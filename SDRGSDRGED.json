@@ -1,0 +1,201 @@
+{
+ "version": "auto-py-to-exe-configuration_v1",
+ "pyinstallerOptions": [
+  {
+   "optionDest": "noconfirm",
+   "value": true
+  },
+  {
+   "optionDest": "filenames",
+   "value": "D:/PROJECTS/AUTOAUTO/run.py"
+  },
+  {
+   "optionDest": "onefile",
+   "value": true
+  },
+  {
+   "optionDest": "console",
+   "value": true
+  },
+  {
+   "optionDest": "name",
+   "value": "AUTODEEP"
+  },
+  {
+   "optionDest": "clean_build",
+   "value": false
+  },
+  {
+   "optionDest": "strip",
+   "value": false
+  },
+  {
+   "optionDest": "noupx",
+   "value": false
+  },
+  {
+   "optionDest": "disable_windowed_traceback",
+   "value": false
+  },
+  {
+   "optionDest": "uac_admin",
+   "value": false
+  },
+  {
+   "optionDest": "uac_uiaccess",
+   "value": false
+  },
+  {
+   "optionDest": "argv_emulation",
+   "value": false
+  },
+  {
+   "optionDest": "bootloader_ignore_signals",
+   "value": false
+  },
+  {
+   "optionDest": "datas",
+   "value": "D:/PROJECTS/AUTOAUTO;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "D:/PROJECTS/AUTOAUTO/.venv/Lib/site-packages/torch/lib/libiomp5md.dll;."
+  },
+  {
+   "optionDest": "datas",
+   "value": "D:/PROJECTS/AUTOAUTO/.venv/Lib/site-packages/gradio_client/types.json;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avcodec-58.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avcodec-59.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avcodec-60.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avdevice-58.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avdevice-59.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avdevice-60.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avfilter-7.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avfilter-8.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avfilter-9.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avformat.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avformat-59.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avformat-60.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avutil-56.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avutil-57.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/avutil-58.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/libpq.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/nvinfer.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/nvonnxparser.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt5MultimediaQuick.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt5WebEngine.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt53DAnimation.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt53DCore.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt53DExtras.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt53DInput.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt53DLogic.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt53DQuickScene2D.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/Qt53DRender.dll;."
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/PROJECTS/AUTOAUTO/DLL/tbb12.dll;."
+  },
+  {
+   "optionDest": "pathex",
+   "value": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA"
+  },
+  {
+   "optionDest": "pathex",
+   "value": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDNN"
+  },
+  {
+   "optionDest": "datas",
+   "value": "D:/PROJECTS/AUTOAUTO/.venv/Lib/site-packages/gradio;gradio/"
+  },
+  {
+   "optionDest": "pathex",
+   "value": "C:/Users/INdaHouse/AppData/Local/Programs/Python/Python311"
+  }
+ ],
+ "nonPyinstallerOptions": {
+  "increaseRecursionLimit": true,
+  "manualArguments": ""
+ }
+}
