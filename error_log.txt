@@ -1,0 +1,314 @@
+
+======================================================================
+ AUTO-DEEP v2.9.8 - PROTECCION TOTAL CONTRA BLOQUEOS
+======================================================================
+ (TEMP) Forzado a: D:\.autodeep_temp
+
+[STEP 1] Preparando entorno NVIDIA/CUDA...
+
+[STEP 2] Cargando motores de Inteligencia Artificial...
+  - PyTorch CUDA: OK
+  - ONNX Providers: ['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'CPUExecutionProvider']
+
+[STEP 3] Lanzando interfaz Gradio...
+[CONFIG] CONFIGURACION DESDE ARCHIVO:
+   [OK] Blend ratio: 0.95 (maxima visibilidad del origen)
+   [OK] Distance threshold: 0.6 (mejor matching)
+   [OK] Face swap mode: selected
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+
+============================================================
+ INICIANDO INTERFAZ DE USUARIO
+============================================================
+2025-12-21 01:29:43,975 - INFO -  [ENTORNO] Carpeta temporal en: D:\.autodeep_temp
+[INFO] Proveedores ONNX Runtime disponibles: ['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'CPUExecutionProvider']
+[INFO] [OK] FORZANDO CUDA PARA FACE DETECTION
+[INFO] Inicializando FaceAnalysis con providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+Applied providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'], with options: {'CUDAExecutionProvider': {'device_id': '0', 'has_user_compute_stream': '0', 'cudnn_conv1d_pad_to_nc1d': '0', 'user_compute_stream': '0', 'gpu_external_alloc': '0', 'gpu_mem_limit': '18446744073709551615', 'enable_cuda_graph': '0', 'gpu_external_free': '0', 'gpu_external_empty_cache': '0', 'arena_extend_strategy': 'kNextPowerOfTwo', 'cudnn_conv_algo_search': 'EXHAUSTIVE', 'do_copy_in_default_stream': '1', 'cudnn_conv_use_max_workspace': '1', 'tunable_op_enable': '0', 'tunable_op_tuning_enable': '0', 'tunable_op_max_tuning_duration_ms': '0', 'enable_skip_layer_norm_strict_mode': '0', 'prefer_nhwc': '0', 'use_ep_level_unified_stream': '0', 'use_tf32': '1', 'sdpa_kernel': '0', 'fuse_conv_bias': '0'}, 'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\1k3d68.onnx landmark_3d_68 ['None', 3, 192, 192] 0.0 1.0
+Applied providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'], with options: {'CUDAExecutionProvider': {'device_id': '0', 'has_user_compute_stream': '0', 'cudnn_conv1d_pad_to_nc1d': '0', 'user_compute_stream': '0', 'gpu_external_alloc': '0', 'gpu_mem_limit': '18446744073709551615', 'enable_cuda_graph': '0', 'gpu_external_free': '0', 'gpu_external_empty_cache': '0', 'arena_extend_strategy': 'kNextPowerOfTwo', 'cudnn_conv_algo_search': 'EXHAUSTIVE', 'do_copy_in_default_stream': '1', 'cudnn_conv_use_max_workspace': '1', 'tunable_op_enable': '0', 'tunable_op_tuning_enable': '0', 'tunable_op_max_tuning_duration_ms': '0', 'enable_skip_layer_norm_strict_mode': '0', 'prefer_nhwc': '0', 'use_ep_level_unified_stream': '0', 'use_tf32': '1', 'sdpa_kernel': '0', 'fuse_conv_bias': '0'}, 'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\2d106det.onnx landmark_2d_106 ['None', 3, 192, 192] 0.0 1.0
+Applied providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'], with options: {'CUDAExecutionProvider': {'device_id': '0', 'has_user_compute_stream': '0', 'cudnn_conv1d_pad_to_nc1d': '0', 'user_compute_stream': '0', 'gpu_external_alloc': '0', 'gpu_mem_limit': '18446744073709551615', 'enable_cuda_graph': '0', 'gpu_external_free': '0', 'gpu_external_empty_cache': '0', 'arena_extend_strategy': 'kNextPowerOfTwo', 'cudnn_conv_algo_search': 'EXHAUSTIVE', 'do_copy_in_default_stream': '1', 'cudnn_conv_use_max_workspace': '1', 'tunable_op_enable': '0', 'tunable_op_tuning_enable': '0', 'tunable_op_max_tuning_duration_ms': '0', 'enable_skip_layer_norm_strict_mode': '0', 'prefer_nhwc': '0', 'use_ep_level_unified_stream': '0', 'use_tf32': '1', 'sdpa_kernel': '0', 'fuse_conv_bias': '0'}, 'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\det_10g.onnx detection [1, 3, '?', '?'] 127.5 128.0
+Applied providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'], with options: {'CUDAExecutionProvider': {'device_id': '0', 'has_user_compute_stream': '0', 'cudnn_conv1d_pad_to_nc1d': '0', 'user_compute_stream': '0', 'gpu_external_alloc': '0', 'gpu_mem_limit': '18446744073709551615', 'enable_cuda_graph': '0', 'gpu_external_free': '0', 'gpu_external_empty_cache': '0', 'arena_extend_strategy': 'kNextPowerOfTwo', 'cudnn_conv_algo_search': 'EXHAUSTIVE', 'do_copy_in_default_stream': '1', 'cudnn_conv_use_max_workspace': '1', 'tunable_op_enable': '0', 'tunable_op_tuning_enable': '0', 'tunable_op_max_tuning_duration_ms': '0', 'enable_skip_layer_norm_strict_mode': '0', 'prefer_nhwc': '0', 'use_ep_level_unified_stream': '0', 'use_tf32': '1', 'sdpa_kernel': '0', 'fuse_conv_bias': '0'}, 'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\genderage.onnx genderage ['None', 3, 96, 96] 0.0 1.0
+Applied providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'], with options: {'CUDAExecutionProvider': {'device_id': '0', 'has_user_compute_stream': '0', 'cudnn_conv1d_pad_to_nc1d': '0', 'user_compute_stream': '0', 'gpu_external_alloc': '0', 'gpu_mem_limit': '18446744073709551615', 'enable_cuda_graph': '0', 'gpu_external_free': '0', 'gpu_external_empty_cache': '0', 'arena_extend_strategy': 'kNextPowerOfTwo', 'cudnn_conv_algo_search': 'EXHAUSTIVE', 'do_copy_in_default_stream': '1', 'cudnn_conv_use_max_workspace': '1', 'tunable_op_enable': '0', 'tunable_op_tuning_enable': '0', 'tunable_op_max_tuning_duration_ms': '0', 'enable_skip_layer_norm_strict_mode': '0', 'prefer_nhwc': '0', 'use_ep_level_unified_stream': '0', 'use_tf32': '1', 'sdpa_kernel': '0', 'fuse_conv_bias': '0'}, 'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\w600k_r50.onnx recognition ['None', 3, 112, 112] 127.5 127.5
+set det-size: (640, 640)
+[SUCCESS] [OK] FaceAnalysis inicializado con CUDAExecutionProvider
+  - landmark_3d_68: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+  - landmark_2d_106: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+  - detection: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+  - genderage: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+  - recognition: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[SUCCESS] [OK] 5 modelos usando CUDA
+ (OK) Motor de IA listo.
+ (INFO) Cargando servidor en http://127.0.0.1:9001...
+Running on local URL:  http://127.0.0.1:9001
+ (INFO) Abriendo ventana nativa...
+[DEBUG] MainCase: URL establecida a http://127.0.0.1:9001
+Lanzando ventana webview en: http://127.0.0.1:9001
+IMPORTANT: You are using gradio version 4.0.0, however version 4.44.1 is available, please upgrade.
+--------
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 270, in _init_core_attrs
+    self.core_schema = _getattr_no_parents(self._type, '__pydantic_core_schema__')
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 55, in _getattr_no_parents
+    raise AttributeError(attribute)
+AttributeError: __pydantic_core_schema__
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\uvicorn\protocols\http\h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\applications.py", line 112, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 714, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 734, in app
+    await route.handle(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\dependencies\utils.py", line 666, in solve_dependencies
+    ) = await request_body_to_args(  # body_params checked above
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\dependencies\utils.py", line 899, in request_body_to_args
+    fields_to_extract = get_cached_model_fields(first_field.type_)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 659, in get_cached_model_fields
+    return get_model_fields(model)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 285, in get_model_fields
+    return [
+           ^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 286, in <listcomp>
+    ModelField(field_info=field_info, name=name)
+  File "<string>", line 6, in __init__
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 111, in __post_init__
+    self._type_adapter: TypeAdapter[Any] = TypeAdapter(
+                                           ^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 227, in __init__
+    self._init_core_attrs(
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 289, in _init_core_attrs
+    core_schema = schema_generator.generate_schema(self._type)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 711, in generate_schema
+    schema = self._generate_schema_inner(obj)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 988, in _generate_schema_inner
+    return self._annotated_schema(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2251, in _annotated_schema
+    schema = self._apply_annotations(source_type, annotations)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2297, in _apply_annotations
+    schema = get_inner_schema(source_type)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_schema_generation_shared.py", line 83, in __call__
+    schema = self._handler(source_type)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2373, in new_handler
+    schema = get_inner_schema(source)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_schema_generation_shared.py", line 83, in __call__
+    schema = self._handler(source_type)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2279, in inner_handler
+    schema = self._generate_schema_inner(obj)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1009, in _generate_schema_inner
+    return self.match_type(obj)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1123, in match_type
+    return self._match_generic_type(obj, origin)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1146, in _match_generic_type
+    return self._union_schema(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1434, in _union_schema
+    choices.append(self.generate_schema(arg))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 711, in generate_schema
+    schema = self._generate_schema_inner(obj)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1009, in _generate_schema_inner
+    return self.match_type(obj)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1127, in match_type
+    return self._unknown_type_schema(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 639, in _unknown_type_schema
+    raise PydanticSchemaGenerationError(
+pydantic.errors.PydanticSchemaGenerationError: Unable to generate pydantic-core schema for <class 'starlette.requests.Request'>. Set `arbitrary_types_allowed=True` in the model_config to ignore this error or implement `__get_pydantic_core_schema__` on your type to fully support it.
+
+If you got this error by calling handler(<some type>) within `__get_pydantic_core_schema__` then you likely need to call `handler.generate_schema(<some type>)` since we do not call `__get_pydantic_core_schema__` on `<some type>` otherwise to avoid infinite recursion.
+
+For further information visit https://errors.pydantic.dev/2.11/u/schema-for-unknown-type
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 270, in _init_core_attrs
+    self.core_schema = _getattr_no_parents(self._type, '__pydantic_core_schema__')
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 55, in _getattr_no_parents
+    raise AttributeError(attribute)
+AttributeError: __pydantic_core_schema__
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\uvicorn\protocols\http\h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\applications.py", line 112, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 714, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 734, in app
+    await route.handle(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\dependencies\utils.py", line 666, in solve_dependencies
+    ) = await request_body_to_args(  # body_params checked above
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\dependencies\utils.py", line 899, in request_body_to_args
+    fields_to_extract = get_cached_model_fields(first_field.type_)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 659, in get_cached_model_fields
+    return get_model_fields(model)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 285, in get_model_fields
+    return [
+           ^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 286, in <listcomp>
+    ModelField(field_info=field_info, name=name)
+  File "<string>", line 6, in __init__
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\fastapi\_compat.py", line 111, in __post_init__
+    self._type_adapter: TypeAdapter[Any] = TypeAdapter(
+                                           ^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 227, in __init__
+    self._init_core_attrs(
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\type_adapter.py", line 289, in _init_core_attrs
+    core_schema = schema_generator.generate_schema(self._type)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 711, in generate_schema
+    schema = self._generate_schema_inner(obj)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 988, in _generate_schema_inner
+    return self._annotated_schema(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2251, in _annotated_schema
+    schema = self._apply_annotations(source_type, annotations)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2297, in _apply_annotations
+    schema = get_inner_schema(source_type)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_schema_generation_shared.py", line 83, in __call__
+    schema = self._handler(source_type)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2373, in new_handler
+    schema = get_inner_schema(source)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_schema_generation_shared.py", line 83, in __call__
+    schema = self._handler(source_type)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 2279, in inner_handler
+    schema = self._generate_schema_inner(obj)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1009, in _generate_schema_inner
+    return self.match_type(obj)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1123, in match_type
+    return self._match_generic_type(obj, origin)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1146, in _match_generic_type
+    return self._union_schema(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1434, in _union_schema
+    choices.append(self.generate_schema(arg))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 711, in generate_schema
+    schema = self._generate_schema_inner(obj)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1009, in _generate_schema_inner
+    return self.match_type(obj)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 1127, in match_type
+    return self._unknown_type_schema(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\pydantic\_internal\_generate_schema.py", line 639, in _unknown_type_schema
+    raise PydanticSchemaGenerationError(
+pydantic.errors.PydanticSchemaGenerationError: Unable to generate pydantic-core schema for <class 'starlette.requests.Request'>. Set `arbitrary_types_allowed=True` in the model_config to ignore this error or implement `__get_pydantic_core_schema__` on your type to fully support it.
+
+If you got this error by calling handler(<some type>) within `__get_pydantic_core_schema__` then you likely need to call `handler.generate_schema(<some type>)` since we do not call `__get_pydantic_core_schema__` on `<some type>` otherwise to avoid infinite recursion.
+
+For further information visit https://errors.pydantic.dev/2.11/u/schema-for-unknown-type
+
+======================================================================
+ MANTENIENDO CONSOLA POR SEGURIDAD
+======================================================================
