@@ -207,6 +207,7 @@ class ProcessMgr:
         try:
             from roop.processors.FaceSwap import FaceSwap
             from roop.processors.Enhance_GFPGAN import Enhance_GFPGAN
+            from roop.processors.Enhance_GPEN import Enhance_GPEN
             from roop.processors.Enhance_CodeFormer import Enhance_CodeFormer
             from roop.processors.Enhance_RestoreFormerPPlus import Enhance_RestoreFormerPPlus
 
@@ -242,6 +243,10 @@ class ProcessMgr:
                         self.processors["enhance_restoreformer"] = Enhance_RestoreFormerPPlus()
                         self.processors["enhance_restoreformer"].Initialize({"devicename": devname})
                         print(f"Restoreformer++ Enhancer initialized (devicename={devname})")
+                    elif selected_enhancer == "GPEN":
+                        self.processors["enhance_gpen"] = Enhance_GPEN()
+                        self.processors["enhance_gpen"].Initialize({"devicename": devname})
+                        print(f"GPEN Enhancer initialized (devicename={devname})")
                 except Exception as e:
                     print(f"Failed to initialize {selected_enhancer} Enhancer: {e}")
 
@@ -551,10 +556,12 @@ class ProcessMgr:
             selection_method = "auto"
             
             face_ref_data = None
+            user_has_selected_face = False  # Flag para saber si el usuario seleccionó una cara
             
             if hasattr(roop.globals, 'selected_face_references'):
                 if video_key in roop.globals.selected_face_references:
                     face_ref_data = roop.globals.selected_face_references[video_key]
+                    user_has_selected_face = True
                 else:
                     clean_video_name = video_basename
                     
@@ -566,10 +573,20 @@ class ProcessMgr:
                         
                         if ref_filename.lower() == clean_video_name.lower():
                             face_ref_data = v
+                            user_has_selected_face = True
                             break
                         if ref_filename in clean_video_name or clean_video_name in ref_filename:
                             face_ref_data = v
+                            user_has_selected_face = True
                             break
+            
+            # Guardar flag para saber si el usuario seleccionó una cara
+            setattr(self, f'_user_selected_face_{video_path}', user_has_selected_face)
+            
+            # En modo selected_faces_frame, SIEMPRE usamos la selección del usuario o el fallback
+            # Si el usuario NO seleccionó ninguna cara, usamos fallback a la cara más grande
+            if not user_has_selected_face:
+                print(f"[SELECTED_FACES_FRAME] ℹ️ No hay cara seleccionada por el usuario para {video_basename}, usando fallback automático")
             
             if face_ref_data:
                 user_selected_face = face_ref_data.get('face_obj')
@@ -633,7 +650,15 @@ class ProcessMgr:
     def _find_target_face_for_selected_mode(self, video_path, valid_faces):
         """Encuentra la cara objetivo que coincide con la seleccionada por el usuario."""
         try:
-            # NUEVO: Asegurar que selected_face_references exista
+            # Verificar si el usuario ha seleccionado una cara
+            user_selected_attr = f'_user_selected_face_{video_path}'
+            user_selected = getattr(self, user_selected_attr, True)  # Por defecto True para permitir fallback
+            
+            # Si el usuario NO seleccionó ninguna cara, usamos fallback (cara más grande)
+            # Esto solo aplica en modo selected_faces_frame
+            use_fallback = not user_selected
+            
+            # Asegurar que selected_face_references exista
             if not hasattr(roop.globals, 'selected_face_references'):
                 roop.globals.selected_face_references = {}
 
@@ -1053,7 +1078,7 @@ class ProcessMgr:
             original_face_region = original_frame[y1:y2, x1:x2].copy()
             
             # ============================================
-            # 2. ENHANCER (aplicar PRIMERO para mejorar calidad base)
+            # 2. ENHANCER (aplicar con BLENDING CONSERVADOR para evitar efectos raros)
             # ============================================
             use_enhancer = getattr(roop.globals, 'use_enhancer', True)
             selected_enhancer = getattr(roop.globals, 'selected_enhancer', 'GFPGAN')
@@ -1065,6 +1090,12 @@ class ProcessMgr:
                 enhancer_key = "enhance_codeformer"
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
+            elif selected_enhancer == "GPEN":
+                enhancer_key = "enhance_gpen"
+            
+            # NUEVO: Factor de blending del enhancer (más bajo para preservar más la cara original)
+            # Esto evita el efecto "blur" o "flash" causado por el enhancer
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.3)  # Por defecto 30% enhancer, 70% swap original
             
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
@@ -1085,16 +1116,19 @@ class ProcessMgr:
                             if enhanced_face.shape[:2] != swapped_face.shape[:2]:
                                 enhanced_face = cv2.resize(enhanced_face, (swapped_face.shape[1], swapped_face.shape[0]), cv2.INTER_LANCZOS4)
                             
-                            # Mejorar blending del enhancer con máscara suave
+                            # NUEVO: Blending más conservador del enhancer
+                            # Esto evita el efecto flash y preserva más la identidad de la cara swappeada
                             region_h, region_w = enhanced_face.shape[:2]
-                            soft_mask = create_soft_mask((0, 0, region_w, region_h), (region_h, region_w), feather=25)
+                            soft_mask = create_soft_mask((0, 0, region_w, region_h), (region_h, region_w), feather=30)
                             
-                            # Blending ponderado con máscara suave
+                            # Aplicar factor de blending conservador
                             mask_3ch = np.stack([soft_mask] * 3, axis=-1)
-                            swapped_face = (enhanced_face.astype(np.float32) * mask_3ch + 
-                                           swapped_face.astype(np.float32) * (1 - mask_3ch)).astype(np.uint8)
+                            # blend_factor controla cuánto del enhanced_face se mezcla con swapped_face
+                            # 0.3 significa 30% enhanced + 70% original swap
+                            swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * mask_3ch + 
+                                           swapped_face.astype(np.float32) * (1 - enhancer_blend_factor * mask_3ch)).astype(np.uint8)
                             
-                            print(f"[QUALITY] {selected_enhancer} aplicado")
+                            print(f"[QUALITY] {selected_enhancer} aplicado (blend={enhancer_blend_factor})")
                 except Exception as e:
                     print(f"[ENHANCER] Error: {e}")
             
@@ -1105,13 +1139,17 @@ class ProcessMgr:
             # Si el color matching es muy fuerte, la cara swappeada se parece menos a la origen
             try:
                 if swapped_face.size > 0 and original_face_region.size > 0:
-                    # Reducido de 0.5 a 0.2 para preservar más la identidad original
-                    swapped_face = adjust_face_brightness(swapped_face, original_face_region, strength=0.2)
+                    # NUEVO: Valor más bajo para preservar más la identidad original
+                    # Esto evita que la cara swappeada pierda parecido con la origen
+                    brightness_strength = getattr(roop.globals, 'brightness_strength', 0.15)
+                    swapped_face = adjust_face_brightness(swapped_face, original_face_region, strength=brightness_strength)
                     
-                    # Reducido de 0.6 a 0.25 para preservar más los colores de la cara origen
+                    # NUEVO: Color matching más conservador para preservar los colores de la cara origen
+                    # Valores muy bajos de color matching hacen que la cara se parezca menos a la origen
+                    color_match_strength = getattr(roop.globals, 'color_match_strength', 0.15)
                     use_color_match = getattr(roop.globals, 'use_color_matching', True)
                     if use_color_match:
-                        swapped_face = match_color_histogram(swapped_face, original_face_region, blend_factor=0.25)
+                        swapped_face = match_color_histogram(swapped_face, original_face_region, blend_factor=color_match_strength)
             except Exception as e:
                 print(f"[COLOR_MATCH] Error: {e}")
             

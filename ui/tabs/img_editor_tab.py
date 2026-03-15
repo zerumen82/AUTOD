@@ -23,15 +23,23 @@ DETECTED_COMFYUI_PORT = None
 
 def detect_comfyui_port():
     """Detecta automaticamente el puerto de ComfyUI"""
+    import requests
     possible_ports = [8188, 8189, 8190, 8888, 8000]
+    
+    print(f"[DEBUG] img_editor: detectando puerto de ComfyUI...")
     
     for port in possible_ports:
         try:
-            response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=1)
+            print(f"[DEBUG] img_editor: probando puerto {port}...")
+            response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=2)
             if response.status_code == 200:
+                print(f"[DEBUG] img_editor: ComfyUI detectado en puerto {port}")
                 return port
-        except:
+        except Exception as e:
+            print(f"[DEBUG] img_editor: error en puerto {port}: {e}")
             continue
+    
+    print(f"[DEBUG] img_editor: no se detectó ComfyUI")
     return None
 
 

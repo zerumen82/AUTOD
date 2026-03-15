@@ -80,17 +80,14 @@ def get_available_models(category="checkpoints"):
 
 def get_ltxvideo2_workflow(
     image_filename, prompt, seed=None,
-    width=704, height=480, frames=121, fps=24, strength=0.6,
+    width=704, height=480, frames=49, fps=24, strength=0.6,
     model_version="ltx2_fp8"
 ):
     """
-    ⚠️  REQUIERE: Gemma 3 en text_encoders/gemma-3-12b-it-qat-q4_0-unquantized/
+    LTX Video Workflow - Simplified version
     
-    Nodos LTX-Video disponibles (del codebase de ComfyUI):
-    - CheckpointLoaderSimple: carga el modelo principal (MODEL, CLIP, VAE)
-    - LTXVGemmaCLIPModelLoader: carga Gemma 3 para texto
-    - LTXVImgToVideoAdvanced: genera video desde imagen
-    - LTXVTiledVAEDecode: decodifica el video (con tileado temporal)
+    Usa UNETLoader + CLIPLoader + VAELoader (no CheckpointLoaderSimple)
+    para cargar el modelo LTX Video correctamente.
     """
     if seed is None:
         import random
@@ -101,94 +98,99 @@ def get_ltxvideo2_workflow(
 
     negative_prompt = "low quality, blurry, distorted, bad anatomy"
 
-    # Obtener modelos disponibles
-    available_checkpoints = get_available_models("checkpoints")
-    available_clip = get_available_models("clip")
+    # Usar valores fijos para LTX Video (modelos ya instalados)
+    # UNET: transformer.safetensors en diffusion_models/ltx-video-0.9.5/
+    # VAE: ltx-video-0.9.5_vae.safetensors en VAE/
+    unet_name = "ltx-video-0.9.5/transformer.safetensors"
+    vae_name = "ltx-video-0.9.5_vae.safetensors"
+    
+    # Intentar obtener CLIP disponible, si falla usar默认值
+    try:
+        available_clips = get_available_models("clip")
+        clip_name = None
+        clip_type = "ltx"
+        
+        # Buscar CLIP compatible con LTX
+        for clip in available_clips:
+            clip_lower = clip.lower()
+            if "t5" in clip_lower or "gemma" in clip_lower or "ltx" in clip_lower:
+                clip_name = clip
+                if "gemma" in clip_lower:
+                    clip_type = "gemma"
+                elif "t5" in clip_lower:
+                    clip_type = "t5"
+                print(f"[LTX VIDEO] CLIP encontrado: {clip_name} (tipo: {clip_type})")
+                break
+        
+        if not clip_name and available_clips:
+            clip_name = available_clips[0]
+            print(f"[LTX VIDEO] Usando primer CLIP disponible: {clip_name}")
+        
+        if not clip_name:
+            # Valor por defecto - podría fallar si no existe
+            clip_name = "t5xxl_fp16.safetensors"
+            print(f"[LTX VIDEO] ADVERTENCIA: Usando CLIP por defecto: {clip_name}")
+    except Exception as e:
+        clip_name = "t5xxl_fp16.safetensors"
+        clip_type = "ltx"
+        print(f"[LTX VIDEO] Error obteniendo CLIP: {e}, usando: {clip_name}")
 
-    # Seleccionar modelo válido - usar FP8 por defecto ya que FP4 no está disponible
-    if model_version == "ltx2_fp4" and LTX2_FP4_MODEL in available_checkpoints:
-        model_name = LTX2_FP4_MODEL
-    else:
-        model_name = LTX2_FP8_MODEL
-
-    # Buscar el nombre correcto del CLIP Gemma 3 (usar barras invertidas de Windows)
-    gemma_clip_name = None
-    for clip in available_clip:
-        if "gemma-3-12b-it-qat-q4_0-unquantized" in clip.lower():
-            gemma_clip_name = clip
-            break
-
-    # Si no se encuentra Gemma 3, usar el primer archivo disponible
-    if not gemma_clip_name and available_clip:
-        gemma_clip_name = available_clip[0]
+    print(f"[LTX VIDEO] Workflow: UNET={unet_name}, VAE={vae_name}, CLIP={clip_name}")
 
     return {
-        # 1: Cargar modelo LTX-2 (CheckpointLoaderSimple existe y funciona con LTX-2)
-        "1": {"inputs": {"ckpt_name": model_name}, "class_type": "CheckpointLoaderSimple"},
+        # 1: UNETLoader - cargar modelo UNET (transformer)
+        "1": {"inputs": {"unet_name": unet_name, "weight_dtype": "default"}, "class_type": "UNETLoader"},
         
         # 2: Cargar imagen
         "2": {"inputs": {"image": image_filename, "upload": "image"}, "class_type": "LoadImage"},
         
-        # 3: Cargar Gemma 3 (usa LTXVGemmaCLIPModelLoader)
-        "3": {"inputs": {
-            "clip_name": gemma_clip_name if gemma_clip_name else "gemma-3-12b-it-qat-q4_0-unquantized\\model-00001-of-00005.safetensors",
-            "model_name": model_name,
-            "max_length": 1024
-        }, "class_type": "LTXVGemmaCLIPModelLoader"},
+        # 3: CLIPLoader - cargar CLIP para texto
+        "3": {"inputs": {"clip_name": clip_name, "type": clip_type}, "class_type": "CLIPLoader"},
         
-        # 4: Positive prompt
-        "4": {"inputs": {"clip": ["3", 0], "text": prompt}, "class_type": "CLIPTextEncode"},
+        # 4: VAELoader - cargar VAE
+        "4": {"inputs": {"vae_name": vae_name}, "class_type": "VAELoader"},
         
-        # 5: Negative prompt
-        "5": {"inputs": {"clip": ["3", 0], "text": negative_prompt}, "class_type": "CLIPTextEncode"},
+        # 5: Positive prompt
+        "5": {"inputs": {"clip": ["3", 0], "text": prompt}, "class_type": "CLIPTextEncode"},
         
-        # 6: Conditioning (combina prompts con frame_rate)
-        "6": {"inputs": {
-            "positive": ["4", 0], 
-            "negative": ["5", 0], 
-            "frame_rate": fps
-        }, "class_type": "LTXVConditioning"},
+        # 6: Negative prompt
+        "6": {"inputs": {"clip": ["3", 0], "text": negative_prompt}, "class_type": "CLIPTextEncode"},
         
-        # 7: Crear latents vacíos para video (EmptyLTXVLatentVideo existe)
+        # 7: LTXVImgToVideo - genera video
         "7": {"inputs": {
-            "width": width, 
-            "height": height, 
-            "length": frames, 
-            "batch_size": 1
-        }, "class_type": "EmptyLTXVLatentVideo"},
-        
-        # 8: Generar video desde imagen (LTXVImgToVideoAdvanced)
-        "8": {"inputs": {
-            "positive": ["6", 0],
-            "negative": ["6", 1],
-            "vae": ["1", 2],  # VAE del checkpoint (output 2 de CheckpointLoaderSimple)
             "image": ["2", 0],
+            "model": ["1", 0],
+            "clip": ["3", 0],
+            "positive": ["5", 0],
+            "negative": ["6", 0],
             "width": width,
             "height": height,
             "length": frames,
-            "batch_size": 1,
-            "strength": strength,
-            "crf": 29,
-            "blur_radius": 0,
-            "interpolation": "lanczos",
-            "crop": "disabled"
-        }, "class_type": "LTXVImgToVideoAdvanced"},
+            "steps": 20,
+            "cfg": 3.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "denoise": strength,
+            "seed": seed
+        }, "class_type": "LTXVImgToVideo"},
         
-        # 9: Decodificar video (LTXVTiledVAEDecode maneja video VAEs con tileado temporal)
+        # 8: VAEDecode
+        "8": {"inputs": {"vae": ["4", 0], "samples": ["7", 2]}, "class_type": "VAEDecode"},
+        
+        # 9: VHS_VideoCombine - crear video MP4
         "9": {"inputs": {
-            "vae": ["1", 2], 
-            "samples": ["8", 2],  # latent output de LTXVImgToVideoAdvanced
-            "tile_size": 256,
-            "overlap": 64,
-            "temporal_size": 16,
-            "temporal_overlap": 4
-        }, "class_type": "LTXVTiledVAEDecode"},
-        
-        # 10: Guardar imágenes individuales
-        "10": {"inputs": {
-            "filename_prefix": "LTX-Video_Output",
-            "images": ["9", 0]
-        }, "class_type": "SaveImage", "_meta": {"title": "Guardar Imágenes"}},
+            "images": ["8", 0],
+            "frame_rate": float(fps),
+            "loop_count": 0,
+            "format": "video/h264-mp4",
+            "output_format": "mp4",
+            "filename_prefix": "ComfyUI",
+            "pix_fmt": "yuv420p",
+            "crf": 20,
+            "save_metadata": True,
+            "pingpong": False,
+            "save_output": True
+        }, "class_type": "VHS_VideoCombine", "_meta": {"title": "Video Combine (MP4)"}},
     }
 
 
@@ -607,7 +609,7 @@ def get_lipsync_workflow(image_filename, audio_filename, seed=None):
             "fps": 25.0,
             "audio": ["2", 0]
         }, "class_type": "CreateVideo"},
-        "5": {"inputs": {
+        "6": {"inputs": {
             "video": ["4", 0],
             "filename_prefix": "LipSync_Output",
             "format": "mp4",

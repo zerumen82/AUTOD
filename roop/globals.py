@@ -56,6 +56,25 @@ blend_mode = 'seamless'  # Mejor integración visual que Poisson
 use_color_correction = True  # Ajusta color de la cara swappeada a la del target
 use_color_matching = True  # Matching de histograma LAB para tono de piel natural
 
+# CONFIGURACIÓN ÓPTIMA PARA MÁXIMO PARECIDO SIN PERDER CALIDAD
+# Balance entre parecido al origen y calidad de imagen
+
+# Factor de blending del enhancer (0-1)
+# 0 = sin enhancer, 1 = enhancer completo
+# Óptimo: 0.15-0.2 para calidad sin perder identidad
+enhancer_blend_factor = 0.15
+
+# Ajuste de brillo (0-1)
+# Óptimo: 0.1 para evitar cambios de brillo
+brightness_strength = 0.1
+
+# Matching de color (0-1)  
+# Óptimo: 0.1 para ajustar colores sin perder identidad
+color_match_strength = 0.1
+
+# GPEN es el mejor enhancer - menos invasivo que GFPGAN
+default_enhancer = 'GPEN'
+
 # PRESERVACIÓN DE EXPRESIÓN DE BOCA
 # Cuando la cara destino tiene la boca abierta (hablando, comiendo, etc.),
 # preserva la zona de la boca original en lugar de imponer la boca cerrada del origen

@@ -444,8 +444,9 @@ def get_svd_turbo_workflow(
                 "images": ["7", 0],
                 "frame_rate": fps,
                 "loop_count": 0,
-                "format": "mp4",
+                "format": "video/h264-mp4",
                 "output_format": "mp4",
+                "filename_prefix": "ComfyUI",
                 "width": width,
                 "height": height
             },
@@ -559,7 +560,7 @@ def get_wan2_2_animate_14b_workflow(
                 "images": ["7", 0],
                 "frame_rate": fps,
                 "loop_count": 0,
-                "format": "mp4",
+                "format": "video/h264-mp4",
                 "output_format": "mp4",
                 "width": width,
                 "height": height
@@ -674,7 +675,7 @@ def get_zeroscope_v2_xl_workflow(
                 "images": ["7", 0],
                 "frame_rate": fps,
                 "loop_count": 0,
-                "format": "mp4",
+                "format": "video/h264-mp4",
                 "output_format": "mp4",
                 "width": width,
                 "height": height

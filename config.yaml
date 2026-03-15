@@ -2,7 +2,7 @@ clear_output: true
 fal_token: ''
 force_cpu: false
 huggingface_token: ''
-last_source_folder: D:\.autodeep_temp\f5c3056dd0c7c03c5ed86734201d8d9b09f72f909ab51b6ff9dc878a698a62f5
+last_source_folder: D:\.autodeep_temp\e47ab167a2f9e71294b838dcf095a5e4f4d011988da77ea02e6e8a36bbba4b65
 last_target_folder: C:\Users\INdaHouse\Desktop\AutoDeep_Destino
 max_threads: 4
 memory_limit: 0

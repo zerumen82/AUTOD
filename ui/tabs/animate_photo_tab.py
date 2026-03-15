@@ -31,12 +31,14 @@ def init_detect_models():
     global AVAILABLE_MODELS, DEFAULT_MODEL
     if AVAILABLE_MODELS is None:
         AVAILABLE_MODELS = detect_available_models()
-        if AVAILABLE_MODELS["ltx_video"]:
+        if AVAILABLE_MODELS["svd_xt"]:
+            DEFAULT_MODEL = "svd_xt"
+        elif AVAILABLE_MODELS["svd_turbo"]:
+            DEFAULT_MODEL = "svd_xt"
+        elif AVAILABLE_MODELS["ltx_video"]:
             DEFAULT_MODEL = "ltx_video"
         elif AVAILABLE_MODELS["svd_turbo"]:
             DEFAULT_MODEL = "svd_turbo"
-        elif AVAILABLE_MODELS["zeroscope_v2_xl"]:
-            DEFAULT_MODEL = "zeroscope_v2_xl"
     return AVAILABLE_MODELS, DEFAULT_MODEL
 
 def init_comfy_modules():
@@ -51,6 +53,8 @@ def init_comfy_modules():
     if COMFY_AVAILABLE is None:
         try:
             import roop.comfy_workflows as workflows
+            import roop.comfy_workflows_fixed as workflows_ltx
+            from roop.comfy_workflows import check_required_nodes, check_model_available
             import roop.comfy_client as comfy_client
             COMFY_AVAILABLE = True
         except ImportError:
@@ -75,7 +79,8 @@ def detect_available_models():
     available = {
         "ltx_video": False,
         "svd_turbo": False,
-        "zeroscope_v2_xl": False
+        "svd_xt": False,
+        "wan_video": False
     }
     
     # Detectar LTX Video
@@ -97,7 +102,7 @@ def detect_available_models():
                 break
     
     # Detectar SVD Turbo - buscar en checkpoints y diffusion_models
-    svd_possible_names = ["svd", "svd_xt", "stable_video_diffusion", "stablevideodiffusion", 
+    svd_possible_names = ["svd", "stable_video_diffusion", "stablevideodiffusion", 
                           "stable-diffusion-turbo", "stablediffusionturbo", "turbo"]
     
     # Buscar en checkpoints
@@ -106,7 +111,7 @@ def detect_available_models():
         for filename in os.listdir(checkpoints_dir):
             filename_lower = filename.lower()
             for name in svd_possible_names:
-                if name in filename_lower:
+                if name in filename_lower and "svd_xt" not in filename_lower:
                     available["svd_turbo"] = True
                     break
             if available["svd_turbo"]:
@@ -118,36 +123,90 @@ def detect_available_models():
         for item in os.listdir(diffusion_models_dir):
             item_lower = item.lower()
             for name in svd_possible_names:
-                if name in item_lower:
+                if name in item_lower and "svd_xt" not in item_lower:
                     available["svd_turbo"] = True
                     break
             if available["svd_turbo"]:
                 break
     
-    # Detectar Zeroscope V2 XL - buscar en checkpoints y diffusion_models
-    zeroscope_possible_names = ["zeroscope", "zero-scope", "zero_scope"]
+    # Detectar SVD XT - buscar en diffusion_models/svd_xt
+    svd_xt_path = os.path.join(COMFY_MODELS_DIR, "diffusion_models", "svd_xt")
+    if os.path.exists(svd_xt_path):
+        unet_file = os.path.join(svd_xt_path, "unet", "diffusion_pytorch_model.safetensors")
+        if os.path.exists(unet_file) and os.path.getsize(unet_file) > 100_000_000:
+            available["svd_xt"] = True
+            available["svd_turbo"] = True  # SVD XT also counts as svd_turbo for workflow
     
-    # Buscar en checkpoints
-    if os.path.exists(checkpoints_dir):
-        for filename in os.listdir(checkpoints_dir):
-            filename_lower = filename.lower()
-            for name in zeroscope_possible_names:
-                if name in filename_lower:
-                    available["zeroscope_v2_xl"] = True
-                    break
-            if available["zeroscope_v2_xl"]:
-                break
+    # Detectar WanVideo - buscar en diffusion_models (archivo GGUF o carpeta wan)
+    # IMPORTANTE: WanVideo requiere VAE compatible con la version actual de ComfyUI-WanVideoWrapper
+    wan_paths = [
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.1-I2V-14B-480P-Q4_K_M"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2-I2V-Q4_K_M"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "wan"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2"),
+    ]
     
-    # Buscar también en diffusion_models
-    if os.path.exists(diffusion_models_dir) and not available["zeroscope_v2_xl"]:
-        for item in os.listdir(diffusion_models_dir):
-            item_lower = item.lower()
-            for name in zeroscope_possible_names:
-                if name in item_lower:
-                    available["zeroscope_v2_xl"] = True
-                    break
-            if available["zeroscope_v2_xl"]:
-                break
+    wan_gguf_found = False
+    for wan_path in wan_paths:
+        if os.path.exists(wan_path):
+            wan_gguf_found = True
+            break
+    
+    # Verificar si el VAE de WanVideo es compatible
+    # El VAE de WanVideo ( Wan2.1/Wan2.2) tiene estructura anidada (downsamples.X.downsamples.Y)
+    # Esta es la estructura CORRECTA y compatible
+    wan_vae_compatible = False
+    vae_path = os.path.join(COMFY_MODELS_DIR, "vae")
+    vae_file = os.path.join(vae_path, "Wan2.2_VAE.safetensors")
+    if os.path.exists(vae_file):
+        try:
+            import safetensors.torch
+            import re
+            with safetensors.torch.safe_open(vae_file, framework="pt") as f:
+                keys = list(f.keys())
+                
+                # La estructura correcta del VAE de WanVideo tiene downsamples.X.residual
+                # No requiere dos 'downsamples' anidados
+                has_downsamples = any("downsamples" in k for k in keys)
+                
+                # Tambien verificar que tenga la estructura basica de VAE
+                has_encoder = any(k.startswith("encoder.") for k in keys)
+                has_decoder = any(k.startswith("decoder.") for k in keys)
+                
+                if has_downsamples and has_encoder and has_decoder:
+                    # Estructura con downsamples + encoder/decoder = WANVIDEO VAE COMPATIBLE
+                    wan_vae_compatible = True
+                    print(f"[AnimatePhoto] WanVideo VAE compatible detectada (estructura downsamples)")
+                elif has_encoder and has_decoder:
+                    # Estructura plana - verificar canales
+                    # Buscar conv2.weight para verificar canales
+                    conv2_shape = None
+                    for k in keys:
+                        if k == "conv2.weight":
+                            conv2_shape = f.get_tensor(k).shape
+                            break
+                    if conv2_shape and len(conv2_shape) == 4:
+                        in_channels = conv2_shape[1]
+                        out_channels = conv2_shape[0]
+                        print(f"[AnimatePhoto] VAE canales: in={in_channels}, out={out_channels}")
+                        # WanVideoVAE38 tiene 48 canales, WanVideoVAE (original) tiene 16 canales
+                        if in_channels == 48 or out_channels == 48 or in_channels == 16 or out_channels == 16:
+                            wan_vae_compatible = True
+                            print(f"[AnimatePhoto] WanVideo VAE compatible detectada ({in_channels} canales)")
+                        else:
+                            print(f"[AnimatePhoto] WanVideo VAE INCOMPATIBLE - canales no reconocidos")
+                    else:
+                        print(f"[AnimatePhoto] WanVideo VAE INCOMPATIBLE - no se pudieron verificar canales")
+                else:
+                    print(f"[AnimatePhoto] WanVideo VAE INCOMPATIBLE - falta estructura encoder/decoder")
+        except Exception as e:
+            print(f"[AnimatePhoto] Error verificando VAE WanVideo: {e}")
+    
+    # WanVideo disponible si tiene modelo GGUF Y VAE compatible
+    if wan_gguf_found and wan_vae_compatible:
+        available["wan_video"] = True
+    elif wan_gguf_found and not wan_vae_compatible:
+        print(f"[AnimatePhoto] WanVideo detectado pero VAE incompatible - no disponible")
     
     print(f"[AnimatePhoto] Modelos detectados: {available}")
     return available
@@ -171,9 +230,75 @@ def check_comfy_status():
                     ckpt_list = node["input"]["required"].get("ckpt_name")
                     if ckpt_list and len(ckpt_list) > 0 and len(ckpt_list[0]) > 0:
                         return f"🟢 Listo ({len(ckpt_list[0])} modelos)"
+            
+            # Verificar nodos requeridos para animación
+            required_animate_nodes = [
+                "UNETLoader", "VAELoader", "CLIPVisionLoader",
+                "SVD_img2vid_Conditioning", "VHS_VideoCombine",
+                "LoadImage", "KSampler", "VAEDecode"
+            ]
+            missing_nodes = []
+            for node_name in required_animate_nodes:
+                if node_name not in data:
+                    missing_nodes.append(node_name)
+            
+            if missing_nodes:
+                return f"🔴 Faltan nodos: {', '.join(missing_nodes)}"
+            
         return "🟡 Conectado (cargando...)"
     except:
         return "🔴 No conectado"
+
+
+def check_required_nodes_for_animation():
+    """Verifica los nodos requeridos para animate_image y retorna un diccionario de estado"""
+    import requests
+    
+    required_nodes = {
+        # Nodos base requeridos para cualquier workflow
+        "base": ["LoadImage", "CheckpointLoaderSimple", "UNETLoader", "VAELoader", "KSampler", "VAEDecode", "CLIPTextEncode"],
+        # Nodos para WanVideo (disponibles en ComfyUI-WanVideoWrapper + ComfyUI-GGUF)
+        "wan_video": [
+            "WanVideoDecode", "WanVideoImageToVideoEncode", "WanVideoTextEncode",
+            "UnetLoaderGGUF", "CLIPLoaderGGUF"
+        ],
+        # Nodos para SVD Turbo
+        "svd": ["CLIPVisionLoader", "SVD_img2vid_Conditioning", "VHS_VideoCombine"],
+        # Nodos para LTX Video (disponibles en ComfyUI_LTXVideo)
+        "ltx": ["LTXVideoCanny", "LTXVideoDiffusionCompression", "LTXVideoInterpolate", "LTXVideoDecode", "LTXVideoEncode", 
+                 "LTXVLinearOverlapLatentTransition", "LTXVAddGuideAdvanced", "LTXVAddLatentGuide", "LTXVAdainLatent", 
+                 "LTXVImgToVideoConditionOnly", "LTXVApplySTG", "LTXVBaseSampler", "LTXVInContextSampler", 
+                 "LTXVTiledVAEDecode", "LTXVImgToVideo", "ModelSamplingLTXV", "LTXVConditioning"]
+    }
+    
+    try:
+        response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/object_info", timeout=5)
+        if response.status_code != 200:
+            return {"error": "ComfyUI no responde", "available_nodes": []}
+        
+        available = response.json()
+        available_node_names = list(available.keys())
+        
+        result = {
+            "available_nodes": available_node_names,
+            "missing": {},
+            "ok": {}
+        }
+        
+        # Verificar nodos base
+        for category, nodes in required_nodes.items():
+            result["missing"][category] = []
+            result["ok"][category] = []
+            for node in nodes:
+                if node in available_node_names:
+                    result["ok"][category].append(node)
+                else:
+                    result["missing"][category].append(node)
+        
+        return result
+        
+    except Exception as e:
+        return {"error": str(e), "available_nodes": []}
 
 
 # ============================================================================
@@ -222,6 +347,8 @@ def animate_photo(
     from PIL import Image
     from roop.comfy_client import ComfyClient
     import roop.comfy_workflows as workflows
+    import roop.comfy_workflows_fixed as workflows_ltx
+    from roop.comfy_workflows import check_required_nodes, check_model_available
     
     global_models, _ = init_detect_models()
     init_comfy_modules()
@@ -241,12 +368,29 @@ def animate_photo(
     if "No conectado" in comfy_status:
         return None, f"❌ ComfyUI no conectado: {comfy_status}", log("[X] ComfyUI no disponible")
     
-    if model_version == "ltx_video" and not global_models["ltx_video"]:
-        return None, "❌ Modelo no encontrado", log("[X] Modelo no encontrado")
+    # Verificar nodos requeridos para animación
+    try:
+        node_check = workflows.check_required_nodes(model_version)
+        if not node_check["ok"]:
+            error_msg = node_check.get("error", "Error desconocido")
+            missing = node_check.get("missing_nodes", [])
+            return None, f"❌ {error_msg}", log(f"[X] {error_msg}")
+    except Exception as e:
+        log(f"[WARN] No se pudo verificar nodos: {e}")
+    
+    # DEBUG: Log model_version received
+    log(f"[DEBUG] model_version seleccionado: {model_version}")
+    
+    if model_version == "ltx_video":
+        # LTX Video tiene problemas conhecidos - deshabilitado temporalmente
+        return None, "❌ LTX Video deshabilitado temporalmente. Usa SVD.", log("[X] LTX Video deshabilitado")
+    elif model_version == "svd_xt" and not global_models["svd_xt"]:
+        return None, "❌ Modelo no encontrado en: ui/tob/ComfyUI/models/diffusion_models/svd_xt/", log("[X] Modelo SVD XT no encontrado. Descárgalo con: python tools/download_svd.py")
     elif model_version == "svd_turbo" and not global_models["svd_turbo"]:
-        return None, "❌ Modelo no encontrado", log("[X] Modelo no encontrado")
-    elif model_version == "zeroscope_v2_xl" and not global_models["zeroscope_v2_xl"]:
-        return None, "❌ Modelo no encontrado", log("[X] Modelo no encontrado")
+        return None, "❌ Modelo no encontrado en: ui/tob/ComfyUI/models/diffusion_models/StableDiffusionTurbo/", log("[X] Modelo SVD Turbo no encontrado")
+    elif model_version == "wan_video" and not global_models["wan_video"]:
+        log("[DEBUG] WanVideo model check - global_models: " + str(global_models.get("wan_video", "NOT FOUND")))
+        return None, "❌ Modelo WanVideo no encontrado en: ui/tob/ComfyUI/models/diffusion_models/", log("[X] Modelo WanVideo no encontrado")
 
     temp_image = None
     temp_image_path = None
@@ -301,37 +445,101 @@ def animate_photo(
         output_dir = os.path.abspath("output")
         os.makedirs(output_dir, exist_ok=True)
         
+        # Seleccionar el módulo de workflow correcto según el modelo
+        # Verificar primero si el modelo está disponible
+        log(f"[DEBUG] Iniciando selección de workflow para: {model_version}")
+        
         if model_version == "ltx_video":
-            # LTX Video usa parámetros específicos: 768x512, 49 frames (múltiplo de 8 + 1)
+            # Verificar si el modelo LTX está instalado
+            model_check = workflows.check_model_available("ltx")
+            if not model_check["ok"] or "ltx_video" not in model_check["available_models"]:
+                log(f"[WARN] Modelo LTX Video no encontrado: {model_check.get('error', 'Archivos no encontrados')}")
+                log("[INFO] Buscando modelos alternativos disponibles...")
+                
+                # Ver qué modelos están disponibles
+                all_models = workflows.check_model_available("all")
+                available = all_models.get("available_models", [])
+                
+                if "svd_turbo" in available:
+                    log("[INFO] Usando SVD Turbo como alternativa")
+                    model_version = "svd_turbo"
+                elif "wan_video" in available:
+                    log("[INFO] Usando WanVideo como alternativa")
+                    model_version = "wan_video"
+                elif "zeroscope" in available:
+                    log("[INFO] Usando Zeroscope como alternativa")
+                    model_version = "zeroscope"
+                else:
+                    return None, "❌ No hay modelos de video instalados", log("❌ Error: Instala al menos un modelo de video (SVD, LTX, WanVideo o Zeroscope)")
+        
+        if model_version == "ltx_video":
+            # LTX Video usa parámetros específicos y workflow corregido
             ltx_width = 768
             ltx_height = 512
             ltx_frames = 49  # LTX requiere frames = 8*n + 1
-            
-            workflow = workflows.get_ltx_video_workflow(
-                image_filename=image_filename,
-                prompt=action_prompt,
-                seed=int(timestamp),
-                width=ltx_width, height=ltx_height, frames=ltx_frames, fps=fps
-            )
-            output_path = os.path.join(output_dir, f"ltx_video_{timestamp}.mp4")
-        elif model_version == "svd_turbo":
-            workflow = workflows.get_svd_turbo_workflow(
-                image_filename=image_filename,
-                prompt=action_prompt,
-                seed=int(timestamp),
-                width=width, height=height, frames=frames, fps=fps
-            )
-            output_path = os.path.join(output_dir, f"svd_turbo_{timestamp}.mp4")
-        elif model_version == "zeroscope_v2_xl":
-            workflow = workflows.get_zeroscope_v2_xl_workflow(
-                image_filename=image_filename,
-                prompt=action_prompt,
-                seed=int(timestamp),
-                width=width, height=height, frames=frames, fps=fps
-            )
-            output_path = os.path.join(output_dir, f"zeroscope_v2_xl_{timestamp}.mp4")
+            wf_module = workflows_ltx
         else:
-            return None, "❌ Modelo no reconocido", log("❌ Modelo no reconocido")
+            # SVD y WanVideo usan workflow original
+            wf_module = workflows
+        
+        try:
+            log(f"[DEBUG] Creando workflow para: {model_version}")
+            if model_version == "ltx_video":
+                # Usar workflow corregido de comfy_workflows_fixed
+                workflow = wf_module.get_ltxvideo2_workflow(
+                    image_filename=image_filename,
+                    prompt=action_prompt,
+                    seed=int(timestamp),
+                    width=ltx_width, height=ltx_height, frames=ltx_frames, fps=fps
+                )
+                output_path = os.path.join(output_dir, f"ltx_video_{timestamp}.mp4")
+            elif model_version == "svd_turbo":
+                workflow = wf_module.get_svd_turbo_workflow(
+                    image_filename=image_filename,
+                    prompt=action_prompt,
+                    seed=int(timestamp),
+                    width=width, height=height, frames=frames, fps=fps
+                )
+                output_path = os.path.join(output_dir, f"svd_turbo_{timestamp}.mp4")
+            elif model_version == "svd_xt":
+                # SVD XT usa el mismo workflow que svd_turbo pero con parámetros diferentes
+                workflow = wf_module.get_svd_turbo_workflow(
+                    image_filename=image_filename,
+                    prompt=action_prompt,
+                    seed=int(timestamp),
+                    width=width, height=height, frames=min(frames, 25),  # SVD XT max 25 frames
+                    fps=fps
+                )
+                output_path = os.path.join(output_dir, f"svd_xt_{timestamp}.mp4")
+            elif model_version == "wan_video":
+                # Verificar si WanVideo está disponible
+                model_check = workflows.check_model_available("wan")
+                if not model_check["ok"] or "wan_video" not in model_check["available_models"]:
+                    log(f"[WARN] Modelo WanVideo no encontrado")
+                    all_models = workflows.check_model_available("all")
+                    available = all_models.get("available_models", [])
+                    
+                    if "svd_turbo" in available:
+                        log("[INFO] Usando SVD Turbo como alternativa")
+                        model_version = "svd_turbo"
+                    elif "ltx_video" in available:
+                        log("[INFO] Usando LTX Video como alternativa")
+                        model_version = "ltx_video"
+                    else:
+                        return None, "❌ No hay modelos de video instalados", log("❌ Error: Instala al menos un modelo de video")
+                
+                workflow = wf_module.get_wan_video_workflow(
+                    image_filename=image_filename,
+                    prompt=action_prompt,
+                    seed=int(timestamp),
+                    width=width, height=height, frames=frames, fps=fps
+                )
+                output_path = os.path.join(output_dir, f"wan_video_{timestamp}.mp4")
+            else:
+                return None, "❌ Modelo no reconocido", log("❌ Modelo no reconocido")
+        except Exception as e:
+            log(f"[ERROR] Error generando workflow: {e}")
+            return None, f"❌ Error: {str(e)}", log(f"[ERROR] {e}")
 
         log("[PROC] Procesando...")
 
@@ -344,6 +552,43 @@ def animate_photo(
             return None, "❌ Error generando", log("[X] Error generando video")
 
         if not success:
+            # Verificar si es un error de VAE de WanVideo
+            error_str = str(result).lower()
+            is_vae_error = any(x in error_str for x in [
+                "vae", "size mismatch", "load_state_dict", 
+                "conv1.weight", "downsamples", "encoder", "decoder"
+            ])
+            
+            # Si es error de VAE y estamos usando WanVideo, intentar con SVD
+            if is_vae_error and model_version == "wan_video":
+                log(f"[WARN] Error de VAE en WanVideo: {result}")
+                log("[INFO] Intentando con SVD Turbo como alternativa...")
+                
+                # Reintentar con SVD
+                try:
+                    workflow = wf_module.get_svd_turbo_workflow(
+                        image_filename=image_filename,
+                        prompt=action_prompt,
+                        seed=int(timestamp),
+                        width=width, height=height, frames=frames, fps=fps
+                    )
+                    output_path = os.path.join(output_dir, f"svd_turbo_{timestamp}.mp4")
+                    success2, result2 = client.generate_video(temp_image_path, workflow, output_path)
+                    if success2:
+                        log("[OK] Video generado con SVD Turbo (fallback)")
+                        if voice_audio_path:
+                            log("[PROC] Añadiendo voz...")
+                            output_path_final = os.path.join(output_dir, f"imagine_{timestamp}_voz.mp4")
+                            merge_audio_video(output_path, voice_audio_path, output_path_final)
+                            log("[OK] Video con voz")
+                            return output_path_final, "✅ Completo (SVD fallback, con voz)", log("[OK] Exito")
+                        else:
+                            return output_path, "✅ Completo (SVD fallback, sin audio)", log("[OK] Exito")
+                    else:
+                        log(f"[ERROR] SVD fallback también falló: {result2}")
+                except Exception as e2:
+                    log(f"[ERROR] Error en fallback SVD: {e2}")
+            
             log(f"[ERROR] {result}")
             return None, f"❌ {result}", log(f"[ERROR] {result}")
 
@@ -397,17 +642,20 @@ def animate_photo_tab():
             return [("Sin modelos", "none")], "none"
         choices = []
         default_value = "none"
+        if models["wan_video"]:
+            choices.append(("WanVideo (Image-to-Video)", "wan_video"))
+            default_value = "wan_video"
+        if models["svd_xt"]:
+            choices.append(("SVD XT (Image-to-Video)", "svd_xt"))
+            if default_value == "none":
+                default_value = "svd_xt"
         if models["ltx_video"]:
-            choices.append(("LTX Video 0.9.1 (⭐ Recomendado)", "ltx_video"))
-            default_value = "ltx_video"
+            # LTX Video tiene problemas - deshabilitado
+            pass
         if models["svd_turbo"]:
             choices.append(("SVD Turbo", "svd_turbo"))
             if default_value == "none":
                 default_value = "svd_turbo"
-        if models["zeroscope_v2_xl"]:
-            choices.append(("Zeroscope V2 XL", "zeroscope_v2_xl"))
-            if default_value == "none":
-                default_value = "zeroscope_v2_xl"
         if not choices:
             choices.append(("Sin modelos", "none"))
             default_value = "none"
@@ -455,6 +703,13 @@ def animate_photo_tab():
                     label="Accion",
                     placeholder="Ej: 'personaje caminando'",
                     lines=2,
+                    info="SVD Turbo/SVD XT: No soporta prompts de texto (solo imagen)"
+                )
+                
+                # Info label para el prompt
+                prompt_info = gr.Markdown(
+                    "**Nota:** SVD Turbo y SVD XT no soportan prompts de texto",
+                    visible=False
                 )
 
                 text_to_speak = gr.Textbox(
@@ -469,7 +724,14 @@ def animate_photo_tab():
                 )
 
                 # Configuracion de video con tooltips
-                gr.Markdown("### Configuracion de Video")
+                gr.Markdown("""
+                ### Configuracion de Video
+                
+                **Guia rapida:**
+                - **Frames:** Numero de fotogramas (10-100)
+                - **FPS:** Velocidad (24=estandar, 30=suave)
+                - **Ancho/Alto:** Resolucion (multiplos de 8 para mejor calidad)
+                """)
                 
                 with gr.Row():
                     frames = gr.Slider(
@@ -478,7 +740,7 @@ def animate_photo_tab():
                         maximum=100,
                         value=24,
                         step=1,
-                        info="Numero de fotogramas del video (mas frames = video mas largo)"
+                        info="Frames del video: 24=1seg, 48=2seg, 72=3seg. SVD max 25, LTX requiere 8n+1 (ej: 25, 33, 49)"
                     )
                     fps = gr.Slider(
                         label="FPS ⓘ",
@@ -486,7 +748,7 @@ def animate_photo_tab():
                         maximum=30,
                         value=24,
                         step=1,
-                        info="Fotogramas por segundo (24 = velocidad estandar)"
+                        info="Velocidad: 8-15=lento, 24=normal, 30=rapido. Mas FPS = archivo mas grande"
                     )
                 
                 with gr.Row():
@@ -496,7 +758,7 @@ def animate_photo_tab():
                         maximum=1024,
                         value=512,
                         step=64,
-                        info="Ancho del video en pixeles (mas alto = mas detalle)"
+                        info="Ancho en pixeles. SVD: 1024x576. LTX: 768x512. SD: 512x512. Multiplos de 8"
                     )
                     height = gr.Slider(
                         label="Alto ⓘ",
@@ -504,7 +766,7 @@ def animate_photo_tab():
                         maximum=1024,
                         value=512,
                         step=64,
-                        info="Alto del video en pixeles"
+                        info="Alto en pixeles. SVD: 1024x576. LTX: 768x512. SD: 512x512. Multiplos de 8"
                     )
 
                 btn_animate = gr.Button("✨ Animar", variant="primary", size="lg")
@@ -555,6 +817,25 @@ def animate_photo_tab():
             inputs=[input_image],
             outputs=[status]
         )
+        
+        # Función para actualizar visibilidad del prompt según modelo
+        def on_model_change(model):
+            if model in ["svd_turbo", "svd_xt"]:
+                return {
+                    action_prompt: gr.update(placeholder="SVD no soporta prompts - usa solo la imagen", interactive=False),
+                    prompt_info: gr.update(visible=True)
+                }
+            else:
+                return {
+                    action_prompt: gr.update(placeholder="Ej: 'personaje caminando'", interactive=True),
+                    prompt_info: gr.update(visible=False)
+                }
+        
+        model_selector.change(
+            fn=on_model_change,
+            inputs=[model_selector],
+            outputs=[action_prompt, prompt_info]
+        )
 
 
 def get_model_status_text(models=None, default_model=None):
@@ -571,14 +852,19 @@ def get_model_status_text(models=None, default_model=None):
     else:
         lines.append("[X] LTX Video 0.9.1")
     
+    if models["svd_xt"]:
+        lines.append("[OK] SVD XT")
+    else:
+        lines.append("[X] SVD XT")
+    
     if models["svd_turbo"]:
         lines.append("[OK] SVD Turbo")
     else:
         lines.append("[X] SVD Turbo")
     
-    if models["zeroscope_v2_xl"]:
-        lines.append("[OK] Zeroscope V2 XL")
+    if models["wan_video"]:
+        lines.append("[OK] WanVideo")
     else:
-        lines.append("[X] Zeroscope V2 XL")
+        lines.append("[X] WanVideo")
     
     return "\n".join(lines)

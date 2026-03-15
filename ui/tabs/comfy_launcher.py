@@ -45,60 +45,36 @@ comfy_process = None
 
 
 def is_port_in_use(port: int) -> bool:
-    """Check if a port has a LISTENING process - DEBUG VERSION"""
+    """Check if a port has a LISTENING process - SIMPLIFIED VERSION"""
     import socket
-    import subprocess
     
     print(f"[DEBUG] Checking port {port}...")
     
+    # Direct socket connection test - most reliable method
+    # This tests if something is actually listening on the port
     try:
-        if sys.platform == "win32":
-            # Use netstat to check for LISTENING processes FIRST
-            result = subprocess.run(
-                f"netstat -ano | findstr :{port} | findstr LISTENING",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            has_listening = 'LISTENING' in result.stdout
-            
-            print(f"[DEBUG] netstat LISTENING result: '{result.stdout.strip()}'")
-            print(f"[DEBUG] has_listening: {has_listening}")
-            
-            # If no LISTENING, port is NOT in use by a service
-            if not has_listening:
-                print(f"[DEBUG] Puerto {port}: NO hay LISTENING - retornar False")
-                return False
-            
-            # Verify with socket (should succeed if there's a listener)
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(1)
-                    result = s.connect_ex(('127.0.0.1', port))
-                    if result != 0:
-                        print(f"[DEBUG] Socket no puede conectar aunque hay LISTENING - retornar False")
-                        return False
-            except Exception as e:
-                print(f"[DEBUG] Socket error: {e}")
-                return False
-            
-            print(f"[DEBUG] Puerto {port}: SI hay LISTENING - retornar True")
-            return True
-        else:
-            result = subprocess.run(
-                f"lsof -i :{port}",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            has_listening = 'LISTEN' in result.stdout.upper()
-            print(f"[DEBUG] lsof result: '{result.stdout.strip()}'")
-            return has_listening
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(('127.0.0.1', port))
+            if result == 0:
+                print(f"[DEBUG] Puerto {port}: socket conectado exitosamente (127.0.0.1) - retornar True")
+                return True
     except Exception as e:
-        print(f"[DEBUG] Error checking port {port}: {e}")
-        return False
+        print(f"[DEBUG] Socket error en puerto {port}: {e}")
+    
+    # Try localhost as fallback
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(('localhost', port))
+            if result == 0:
+                print(f"[DEBUG] Puerto {port}: socket conectado exitosamente (localhost) - retornar True")
+                return True
+    except Exception as e:
+        print(f"[DEBUG] Socket error (localhost) en puerto {port}: {e}")
+    
+    print(f"[DEBUG] Puerto {port}: no hay proceso escuchando - retornar False")
+    return False
 
 
 def kill_process_on_port(port: int) -> bool:

@@ -800,10 +800,37 @@ def faceswap_tab():
                                 gr.Markdown("**Mejoras de Calidad**")
                                 
                                 ui_selected_enhancer = gr.Dropdown(
-                                    choices=["None", "GFPGAN", "CodeFormer", "Restoreformer++"],
-                                    value="GFPGAN",
+                                    choices=["None", "GFPGAN", "CodeFormer", "Restoreformer++", "GPEN"],
+                                    value="GPEN",
                                     label="Face Enhancer",
-                                    info="Mejora la calidad de las caras generadas"
+                                    info="None=Máximo parecido | GPEN=Mejor calidad | GFPGAN=Fuerte"
+                                )
+                                
+                                ui_enhancer_blend = gr.Slider(
+                                    minimum=0.0,
+                                    maximum=1.0,
+                                    value=0.15,
+                                    step=0.05,
+                                    label="Enhancer Blend",
+                                    info="0=Máximo parecido, 0.15=Óptimo, 1=Más calidad"
+                                )
+                                
+                                ui_color_match = gr.Slider(
+                                    minimum=0.0,
+                                    maximum=1.0,
+                                    value=0.1,
+                                    step=0.05,
+                                    label="Color Match",
+                                    info="0=Máximo parecido, 0.1=Óptimo, 1=Más ajuste"
+                                )
+                                
+                                ui_brightness = gr.Slider(
+                                    minimum=0.0,
+                                    maximum=1.0,
+                                    value=0.1,
+                                    step=0.05,
+                                    label="Brightness Adjust",
+                                    info="0=Máximo parecido, 0.1=Óptimo, 1=Más ajuste"
                                 )
                                 
                                 ui_blend_ratio = gr.Slider(
@@ -1210,6 +1237,10 @@ def faceswap_tab():
             ui_similarity_threshold,   # similarity_threshold - desde UI
             ui_gender_strictness,      # gender_strictness - desde UI
             ui_color_correction,       # color_correction - desde UI
+            # Nuevos controles de calidad
+            ui_enhancer_blend,        # enhancer_blend_factor
+            ui_color_match,            # color_match_strength
+            ui_brightness,            # brightness_strength
         ],
         outputs=[bt_start, bt_stop, result_gallery],
     )
@@ -1255,7 +1286,7 @@ def on_content_type_changed(content_type):
             gr.update(value=0.65),  # ui_blend_ratio - CONSERVADOR
             gr.update(value=45),  # mask_blur
             gr.update(value="DFL XSeg"),  # selected_mask_engine
-            gr.update(value="GFPGAN"),  # ui_selected_enhancer
+            gr.update(value="GPEN"),  # ui_selected_enhancer
             gr.update(value="General", visible=True),  # sub_category
             gr.update(value="Selected faces"),  # selected_face_detection
         ]
@@ -1267,7 +1298,7 @@ def on_content_type_changed(content_type):
             gr.update(value=0.65),  # ui_blend_ratio - CONSERVADOR
             gr.update(value=45),  # mask_blur (más suave para boca)
             gr.update(value="DFL XSeg"),  # selected_mask_engine
-            gr.update(value="GFPGAN"),  # ui_selected_enhancer
+            gr.update(value="GPEN"),  # ui_selected_enhancer
             gr.update(value="General", visible=True),  # sub_category
             gr.update(value="First found"),  # selected_face_detection
         ]
@@ -3639,6 +3670,10 @@ def start_swap(
     color_correction=None,
     selected_top_k=3,
     selected_assignment_ttl=90,
+    # Nuevos parámetros de calidad
+    enhancer_blend_factor=None,
+    color_match_strength=None,
+    brightness_strength=None,
     progress=gr.Progress(),
 ):
     from roop.core import batch_process_regular
@@ -3661,6 +3696,19 @@ def start_swap(
     if color_correction is not None:
         roop.globals.use_color_correction = color_correction
         print(f"[CONFIG] Color Correction: {color_correction}")
+    
+    # NUEVO: Aplicar controles de calidad para preservar identidad
+    if enhancer_blend_factor is not None:
+        roop.globals.enhancer_blend_factor = enhancer_blend_factor
+        print(f"[CONFIG] Enhancer Blend Factor: {enhancer_blend_factor}")
+    
+    if color_match_strength is not None:
+        roop.globals.color_match_strength = color_match_strength
+        print(f"[CONFIG] Color Match Strength: {color_match_strength}")
+    
+    if brightness_strength is not None:
+        roop.globals.brightness_strength = brightness_strength
+        print(f"[CONFIG] Brightness Strength: {brightness_strength}")
     
     # Aplicar temporal smoothing
     roop.globals.temporal_smoothing = temporal_smoothing if temporal_smoothing is not None else True

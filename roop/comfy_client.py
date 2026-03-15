@@ -73,6 +73,7 @@ class ComfyClient:
         attempts = 0
         last_status = ""
         found_images = False
+        nan_detected = False
         
         while attempts < max_attempts:
             attempts += 1
@@ -87,6 +88,24 @@ class ComfyClient:
             if prompt_id in history:
                 outputs = history[prompt_id].get("outputs", {})
                 status = history[prompt_id].get("status", "")
+                
+                # Verificar si hay errores NaN en los outputs
+                for nid, node_output in outputs.items():
+                    if "errors" in node_output:
+                        for error in node_output["errors"]:
+                            error_msg = str(error.get("message", ""))
+                            if "nan" in error_msg.lower() or "NaN" in error_msg:
+                                print(f"[ComfyClient] ERROR NaN detectado en nodo {nid}: {error_msg}")
+                                nan_detected = True
+                    # Verificar si hay datos inválidos en las imágenes
+                    if "images" in node_output:
+                        for img in node_output["images"]:
+                            if img.get("filename", "").lower().endswith("nan"):
+                                print(f"[ComfyClient] ERROR: Archivo con nombre NaN detectado")
+                                nan_detected = True
+                
+                if nan_detected:
+                    raise Exception("Error: El modelo generó valores NaN. Esto suele ocurrir por incompatibilidad con el VAE o el modelo. Prueba con otro VAE o modelo.")
                 
                 # Mostrar progreso cada 10 intentos
                 if attempts % 20 == 0:
@@ -156,6 +175,7 @@ class ComfyClient:
         max_attempts = 1200  # Maximo 600 segundos esperando (10 minutos)
         attempts = 0
         found_videos = False
+        nan_detected = False
         
         while attempts < max_attempts:
             attempts += 1
@@ -169,14 +189,39 @@ class ComfyClient:
             
             if prompt_id in history:
                 outputs = history[prompt_id].get("outputs", {})
-                status = history[prompt_id].get("status", "")
+                status = history[prompt_id].get("status", {})
+                
+                # Verificar si hay errores NaN en los outputs
+                for nid, node_output in outputs.items():
+                    if "errors" in node_output:
+                        for error in node_output["errors"]:
+                            error_msg = str(error.get("message", ""))
+                            if "nan" in error_msg.lower() or "NaN" in error_msg:
+                                print(f"[ComfyClient] ERROR NaN detectado en nodo {nid}: {error_msg}")
+                                nan_detected = True
+                    # Verificar si hay datos inválidos en las imágenes
+                    if "images" in node_output:
+                        for img in node_output["images"]:
+                            if img.get("filename", "").lower().endswith("nan"):
+                                print(f"[ComfyClient] ERROR: Archivo con nombre NaN detectado")
+                                nan_detected = True
+                
+                if nan_detected:
+                    raise Exception("Error: El modelo generó valores NaN. Esto suele ocurrir por incompatibilidad con el VAE o el modelo. Prueba con otro VAE o modelo.")
                 
                 # Mostrar progreso cada 20 intentos
                 if attempts % 20 == 0:
-                    print(f"[ComfyClient] Esperando video... intento {attempts}, status={status}")
+                    status_str = status.get("status", "unknown") if isinstance(status, dict) else str(status)
+                    print(f"[ComfyClient] Esperando video... intento {attempts}, status={status_str}")
                 
                 if outputs:
                     print(f"[ComfyClient] Outputs disponibles: {list(outputs.keys())}")
+                    
+                    # Mostrar detalles de cada output para debug
+                    for nid, node_output in outputs.items():
+                        print(f"[ComfyClient]   Nodo {nid}: {list(node_output.keys())}")
+                        if "errors" in node_output:
+                            print(f"[ComfyClient]     ERRORS: {node_output['errors']}")
                     
                     # Buscar videos en todos los nodos (pueden estar en 'gifs' o 'images')
                     for nid, node_output in outputs.items():
@@ -335,6 +380,12 @@ class ComfyClient:
                             details.append(f"[Nodo {node_id}] {error_message}")
                 
                 full_error = f"{error_msg}: {', '.join(details)}" if details else error_msg
+                
+                # Agregar información de ayuda basada en el error
+                help_info = self._get_error_help(full_error)
+                if help_info:
+                    full_error = f"{full_error}\n\n💡 {help_info}"
+                
                 return "", False, full_error
             else:
                 return "", False, f"HTTP {response.status_code}: {response.text[:200]}"
@@ -343,6 +394,28 @@ class ComfyClient:
             return "", False, "No se puede conectar a ComfyUI. ¿Esta corriendo?"
         except Exception as e:
             return "", False, f"Error: {str(e)}"
+    
+    def _get_error_help(self, error_msg: str) -> str:
+        """Proporciona ayuda basada en el tipo de error"""
+        error_lower = error_msg.lower()
+        
+        # Errores comunes y su ayuda
+        if "SVD_img2vid_Conditioning" in error_msg:
+            return "Instala el nodo 'ComfyUI-SVD-img2vid' para usar SVD Turbo. Busca en GitHub."
+        elif "LTXVideo" in error_msg:
+            return "Instala 'ComfyUI-LTXVideo' para usar LTX Video. Busca en GitHub."
+        elif "UNETLoader" in error_msg and "not found" in error_lower:
+            return "El modelo UNET no se encuentra. Verifica que el modelo esté en ui/tob/ComfyUI/models/diffusion_models/"
+        elif "VAELoader" in error_msg and "not found" in error_lower:
+            return "El VAE no se encuentra. Verifica que esté en ui/tob/ComfyUI/models/vae/"
+        elif "clip_name" in error_lower or "clip vision" in error_lower:
+            return "Falta el modelo CLIP Vision. Descarga 'open_clip_pytorch_model.bin' en ui/tob/ComfyUI/models/clip_vision/"
+        elif "class_type" in error_lower:
+            return "Un nodo del workflow no existe en ComfyUI. ¿Faltan nodos personalizados instalados?"
+        elif "was not connected" in error_lower or "connection" in error_lower:
+            return "ComfyUI no está respondiendo. Asegúrate de que está ejecutándose en el puerto 8188."
+        
+        return ""
     
     def generate_video(
         self,
@@ -360,9 +433,15 @@ class ComfyClient:
             if not os.path.exists(image_path):
                 return False, f"Imagen no encontrada: {image_path}"
             
+            print(f"[ComfyClient] ========== INICIANDO GENERACION ==========")
+            print(f"[ComfyClient] Workflow keys: {list(workflow.keys())}")
+            
             # El workflow ya debe tener la imagen configurada (cargada previamente)
             # Solo encolar y esperar resultado
             prompt_id, success, error = self.queue_prompt(workflow)
+            
+            print(f"[ComfyClient] queue_prompt result: success={success}, prompt_id={prompt_id[:8] if prompt_id else 'None'}..., error={error}")
+            
             if not success:
                 return False, error
             
@@ -374,21 +453,32 @@ class ComfyClient:
             waited = 0
             videos = []
             
+            print(f"[ComfyClient] Esperando hasta {max_wait}s por el video...")
+            
             while waited < max_wait:
                 videos = self.get_videos(prompt_id, "*")
                 if videos:
+                    print(f"[ComfyClient] Videos encontrados: {len(videos)}")
                     break
                 time.sleep(5)
                 waited += 5
-                if waited % 30 == 0:
-                    print(f"[ComfyClient] Esperando video... {waited}s")
+                print(f"[ComfyClient] Esperando video... {waited}s / {max_wait}s", end='\r')
+            
+            print()  # Nueva línea después del progress
             
             if videos:
+                print(f"[ComfyClient] Guardando video de {len(videos[0])} bytes en: {output_path}")
                 with open(output_path, "wb") as f:
                     f.write(videos[0])
                 print(f"[ComfyClient] Video guardado: {output_path}")
                 return True, output_path
             else:
+                # Intentar obtener el historial para ver qué pasó
+                try:
+                    history = self.get_history(prompt_id)
+                    print(f"[ComfyClient] Historial final: {history}")
+                except:
+                    pass
                 return False, "Timeout: No se generó el video en el tiempo esperado"
                 
         except Exception as e:
