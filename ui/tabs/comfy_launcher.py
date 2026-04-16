@@ -21,16 +21,21 @@ COMFYUI_PORT = None  # Se detectará automáticamente
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 COMFYUI_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "tob", "ComfyUI"))
 
-# Usar el venv de ComfyUI si existe, sino el del proyecto principal
+# Usar el venv_flux (GPU) por defecto para ComfyUI
 if sys.platform == "win32":
+    FLUX_VENV_PYTHON = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "venv_flux", "Scripts", "python.exe"))
     COMFYUI_VENV_PYTHON = os.path.join(COMFYUI_DIR, "venv", "Scripts", "python.exe")
     PROJECT_VENV_PYTHON = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "venv", "Scripts", "python.exe"))
 else:
+    FLUX_VENV_PYTHON = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "venv_flux", "bin", "python"))
     COMFYUI_VENV_PYTHON = os.path.join(COMFYUI_DIR, "venv", "bin", "python")
     PROJECT_VENV_PYTHON = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "venv", "bin", "python"))
 
-# Determinar cual Python usar
-if os.path.exists(COMFYUI_VENV_PYTHON):
+# Determinar cual Python usar - preferir venv_flux (GPU)
+if os.path.exists(FLUX_VENV_PYTHON):
+    COMFYUI_PYTHON = FLUX_VENV_PYTHON
+    print(f"[ComfyLauncher] Usando venv_flux (GPU): {COMFYUI_PYTHON}")
+elif os.path.exists(COMFYUI_VENV_PYTHON):
     COMFYUI_PYTHON = COMFYUI_VENV_PYTHON
     print(f"[ComfyLauncher] Usando venv de ComfyUI: {COMFYUI_PYTHON}")
 elif os.path.exists(PROJECT_VENV_PYTHON):
@@ -291,8 +296,9 @@ def start(
         python_exe = COMFYUI_PYTHON if os.path.exists(COMFYUI_PYTHON) else sys.executable
         
         # ComfyUI espera argumentos: python main.py --port 8189
-        # Nota: El safety filter se desactiva desde la UI de ComfyUI o con variable de entorno
-        cmd = [python_exe, "-u", exe, "--port", str(port)]
+        # --lowvram habilita CPU offloading secuencial para GPUs con VRAM limitada
+        # Sin --cpu para usar GPU con PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync
+        cmd = [python_exe, "-u", exe, "--port", str(port), "--lowvram"]
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
         print(f"[ComfyLauncher] Directorio: {COMFYUI_DIR}")
         print(f"[ComfyLauncher] Python: {python_exe}")
@@ -316,6 +322,8 @@ def start(
             env["DO_NOT_TRACK"] = "1"
             # Aumentar timeout de inicio
             env["COMFYUI_STARTUP_TIMEOUT"] = "300"
+            # Fix CUDA allocator - usar backend alternativo
+            env["PYTORCH_CUDA_ALLOC_CONF"] = "backend:cudaMallocAsync"
             
             comfy_process = subprocess.Popen(
                 cmd,

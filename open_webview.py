@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.getcwd())
 
 # URL del servidor Gradio que ya está ejecutándose
-GRADIO_URL = "http://127.0.0.1:9000"
+GRADIO_URL = "http://127.0.0.1:7861"
 
 print(f"[PYWEBVIEW] Abriendo {GRADIO_URL} en pywebview...")
 

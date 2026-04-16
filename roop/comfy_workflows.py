@@ -120,6 +120,19 @@ def check_model_available(model_category: str = "all") -> dict:
             if zs_files:
                 result["available_models"].append("zeroscope")
     
+    # Check for CogVideoX (in ComfyUI models/CogVideo folder)
+    if model_category in ["cogvideo", "all"]:
+        cogvideo_path = os.path.join(models_path, "CogVideo", "CogVideoX-5b-1.5")
+        if os.path.exists(cogvideo_path):
+            # Verificar que tiene los componentes necesarios
+            transformer_path = os.path.join(cogvideo_path, "transformer_I2V", "diffusion_pytorch_model.safetensors")
+            vae_path = os.path.join(cogvideo_path, "vae", "diffusion_pytorch_model.safetensors")
+            text_encoder_path = os.path.join(cogvideo_path, "text_encoder", "model-00001-of-00002.safetensors")
+            
+            if os.path.exists(transformer_path) and os.path.exists(vae_path) and os.path.exists(text_encoder_path):
+                result["available_models"].append("cogvideo")
+                print(f"[check_model_available] CogVideoX-5B-I2V detectado en {cogvideo_path}")
+    
     if result["available_models"]:
         result["ok"] = True
     else:
@@ -160,6 +173,12 @@ def check_required_nodes(model_type: str) -> dict:
         "wan_video": [
             "WanVideoDecode", "WanVideoImageToVideoEncode", "WanVideoTextEncode",
             "UnetLoaderGGUF", "CLIPLoaderGGUF"
+        ],
+        "cogvideo": [
+            # CogVideoX nodes from ComfyUI_CogVideoXWrapper
+            "DownloadAndLoadCogVideoModel", "CogVideoImageEncode", "CogVideoTextEncode",
+            "CogVideoSampler", "CogVideoDecode", "CogVideoTextEncodeCombine",
+            "CogVideoTransformerEdit"
         ]
     }
     
@@ -279,72 +298,137 @@ def get_svd_turbo_workflow(
     diffusion_models_path = os.path.join(models_path, "diffusion_models")
     checkpoints_path = os.path.join(models_path, "checkpoints")
     
-    # Buscar modelo SVD en diffusion_models/StableDiffusionTurbo
+    # Buscar modelo SVD - NO usar svd_xt (no funciona con ComfyUI)
     svd_model_name = None
-    stable_diffusion_turbo_path = os.path.join(diffusion_models_path, "StableDiffusionTurbo")
     
-    # Usar os.listdir que maneja correctamente los paths en Windows
-    if os.path.exists(stable_diffusion_turbo_path):
-        for f in os.listdir(stable_diffusion_turbo_path):
-            if f.lower().endswith('.safetensors') or f.lower().endswith('.ckpt'):
-                # Usar el path con separador de Windows (barra invertida)
-                svd_model_name = f"StableDiffusionTurbo\{f}"
-                print(f"[SVD_TURBO] Modelo encontrado en diffusion_models: {svd_model_name}")
-                break
+    # Primero: consultar a ComfyUI qué modelos están disponibles
+    try:
+        response = requests.get(f"{get_comfyui_url()}/object_info/UNETLoader", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if "UNETLoader" in data:
+                available_unets = data["UNETLoader"]["input"]["required"].get("unet_name", [[]])[0]
+                print(f"[SVD_TURBO] UNETs disponibles en ComfyUI: {len(available_unets)}")
+                
+                # Buscar SVD en los disponibles
+                for unet in available_unets:
+                    if "svd" in unet.lower():
+                        svd_model_name = unet
+                        print(f"[SVD_TURBO] Usando SVD desde ComfyUI: {svd_model_name}")
+                        break
+    except Exception as e:
+        print(f"[SVD_TURBO] Error consultando ComfyUI: {e}")
     
-    # Si no está en diffusion_models, buscar en checkpoints
-    if not svd_model_name and os.path.exists(checkpoints_path):
-        for ckpt in os.listdir(checkpoints_path):
-            if "svd" in ckpt.lower():
-                svd_model_name = ckpt
-                print(f"[SVD_TURBO] Modelo encontrado en checkpoints: {svd_model_name}")
-                break
+    # Si no se encontró desde API, NO buscar en svd_xt (no funciona)
+    # Buscar en StableDiffusionTurbo como alternativa
+    if not svd_model_name:
+        stable_diffusion_turbo_path = os.path.join(diffusion_models_path, "StableDiffusionTurbo")
+        if os.path.exists(stable_diffusion_turbo_path):
+            for f in os.listdir(stable_diffusion_turbo_path):
+                if f.lower().endswith('.safetensors') or f.lower().endswith('.ckpt'):
+                    svd_model_name = f"StableDiffusionTurbo\\{f}"
+                    print(f"[SVD_TURBO] Modelo en StableDiffusionTurbo: {svd_model_name}")
+                    break
     
     if not svd_model_name:
-        svd_model_name = "StableDiffusionTurbo\\svd_xt.safetensors"
-        print(f"[SVD_TURBO] WARN Usando modelo por defecto: {svd_model_name}")
+        raise ValueError("[SVD_TURBO] ERROR: No se encontró modelo SVD válido en ComfyUI.")
     
-    # Buscar VAE - IMPORTANTE: Debe ser el VAE correcto para SVD
+    # Buscar VAE - PRIORIZAR obtener desde ComfyUI API
     vae_path = os.path.join(models_path, "vae")
-    
-    # NO usar LTX VAE con SVD - son incompatibles
-    # Filtrar explícitamente el VAE de LTX
-    # NOTA: svd_xt_image_decoder puede estar corrupto (9GB+ no es VAE válido)
-    # Usar pixel_space como opción segura
-    vae_options = [
-        "ae.safetensors",
-        "ae_fixed.safetensors",
-        "vae-ft-mse-840000.safetensors"
-    ]
-    
-    # NO usar VAE de LTX ni VAEs potencialmente corrupto de SVD
-    exclude_vae = ["ltx", "video", "svd_xt_image_decoder"]
-    
     svd_vae = None
-    if os.path.exists(vae_path):
+    
+    # Primero: consultar a ComfyUI qué VAEs están disponibles
+    try:
+        response = requests.get(f"{get_comfyui_url()}/object_info/VAELoader", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if "VAELoader" in data:
+                available_vaes = data["VAELoader"]["input"]["required"].get("vae_name", [[]])[0]
+                print(f"[SVD_TURBO] VAEs disponibles en ComfyUI: {len(available_vaes)}")
+                
+                # Buscar VAE de SVD en los disponibles
+                for vae in available_vaes:
+                    vae_lower = vae.lower()
+                    if "svd" in vae_lower and "image_decoder" in vae_lower:
+                        svd_vae = vae
+                        print(f"[SVD_TURBO] VAE de SVD desde ComfyUI: {svd_vae}")
+                        break
+                
+                # Si no hay VAE específico de SVD, buscar VAE de Wan como fallback
+                if not svd_vae:
+                    for vae in available_vaes:
+                        vae_lower = vae.lower()
+                        if "wan" in vae_lower and vae_lower.endswith('.safetensors'):
+                            svd_vae = vae
+                            print(f"[SVD_TURBO] VAE de Wan desde ComfyUI: {svd_vae}")
+                            break
+    except Exception as e:
+        print(f"[SVD_TURBO] Error consultando VAEs: {e}")
+    
+    # Segundo: buscar localmente si no se encontró desde API
+    if not svd_vae:
+        svd_vae_specific = os.path.join(vae_path, "svd_vae.safetensors")
+        if os.path.exists(svd_vae_specific):
+            vae_size = os.path.getsize(svd_vae_specific)
+            vae_size_mb = vae_size / (1024**2)
+            if 100 < vae_size_mb < 500:  # Validar tamaño razonable
+                svd_vae = "svd_vae.safetensors"
+                print(f"[SVD_TURBO] VAE de SVD encontrado: {svd_vae} ({vae_size_mb:.0f} MB)")
+    
+    # Tercero: buscar VAE de SVD en diffusion_models/svd_xt/vae/
+    if not svd_vae:
+        svd_xt_vae_path = os.path.join(diffusion_models_path, "svd_xt", "vae", "diffusion_pytorch_model.safetensors")
+        if os.path.exists(svd_xt_vae_path):
+            vae_size = os.path.getsize(svd_xt_vae_path)
+            vae_size_mb = vae_size / (1024**2)
+            if 100 < vae_size_mb < 500:  # Validar tamaño
+                # Copiar a models/vae para que ComfyUI lo reconozca
+                dest_vae = os.path.join(vae_path, "svd_vae.safetensors")
+                if not os.path.exists(dest_vae):
+                    import shutil
+                    shutil.copy2(svd_xt_vae_path, dest_vae)
+                    print(f"[SVD_TURBO] Copiado VAE de diffusion_models a models/vae")
+                svd_vae = "svd_vae.safetensors"
+                print(f"[SVD_TURBO] VAE de SVD encontrado en diffusion_models: {svd_vae} ({vae_size_mb:.0f} MB)")
+    
+    # Tercero: buscar cualquier VAE de SVD en models/vae/
+    if not svd_vae and os.path.exists(vae_path):
         for f in os.listdir(vae_path):
             f_lower = f.lower()
-            if f_lower.endswith('.safetensors') or f_lower.endswith('.ckpt'):
-                # EXCLUIR VAE de LTX y VAEs potencialmente corrupto
-                if any(ex in f_lower for ex in exclude_vae):
-                    print(f"[SVD_TURBO] Ignorando VAE potencialmente inválido: {f}")
+            if f_lower.endswith('.safetensors'):
+                # Ignorar archivos corruptos (> 1GB)
+                vae_file_path = os.path.join(vae_path, f)
+                vae_size = os.path.getsize(vae_file_path)
+                vae_size_gb = vae_size / (1024**3)
+                
+                if vae_size_gb > 1.0:
+                    print(f"[SVD_TURBO] Ignorando VAE corrupto: {f} ({vae_size_gb:.2f} GB)")
                     continue
-                # Buscar VAE válido
-                if svd_vae is None and not f_lower.startswith('.'):
-                    for vae_opt in vae_options:
-                        if vae_opt.lower() in f_lower:
-                            svd_vae = f
-                            print(f"[SVD_TURBO] VAE encontrado: {svd_vae}")
-                            break
-                    if svd_vae:
-                        break
+                
+                # Buscar VAE de SVD
+                if "svd" in f_lower and ("ae" in f_lower or "decoder" in f_lower or f_lower == "svd_vae.safetensors"):
+                    svd_vae = f
+                    print(f"[SVD_TURBO] VAE de SVD encontrado: {svd_vae} ({vae_size_gb*1024:.0f} MB)")
+                    break
     
-    # IMPORTANTE: SVD siempre requiere VAE externo - no tiene VAE incorporado
-    # Si no se encuentra VAE específico, usar pixel_space como fallback
-    use_external_vae = True
+    # Si el VAE de SVD está corrupto o no existe, probar VAE de Wan como fallback
+    if not svd_vae:
+        wan_vaes = ["Wan2.2_VAE_bf16.safetensors", "Wan2.2_VAE.safetensors", "Wan2.1_VAE_bf16.safetensors"]
+        for wan_vae in wan_vaes:
+            wan_vae_path = os.path.join(vae_path, wan_vae)
+            if os.path.exists(wan_vae_path):
+                vae_size = os.path.getsize(wan_vae_path)
+                vae_size_mb = vae_size / (1024**2)
+                print(f"[SVD_TURBO] Usando VAE de Wan como fallback: {wan_vae} ({vae_size_mb:.0f} MB)")
+                svd_vae = wan_vae
+                break
+    
+    # Si aún no hay VAE, NO usar pixel_space - buscar en ComfyUI
+    if not svd_vae:
+        print("[SVD_TURBO] No se encontró VAE local, buscando en ComfyUI...")
     
     # Buscar VAE válido en ComfyUI si no se encontró localmente
-    if not svd_vae:
+    if not svd_vae or svd_vae == "pixel_space":
         # Consultar a ComfyUI para obtener VAE válido
         try:
             response = requests.get(f"{get_comfyui_url()}/object_info/VAELoader", timeout=5)
@@ -354,25 +438,57 @@ def get_svd_turbo_workflow(
                     available_vaes = data["VAELoader"]["input"]["required"].get("vae_name", [[]])[0]
                     # Ignorar VAE corrupto de SVD y buscar alternativas válidas
                     exclude = ["svd_xt_image_decoder", "ltx", "video"]
-                    for vae in available_vaes:
-                        vae_lower = vae.lower()
-                        if not any(ex in vae_lower for ex in exclude):
-                            # Buscar VAE básico (ae, vae-ft-mse, etc.)
-                            if "ae" in vae_lower or "vae" in vae_lower:
-                                svd_vae = vae
-                                print(f"[SVD_TURBO] VAE válido encontrado en ComfyUI: {svd_vae}")
-                                break
-                    # Si no hay VAE básico, usar pixel_space como fallback
-                    if not svd_vae and "pixel_space" in available_vaes:
-                        svd_vae = "pixel_space"
-                        print(f"[SVD_TURBO] Usando pixel_space VAE como fallback")
+                    
+                    # Primero buscar VAE de Wan (más confiable)
+                    wan_priority = ["Wan2.2_VAE_bf16.safetensors", "Wan2.2_VAE.safetensors", "Wan2.1_VAE_bf16.safetensors"]
+                    for wan_vae in wan_priority:
+                        if wan_vae in available_vaes:
+                            svd_vae = wan_vae
+                            print(f"[SVD_TURBO] VAE de Wan encontrado en ComfyUI: {svd_vae}")
+                            break
+                    
+                    # Si no hay Wan VAE, buscar otro VAE válido
+                    if not svd_vae or svd_vae == "pixel_space":
+                        for vae in available_vaes:
+                            vae_lower = vae.lower()
+                            if not any(ex in vae_lower for ex in exclude):
+                                # Buscar VAE básico (ae, vae-ft-mse, etc.)
+                                if "ae" in vae_lower or "vae" in vae_lower:
+                                    svd_vae = vae
+                                    print(f"[SVD_TURBO] VAE válido encontrado en ComfyUI: {svd_vae}")
+                                    break
+                    
+                    # Si no hay VAE básico, NO usar pixel_space (causa errores)
+                    # Buscar cualquier VAE que no esté excluido
+                    if not svd_vae or svd_vae == "pixel_space":
+                        for vae in available_vaes:
+                            vae_lower = vae.lower()
+                            if not any(ex in vae_lower for ex in exclude):
+                                if vae != "pixel_space":
+                                    svd_vae = vae
+                                    print(f"[SVD_TURBO] Cualquier VAE disponible: {svd_vae}")
+                                    break
         except Exception as e:
             print(f"[SVD_TURBO] Error consultando VAEs: {e}")
     
-    # ULTIMO RESORT: Si sigue sin haber VAE, usar pixel_space
-    if not svd_vae:
-        svd_vae = "pixel_space"
-        print(f"[SVD_TURBO] ADVERTENCIA: Usando pixel_space como VAE final")
+    # ULTIMO RESORT: Si sigue sin haber VAE válido, forzar uso de Wan VAE
+    # (NO usar pixel_space - causa errores en ComfyUI)
+    if not svd_vae or svd_vae == "pixel_space" or svd_vae is None:
+        # Intentar cargar cualquier VAE de Wan
+        wan_vaes_fallback = ["Wan2.2_VAE_bf16.safetensors", "Wan2.2_VAE.safetensors", "Wan2.1_VAE_bf16.safetensors"]
+        for wan_vae in wan_vaes_fallback:
+            wan_path = os.path.join(vae_path, wan_vae)
+            if os.path.exists(wan_path):
+                vae_size = os.path.getsize(wan_path)
+                vae_size_mb = vae_size / (1024**2)
+                if vae_size_mb > 500:  # Validar tamaño
+                    svd_vae = wan_vae
+                    print(f"[SVD_TURBO] Fallback forzado a VAE de Wan: {svd_vae} ({vae_size_mb:.0f} MB)")
+                    break
+        
+        if not svd_vae or svd_vae == "pixel_space" or svd_vae is None:
+            # Error crítico - no hay VAE válido
+            raise ValueError("[SVD_TURBO] ERROR CRÍTICO: No se encontró VAE válido para SVD. Por favor descarga un VAE de Wan o SVD.")
     
     # Asegurar que siempre tenemos VAE válido para SVD
     print(f"[SVD_TURBO] Usando modelo: {svd_model_name}, VAE: {svd_vae}")
@@ -382,17 +498,18 @@ def get_svd_turbo_workflow(
         # 1: Cargar imagen
         "1": {"inputs": {"image": image_filename, "upload": "image"}, "class_type": "LoadImage"},
         
-        # 2: Cargar modelo SVD Turbo (UNETLoader para diffusion models)
+        # 2: Cargar modelo SVD Turbo (UNETLoader)
         "2": {"inputs": {"unet_name": svd_model_name, "weight_dtype": "default"}, "class_type": "UNETLoader"},
         
-        # 3: VAE - SVD siempre requiere VAE externo
+        # 3: VAE - requerido para SVD
         "3": {"inputs": {"vae_name": svd_vae}, "class_type": "VAELoader"},
         
         # 4: Cargar CLIP Vision
         "4": {"inputs": {"clip_name": "open_clip_pytorch_model.bin"}, "class_type": "CLIPVisionLoader"},
     }
     
-    # Siempre usar VAE externo para SVD (no tiene VAE incorporado)
+    # Referencias
+    model_ref = ["2", 0]
     vae_ref = ["3", 0]
     
     # 5: Condicionamiento para SVD
@@ -403,14 +520,14 @@ def get_svd_turbo_workflow(
         "width": width,
         "height": height,
         "video_frames": frames,
-        "motion_bucket_id": 127,
+        "motion_bucket_id": 30,  # Lower for less distortion, more similar to original
         "fps": fps,
-        "augmentation_level": 0.0
+        "augmentation_level": 0.0  # No augmentation to preserve original
     }, "class_type": "SVD_img2vid_Conditioning"}
     
     # 6: Sampler - SVD Turbo es un modelo distilled, fewer steps needed
     nodes["6"] = {"inputs": {
-        "model": ["2", 0],
+        "model": model_ref,
         "positive": ["5", 0],
         "negative": ["5", 1],
         "latent_image": ["5", 2],
@@ -996,7 +1113,7 @@ def _get_zeroscope_fallback_workflow(
 
 def get_wan_video_workflow(
     image_filename, prompt, seed=None,
-    width=720, height=480, frames=120, fps=24
+    width=512, height=512, frames=33, fps=8
 ):
     """
     WORKFLOW WanVideo - Image to Video con modelo GGUF local
@@ -1021,9 +1138,9 @@ def get_wan_video_workflow(
         seed = random.randint(0, 1000000000)
 
     if not prompt or not prompt.strip():
-        prompt = "high quality video, smooth motion, detailed"
+        prompt = "natural gentle movement, subtle animation, realistic motion, person slightly moving, preserve the original image"
 
-    negative_prompt = "low quality, blurry, distorted, bad anatomy, static, low resolution"
+    negative_prompt = "low quality, blurry, distorted, bad anatomy, static, low resolution, frozen, still, no movement"
     
     # Buscar modelo WanVideo GGUF
     import os
@@ -1032,11 +1149,10 @@ def get_wan_video_workflow(
     diffusion_path = os.path.join(models_path, "diffusion_models")
     
     wan_model = None
-    # Priorizar Wan2.2 Animate GGUF (mejor compatibilidad y calidad)
+    # PRIORIDAD: Wan2.2 > Wan2.1
     wan_paths = [
-        "Wan2.2-Animate-14B-Q2_K.gguf",
+        "Wan2.2-I2V-Q4_K_M\\Wan2.2-I2V-Q4_K_M.gguf",
         "Wan2.1-I2V-14B-480P-Q4_K_M\\wan2.1-i2v-14b-480p-Q4_K_M.gguf",
-        "Wan2.2-I2V-Q4_K_M\\Wan2.2-I2V-Q4_K_M.gguf"
     ]
     for p in wan_paths:
         full_path = os.path.join(diffusion_path, p)
@@ -1125,22 +1241,22 @@ def get_wan_video_workflow(
              "class_type": "WanVideoImageToVideoEncode",
              "_meta": {"title": "WanVideo ImageToVideo Encode"}
          },
-        # 7: WanVideoSampler para generar frames
+        # 7: WanVideoSampler - MAXIMO MOVIMIENTO con imagen reconocible
          "7": {
              "inputs": {
                  "model": ["2", 0],
                  "image_embeds": ["6", 0],
                  "text_embeds": ["5", 0],
-                 "steps": 30,
-                 "cfg": 6.0,
-                 "shift": 5.0,
+                 "steps": 15,  # Reduced from 30 for faster generation
+                 "cfg": 1.0,        # Bajo para movimiento pero no muy bajo
+                 "shift": 1.0,      # Bajo para dinamismo
                  "seed": seed,
                  "scheduler": "unipc",
                  "riflex_freq_index": 0,
                  "force_offload": True
              },
              "class_type": "WanVideoSampler",
-             "_meta": {"title": "WanVideo Sampler"}
+             "_meta": {"title": "WanVideo Sampler (Max Movement)"}
          },
          # 8: Decodificar latentes a imágenes
          "8": {
@@ -1203,9 +1319,9 @@ def get_wan_video_workflow_optimized(
         seed = random.randint(0, 1000000000)
 
     if not prompt or not prompt.strip():
-        prompt = "video"  # Ultra-minimal prompt
+        prompt = "dynamic motion, fluid movement, flowing motion, dynamic animation, realistic motion, gentle movement"
 
-    negative_prompt = "low quality, blurry"
+    negative_prompt = "static, frozen, still, no movement, blurry, low quality, distorted"
 
     # Buscar modelo WanVideo GGUF
     import os
@@ -1215,11 +1331,10 @@ def get_wan_video_workflow_optimized(
     vae_path = os.path.join(models_path, "vae")
 
     wan_model = None
-    # Priorizar Wan2.2 Animate GGUF (mejor compatibilidad y calidad)
+    # PRIORIDAD: Wan2.2 > Wan2.1
     wan_paths = [
-        "Wan2.2-Animate-14B-Q2_K.gguf",
+        "Wan2.2-I2V-Q4_K_M\\Wan2.2-I2V-Q4_K_M.gguf",
         "Wan2.1-I2V-14B-480P-Q4_K_M\\wan2.1-i2v-14b-480p-Q4_K_M.gguf",
-        "Wan2.2-I2V-Q4_K_M\\Wan2.2-I2V-Q4_K_M.gguf"
     ]
     for p in wan_paths:
         full_path = os.path.join(diffusion_path, p)
@@ -1308,22 +1423,22 @@ def get_wan_video_workflow_optimized(
             "class_type": "WanVideoImageToVideoEncode",
             "_meta": {"title": "WanVideo ImageToVideo Encode"}
         },
-        # 7: WanVideoSampler para generar frames (OPTIMIZADO)
+        # 7: WanVideoSampler para generar frames (OPTIMIZADO + MEJORADO para movimiento)
         "7": {
             "inputs": {
                 "model": ["2", 0],
                 "image_embeds": ["6", 0],
                 "text_embeds": ["5", 0],
-                "steps": 15,  # REDUCIDO de 30 a 15 para velocidad
-                "cfg": 3.0,   # REDUCIDO de 6.0 a 3.0 para menos condicionamiento
-                "shift": 5.0,
+                "steps": 15,  # Reduced for faster generation
+                "cfg": 1.0,   # MÍNIMO para máxima libertad
+                "shift": 1.0, # MÍNIMO para máximo dinamismo
                 "seed": seed,
-                "scheduler": "unipc",
+                "scheduler": "euler",
                 "riflex_freq_index": 0,
-                "force_offload": True
+                "force_offload": False
             },
             "class_type": "WanVideoSampler",
-            "_meta": {"title": "WanVideo Sampler (Optimized)"}
+            "_meta": {"title": "WanVideo Sampler (Max Motion)"}
         },
         # 8: Decodificar latentes a imágenes (con tiling para VRAM baja)
         "8": {

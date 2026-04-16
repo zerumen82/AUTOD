@@ -11,7 +11,7 @@ import atexit
 import socket
 
 # Puerto base dinamico
-GRADIO_BASE_PORT = int(os.environ.get('GRADIO_SERVER_PORT', '7860'))
+GRADIO_BASE_PORT = int(os.environ.get('GRADIO_SERVER_PORT', '7861'))
 COMFYUI_PORT = os.environ.get('COMFYUI_PORT', '8188')
 
 
@@ -68,7 +68,7 @@ def show_msg(msg: str):
     print(f"[MSG] {msg}")
 
 
-def find_available_port(start_port: int = 7860, max_attempts: int = 10) -> int:
+def find_available_port(start_port: int = 7861, max_attempts: int = 10) -> int:
     for port in range(start_port, start_port + max_attempts):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -214,8 +214,8 @@ def create_ui():
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
             
-            # Tab 3: SD Editor
-            with gr.Tab("SD Editor"):
+            # Tab 3: Image Editor
+            with gr.Tab("🎨 Image Editor"):
                 try:
                     from ui.tabs.img_editor_tab import create_img_editor_tab
                     create_img_editor_tab()
@@ -278,13 +278,31 @@ def main():
     available_port = find_available_port()
     demo = create_ui()
     demo.queue()  # Habilitado - necesario para el funcionamiento de los botones
-    demo.launch(
-        server_name="127.0.0.1",
-        server_port=available_port,
-        share=False,
-        show_error=True,
-        quiet=True
-    )
+    
+    # Intentar lanzar en el puerto disponible
+    try:
+        demo.launch(
+            server_name="127.0.0.1",
+            server_port=available_port,
+            share=False,
+            show_error=True,
+            quiet=True
+        )
+    except OSError as e:
+        if "Cannot find empty port" in str(e):
+            # Si falla, buscar otro puerto automaticamente
+            print(f"[WARNING] Puerto {available_port} ocupado, buscando otro...")
+            available_port = find_available_port(7870, 20)  # Empezar desde 7870
+            print(f"[INFO] Usando puerto alternativo: {available_port}")
+            demo.launch(
+                server_name="127.0.0.1",
+                server_port=available_port,
+                share=False,
+                show_error=True,
+                quiet=True
+            )
+        else:
+            raise
 
 
 def run():

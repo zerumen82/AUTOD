@@ -78,7 +78,7 @@ def cleanup_comfyui():
         print(f"[CORE] Error en cleanup: {e}")
 
 
-def find_available_port(start_port=7860, max_attempts=10):
+def find_available_port(start_port=7861, max_attempts=10):
     """Busca un puerto disponible"""
     for port in range(start_port, start_port + max_attempts):
         try:
@@ -156,12 +156,24 @@ def run():
                  print("[OK] Patch asyncio aplicado")
              except (ImportError, AttributeError) as e:
                  print(f"[WARNING] No se pudo patch asyncio: {e}")
-        
+
+        # INICIAR COMFYUI AUTOMÁTICAMENTE
+        print("\n[COMFYUI] Iniciando ComfyUI automáticamente...")
+        try:
+            from ui.tabs.comfy_launcher import start as start_comfyui
+            success, msg, port = start_comfyui(port=8188, directly_run=True)
+            if success:
+                print(f"[OK] ComfyUI iniciado en puerto {port}")
+            else:
+                print(f"[WARNING] ComfyUI no se pudo iniciar: {msg}")
+        except Exception as e:
+            print(f"[WARNING] Error iniciando ComfyUI: {e}")
+
         # Puerto dinamico
         print("[INIT] Buscando puerto...")
-        available_port = find_available_port(7860)
+        available_port = find_available_port(7861)
         print(f"[OK] Puerto: {available_port}")
-        
+
         server_url = f"http://127.0.0.1:{available_port}"
         
         # Funcion para iniciar servidor
@@ -205,7 +217,19 @@ def run():
         webview.start(debug=False, func=None)
         
         print("[EXIT] Ventana cerrada")
-        cleanup_comfyui()
+        
+        # Kill ComfyUI processes aggressively
+        print("[CORE] Limpiando procesos ComfyUI...")
+        try:
+            import subprocess
+            # Kill by process name first
+            subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], capture_output=True)
+            # Then by port
+            from ui.tabs.comfy_launcher import stop
+            success, msg = stop()
+            print(f"[CORE] {msg}")
+        except Exception as e:
+            print(f"[CORE] Error en cleanup: {e}")
         
     except ImportError as e:
         print(f"[ERROR] Pywebview no instalado: {e}")
@@ -320,8 +344,9 @@ def batch_process_regular(
                     combined_progress = progress_percent + (video_progress / total_files)
                     yield (combined_progress, video_msg)
             else:
-                # Procesar imagen
-                frame = cv2.imread(filename)
+                # Procesar imagen - usar imdecode para soportar WebP
+                from roop.capturer import get_image_frame
+                frame = get_image_frame(filename)
                 if frame is not None:
                     processed_frame = process_mgr.process_frame(frame, file_path=filename)
                     if processed_frame is not None:
@@ -400,8 +425,9 @@ def batch_process_with_options(list_files_process, options, progress_callback):
                 ):
                     pass  # Consumir generador
             else:
-                # Procesar imagen
-                frame = cv2.imread(filename)
+                # Procesar imagen - usar imdecode para soportar WebP
+                from roop.capturer import get_image_frame
+                frame = get_image_frame(filename)
                 if frame is not None:
                     processed_frame = process_mgr.process_frame(frame, file_path=filename)
                     if processed_frame is not None:

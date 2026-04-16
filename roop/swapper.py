@@ -17,10 +17,11 @@ def get_face_swapper():
             FACE_SWAPPER = insightface.model_zoo.get_model(model_path, providers=roop.globals.providers)  
     return FACE_SWAPPER  
   
-def process_img(source_img, target_path, output_file):  
-    frame = cv2.imread(target_path)  
-    face = get_face_single(frame)  
-    source_face = get_face_single(cv2.imread(source_img))  
-    result = get_face_swapper().get(frame, face, source_face, paste_back=True)  
-    cv2.imwrite(output_file, result)  
-    print('Image saved as:', output_file) 
+def process_img(source_img, target_path, output_file):
+    from roop.capturer import get_image_frame
+    frame = get_image_frame(target_path)
+    face = get_face_single(frame)
+    source_face = get_face_single(get_image_frame(source_img))
+    result = get_face_swapper().get(frame, face, source_face, paste_back=True)
+    cv2.imwrite(output_file, result)
+    print('Image saved as:', output_file)

@@ -32,7 +32,7 @@ echo [INFO] Lanzando aplicación con pywebview...
 echo.
 
 echo [NOTA] Si pywebview no abre, la UI estará disponible en el navegador:
-echo   - Busca la URL en la consola (ej: http://127.0.0.1:9000)
+echo   - Busca la URL en la consola (ej: http://127.0.0.1:7861)
 echo   - Copia y pega la URL en tu navegador
 echo.
 

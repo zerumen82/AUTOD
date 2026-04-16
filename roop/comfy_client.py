@@ -330,7 +330,24 @@ class ComfyClient:
     def get_models(self) -> list:
         """Alias de get_checkpoints para compatibilidad"""
         return self.get_checkpoints()
-    
+
+    def get_controlnet_models(self) -> list:
+        """Obtiene lista de ControlNet models disponibles"""
+        try:
+            response = requests.get(f"{self.base_url}/object_info/ControlNetLoader", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if "ControlNetLoader" in data:
+                    node = data["ControlNetLoader"]
+                    if "input" in node and "required" in node["input"]:
+                        ckpt_list = node["input"]["required"].get("control_net_name")
+                        if ckpt_list and len(ckpt_list) > 0 and len(ckpt_list[0]) > 0:
+                            return ckpt_list[0]
+            return []
+        except Exception as e:
+            print(f"[ComfyClient] Error obteniendo ControlNet models: {e}")
+            return []
+
     def get_status(self, prompt_id: str) -> Dict:
         """Obtiene estado de un prompt"""
         try:
@@ -340,7 +357,17 @@ class ComfyClient:
             return {}
         except:
             return {}
-    
+
+    def get_object_info(self) -> Dict:
+        """Obtiene información de nodos/modelos de ComfyUI"""
+        try:
+            response = requests.get(f"{self.base_url}/object_info", timeout=5)
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            print(f"[ComfyClient] Error getting object_info: {e}")
+        return {}
+
     def queue_prompt(self, workflow: Dict) -> Tuple[str, bool, str]:
         """Encola un prompt y retorna el ID del prompt"""
         try:

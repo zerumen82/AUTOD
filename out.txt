@@ -1,2 +1,0 @@
-conv2.weight shape: torch.Size([48, 48, 1, 1, 1])
-conv2 channels: 48

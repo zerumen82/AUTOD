@@ -1,0 +1,191 @@
+{
+  "imagen_completa": {
+    "keywords": [
+      "imagen completa", "foto completa", "todo", "completo",
+      "full image", "entire", "whole", "all",
+      "transforma", "transform", "cambia todo", "change all",
+      "haz que", "make", "convierte", "convert"
+    ],
+    "coords": {"y_start": 0.0, "y_end": 1.0, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": ""
+  },
+
+  "fondo": {
+    "keywords": [
+      "fondo", "background", "fondo", "escenario", "scene", "entorno", "environment",
+      "elimina fondo", "cambia fondo", "remove background", "change background",
+      "nuevo fondo", "new background", "otro fondo", "different background"
+    ],
+    "coords": {"y_start": 0.0, "y_end": 0.85, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "detailed background, realistic background, professional photography background, depth of field"
+  },
+
+  "cuerpo_completo": {
+    "keywords": [
+      "cuerpo completo", "cuerpo entero", "full body", "whole body",
+      "persona completa", "persona entera", "full person",
+      "desnuda", "desnudo", "sin ropa", "naked", "nude", "no clothing"
+    ],
+    "coords": {"y_start": 0.0, "y_end": 1.0, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "natural body, detailed skin, realistic body, anatomically correct"
+  },
+
+  "pies": {
+    "keywords": [
+      "zapato", "zapatos", "zapatilla", "zapatillas",
+      "pies", "pie", "descalza", "descalzo",
+      "barefoot", "foot", "feet", "shoe", "shoes", "sneakers",
+      "sin zapatos", "sin zapato", "quitar zapatos", "elimina zapatos",
+      "sandalias", "tacones", "heels", "boots", "botas"
+    ],
+    "coords": {"y_start": 0.7, "y_end": 1.0, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "barefoot, feet visible, detailed feet, natural skin texture, realistic feet, (no shoes:1.5), (no footwear:1.5), (no sandals:1.4), (no socks:1.4), (no sneakers:1.4)"
+  },
+
+  "piernas": {
+    "keywords": [
+      "pierna", "piernas", "pantalon", "pantalones", "pantalón",
+      "falda", "short", "shorts", "medias", "calcetines",
+      "leg", "legs", "pants", "trousers", "skirt", "shorts", "socks", "stockings",
+      "sin pantalones", "quitar pantalones", "elimina pantalones",
+      "jeans", "vaqueros", "leggings", "tights"
+    ],
+    "coords": {"y_start": 0.50, "y_end": 1.0, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "bare legs, detailed legs, natural skin, smooth skin, realistic legs, (no pants:1.6), (no trousers:1.6), (no skirt:1.5), (no clothing on legs:1.5), (no jeans:1.5), (no leggings:1.5)"
+  },
+
+  "cadera": {
+    "keywords": [
+      "cadera", "caderas", "hips", "hip", "waist", "cintura",
+      "gluteos", "glúteos", "buttocks", "butt",
+      "panties", "underwear", "ropa interior", "calzoncillos"
+    ],
+    "coords": {"y_start": 0.45, "y_end": 0.75, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "detailed hips, natural waist, realistic body curves, anatomically correct"
+  },
+
+  "torso": {
+    "keywords": [
+      "torso", "pecho", "camisa", "camiseta", "top", "vestido",
+      "blusa", "chaqueta", "abrigo", "chaleco",
+      "chest", "torso", "shirt", "blouse", "jacket", "dress", "coat", "vest",
+      "sin camisa", "sin camiseta", "topless", "desnudo superior", "quitar camisa",
+      "tank top", "sweater", "hoodie", "sudadera", "polera",
+      "ropa", "clothes", "clothing", "outfit", "vestimenta", "atuendo"
+    ],
+    "coords": {"y_start": 0.25, "y_end": 0.55, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "bare chest, bare torso, detailed skin, natural skin texture, realistic body, (no shirt:1.4), (no clothing:1.4), (no top:1.4), (no bra:1.3)"
+  },
+
+  "brazos": {
+    "keywords": [
+      "brazo", "brazos", "arm", "arms", "hands", "manos", "dedos", "fingers",
+      "muñeca", "wrist", "shoulder", "hombro", "codo", "elbow",
+      "mangas", "sleeves", "sin mangas", "sleeveless"
+    ],
+    "coords": {"y_start": 0.25, "y_end": 0.7, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "detailed arms, natural skin, realistic hands, detailed fingers, anatomically correct"
+  },
+
+  "cabello": {
+    "keywords": [
+      "pelo", "cabello", "melena", "capelli", "hair", "hairstyle", "haired",
+      "rubio", "rubia", "blonde", "blond",
+      "moreno", "morena", "brunette", "dark hair",
+      "pelirrojo", "red hair", "ginger",
+      "cambiar pelo", "cambiar cabello", "nuevo pelo", "nuevo cabello",
+      "corte", "cut", "peinado", "braid", "trenza", "ponytail", "cola", "moño", "bun"
+    ],
+    "coords": {"y_start": 0.0, "y_end": 0.25, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "detailed hair, shiny hair, hair strands, volumetric hair, realistic hair, beautiful hair, natural hair flow",
+    "color_keywords": {
+      "rubio": "blonde hair, golden blonde, light hair",
+      "blonde": "blonde hair, golden blonde, light hair",
+      "moreno": "dark hair, brunette, brown hair",
+      "brunette": "dark hair, brunette, brown hair",
+      "pelirrojo": "red hair, ginger hair, auburn hair",
+      "red": "red hair, ginger hair, auburn hair",
+      "negro": "black hair, dark black hair, jet black",
+      "black": "black hair, dark black hair",
+      "castaño": "brown hair, chestnut hair, light brown hair",
+      "brown": "brown hair, chestnut hair, light brown hair",
+      "gris": "gray hair, silver hair, grey hair",
+      "gray": "gray hair, silver hair, grey hair",
+      "blanco": "white hair, platinum hair",
+      "white": "white hair, platinum hair"
+    }
+  },
+
+  "cara": {
+    "keywords": [
+      "cara", "rostro", "expresion", "expresión", "sonrisa", "sonriente",
+      "face", "smile", "smiling", "expression", "facial", "face edit",
+      "feliz", "happy", "contento", "serio", "serious", "intenso", "intense",
+      "ojos", "eyes", "mirada", "look", "gaze",
+      "boca", "lips", "labios", "smile", "sonrisa"
+    ],
+    "coords": {"y_start": 0.05, "y_end": 0.35, "x_start": 0.2, "x_end": 0.8},
+    "add_prompt": "detailed face, detailed eyes, natural expression, detailed facial features, realistic face, beautiful face, symmetrical face",
+    "expression_keywords": {
+      "sonris": "smiling, happy expression, cheerful, joyful, warm smile",
+      "feliz": "happy, joyful expression, smiling, content",
+      "smile": "smiling, happy expression, cheerful, pleasant",
+      "happy": "happy, joyful expression, smiling, delighted",
+      "seri": "serious expression, intense look, focused, composed",
+      "serious": "serious expression, intense look, focused, determined",
+      "triste": "sad expression, melancholic, somber, thoughtful",
+      "sad": "sad expression, melancholic, somber, pensive",
+      "enoj": "angry expression, fierce look, intense, determined",
+      "angry": "angry expression, fierce look, intense, frustrated",
+      "sorpren": "surprised expression, amazed, shocked, wide eyes",
+      "surprised": "surprised expression, amazed, astonished, startled"
+    }
+  },
+
+  "cuello": {
+    "keywords": [
+      "cuello", "neck", "garganta", "throat",
+      "collar", "necklace", "cadena", "chain"
+    ],
+    "coords": {"y_start": 0.18, "y_end": 0.3, "x_start": 0.3, "x_end": 0.7},
+    "add_prompt": "detailed neck, natural skin texture, realistic neck anatomy"
+  },
+
+  "bikini": {
+    "keywords": [
+      "bikini", "bañador", "traje de baño", "swimsuit", "swimwear",
+      "lingerie", "lenceria", "lencería", "underwear", "ropa interior"
+    ],
+    "coords": {"y_start": 0.25, "y_end": 0.75, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "detailed bikini, realistic fabric, natural fit, proper anatomy under clothing"
+  },
+
+  "animal": {
+    "keywords": [
+      "animal", "animales", "caballo", "horse", "perro", "dog", "gato", "cat",
+      "montar", "ride", "subir", "climb", "animal"
+    ],
+    "coords": {"y_start": 0.0, "y_end": 1.0, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "realistic animal, detailed animal, natural pose, anatomically correct animal"
+  },
+
+  "objeto": {
+    "keywords": [
+      "objeto", "objetos", "object", "objects", "cosa", "things",
+      "añade", "add", "pon", "put", "coloca", "place",
+      "elimina", "remove", "quita", "take out"
+    ],
+    "coords": {"y_start": 0.0, "y_end": 1.0, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "detailed object, realistic object, natural integration, proper lighting"
+  },
+
+  "estilo": {
+    "keywords": [
+      "estilo", "style", "modern", "moderno", "moderna", "actual", "contemporaneo",
+      "vintage", "clasico", "classic", "retro", "antiguo",
+      "profesional", "professional", "artistico", "artistic", "art"
+    ],
+    "coords": {"y_start": 0.0, "y_end": 1.0, "x_start": 0.0, "x_end": 1.0},
+    "add_prompt": "professional style, modern style, detailed, high quality, realistic"
+  }
+}

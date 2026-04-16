@@ -16,7 +16,7 @@ provider: cuda
 replicate_token: ''
 selected_theme: Default
 server_name: ''
-server_port: 9000
+server_port: 7861
 server_share: false
 use_os_temp_folder: false
 video_quality: 14

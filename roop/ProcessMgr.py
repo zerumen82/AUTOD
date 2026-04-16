@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
 import numpy as np
+import torch
 
 import roop.globals
 from roop.utils import run_ffmpeg
@@ -152,24 +153,28 @@ class ProcessMgr:
         self.is_initialized = False
         self.processors = {}
         self.thread_lock = threading.Lock()
-        
+
         self.source_embeddings_cache = {}
         self.previous_result = None
         self.frame_count = 0
-        
+
         self.face_assignment_cache = {}
         self.face_position_history = {}
         self.global_source_for_all_id = None
         self.selected_face_assignment_cache = {}
-        
+
         self.selected_assignment_ttl = getattr(roop.globals, 'selected_assignment_ttl', 60)
         self.selected_top_k = getattr(roop.globals, 'selected_top_k', 3)
         
+        # NUEVO: Suavizado temporal para boca - evita flickering en preservación de boca
+        self._mouth_open_history = {}  # Historial de apertura de boca por video
+        self._mouth_blend_smooth = {}   # Blend ratio suavizado por video
+
         if is_valid_progress_callback(self.progress_callback):
             print(f"ProcessMgr v2.1 inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
         else:
             print(f"ProcessMgr v2.1 inicializado SIN progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
-        
+
         self._initialize_processors()
 
     def initialize(self, input_facesets, target_faces, options):
@@ -179,14 +184,18 @@ class ProcessMgr:
         self.is_initialized = True
 
         self._cache_source_embeddings()
+        
+        # LIMPIAR historial de boca para nuevo video
+        self._mouth_open_history.clear()
+        self._mouth_blend_smooth.clear()
 
         print(f"ProcessMgr v2.1 inicializado: {len(self.input_facesets)} facesets, {len(self.target_faces)} target faces")
-        
+
         if len(self.input_facesets) == 0:
             print("[WARNING] No hay facesets de origen cargados")
         if len(self.target_faces) == 0:
             print("[WARNING] No hay caras destino seleccionadas")
-        
+
         self.global_source_for_all_id = None
 
     def _cache_source_embeddings(self):
@@ -206,36 +215,36 @@ class ProcessMgr:
     def _initialize_processors(self):
         try:
             from roop.processors.FaceSwap import FaceSwap
-            from roop.processors.Enhance_GFPGAN import Enhance_GFPGAN
-            from roop.processors.Enhance_GPEN import Enhance_GPEN
             from roop.processors.Enhance_CodeFormer import Enhance_CodeFormer
             from roop.processors.Enhance_RestoreFormerPPlus import Enhance_RestoreFormerPPlus
 
             try:
-                import onnxruntime as ort
-                providers = ort.get_available_providers()
-                use_cuda = "CUDAExecutionProvider" in providers
-            except Exception:
+                # FORZAR GPU si PyTorch tiene CUDA disponible (más confiable)
+                import torch
+                use_cuda = torch.cuda.is_available()
+                if use_cuda:
+                    print(f"[ProcessMgr] GPU detectada: {torch.cuda.get_device_name(0)}")
+                else:
+                    print("[ProcessMgr] GPU NO disponible en PyTorch, usando CPU")
+                    use_cuda = False
+            except Exception as e:
+                print(f"[ProcessMgr] Error detectando GPU: {e}")
                 use_cuda = False
 
             devname = "cuda" if use_cuda else "cpu"
-            
+
             print(f"[ProcessMgr] Inicializando FaceSwap con devicename={devname}")
             self.processors["faceswap"] = FaceSwap()
             self.processors["faceswap"].Initialize({"devicename": devname})
             print(f"[ProcessMgr] FaceSwap inicializado correctamente")
-            
+
             # Obtener el enhancer seleccionado
-            selected_enhancer = getattr(roop.globals, 'selected_enhancer', 'GFPGAN')
+            selected_enhancer = getattr(roop.globals, 'selected_enhancer', 'CodeFormer')
             use_enhancer = getattr(roop.globals, 'use_enhancer', True)
-            
+
             if use_enhancer and selected_enhancer and selected_enhancer != "None":
                 try:
-                    if selected_enhancer == "GFPGAN":
-                        self.processors["enhance_gfpgan"] = Enhance_GFPGAN()
-                        self.processors["enhance_gfpgan"].Initialize({"devicename": devname})
-                        print(f"GFPGAN Enhancer initialized (devicename={devname})")
-                    elif selected_enhancer == "CodeFormer":
+                    if selected_enhancer == "CodeFormer":
                         self.processors["enhance_codeformer"] = Enhance_CodeFormer()
                         self.processors["enhance_codeformer"].Initialize({"devicename": devname})
                         print(f"CodeFormer Enhancer initialized (devicename={devname})")
@@ -243,10 +252,6 @@ class ProcessMgr:
                         self.processors["enhance_restoreformer"] = Enhance_RestoreFormerPPlus()
                         self.processors["enhance_restoreformer"].Initialize({"devicename": devname})
                         print(f"Restoreformer++ Enhancer initialized (devicename={devname})")
-                    elif selected_enhancer == "GPEN":
-                        self.processors["enhance_gpen"] = Enhance_GPEN()
-                        self.processors["enhance_gpen"].Initialize({"devicename": devname})
-                        print(f"GPEN Enhancer initialized (devicename={devname})")
                 except Exception as e:
                     print(f"Failed to initialize {selected_enhancer} Enhancer: {e}")
 
@@ -263,7 +268,8 @@ class ProcessMgr:
 
         def process_single_image(input_path, output_path):
             try:
-                frame = cv2.imread(input_path)
+                from roop.capturer import get_image_frame
+                frame = get_image_frame(input_path)
                 if frame is None:
                     print(f"Could not read image: {input_path}")
                     return
@@ -318,6 +324,15 @@ class ProcessMgr:
                 # DEBUG: Verificar qué modo se está recibiendo
                 print(f"[DEBUG] process_frame: face_swap_mode='{face_swap_mode}' (tipo: {type(face_swap_mode).__name__})")
                 
+                # Establecer clave de video para suavizado temporal de boca
+                video_path = getattr(self.options, 'current_video_path', None)
+                if video_path is None and file_path:
+                    video_path = file_path
+                if video_path:
+                    self._current_video_key = f"video_{os.path.basename(video_path)}"
+                else:
+                    self._current_video_key = f"frame_{call_num}"
+
                 faces_to_process = []
 
                 if face_swap_mode == 'selected_faces_frame':
@@ -541,36 +556,40 @@ class ProcessMgr:
             return candidate_faces[0] if candidate_faces else None
 
     def _setup_selected_faces_frame_for_video(self, video_path, valid_faces):
+        """
+        Setup inicial de cara de referencia para modo Selected Faces Frame.
+        IMPORTANTE: Una vez establecida la cara de referencia, NO debe cambiar durante todo el video.
+        """
         try:
             # NUEVO: Asegurar que selected_face_references exista
             if not hasattr(roop.globals, 'selected_face_references'):
                 roop.globals.selected_face_references = {}
-            
+
             if not valid_faces:
                 return
 
             video_basename = os.path.basename(video_path)
             video_key = f"selected_face_ref_{video_basename}"
-            
+
             selected_face = None
             selection_method = "auto"
-            
+
             face_ref_data = None
             user_has_selected_face = False  # Flag para saber si el usuario seleccionó una cara
-            
+
             if hasattr(roop.globals, 'selected_face_references'):
                 if video_key in roop.globals.selected_face_references:
                     face_ref_data = roop.globals.selected_face_references[video_key]
                     user_has_selected_face = True
                 else:
                     clean_video_name = video_basename
-                    
+
                     for k, v in roop.globals.selected_face_references.items():
                         if not k.startswith("selected_face_ref_"):
                             continue
-                        
+
                         ref_filename = k.replace("selected_face_ref_", "")
-                        
+
                         if ref_filename.lower() == clean_video_name.lower():
                             face_ref_data = v
                             user_has_selected_face = True
@@ -579,47 +598,56 @@ class ProcessMgr:
                             face_ref_data = v
                             user_has_selected_face = True
                             break
-            
+
             # Guardar flag para saber si el usuario seleccionó una cara
             setattr(self, f'_user_selected_face_{video_path}', user_has_selected_face)
-            
-            # En modo selected_faces_frame, SIEMPRE usamos la selección del usuario o el fallback
-            # Si el usuario NO seleccionó ninguna cara, usamos fallback a la cara más grande
+
+            # En modo selected_faces_frame:
+            # - Si el usuario seleccionó cara: usar ESA cara como referencia (sin fallback)
+            # - Si el usuario NO seleccionó cara: usar fallback a la cara más grande PERO mantenerla fija
             if not user_has_selected_face:
-                print(f"[SELECTED_FACES_FRAME] ℹ️ No hay cara seleccionada por el usuario para {video_basename}, usando fallback automático")
-            
+                print(f"[SELECTED_FACES_FRAME] ℹ️ No hay cara seleccionada por el usuario para {video_basename}, usando fallback automático a la cara más grande (FIJA para todo el video)")
+
             if face_ref_data:
                 user_selected_face = face_ref_data.get('face_obj')
                 user_embedding = face_ref_data.get('embedding')
                 user_bbox = face_ref_data.get('bbox')
-                
+
                 if user_selected_face is not None:
                     best_match = None
                     best_score = -1
-                    
+
                     for face in valid_faces:
                         if not hasattr(face, 'embedding') or face.embedding is None:
                             continue
-                        
+
                         if user_embedding is not None:
                             score = self._calculate_similarity(user_embedding, face.embedding)
                         else:
                             score = self._bbox_iou(user_bbox, face.bbox) if user_bbox is not None else 0
-                        
+
                         if score > best_score:
                             best_score = score
                             best_match = face
-                    
-                    if best_match and best_score > 0.03:
+
+                    if best_match and best_score > 0.15:
                         selected_face = best_match
                         selection_method = f"usuario (score={best_score:.2f})"
                     else:
                         selected_face = user_selected_face
                         selection_method = f"usuario-guardado (score={best_score:.2f})"
-            
+
+            # FALLBACK INICIAL: Solo si no hay selección del usuario
             if selected_face is None:
                 selected_face = max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
                 selection_method = f"auto-grande ({len(valid_faces)} caras)"
+
+            # Guardar embedding de referencia para tracking consistente
+            if hasattr(selected_face, 'embedding') and selected_face.embedding is not None:
+                emb = np.array(selected_face.embedding, dtype=np.float32)
+                norm = np.linalg.norm(emb)
+                if norm > 0:
+                    setattr(self, f'_fallback_embedding_{video_path}', emb / norm)
 
             attr_name = f'_reference_face_selected_{video_path}'
             setattr(self, f'global_source_for_all_id_{video_path}', id(selected_face))
@@ -652,12 +680,13 @@ class ProcessMgr:
         try:
             # Verificar si el usuario ha seleccionado una cara
             user_selected_attr = f'_user_selected_face_{video_path}'
-            user_selected = getattr(self, user_selected_attr, True)  # Por defecto True para permitir fallback
-            
-            # Si el usuario NO seleccionó ninguna cara, usamos fallback (cara más grande)
-            # Esto solo aplica en modo selected_faces_frame
+            user_selected = getattr(self, user_selected_attr, True)  # True si el usuario seleccionó una cara
+
+            # En modo selected_faces_frame: 
+            # - Si el usuario seleccionó cara: NO usar fallback, retornar None si se pierde tracking
+            # - Si el usuario NO seleccionó cara: usar fallback a la cara más grande
             use_fallback = not user_selected
-            
+
             # Asegurar que selected_face_references exista
             if not hasattr(roop.globals, 'selected_face_references'):
                 roop.globals.selected_face_references = {}
@@ -674,11 +703,11 @@ class ProcessMgr:
             position_history_attr = f'_position_history_{video_path}'
             frame_count_attr = f'_frame_count_{video_path}'
 
-            MIN_SCORE_THRESHOLD = 0.02
-            REACQUIRE_EMB_THRESHOLD = 0.03
-            HIGH_CONFIDENCE_THRESHOLD = 0.06
+            MIN_SCORE_THRESHOLD = 0.015  # Reducido para ser más permisivo
+            REACQUIRE_EMB_THRESHOLD = 0.02  # Reducido para facilitar reacquire
+            HIGH_CONFIDENCE_THRESHOLD = 0.04  # Reducido
             # Umbral de distancia mínima entre caras para considerar que hay superposición significativa
-            MIN_FACE_DISTANCE = 50  # píxeles mínimos entre centros de caras (aumentado para mejor separación)
+            MIN_FACE_DISTANCE = 40  # píxeles mínimos entre centros de caras
             # Si dos caras están más cerca que esto, considerar que hay conflicto (beso/abrazo)
 
             if not hasattr(self, tracking_lost_attr):
@@ -784,7 +813,7 @@ class ProcessMgr:
                             best_match = best_emb_match
                             best_score = best_emb_score
 
-                    if best_match and best_score > 0.03:
+                    if best_match and best_score > 0.15:
                         setattr(self, assigned_attr, best_match)
                         if hasattr(best_match, 'embedding') and best_match.embedding is not None:
                             emb = np.array(best_match.embedding, dtype=np.float32)
@@ -904,6 +933,7 @@ class ProcessMgr:
             original_embedding = getattr(self, original_embedding_attr, None) if hasattr(self, original_embedding_attr) else None
 
             if original_embedding is None:
+                # Intentar obtener embedding de referencias
                 if hasattr(roop.globals, 'selected_face_references') and video_key in roop.globals.selected_face_references:
                     face_ref_data = roop.globals.selected_face_references[video_key]
                     user_embedding = face_ref_data.get('embedding')
@@ -913,9 +943,13 @@ class ProcessMgr:
                         if norm > 0:
                             original_embedding = emb / norm
                             setattr(self, original_embedding_attr, original_embedding)
+                
+                # Fallback: usar embedding guardado del setup inicial
+                if original_embedding is None:
+                    original_embedding = getattr(self, f'_fallback_embedding_{video_path}', None)
 
             # Reacquire con embedding - requerir score mayor si hay caras cerca
-            min_reacquire_score = 0.03 if not strict_mode else 0.06
+            min_reacquire_score = 0.015 if not strict_mode else 0.03
 
             if original_embedding is not None:
                 best_reacquire = None
@@ -956,11 +990,41 @@ class ProcessMgr:
                     print(f"[REACQUIRE] Frame {frame_count}: emb={best_reacquire_score:.2f} ({'modo estricto' if strict_mode else 'normal'})")
                     return best_reacquire
 
-            # En modo selected_faces_frame, NO usar fallback a la cara más grande
-            # Si no se encuentra la cara seleccionada, se debe omitir el frame
+            # Fallback cuando se pierde tracking:
+            # - Si hay embedding guardado (fallback inicial): buscar cara más similar al embedding
+            # - Si usuario seleccionó cara: NO fallback, retornar None
+            # - Si no hay embedding: usar cara más grande (solo primer frame sin selección)
+            
+            fallback_embedding = getattr(self, f'_fallback_embedding_{video_path}', None)
+            
+            if fallback_embedding is not None:
+                # Usar embedding para encontrar cara consistente (evita parpadeo)
+                best_fallback = None
+                best_fallback_score = 0.0
+                
+                for face in valid_faces:
+                    if not hasattr(face, 'embedding') or face.embedding is None:
+                        continue
+                    
+                    emb_score = self._calculate_similarity(fallback_embedding, face.embedding)
+                    if emb_score > best_fallback_score:
+                        best_fallback_score = emb_score
+                        best_fallback = face
+                
+                if best_fallback and best_fallback_score > 0.015:
+                    print(f"[FALLBACK] Usando embedding (score={best_fallback_score:.2f})")
+                    return best_fallback
+            
+            # Sin embedding: usuario seleccionó cara -> NO fallback
+            if not use_fallback:
+                if lost_count == 1 or lost_count % 50 == 0:
+                    print(f"[LOST] Tracking perdido #{lost_count} - OMITIENDO frame")
+                return None
+            
+            # Solo aquí: fallback a cara más grande (caso raro sin embedding)
             if lost_count == 1 or lost_count % 50 == 0:
-                print(f"[LOST] Tracking perdido #{lost_count}")
-            return None
+                print(f"[FALLBACK] Tracking perdido #{lost_count}, usando cara más grande")
+            return max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
 
         except Exception as e:
             print(f"[ERROR] _find_target_face_for_selected_mode: {e}")
@@ -1037,10 +1101,34 @@ class ProcessMgr:
         try:
             if not hasattr(source_face, 'embedding') or source_face.embedding is None:
                 return original_frame
-                
+
             if not hasattr(target_face, 'bbox') or target_face.bbox is None:
                 return original_frame
-            
+
+            # ============================================
+            # SUAVIZADO TEMPORAL DE BBOX (anti-parpadeo)
+            # ============================================
+            if enable_temporal_smoothing:
+                video_key = getattr(self, '_current_video_key', 'default')
+                prev_bbox = getattr(self, '_prev_face_bbox', {}).get(video_key)
+
+                if prev_bbox is not None:
+                    # Interpolar bbox: 70% actual, 30% anterior (suaviza transiciones)
+                    smooth_factor = 0.7
+                    curr_bbox = np.array(target_face.bbox)
+                    prev_bbox_arr = np.array(prev_bbox)
+                    smoothed_bbox = (smooth_factor * curr_bbox + (1 - smooth_factor) * prev_bbox_arr).astype(int)
+
+                    # Aplicar bbox suavizado a target_face
+                    target_face.bbox = tuple(smoothed_bbox)
+                    print(f"[TEMPORAL_SMOOTH] Bbox suavizado (factor={smooth_factor})")
+
+                # Guardar bbox actual para el siguiente frame
+                if video_key:
+                    if not hasattr(self, '_prev_face_bbox'):
+                        self._prev_face_bbox = {}
+                    self._prev_face_bbox[video_key] = target_face.bbox
+
             # ============================================
             # NUEVO: DETECTAR BOCA ABIERTA ANTES DEL SWAP
             # ============================================
@@ -1048,16 +1136,20 @@ class ProcessMgr:
             mouth_open = False
             mouth_region = None
             mouth_open_ratio = 0.0
-            
+
             if preserve_mouth:
                 from roop.processors.FaceSwap import detect_mouth_open, create_mouth_preservation_mask
                 landmarks_106 = getattr(target_face, 'landmark_106', None)
-                mouth_open, mouth_region, mouth_open_ratio = detect_mouth_open(target_face, landmarks_106)
-                
+                # Pasar la imagen completa para MediaPipe
+                mouth_open, mouth_region, mouth_open_ratio = detect_mouth_open(target_face, landmarks_106, result_frame)
+
+                # DEBUG: Verificar tipo de mouth_region
+                print(f"[MOUTH_DEBUG] mouth_open={mouth_open}, mouth_region type={type(mouth_region).__name__}, ratio={mouth_open_ratio}")
+
                 if mouth_open:
                     print(f"[MOUTH_PRESERVE] Frame {call_num}: Boca abierta (ratio={mouth_open_ratio:.2f})")
-            
-            # Obtener bbox de la cara
+
+            # Obtener bbox de la cara (ya suavizado si aplica)
             x1, y1, x2, y2 = target_face.bbox
             x1, y1 = max(0, int(x1)), max(0, int(y1))
             x2, y2 = min(result_frame.shape[1], int(x2)), min(result_frame.shape[0], int(y2))
@@ -1078,11 +1170,11 @@ class ProcessMgr:
             original_face_region = original_frame[y1:y2, x1:x2].copy()
             
             # ============================================
-            # 2. ENHANCER (aplicar con BLENDING CONSERVADOR para evitar efectos raros)
+            # 2. ENHANCER (CALIDAD MEJORADA)
             # ============================================
             use_enhancer = getattr(roop.globals, 'use_enhancer', True)
             selected_enhancer = getattr(roop.globals, 'selected_enhancer', 'GFPGAN')
-            
+
             enhancer_key = None
             if selected_enhancer == "GFPGAN":
                 enhancer_key = "enhance_gfpgan"
@@ -1090,83 +1182,166 @@ class ProcessMgr:
                 enhancer_key = "enhance_codeformer"
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
-            elif selected_enhancer == "GPEN":
-                enhancer_key = "enhance_gpen"
-            
-            # NUEVO: Factor de blending del enhancer (más bajo para preservar más la cara original)
-            # Esto evita el efecto "blur" o "flash" causado por el enhancer
-            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.3)  # Por defecto 30% enhancer, 70% swap original
-            
+
+            # Blend del enhancer (0.3 = 30% enhanced + 70% original - balance calidad/velocidad)
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.3)
+
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
-                    class MockFaceSet:
-                        pass
-                    mock_faceset = MockFaceSet()
+                    # Crear FaceSet con referencia de la cara origen para mejorar calidad
+                    class FaceSetWithRef:
+                        def __init__(self, faces, ref_imgs):
+                            self.faces = faces if faces else []
+                            self.ref_images = ref_imgs if ref_imgs else []
                     
+                    # Buscar imagen de referencia de la cara origen
+                    ref_face_img = None
+                    if hasattr(source_face, 'face_img_ref') and source_face.face_img_ref is not None:
+                        ref_face_img = source_face.face_img_ref
+                    elif hasattr(source_face, 'face_img') and source_face.face_img is not None:
+                        ref_face_img = source_face.face_img_ref = source_face.face_img
+                    
+                    # Upscale de la imagen de referencia si es pequeña
+                    if ref_face_img is not None and ref_face_img.shape[0] < 256:
+                        ref_face_img = cv2.resize(ref_face_img, (256, 256), interpolation=cv2.INTER_LANCZOS4)
+                        if hasattr(source_face, 'face_img_ref'):
+                            source_face.face_img_ref = ref_face_img
+                        elif hasattr(source_face, 'face_img'):
+                            source_face.face_img_ref = ref_face_img
+                    
+                    mock_faceset = FaceSetWithRef(
+                        [source_face] if source_face else [],
+                        [ref_face_img] if ref_face_img is not None else []
+                    )
+
                     enhancer_result = self.processors[enhancer_key].Run(mock_faceset, None, swapped_face)
-                    
+
                     if enhancer_result is not None:
                         if isinstance(enhancer_result, tuple):
                             enhanced_face = enhancer_result[0]
                         else:
                             enhanced_face = enhancer_result
-                        
+
                         if enhanced_face is not None:
-                            # Resize al tamaño correcto
+                            # Resize con LANCZOS4 (más calidad)
                             if enhanced_face.shape[:2] != swapped_face.shape[:2]:
                                 enhanced_face = cv2.resize(enhanced_face, (swapped_face.shape[1], swapped_face.shape[0]), cv2.INTER_LANCZOS4)
-                            
-                            # NUEVO: Blending más conservador del enhancer
-                            # Esto evita el efecto flash y preserva más la identidad de la cara swappeada
+
+                            # Blending
                             region_h, region_w = enhanced_face.shape[:2]
                             soft_mask = create_soft_mask((0, 0, region_w, region_h), (region_h, region_w), feather=30)
-                            
-                            # Aplicar factor de blending conservador
+
                             mask_3ch = np.stack([soft_mask] * 3, axis=-1)
-                            # blend_factor controla cuánto del enhanced_face se mezcla con swapped_face
-                            # 0.3 significa 30% enhanced + 70% original swap
-                            swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * mask_3ch + 
+                            swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * mask_3ch +
                                            swapped_face.astype(np.float32) * (1 - enhancer_blend_factor * mask_3ch)).astype(np.uint8)
+
+                            print(f"[QUALITY] {selected_enhancer} aplicado (blend={enhancer_blend_factor:.2f})")
                             
-                            print(f"[QUALITY] {selected_enhancer} aplicado (blend={enhancer_blend_factor})")
+                            # Sharpening SUTIL - solo para dar nitidez, no exagerar
+                            # Aplicar solo si no es demasiado fuerte
+                            use_sharpening = getattr(roop.globals, 'use_sharpening', True)
+                            if use_sharpening:
+                                kernel = np.array([[0, -1, 0],
+                                                   [-1,  5, -1],
+                                                   [0, -1, 0]])
+                                swapped_face = cv2.filter2D(swapped_face, -1, kernel)
+                                print(f"[QUALITY] Sharpening sutil aplicado")
+                            
                 except Exception as e:
                     print(f"[ENHANCER] Error: {e}")
             
             # ============================================
             # 3. COLOR MATCHING Y AJUSTE DE BRILLO
             # ============================================
-            # NOTA: Reducimos estos valores para preservar mejor la identidad de la cara origen
-            # Si el color matching es muy fuerte, la cara swappeada se parece menos a la origen
+            # REACTIVADO con corrección: swapped_face viene en RGB del face swap
             try:
                 if swapped_face.size > 0 and original_face_region.size > 0:
-                    # NUEVO: Valor más bajo para preservar más la identidad original
-                    # Esto evita que la cara swappeada pierda parecido con la origen
+                    # Ajuste de brillo - usar con moderación
                     brightness_strength = getattr(roop.globals, 'brightness_strength', 0.15)
-                    swapped_face = adjust_face_brightness(swapped_face, original_face_region, strength=brightness_strength)
+                    if brightness_strength > 0:
+                        swapped_face = adjust_face_brightness(swapped_face, original_face_region, strength=brightness_strength)
                     
-                    # NUEVO: Color matching más conservador para preservar los colores de la cara origen
-                    # Valores muy bajos de color matching hacen que la cara se parezca menos a la origen
-                    color_match_strength = getattr(roop.globals, 'color_match_strength', 0.15)
-                    use_color_match = getattr(roop.globals, 'use_color_matching', True)
-                    if use_color_match:
-                        swapped_face = match_color_histogram(swapped_face, original_face_region, blend_factor=color_match_strength)
+                    # Color matching - DESACTIVADO porque causa artefactos
+                    # El face swap ya hace buen trabajo de integración de color
+                    # color_match_strength = getattr(roop.globals, 'color_match_strength', 0.15)
+                    # use_color_match = getattr(roop.globals, 'use_color_matching', True)
+                    # if use_color_match and color_match_strength > 0:
+                    #     swapped_face = match_color_histogram(swapped_face, original_face_region, blend_factor=color_match_strength)
             except Exception as e:
                 print(f"[COLOR_MATCH] Error: {e}")
             
             # ============================================
-            # 4. PRESERVACIÓN DE BOCA
+            # 4. PRESERVACIÓN DE BOCA (CON TRACKING PARA VIDEOS)
             # ============================================
+            # IMPORTANTE: Diferenciar entre selected_faces_frame (video con tracking) 
+            # y selected_faces (imágenes sin tracking)
+
             if mouth_open and mouth_region is not None:
                 try:
-                    mouth_mask = create_mouth_preservation_mask(original_frame, mouth_region, blend_ratio=0.85)
-                    mouth_mask_region = mouth_mask[y1:y2, x1:x2]
-                    mouth_mask_3ch = np.expand_dims(mouth_mask_region, axis=2)
+                    # Determinar si es video (selected_faces_frame) o imagen
+                    is_video_mode = getattr(roop.globals, 'face_swap_mode', '') == 'selected_faces_frame'
                     
+                    # Obtener clave única para este video/archivo
+                    if is_video_mode:
+                        video_key = getattr(self, '_current_video_key', f'frame_{call_num}')
+                    else:
+                        video_key = None  # No usar tracking para imágenes
+
+                    # Calcular blend ratio DINÁMICO basado en apertura de boca
+                    dynamic_blend = 0.50 + (mouth_open_ratio * 0.40)
+                    dynamic_blend = min(0.90, max(0.50, dynamic_blend))
+
+                    # SUAVIZADO TEMPORAL: Solo para videos (tracking)
+                    if video_key and video_key in self._mouth_blend_smooth:
+                        # Suavizado exponencial: 70% actual, 30% anterior
+                        smooth_blend = 0.7 * dynamic_blend + 0.3 * self._mouth_blend_smooth[video_key]
+                    else:
+                        smooth_blend = dynamic_blend
+
+                    # Guardar para el siguiente frame (solo videos)
+                    if video_key:
+                        self._mouth_blend_smooth[video_key] = smooth_blend
+
+                    # Crear máscara de boca con bordes suaves
+                    mouth_mask = create_mouth_preservation_mask(
+                        original_frame,
+                        mouth_region,
+                        blend_ratio=smooth_blend
+                    )
+
+                    # Extraer región de máscara para el área de la cara
+                    mouth_mask_region = mouth_mask[y1:y2, x1:x2]
+
+                    # Asegurar 3 canales
+                    if mouth_mask_region.ndim == 2:
+                        mouth_mask_3ch = np.stack([mouth_mask_region] * 3, axis=-1)
+                    else:
+                        mouth_mask_3ch = mouth_mask_region
+
+                    # Aplicar blur adicional para suavizar bordes (OPTIMIZADO: kernel más pequeño)
+                    blur_kernel = 15  # Valor fijo razonable
+                    if isinstance(mouth_region, dict):
+                        width = mouth_region.get('width', 30)
+                        if isinstance(width, float):
+                            width = int(width)
+                        blur_kernel = int(max(9, min(width // 3, 21) | 1))
+
+                    # Blur rápido en un solo paso
+                    mouth_mask_3ch = cv2.GaussianBlur(mouth_mask_3ch, (blur_kernel, blur_kernel), 0)
+                    mouth_mask_3ch = np.clip(mouth_mask_3ch, 0.0, 1.0)
+
                     # Combinar: swapped_face donde mouth_mask=1, original donde mouth_mask=0
-                    swapped_face = (swapped_face.astype(np.float32) * mouth_mask_3ch + 
-                                   original_face_region.astype(np.float32) * (1 - mouth_mask_3ch)).astype(np.uint8)
+                    swapped_face = (
+                        swapped_face.astype(np.float32) * mouth_mask_3ch +
+                        original_face_region.astype(np.float32) * (1.0 - mouth_mask_3ch)
+                    ).astype(np.uint8)
+
+                    print(f"[MOUTH_PRESERVE] Frame {call_num}: boca preservada (ratio={smooth_blend:.2f}, open={mouth_open_ratio:.2f})")
+
                 except Exception as e:
                     print(f"[MOUTH_PRESERVE] Error: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             # ============================================
             # 5. BLENDING FINAL CON MÁSCARA SUAVE
@@ -1284,14 +1459,17 @@ class ProcessMgr:
             if not self.is_initialized:
                 print("ProcessMgr not initialized")
                 return
-            
+
             import cv2
             import os
+            import time
             from pathlib import Path
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from tqdm import tqdm
 
             if self.options:
                 self.options.current_video_path = video_path
-            
+
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 print(f"Could not open video: {video_path}")
@@ -1320,9 +1498,168 @@ class ProcessMgr:
 
             print(f"Processing video: {os.path.basename(video_path)} ({start_frame}-{end_frame}/{total_frames} frames)")
 
-            frame_count = 0
-            processed_frames = 0
+            # Yield inicial
+            yield (0, f"🎬 Iniciando: {os.path.basename(video_path)}")
+
+            # ============================================
+            # INICIALIZAR MÉTRICAS EN TIEMPO REAL
+            # ============================================
+            from roop.metrics_tracker import MetricsTracker, set_current_tracker
+
+            metrics = MetricsTracker(total_frames=end_frame - start_frame)
+            set_current_tracker(metrics)
+            metrics.start()
+            
+            # ============================================
+            # BATCH PROCESSING - Procesamiento en paralelo
+            # ============================================
+            # Leer todos los frames primero para procesamiento en batch
+            batch_size = getattr(roop.globals, 'batch_processing_size', 4)
+            max_workers = getattr(roop.globals, 'max_batch_threads', 4)
+            
+            print(f"[BATCH] Configuración: batch_size={batch_size}, max_workers={max_workers}")
+            print(f"[BATCH] Leyendo frames para procesamiento en paralelo...")
+            
+            # Inicializar contador de frames
             current_frame = start_frame
+            
+            # Leer frames en memoria
+            frames_to_process = []
+            frame_indices = []
+            
+            with tqdm(total=end_frame - start_frame, desc="Leyendo frames", unit="frame") as pbar:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret or current_frame >= end_frame:
+                        break
+                    
+                    if frame is not None:
+                        frames_to_process.append(frame.copy())
+                        frame_indices.append(current_frame)
+                    
+                    current_frame += 1
+                    pbar.update(1)
+            
+            cap.release()
+            
+            total_frames_to_process = len(frames_to_process)
+            print(f"[BATCH] {total_frames_to_process} frames cargados en memoria")
+            
+            if total_frames_to_process == 0:
+                print("[BATCH] Error: No hay frames para procesar")
+                out.release()
+                return
+            
+            # ============================================
+            # Procesar frames SECUENCIALMENTE (necesario para suavizado temporal)
+            # El paralelismo rompe el orden frame-a-frame causando parpadeo
+            # ============================================
+            processed_frames_dict = {}
+
+            print(f"[BATCH] Iniciando procesamiento secuencial (temporal smoothing activo)...")
+            start_time = time.time()
+            last_yield_time = time.time()
+            yield_interval = 1.0  # Actualizar UI cada 1 segundo
+
+            for i, (frame_idx, frame) in enumerate(zip(frame_indices, frames_to_process)):
+                try:
+                    # Procesar frame secuencialmente con smoothing
+                    processed = self.process_frame(frame, enable_temporal_smoothing=True, file_path=video_path)
+                    processed_frames_dict[frame_idx] = processed
+
+                    # Métricas
+                    try:
+                        from roop.metrics_tracker import _current_tracker
+                        if _current_tracker:
+                            _current_tracker.update_frame_processed()
+                    except:
+                        pass
+
+                    # Yield de métricas periódicamente
+                    current_time = time.time()
+                    if current_time - last_yield_time >= yield_interval:
+                        elapsed_processing = current_time - start_time
+                        fps_current = (i + 1) / elapsed_processing if elapsed_processing > 0 else 0
+                        progress_pct = ((i + 1) / total_frames_to_process) * 100
+                        remaining_frames = total_frames_to_process - (i + 1)
+                        eta_seconds = remaining_frames / fps_current if fps_current > 0 else 0
+                        eta_str = f"{int(eta_seconds // 60):02d}:{int(eta_seconds % 60):02d}"
+
+                        yield (progress_pct, f"⚡ {fps_current:.1f} FPS | {i+1}/{total_frames_to_process} frames | ETA: {eta_str}")
+                        last_yield_time = current_time
+
+                except Exception as e:
+                    print(f"[BATCH] Error frame {frame_idx}: {e}")
+                    processed_frames_dict[frame_idx] = frame  # Usar frame original si hay error
+            
+            elapsed_time = time.time() - start_time
+            fps_processed = total_frames_to_process / elapsed_time if elapsed_time > 0 else 0
+
+            print(f"[BATCH] Procesamiento completado en {elapsed_time:.2f}s ({fps_processed:.2f} fps)")
+            print(f"[BATCH] Velocidad: {fps_processed / fps_video:.2f}x tiempo real")
+
+            # Yield final de métricas
+            yield (95, f"✅ Procesamiento completado: {fps_processed:.1f} FPS")
+
+            # ============================================
+            # Escribir frames procesados en orden
+            # ============================================
+            print(f"[BATCH] Escribiendo frames procesados...")
+            
+            with tqdm(total=total_frames_to_process, desc="Escribiendo video", unit="frame") as pbar:
+                for frame_idx in sorted(processed_frames_dict.keys()):
+                    processed_frame = processed_frames_dict[frame_idx]
+                    if processed_frame is not None:
+                        out.write(processed_frame)
+                    pbar.update(1)
+            
+            out.release()
+            
+            # ============================================
+            # CLEANUP - Liberar memoria
+            # ============================================
+            del frames_to_process
+            del frame_indices
+            del processed_frames_dict
+            
+            import gc
+            gc.collect()
+            
+            print(f"[BATCH] Memoria liberada")
+
+            # Audio: restaurar ANTES de mover el archivo temporal
+            if not skip_audio:
+                try:
+                    from roop.util_ffmpeg import restore_audio
+                    restore_audio(temp_output, video_path, None, None, output_path)
+                    print(f"[BATCH] Audio restaurado desde: {video_path}")
+                except Exception as e:
+                    print(f"[BATCH] Error restaurando audio: {e}")
+                    # Si falla el audio, mover el video sin audio
+                    import shutil
+                    shutil.move(temp_output, output_path)
+            else:
+                # Sin audio, solo mover el archivo
+                import shutil
+                shutil.move(temp_output, output_path)
+
+            print(f"[BATCH] Video guardado en: {output_path}")
+
+            # Limpiar archivo temporal
+            try:
+                if os.path.exists(temp_output):
+                    os.remove(temp_output)
+                    print(f"[CLEANUP] Temporal eliminado: {temp_output}")
+            except Exception as e:
+                print(f"[CLEANUP] Error eliminando temporal: {e}")
+
+            # Yield de completado
+            yield (100, f"✅ Video completado: {os.path.basename(output_path)}")
+
+        except Exception as e:
+            print(f"[BATCH] Error en run_batch_inmem: {e}")
+            import traceback
+            traceback.print_exc()
             total_frames_to_process = end_frame - start_frame
             
             yield (0, "Iniciando procesamiento de video...")
@@ -1397,8 +1734,41 @@ class ProcessMgr:
             self.face_position_history.clear()
             self.global_source_for_all_id = None
             self.selected_face_assignment_cache.clear()
+            
+            # LIMPIEZA DE VRAM DESPUÉS DE PROCESAR VIDEO
+            self._cleanup_vram()
         except:
             pass
+
+    def _cleanup_vram(self):
+        """Limpia caché CUDA y libera VRAM después del procesamiento"""
+        import gc
+        import tempfile
+        import os
+        
+        # 1. Limpiar caché CUDA
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            print(f"[ProcessMgr] VRAM después de limpiar: {allocated:.2f} GB")
+        
+        # 2. Forzar garbage collector
+        gc.collect()
+        
+        # 3. Limpiar temporales
+        temp_dir = tempfile.gettempdir()
+        try:
+            for f in os.listdir(temp_dir):
+                if f.startswith("temp_frame_") or f.startswith("faceswap_") or f.startswith("roop_"):
+                    try:
+                        os.remove(os.path.join(temp_dir, f))
+                    except:
+                        pass
+        except:
+            pass
+        
+        print("[ProcessMgr] ✅ Limpieza de VRAM completada")
 
     def _log_audio_merge_error(self, error, video_path, temp_output):
         error_type = type(error).__name__

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import socket
 
-_public_url = "http://127.0.0.1:9000"
+_public_url = "http://127.0.0.1:7861"
 _sd_url = None
 _sd_process = None
 _sd_window = None

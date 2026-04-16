@@ -138,17 +138,21 @@ def get_ltxvideo2_workflow(
     print(f"[LTX VIDEO] Workflow: UNET={unet_name}, VAE={vae_name}, CLIP={clip_name}")
 
     return {
-        # 1: UNETLoader - cargar modelo UNET (transformer)
-        "1": {"inputs": {"unet_name": unet_name, "weight_dtype": "default"}, "class_type": "UNETLoader"},
+        # 1: CheckpointLoaderSimple - cargar modelo completo (incluye UNET, CLIP, VAE)
+        "1": {"inputs": {"ckpt_name": "ltx-2-19b-distilled.safetensors"}, "class_type": "CheckpointLoaderSimple"},
         
-        # 2: Cargar imagen
-        "2": {"inputs": {"image": image_filename, "upload": "image"}, "class_type": "LoadImage"},
+        # 2: LTXVAudioVAELoader - cargar Audio VAE para audio
+        "2": {"inputs": {"vae_name": unet_name}, "class_type": "LTXVAudioVAELoader"},
         
-        # 3: CLIPLoader - cargar CLIP para texto
-        "3": {"inputs": {"clip_name": clip_name, "type": clip_type}, "class_type": "CLIPLoader"},
+        # 3: LTXVGemmaCLIPModelLoader - cargar CLIP Gemma para texto
+        "3": {"inputs": {
+            "clip_name": clip_name, 
+            "model_name": unet_name,
+            "max_length": 1024
+        }, "class_type": "LTXVGemmaCLIPModelLoader"},
         
-        # 4: VAELoader - cargar VAE
-        "4": {"inputs": {"vae_name": vae_name}, "class_type": "VAELoader"},
+        # 4: Cargar imagen
+        "4": {"inputs": {"image": image_filename, "upload": "image"}, "class_type": "LoadImage"},
         
         # 5: Positive prompt
         "5": {"inputs": {"clip": ["3", 0], "text": prompt}, "class_type": "CLIPTextEncode"},
@@ -156,41 +160,83 @@ def get_ltxvideo2_workflow(
         # 6: Negative prompt
         "6": {"inputs": {"clip": ["3", 0], "text": negative_prompt}, "class_type": "CLIPTextEncode"},
         
-        # 7: LTXVImgToVideo - genera video
+        # 7: LTXVConditioning - configurar condicionamiento de video
         "7": {"inputs": {
-            "image": ["2", 0],
-            "model": ["1", 0],
-            "clip": ["3", 0],
             "positive": ["5", 0],
             "negative": ["6", 0],
+            "frame_rate": float(fps)
+        }, "class_type": "LTXVConditioning"},
+        
+        # 8: LTXVImgToVideoAdvanced - genera condicionamiento de imagen a video
+        "8": {"inputs": {
+            "positive": ["7", 0],
+            "negative": ["7", 1],
+            "vae": ["1", 2],
+            "image": ["4", 0],
             "width": width,
             "height": height,
             "length": frames,
-            "steps": 20,
-            "cfg": 3.0,
-            "sampler_name": "euler",
-            "scheduler": "normal",
-            "denoise": strength,
-            "seed": seed
-        }, "class_type": "LTXVImgToVideo"},
+            "batch_size": 1,
+            "crf": 29,
+            "blur_radius": 0,
+            "interpolation": "lanczos",
+            "crop": "disabled",
+            "strength": strength
+        }, "class_type": "LTXVImgToVideoAdvanced"},
         
-        # 8: VAEDecode
-        "8": {"inputs": {"vae": ["4", 0], "samples": ["7", 2]}, "class_type": "VAEDecode"},
+        # 9: KSamplerSelect - seleccionar sampler
+        "9": {"inputs": {"sampler_name": "euler"}, "class_type": "KSamplerSelect"},
         
-        # 9: VHS_VideoCombine - crear video MP4
-        "9": {"inputs": {
-            "images": ["8", 0],
-            "frame_rate": float(fps),
-            "loop_count": 0,
-            "format": "video/h264-mp4",
-            "output_format": "mp4",
-            "filename_prefix": "ComfyUI",
-            "pix_fmt": "yuv420p",
-            "crf": 20,
-            "save_metadata": True,
-            "pingpong": False,
-            "save_output": True
-        }, "class_type": "VHS_VideoCombine", "_meta": {"title": "Video Combine (MP4)"}},
+        # 10: CFGGuider - configurar CFG
+        "10": {"inputs": {
+            "model": ["1", 0],
+            "positive": ["8", 0],
+            "negative": ["8", 1],
+            "cfg": 3.0
+        }, "class_type": "CFGGuider"},
+        
+        # 11: RandomNoise - generar ruido aleatorio
+        "11": {"inputs": {"seed": seed, "control": "fixed"}, "class_type": "RandomNoise"},
+        
+        # 12: ManualSigmas - configurar sigmas
+        "12": {"inputs": {
+            "sigmas": "1., 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+        }, "class_type": "ManualSigmas"},
+        
+        # 13: SamplerCustomAdvanced - sampler principal
+        "13": {"inputs": {
+            "noise": ["11", 0],
+            "guider": ["10", 0],
+            "sampler": ["9", 0],
+            "sigmas": ["12", 0],
+            "latent_image": ["8", 2]
+        }, "class_type": "SamplerCustomAdvanced"},
+        
+        # 14: LTXVSpatioTemporalTiledVAEDecode - decodificar video
+        "14": {"inputs": {
+            "vae": ["1", 2],
+            "latents": ["13", 1],
+            "tile_x": 4,
+            "tile_y": 4,
+            "tile_t": 16,
+            "overlap": 4
+        }, "class_type": "LTXVSpatioTemporalTiledVAEDecode"},
+        
+        # 15: LTXVSeparateAVLatent - separar audio y video latentes
+        "15": {"inputs": {"av_latent": ["13", 1]}, "class_type": "LTXVSeparateAVLatent"},
+        
+        # 16: LTXVAudioVAEDecode - decodificar audio
+        "16": {"inputs": {
+            "samples": ["15", 1],
+            "audio_vae": ["2", 0]
+        }, "class_type": "LTXVAudioVAEDecode"},
+        
+        # 17: CreateVideo - combinar video y audio
+        "17": {"inputs": {
+            "images": ["14", 0],
+            "audio": ["16", 0],
+            "fps": float(fps)
+        }, "class_type": "CreateVideo"},
     }
 
 
@@ -456,11 +502,14 @@ def get_cogvideox_workflow(
     
     Modelos disponibles:
     - cogvideo_5b: ~10GB, CogVideoX-2, nuevo
-    - cogvideo_1_5_5b: ~10GB, CogVideoX-1.5, mas estable
+    - cogvideo_1_5_5b: ~10GB, CogVideoX-1.5, mas estable (USAR ESTE)
     - cogvideo_9b: ~19GB, mayor calidad pero necesita más VRAM
     
     Parametros:
     - frames: 49 (6 seg), 101 (12 seg)
+    
+    Nota: Ahora usa DownloadAndLoadCogVideoModel que descarga automaticamente
+    desde HuggingFace si no tienes los archivos localmente.
     """
     if seed is None:
         import random
@@ -469,46 +518,22 @@ def get_cogvideox_workflow(
     if not prompt or not prompt.strip():
         prompt = "high quality video, smooth motion"
     
-    # Obtener modelos disponibles
-    available_checkpoints = get_available_models("checkpoints")
-    available_clip = get_available_models("clip")
+    # Note: DownloadAndLoadCogVideoModel will download from HuggingFace automatically
+    # Using kijai/CogVideoX-5b-1.5-I2V which is the recommended version
     
-    # Seleccionar modelo CogVideoX (usar el primer archivo sharded)
-    if model_version == "cogvideo_9b":
-        model_name = COGVIDEO_MODEL_9B
-    elif model_version == "cogvideo_1_5_5b":
-        model_name = COGVIDEO_MODEL_1_5_5B
-    else:
-        model_name = COGVIDEO_MODEL_5B
-    
-    # Buscar el nombre correcto del checkpoint CogVideoX
-    cogvideo_checkpoint = None
-    for ckpt in available_checkpoints:
-        if "cogvideo" in ckpt.lower() and "model-00001" in ckpt.lower():
-            cogvideo_checkpoint = ckpt
-            break
-    
-    # Si no se encuentra, usar el primer checkpoint disponible
-    if not cogvideo_checkpoint and available_checkpoints:
-        cogvideo_checkpoint = available_checkpoints[0]
-    
-    # Buscar T5-XXL (si no está disponible, usar el primer CLIP disponible)
-    t5_clip = None
-    for clip in available_clip:
-        if "t5" in clip.lower():
-            t5_clip = clip
-            break
-    
-    # Si no se encuentra T5, usar el primer CLIP disponible
-    if not t5_clip and available_clip:
-        t5_clip = available_clip[0]
-
     workflow = {
-        # 1: Cargar modelo CogVideoX (usar nodo especializado)
+        # 1: Download and Load CogVideoX model (using 2B for lower VRAM)
         "1": {
-            "inputs": {"model": cogvideo_checkpoint if cogvideo_checkpoint else "CogVideoX\\model-00001-of-00004.safetensors"},
-            "class_type": "CogVideoXModelLoader",
-            "_meta": {"title": f"CogVideoX ({model_name})"}
+            "inputs": {
+                "model": "THUDM/CogVideoX-2b",
+                "precision": "fp16",
+                "quantization": "disabled",
+                "enable_sequential_cpu_offload": False,
+                "attention_mode": "sdpa",
+                "load_device": "main_device"
+            },
+            "class_type": "DownloadAndLoadCogVideoModel",
+            "_meta": {"title": "Download & Load CogVideoX-2B"}
         },
         # 2: Cargar imagen
         "2": {
@@ -516,11 +541,14 @@ def get_cogvideox_workflow(
             "class_type": "LoadImage",
             "_meta": {"title": "Cargar Imagen"}
         },
-        # 3: Cargar T5-XXL (tu modelo actual)
+        # 3: CLIP Loader for T5 text encoder (use available umt5-xxl)
         "3": {
-            "inputs": {"clip_name": t5_clip if t5_clip else "gemma-3-12b-it-qat-q4_0-unquantized\\model-00001-of-00005.safetensors"},
+            "inputs": {
+                "clip_name": "umt5-xxl-enc-bf16.safetensors",
+                "type": "sd3"
+            },
             "class_type": "CLIPLoader",
-            "_meta": {"title": "T5-XXL (ya disponible)"}
+            "_meta": {"title": "T5-XXL Encoder"}
         },
         # 4: Positive prompt (usa CogVideoTextEncode)
         "4": {
@@ -546,7 +574,7 @@ def get_cogvideox_workflow(
                 "model": ["1", 0],
                 "positive": ["4", 0],
                 "negative": ["5", 0],
-                "num_frames": frames,
+                "num_frames": 25,  # Reduced for 8GB VRAM
                 "steps": 50,
                 "cfg": 6.0,
                 "seed": seed,

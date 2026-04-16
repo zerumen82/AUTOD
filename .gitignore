@@ -23,8 +23,12 @@ wheels/
 # Virtual environments
 .venv/
 venv/
+venv_ext/
 ENV/
 env/
+
+# Python packages (large wheel files)
+*.whl
 
 # IDE
 .vscode/

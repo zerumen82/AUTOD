@@ -82,35 +82,40 @@ def match_color_histogram(source: np.ndarray, target: np.ndarray, blend_factor: 
 def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, int], feather: int = 20) -> np.ndarray:
     """
     Crea una máscara suave ELÍPTICA con cobertura central y bordes difuminados.
-    
+    OPTIMIZADA v2: Mejor cobertura de frente para evitar efecto "flequillo"
+
     Args:
         bbox: Bounding box de la cara (x1, y1, x2, y2)
         frame_shape: Forma del frame (height, width)
         feather: Píxeles de difuminado en los bordes
-    
+
     Returns:
         Máscara suave (valores 0-1)
     """
     x1, y1, x2, y2 = map(int, bbox)
     h, w = frame_shape[:2]
-    
+
     # Crear máscara base
     mask = np.zeros((h, w), dtype=np.float32)
-    
+
     # Calcular centro y radios de la elipse
     center_x = (x1 + x2) // 2
     center_y = (y1 + y2) // 2
     width = x2 - x1
     height = y2 - y1
-    
-    # SOLUCIÓN: Reducir el radio para evitar que toque los bordes del bbox
-    # 0.40 = 80% del ancho/alto, dejando un margen del 10% a cada lado
-    radius_x = int(width * 0.40) 
-    radius_y = int(height * 0.40)
-    
+
+    # OPTIMIZADO v2: Elipse más amplia para cubrir COMPLETAMENTE frente y evitar efecto "flequillo"
+    # Aumentado radius_y a 0.52 (104% de la altura) para cubrir frente y parte del pelo
+    # Aumentado radius_x a 0.48 (96% del ancho) para mejor cobertura lateral
+    radius_x = int(width * 0.48)
+    radius_y = int(height * 0.52)  # Más alto para cubrir frente y pelo superior
+
+    # Ajustar centro hacia arriba para mejor cobertura de frente (aumentado de 5% a 8%)
+    adjusted_center_y = center_y - int(height * 0.08)
+
     # Dibujar elipse COMPLETA en la máscara
-    cv2.ellipse(mask, (center_x, center_y), (radius_x, radius_y), 0, 0, 360, 1.0, -1)
-    
+    cv2.ellipse(mask, (center_x, adjusted_center_y), (radius_x, radius_y), 0, 0, 360, 1.0, -1)
+
     # Aplicar difuminado SOLO en los bordes para transición suave
     if feather > 0:
         # Kernel moderado para suavizar solo los bordes
@@ -119,7 +124,7 @@ def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, in
             kernel_size += 1
         sigma = max(feather / 2, 8)  # Sigma moderado
         mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), sigma)
-    
+
     return mask
 
 

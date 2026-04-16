@@ -340,7 +340,8 @@ def extract_face_images(
             if not os.path.exists(image_path):
                 logger.error(f"Archivo no encontrado: {image_path}")
                 return []
-            img = cv2.imread(image_path)
+            from roop.capturer import get_image_frame
+            img = get_image_frame(image_path)
         else:
             img = image_path.copy()
 

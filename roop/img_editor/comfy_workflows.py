@@ -207,6 +207,7 @@ def build_img2img_workflow(
 
 def build_inpaint_workflow(
     image_filename: str,
+    mask_filename: str = None,
     prompt: str = "",
     negative_prompt: str = "",
     seed: int = 42,
@@ -216,26 +217,29 @@ def build_inpaint_workflow(
     checkpoint: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Construye workflow de Inpaint con máscara automática (toda la imagen).
-    
-    Este workflow usa VAEEncodeForInpaint con una máscara blanca completa,
-    lo que permite editar toda la imagen usando el pipeline de inpaint.
+    Construye workflow de Inpaint con máscara.
+
+    Si mask_filename es None, usa máscara automática (toda la imagen).
+    Si mask_filename es proporcionada, usa esa máscara específica.
     """
-    
+
     if checkpoint is None:
         checkpoint = get_default_checkpoint()
-    
+
     if checkpoint is None:
         raise ValueError("No hay checkpoints disponibles en ComfyUI")
-    
+
     # Negative prompt optimizado para contenido adulto
     final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed, child, underage, minor"
     if negative_prompt:
         final_negative_prompt += f", {negative_prompt}"
-    
+
     # No modificar el prompt del usuario
     final_prompt = prompt if prompt else "high quality, detailed, realistic"
-    
+
+    # Determinar si usamos máscara externa o generamos una
+    use_external_mask = mask_filename is not None and mask_filename != ""
+
     return {
         # Cargar imagen
         "1": {
@@ -245,6 +249,15 @@ def build_inpaint_workflow(
             },
             "class_type": "LoadImage",
             "_meta": {"title": "LoadImage"}
+        },
+        # Cargar máscara (si existe)
+        "100": {
+            "inputs": {
+                "image": mask_filename if use_external_mask else image_filename,
+                "upload": "image"
+            },
+            "class_type": "LoadImage",
+            "_meta": {"title": "LoadMask"}
         },
         # Cargar checkpoint
         "2": {
@@ -274,10 +287,11 @@ def build_inpaint_workflow(
         },
         # Convertir imagen a máscara (usando canal alpha o creando máscara blanca)
         # ImageToMask usa el canal especificado: red=0, green=1, blue=2, alpha=3
+        # Para máscara en escala de grises, usar 'red' funciona porque R=G=B
         "10": {
             "inputs": {
-                "image": ["1", 0],
-                "channel": "red"  # Usar canal rojo como base
+                "image": ["100", 0],
+                "channel": "red"  # Usar canal rojo (funciona para máscaras B&W)
             },
             "class_type": "ImageToMask",
             "_meta": {"title": "ImageToMask"}

@@ -18,6 +18,33 @@ import cv2
 import gradio as gr
 
 import roop.globals
+
+
+# ============================================================
+# Métricas en tiempo real (igual que img_editor_tab.py)
+# ============================================================
+
+def get_metrics_html(percent, processed, total, time_elapsed, time_remaining, status):
+    """Genera HTML de métricas profesional para FaceSwap"""
+    progress_color = "#3b82f6" if status not in ["Error", "Completado"] else ("#10b981" if status == "Completado" else "#ef4444")
+    bar_color = "linear-gradient(90deg, #3b82f6, #10b981)" if status != "Error" else "linear-gradient(90deg, #ef4444, #f59e0b)"
+    safe_percent = max(0, min(100, percent))
+    return f"""
+    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 15px; border-radius: 10px; margin: 10px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #334155;">
+        <h3 style="color: #3b82f6; margin-top: 0; font-size: 16px; border-bottom: 1px solid #334155; padding-bottom: 5px;">🔄 Progreso en Tiempo Real</h3>
+        <div style="margin-bottom: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; height: 24px; overflow: hidden; position: relative;">
+            <div style="width: {safe_percent}%; height: 100%; background: {bar_color}; transition: width 0.4s ease-out; display: flex; align-items: center; justify-content: center;">
+                <span style="color: white; font-size: 12px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">{safe_percent:.1f}%</span>
+            </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">ARCHIVOS</div><div style="color: #10b981; font-size: 20px; font-weight: bold;">{processed}/{total}</div></div>
+            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">TRANSCURRIDO</div><div style="color: #f59e0b; font-size: 18px; font-weight: bold;">{time_elapsed}</div></div>
+            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">RESTANTE</div><div style="color: #06b6d4; font-size: 18px; font-weight: bold;">{time_remaining}</div></div>
+            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">ESTADO</div><div style="color: #8b5cf6; font-size: 13px; font-weight: bold;">{status}</div></div>
+        </div>
+    </div>
+    """
 import roop.utilities as util
 import ui.globals
 from roop.types import FaceSet
@@ -789,6 +816,7 @@ def faceswap_tab():
                     choices=["First found", "Selected faces", "Selected faces frame", "All faces"],
                     value="Selected faces",
                     label="🎭 Face Detection Mode",
+                    info="First: mejor velocidad | Selected: usa caras elegido por usuario | All: procesa todas",
                     visible=True
                 )
                 
@@ -801,9 +829,9 @@ def faceswap_tab():
                                 
                                 ui_selected_enhancer = gr.Dropdown(
                                     choices=["None", "GFPGAN", "CodeFormer", "Restoreformer++", "GPEN"],
-                                    value="GPEN",
+                                    value="CodeFormer",
                                     label="Face Enhancer",
-                                    info="None=Máximo parecido | GPEN=Mejor calidad | GFPGAN=Fuerte"
+                                    info="CodeFormer=Mejor identidad | GPEN=Mejor calidad | GFPGAN=Fuerte | None=Máximo parecido"
                                 )
                                 
                                 ui_enhancer_blend = gr.Slider(
@@ -935,6 +963,9 @@ def faceswap_tab():
                             type="filepath",
                         )
                         
+                        # Panel de métricas en tiempo real (encima de resultados)
+                        swap_metrics = gr.HTML(value=get_metrics_html(0, 0, 0, "--:--", "--:--", "Listo para empezar"))
+
                         # Galería de resultados para múltiples archivos
                         result_gallery = gr.Gallery(
                             label="📁 Resultados",
@@ -960,7 +991,7 @@ def faceswap_tab():
     # NOTA: selected_face_detection ya está definido en la UI principal (línea 749)
     
     _enhancer_placeholder = gr.Dropdown(
-        choices=["None", "GFPGAN", "CodeFormer", "Restoreformer++"],
+        choices=["None", "GFPGAN", "CodeFormer", "Restoreformer++", "GPEN"],
         value="None",
         visible=False
     )
@@ -1242,7 +1273,7 @@ def faceswap_tab():
             ui_color_match,            # color_match_strength
             ui_brightness,            # brightness_strength
         ],
-        outputs=[bt_start, bt_stop, result_gallery],
+        outputs=[bt_start, bt_stop, result_gallery, swap_metrics],
     )
     
     # Botón Stop - detener procesamiento
@@ -1286,7 +1317,7 @@ def on_content_type_changed(content_type):
             gr.update(value=0.65),  # ui_blend_ratio - CONSERVADOR
             gr.update(value=45),  # mask_blur
             gr.update(value="DFL XSeg"),  # selected_mask_engine
-            gr.update(value="GPEN"),  # ui_selected_enhancer
+            gr.update(value="CodeFormer"),  # ui_selected_enhancer
             gr.update(value="General", visible=True),  # sub_category
             gr.update(value="Selected faces"),  # selected_face_detection
         ]
@@ -1298,7 +1329,7 @@ def on_content_type_changed(content_type):
             gr.update(value=0.65),  # ui_blend_ratio - CONSERVADOR
             gr.update(value=45),  # mask_blur (más suave para boca)
             gr.update(value="DFL XSeg"),  # selected_mask_engine
-            gr.update(value="GPEN"),  # ui_selected_enhancer
+            gr.update(value="CodeFormer"),  # ui_selected_enhancer
             gr.update(value="General", visible=True),  # sub_category
             gr.update(value="First found"),  # selected_face_detection
         ]
@@ -1313,9 +1344,9 @@ def on_sub_category_changed(sub_cat):
             gr.update(value=0.99),
             gr.update(value=45),
             gr.update(value="DFL XSeg"),
-            gr.update(value="GFPGAN"),
+            gr.update(value="CodeFormer"),
             gr.update(
-                value="**General:** Configuración equilibrada para resultados estándar en la mayoría de casos."
+                value="**General:** Configuración equilibrada - CodeFormer para mejor preservación de identidad."
             ),
         ]
     elif sub_cat == "Acciones de Boca y Objetos":
@@ -1325,7 +1356,7 @@ def on_sub_category_changed(sub_cat):
             gr.update(value=0.98),
             gr.update(value=40),
             gr.update(value="DFL XSeg"),
-            gr.update(value="GFPGAN"),
+            gr.update(value="CodeFormer"),
             gr.update(
                 value="**Acciones de Boca y Objetos:** Optimizado para escenas con apertura de boca, dientes o inserción de objetos. Mayor padding y pasos para mejor detalle."
             ),
@@ -1337,9 +1368,9 @@ def on_sub_category_changed(sub_cat):
             gr.update(value=0.99),
             gr.update(value=40),
             gr.update(value="DFL XSeg"),
-            gr.update(value="GFPGAN"),
+            gr.update(value="CodeFormer"),
             gr.update(
-                value="**Expresiones Faciales:** Ideal para expresiones faciales dinámicas como sonrisas o gestos. Ajustes equilibrados para naturalidad."
+                value="**Expresiones Faciales:** Ideal para expresiones faciales dinámicas como sonrisas o gestos. CodeFormer para mejor identidad."
             ),
         ]
     elif sub_cat == "Modo Rápido":
@@ -2070,10 +2101,11 @@ def on_use_face_from_selected(frame_num=None):
                                     'bbox': face_obj.bbox,
                                     'embedding': face_obj.embedding,
                                     'source_file': video_path,
-                                    'face_obj': face_obj
+                                    'face_obj': face_obj,
+                                    'face_img': face_img
                                 }
                                 roop.globals.selected_face_references[video_key] = face_ref_data
-                                print(f"[SELECTED_FACES] Cara guardada para {os.path.basename(video_path)}: {len(SELECTION_FACES_DATA)} detectadas")
+                                print(f"[SELECTED_FACES] Cara guardada para {os.path.basename(video_path)}: {len(SELECTION_FACES_DATA)} detectadas, img shape: {face_img.shape}")
 
     
                 
@@ -2098,12 +2130,15 @@ def on_use_face_from_selected(frame_num=None):
                                     face_obj.source_file = roop.globals.target_path
                                 except Exception:
                                     pass
-
+                                
+                                # Guardar imagen de referencia en el objeto cara para enhancer
+                                face_obj.face_img_ref = face_img.copy()
+                                
                                 # Añadir a TARGET_FACES para procesamiento
                                 roop.globals.TARGET_FACES.append(face_obj)
                                 ui.globals.ui_target_thumbs.append(image)
                                 SELECTED_TARGET_FACE_INDEX = len(roop.globals.TARGET_FACES) - 1
-                                print(f"[DEBUG] Cara única agregada automáticamente, SELECTED_TARGET_FACE_INDEX={SELECTED_TARGET_FACE_INDEX}")
+                                print(f"[DEBUG] Cara única agregada automáticamente, SELECTED_TARGET_FACE_INDEX={SELECTED_TARGET_FACE_INDEX}, face_img shape: {face_img.shape}")
 
                                 faces_page = get_faces_for_page(ui.globals.ui_target_thumbs, "target")
                                 target_page_info = update_pagination_info(ui.globals.ui_target_thumbs, "target")
@@ -3168,6 +3203,9 @@ def on_selected_face(face_index, detected_faces=None):
     if IS_INPUT:
         face_set = FaceSet()
         fd[0].mask_offsets = (0, 0.15, 0, 0, 1, 15)  # Más cobertura inferior para boca
+        # Guardar imagen de referencia para enhancer
+        if fd[1] is not None and hasattr(fd[1], 'shape'):
+            fd[0].face_img_ref = fd[1].copy()
         face_set.faces.append(fd[0])
         roop.globals.INPUT_FACESETS.append(face_set)
         ui.globals.ui_input_thumbs.append(image)
@@ -3193,10 +3231,16 @@ def on_selected_face(face_index, detected_faces=None):
     else:
         # Anotar la cara destino con el archivo desde el que fue tomada
         face_obj = fd[0]
+        face_img = fd[1] if len(fd) > 1 else None
+        
         try:
             face_obj.source_file = roop.globals.target_path
         except Exception:
             pass
+        
+        # Guardar imagen de referencia para enhancer
+        if face_img is not None and hasattr(face_img, 'shape'):
+            face_obj.face_img_ref = face_img.copy()
         
         # CRÍTICO: Guardar la cara seleccionada como referencia permanente para este video
         # Esto permite que ProcessMgr use SOLO esta cara para hacer swap
@@ -3213,7 +3257,8 @@ def on_selected_face(face_index, detected_faces=None):
                 'bbox': face_obj.bbox,
                 'embedding': face_obj.embedding,
                 'source_file': video_path,
-                'face_obj': face_obj  # Referencia directa al objeto
+                'face_obj': face_obj,
+                'face_img': face_img
             }
             
             roop.globals.selected_face_references[video_key] = face_ref_data
@@ -3674,7 +3719,6 @@ def start_swap(
     enhancer_blend_factor=None,
     color_match_strength=None,
     brightness_strength=None,
-    progress=gr.Progress(),
 ):
     from roop.core import batch_process_regular
     from ui.main import prepare_environment
@@ -3721,7 +3765,7 @@ def start_swap(
         error_msg = "[ERROR] ERROR: No hay archivos de destino configurados. Carga archivos en la sección 'Archivos Destino'."
         print(f"[DIAGNÓSTICO] {error_msg}")
         gr.Error(error_msg)
-        return gr.update(variant="primary", interactive=True), gr.update(interactive=False), []
+        return gr.update(variant="primary", interactive=True), gr.update(interactive=False), [], get_metrics_html(0, 0, 0, "--:--", "--:--", "Error: sin archivos")
 
     # Detectar tipo de procesamiento
     global is_video_processing, is_image_processing
@@ -3890,9 +3934,13 @@ def start_swap(
 
     is_processing = True
     print("[START] [DIAGNÓSTICO] Iniciando procesamiento...")
+    start_t = time.time()
+    total_files = len(list_files_process)
     yield (
         gr.update(variant="secondary", interactive=False),
-        gr.update(variant="primary", interactive=True), [],
+        gr.update(variant="primary", interactive=True),
+        [],
+        get_metrics_html(0, 0, total_files, "0:00", "--:--", "Iniciando..."),
     )
 
     roop.globals.execution_threads = roop.globals.CFG.max_threads
@@ -3930,22 +3978,36 @@ def start_swap(
             processing_method == "In-Memory processing",
             mask_data,
             roop.globals.num_swap_steps,
-            progress,
+            None,  # progress - no usamos gr.Progress()
             SELECTED_INPUT_FACE_INDEX,
             temporal_smoothing,
         ):
-            # Reportar progreso a la UI de Gradio
+            # Calcular métricas en tiempo real
             try:
-                progress(progress_percent, desc=progress_message)
-                print(f"[UI] Progreso reportado: {progress_percent:.1f}% - {progress_message}")
+                elapsed = time.time() - start_t
+                elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+                files_done = int(progress_percent / 100.0 * total_files) if total_files > 0 else 0
+                time_remaining = "--:--"
+                if progress_percent > 0 and files_done > 0:
+                    rate = files_done / elapsed
+                    remaining = (total_files - files_done) / rate if rate > 0 else 0
+                    time_remaining = time.strftime("%H:%M:%S", time.gmtime(remaining))
+
+                yield (
+                    gr.update(variant="secondary", interactive=False),
+                    gr.update(variant="primary", interactive=True),
+                    [],
+                    get_metrics_html(progress_percent, files_done, total_files, elapsed_str, time_remaining, "Procesando..."),
+                )
+                print(f"[UI] Progreso: {progress_percent:.1f}% - {progress_message}")
             except Exception as e:
-                print(f"[WARNING] Error reportando progreso a UI: {e}")
+                print(f"[WARNING] Error actualizando métricas: {e}")
         
         # Resumen final para el usuario
         summary = f"✅ Procesamiento completado.\n📂 Archivos gestionados: {len(list_files_process)}"
         gr.Info(summary)
         print(f"[OK] {summary}")
-        
+
         cleanup_temp_files()
     except Exception as e:
         error_msg = f"[ERROR] ERROR durante el procesamiento: {str(e)}"
@@ -3955,11 +4017,22 @@ def start_swap(
         traceback.print_exc()
         gr.Error(error_msg)
         cleanup_temp_files()
+        elapsed = time.time() - start_t
+        elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+        yield (
+            gr.update(variant="primary", interactive=True),
+            gr.update(variant="secondary", interactive=False),
+            [],
+            get_metrics_html(0, 0, total_files, elapsed_str, "--:--", "Error"),
+        )
+        return
 
     is_processing = False
+    elapsed = time.time() - start_t
+    elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
     outdir = pathlib.Path(roop.globals.output_path)
     outfiles = [str(item) for item in outdir.rglob("*") if item.is_file()]
-    
+
     if len(outfiles) > 0:
         print(f"[OK] [DIAGNÓSTICO] Archivos generados: {len(outfiles)}")
         # Devolver rutas de archivo como strings, que es lo que espera Gradio
@@ -3967,6 +4040,7 @@ def start_swap(
             gr.update(variant="primary", interactive=True),
             gr.update(variant="secondary", interactive=False),
             outfiles,
+            get_metrics_html(100, total_files, total_files, elapsed_str, "--:--", "Completado"),
         )
     else:
         print("⚠️ [DIAGNÓSTICO] No se generaron archivos de salida")
@@ -3974,6 +4048,7 @@ def start_swap(
             gr.update(variant="primary", interactive=True),
             gr.update(variant="secondary", interactive=False),
             [],
+            get_metrics_html(0, 0, total_files, elapsed_str, "--:--", "Sin resultados"),
         )
 
 

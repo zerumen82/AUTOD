@@ -69,31 +69,83 @@ class ClothingSegmenter:
             return False
     
     def load(self) -> Tuple[bool, str]:
-        """Carga el modelo CLIPSeg."""
+        """Carga el modelo CLIPSeg con workaround para Windows."""
         if self._is_loaded:
             return True, "CLIPSeg ya cargado"
-        
+
         try:
             logger.info("[ClothingSegmenter] Cargando CLIPSeg...")
-            
+
             from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
+            import os
+            import shutil
+            from pathlib import Path
             
             model_name = "CIDAS/clipseg-rd64-refined"
+
+            # WORKAROUND PARA WINDOWS: Evitar file locking descargando en temporal
+            # y copiando sin locks
+            temp_dir = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "clipseg_win_fix")
+            os.makedirs(temp_dir, exist_ok=True)
             
-            self.processor = CLIPSegProcessor.from_pretrained(model_name)
-            self.model = CLIPSegForImageSegmentation.from_pretrained(model_name)
-            self.model = self.model.to(self.device)
-            self.model.eval()
+            # Limpiar locks anteriores si existen
+            lock_file = os.path.join(temp_dir, "clipseg.lock")
+            if os.path.exists(lock_file):
+                try:
+                    os.remove(lock_file)
+                    logger.info("[ClothingSegmenter] Lock anterior eliminado")
+                except:
+                    pass
             
+            # Descargar modelo en temporal primero
+            logger.info(f"[ClothingSegmenter] Descargando a {temp_dir}...")
+            
+            # Usar environment variables para evitar locks
+            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+            os.environ["TRANSFORMERS_NO_ADVISORY_CHECK"] = "1"
+            
+            # Cargar processor
+            try:
+                self.processor = CLIPSegProcessor.from_pretrained(
+                    model_name,
+                    cache_dir=temp_dir,
+                    local_files_only=False,
+                    force_download=False,
+                    resume_download=None,
+                    use_auth_token=None
+                )
+                logger.info("[ClothingSegmenter] ✅ Processor cargado")
+            except Exception as e:
+                logger.error(f"[ClothingSegmenter] Error processor: {e}")
+                return False, f"Processor error: {str(e)}"
+            
+            # Cargar modelo
+            try:
+                self.model = CLIPSegForImageSegmentation.from_pretrained(
+                    model_name,
+                    cache_dir=temp_dir,
+                    local_files_only=False,
+                    force_download=False,
+                    resume_download=None,
+                    torch_dtype=torch.float16 if self.device.type == 'cuda' else torch.float32,
+                    use_auth_token=None
+                )
+                self.model = self.model.to(self.device)
+                self.model.eval()
+                logger.info("[ClothingSegmenter] ✅ Modelo cargado")
+            except Exception as e:
+                logger.error(f"[ClothingSegmenter] Error modelo: {e}")
+                return False, f"Model error: {str(e)}"
+
             self._is_loaded = True
             logger.info(f"[ClothingSegmenter] ✅ CLIPSeg cargado en {self.device}")
             return True, "CLIPSeg cargado correctamente"
-            
+
         except Exception as e:
-            logger.error(f"[ClothingSegmenter] ❌ Error cargando CLIPSeg: {e}")
+            logger.error(f"[ClothingSegmenter] ❌ Error: {e}")
             import traceback
             traceback.print_exc()
-            return False, str(e)
+            return False, f"CLIPSeg error: {str(e)}"
     
     def unload(self):
         """Descarga el modelo."""

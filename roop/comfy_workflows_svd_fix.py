@@ -93,7 +93,7 @@ def get_svd_turbo_workflow_fixed(image_filename, prompt, seed=None, width=720, h
             "width": width,
             "height": height,
             "video_frames": frames,
-            "motion_bucket_id": 127,
+            "motion_bucket_id": 30,  # Lower for less distortion
             "fps": fps,
             "augmentation_level": 0.0
         }, "class_type": "SVD_img2vid_Conditioning"},

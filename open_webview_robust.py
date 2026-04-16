@@ -12,7 +12,7 @@ import threading
 # Agregar el directorio raíz al path
 sys.path.insert(0, os.getcwd())
 
-GRADIO_URL = "http://127.0.0.1:9000"
+GRADIO_URL = "http://127.0.0.1:7861"
 
 def wait_for_server(url, timeout=60):
     """Espera a que el servidor Gradio esté disponible"""

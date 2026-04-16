@@ -176,8 +176,9 @@ Path.unlink = resilient_unlink
 def setup_runtime():
     print("\n[STEP 1] Preparando entorno NVIDIA/CUDA...")
     
-    # Configurar PyTorch para evitar fragmentación de memoria
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
+    # Configurar PyTorch para evitar fragmentación de memoria - solo para el proceso principal
+    # NO establecer PYTORCH_CUDA_ALLOC_CONF aqui porque ComfyUI usa su propio entorno
+    # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
     
     base_dir = os.getcwd()
     # Forzar uso de venv que es donde está torch instalado
