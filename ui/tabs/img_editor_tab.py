@@ -387,48 +387,54 @@ def create_img_editor_tab():
     def analyze_image_click(img):
         if img is None:
             return "ERROR: No hay imagen cargada. Sube una imagen primero."
-        
-        if not HAS_ANALYZER:
-            return "ERROR: Módulo de análisis no disponible."
-        
+
         # Handle Gradio 4.x/5.x ImageEditor dict format
         if isinstance(img, dict):
             img = img.get("background")
-        
+
         if img is None:
             return "ERROR: No se pudo extraer la imagen."
-        
+
         try:
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
                 img.save(tmp.name)
                 tmp_path = tmp.name
-            
-            from image_analyzer_for_prompt import ImageAnalyzer
-            analyzer = ImageAnalyzer()
-            result = analyzer.generate_full_prompt(tmp_path, nsfw_level='explicit')
-            
+
+            generated_prompt = ""
+
+            # 1. Intentar con Moondream 2 (IA Visual profunda)
+            try:
+                from moondream_analyzer import analyze_image_with_moondream
+                print("[ANALIZADOR] 🌙 Usando Moondream 2 para análisis visual...")
+                res_moon = analyze_image_with_moondream(tmp_path)
+                if res_moon and 'positive' in res_moon:
+                    generated_prompt = res_moon['positive']
+                    print("[ANALIZADOR] ✅ Moondream completado")
+            except Exception as e:
+                print(f"[ANALIZADOR] ⚠️ Moondream no disponible o falló: {e}")
+
+            # 2. Si Moondream falló o no dio resultado, usar ImageAnalyzer clásico
+            if not generated_prompt:
+                from image_analyzer_for_prompt import ImageAnalyzer
+                analyzer = ImageAnalyzer()
+                result = analyzer.generate_full_prompt(tmp_path, nsfw_level='explicit')
+                generated_prompt = result['positive']
+
+                num_people = result['analysis'].get('num_people', 0)
+                if num_people > 0:
+                    print(f"[ANALIZADOR] Detectadas {num_people} personas")
+
             try:
                 os.unlink(tmp_path)
             except:
                 pass
-            
-            generated_prompt = result['positive']
-            
-            num_people = result['analysis'].get('num_people', 0)
-            if num_people > 0:
-                print(f"[ANALIZADOR] Detectadas {num_people} personas")
-                for i, face in enumerate(result['analysis']['faces']):
-                    g = face.get('gender', 'desconocido')
-                    a = face.get('age', '?')
-                    print(f"  - Persona {i+1}: {g}, {a} años")
-            
+
             return generated_prompt
-            
+
         except Exception as e:
             import traceback
             traceback.print_exc()
             return f"ERROR: {str(e)}"
-    
     btn_analyze.click(
         fn=analyze_image_click,
         inputs=[input_img],
