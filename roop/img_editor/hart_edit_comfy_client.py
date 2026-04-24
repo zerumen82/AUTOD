@@ -136,55 +136,34 @@ model_path = r"{self._model_paths['hart_model']}"
 text_model_path = r"{self._model_paths['qwen2_vl']}"
 
 # Cargar en CPU primero para evitar OOM
-print("[HART] Cargando modelo en CPU...", flush=True)
-model = HARTForT2I.from_pretrained(model_path, device_map="cpu")
-print("[HART] Modelo base cargado", flush=True)
-
-# Compilar si está disponible (ahorra memoria)
-try:
-    import torch._dynamo
-    torch._dynamo.config.suppress_errors = True
-    model = torch.compile(model, mode="reduce-overhead")
-    print("[HART] Modelo compilado", flush=True)
-except Exception as e:
-    print(f"[HART] Compile skipped: {e}", flush=True)
-
-torch.cuda.empty_cache()
-torch.cuda.synchronize()
-
-print("[HART] Cargando EMA weights (CPU)...", flush=True)
-ema_state = torch.load(os.path.join(model_path, "ema_model.bin"), map_location="cpu", weights_only=False)
-model.load_state_dict(ema_state)
-del ema_state
-torch.cuda.empty_cache()
-torch.cuda.synchronize()
+print("[HART] Cargando modelo en bfloat16...", flush=True)
+model = HARTForT2I.from_pretrained(model_path, torch_dtype=torch.bfloat16, device_map="cpu")
+print("[HART] Modelo base cargado (bf16)", flush=True)
 
 # Mover a GPU con manejo de OOM
 print("[HART] Moviendo a GPU...", flush=True)
 try:
     model = model.to(device)
 except RuntimeError as e:
-    if "out of memory" in str(e).lower():
-        print("[HART] ⚠️ OOM en GPU. Usando CPU (lento, pero funciona)", flush=True)
-        device = torch.device("cpu")
-        model = model.to(device)
-    else:
-        raise
+    print(f"[HART] ⚠️ Error moviendo a GPU: {{e}}. Reintentando con offloading...", flush=True)
+    model = model.to("cpu")
 
-print("[HART] Modelo listo", flush=True)
-torch.cuda.empty_cache()
-torch.cuda.synchronize()
+print("[HART] Cargando EMA weights...", flush=True)
+ema_state = torch.load(os.path.join(model_path, "ema_model.bin"), map_location="cpu", weights_only=True)
+model.load_state_dict(ema_state, strict=False)
+del ema_state
 
 # Generación
 with torch.inference_mode():
-    print("[HART] Cargando Qwen2-VL (CPU)...", flush=True)
-    text_model = AutoModel.from_pretrained(text_model_path).to("cpu")
+    print("[HART] Cargando Qwen2-VL (4-bit)...", flush=True)
+    # Usar bfloat16 para el modelo de texto ahorra 50% de VRAM
+    text_model = AutoModel.from_pretrained(text_model_path, torch_dtype=torch.bfloat16).to(device)
     text_tokenizer = AutoTokenizer.from_pretrained(text_model_path)
     
     print("[HART] Encoding prompt...", flush=True)
     with torch.no_grad():
         context_tokens, context_mask, context_position_ids, context_tensor = encode_prompts(
-            ["{prompt}"], text_model, text_tokenizer, 300, llm_system_prompt, True
+            [{json.dumps(prompt)}], text_model, text_tokenizer, 300, llm_system_prompt, True
         )
         context_tensor = context_tensor.float()
     

@@ -55,7 +55,7 @@ def detect_mouth_open(target_face: Face, landmarks_106=None, target_image=None) 
                 print(f"[MOUTH_DETECT] MediaPipe falló: {e}, usando fallback")
         
         # FALLBACK: landmarks de 106 puntos
-        mouth_open_threshold = 0.12  # Umbral reducido para mejor detección
+        mouth_open_threshold = 0.08  # Umbral bajado de 0.12 a 0.08 para detectar bocas entreabiertas
 
         if landmarks_106 is not None and len(landmarks_106) >= 106:
             # Landmarks de boca en insightface 106:
@@ -169,15 +169,15 @@ def create_mouth_preservation_mask(target_img: np.ndarray, mouth_region: dict,
 
         # OPTIMIZADO: Región más amplia para cubrir mejor la boca abierta
         # Más ancha que alta para cubrir toda la boca + zona alrededor
-        radius_x = int(mouth_width * 1.0) if mouth_width else 30  # 100% del ancho para mejor cobertura
-        radius_y = int(mouth_height * 2.0) if mouth_height else 25  # 200% del alto para boca abierta
+        radius_x = int(mouth_width * 1.1) if mouth_width else 35  # 110% del ancho para mejor cobertura
+        radius_y = int(mouth_height * 2.5) if mouth_height else 30  # 250% del alto para boca abierta (hablando/comiendo)
 
         # Crear máscara elíptica suave para la boca
         mouth_mask = np.zeros((h, w), dtype=np.float32)
         cv2.ellipse(mouth_mask, (cx, cy), (radius_x, radius_y), 0, 0, 360, 1.0, -1)
 
-        # Aplicar blur para transición suave
-        blur_size = int(max(7, min(radius_x, radius_y) // 2) | 1)  # Blur más suave
+        # Aplicar blur mucho más suave para evitar cortes bruscos
+        blur_size = int(max(15, min(radius_x, radius_y)) | 1)  # Blur aumentado para suavidad extrema
         mouth_mask = cv2.GaussianBlur(mouth_mask, (blur_size, blur_size), 0)
         
         # NORMALIZAR después del blur para evitar valores > 1
@@ -247,7 +247,7 @@ class FaceSwap:
                         traceback.print_exc()
 
     def Run(self, source_face: Face, target_face: Face, temp_frame: Frame, paste_back: bool = True) -> Any:
-        """Ejecuta inswapper con soporte completo para keypoints"""
+        """Ejecuta inswapper con soporte para oclusiones y detección de confianza"""
         if self.model is None:
             raise Exception("FaceSwap not initialized")
 
@@ -263,6 +263,15 @@ class FaceSwap:
             if not hasattr(target_face, 'kps') or target_face.kps is None:
                 return None
 
+            # DETECCIÓN DE OCLUSIONES: Si la confianza de detección es baja, suavizamos el swap
+            # target_face.det_score suele estar entre 0.0 y 1.0
+            det_score = getattr(target_face, 'det_score', 1.0)
+            if det_score < 0.45:
+                print(f"[OCCLUSION] Baja confianza detectada ({det_score:.2f}). Cara posiblemente ocluida.")
+                # Forzar un blend_ratio menor para que no parezca pegado encima de la mano/pelo
+                original_blend = getattr(roop.globals, 'blend_ratio', 0.95)
+                roop.globals.blend_ratio = max(0.4, original_blend * 0.7)
+            
             if not isinstance(target_face.kps, np.ndarray):
                 target_face.kps = np.array(target_face.kps, dtype=np.float32)
             if target_face.kps.shape != (5, 2):
@@ -270,6 +279,10 @@ class FaceSwap:
 
             # Ejecutar el swap
             res = self.model.get(temp_frame, target_face, source_face, paste_back=True)
+
+            # Restaurar blend_ratio si se cambió por oclusión
+            if det_score < 0.45:
+                roop.globals.blend_ratio = original_blend
 
             if res is None:
                 return None
@@ -383,8 +396,9 @@ class FaceSwap:
                         # ============================================
                         if mouth_open and mouth_region is not None:
                             # Crear máscara de preservación de boca
+                            # 0.75 = 75% boca original, 25% swap (ideal para hablar)
                             mouth_preserve_mask = create_mouth_preservation_mask(
-                                target_img, mouth_region, blend_ratio=0.8
+                                target_img, mouth_region, blend_ratio=0.75
                             )
                             # Reducir el blending en la zona de la boca
                             mask = mask * mouth_preserve_mask
@@ -422,8 +436,8 @@ class FaceSwap:
                 swapped_face_avg = np.average(warped_face_float, weights=mask_3ch[:, :, 0], axis=(0, 1))
                 
                 color_diff = original_face_avg - swapped_face_avg
-                # Reducido de 0.7 a 0.25 para preservar mejor la identidad de la cara origen
-                result += color_diff * final_alpha * 0.25
+                # Reducido a 0.20 para preservar mejor la identidad y color de la cara origen
+                result += color_diff * final_alpha * 0.20
             
             return np.clip(result, 0, 255).astype(np.uint8)
 

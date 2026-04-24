@@ -23,6 +23,27 @@ except ImportError:
     HAS_ANALYZER = False
     print("[WARN] No se pudo importar image_analyzer_for_prompt")
 
+
+def create_maskable_image_input():
+    """
+    Compatibilidad simple - Si falla el modo dibujo, devuelve imagen normal
+    """
+    common_kwargs = {
+        "label": "Imagen Original",
+        "height": 450,
+        "type": "pil"
+    }
+    
+    # Intentar con ImageEditor (Gradio 5+) o Image con brush (Gradio 4.x)
+    try:
+        if hasattr(gr, "ImageEditor"):
+            return gr.ImageEditor(**common_kwargs)
+    except:
+        pass
+    
+    # Fallback a Image normal
+    return gr.Image(**common_kwargs)
+
 def get_metrics_html(percent, variation, time_remaining, status):
     progress_color = "#3b82f6" if status not in ["Error", "Completado"] else ("#10b981" if status == "Completado" else "#ef4444")
     bar_color = "linear-gradient(90deg, #3b82f6, #10b981)" if status != "Error" else "linear-gradient(90deg, #ef4444, #f59e0b)"
@@ -39,26 +60,43 @@ def get_metrics_html(percent, variation, time_remaining, status):
     </div>
     """
 
-def on_generate(img, p_text, creativity, preserve, steps, num_var, f_preserve, a_enhance, res_label, c_ref, use_c_ref, b_mode, b_files, engine_val):
+def on_generate(img_data, p_text, creativity, preserve, steps, num_var, f_preserve, a_enhance, res_label, c_ref, use_c_ref, b_mode, b_files, engine_val, m_mode, m_prompt):
+    # m_mode: "Global", "Manual 🖌️", "IA Inteligente 🤖"
+    # img_data en Gradio 4.x/5.x con tool='sketch' es un dict
+    
+    img = None
+    manual_mask = None
+    
+    if img_data is None:
+        yield [], "Error: No hay imagen", get_metrics_html(0, "0/0", "0s", "Error")
+        return
+
+    if isinstance(img_data, dict):
+        # Gradio 4.x/5.x format
+        img = img_data.get("background")
+        if m_mode == "manual" and "layers" in img_data and img_data["layers"]:
+            # La máscara suele estar en la primera capa
+            manual_mask = img_data["layers"][0]
+    else:
+        img = img_data
+
+    # Fallback si por algún motivo img sigue siendo None tras el dict
+    if img is None:
+        yield [], "Error: Formato de imagen inválido", get_metrics_html(0, "0/0", "0s", "Error")
+        return
+
     if b_mode:
         if not b_files: yield [], "Error: Sube imagenes", get_metrics_html(0, "0/0", "0s", "Error"); return
         work_images = [Image.open(f.name) for f in b_files]
     else:
-        if not img: yield [], "Error: Sube una imagen", get_metrics_html(0, "0/0", "0s", "Error"); return
         work_images = [img]
 
     manager = get_img_editor_manager()
     yield [], "Preparando...", get_metrics_html(0, "0/0", "0s", "Inicializando")
-
-    # Convertir sliders a parámetros de generación
-    # creativity: 0-1 -> guidance_scale: 1.5-3.5 (rango óptimo para FLUX)
+    
     guidance = 1.5 + (creativity * 2.0)
-    # preserve: 0-1 -> denoise: invertido (mas preserv = MENOS denoise, para mantener original)
-    # preserve=1 (max) -> denoise=0.3 (muy conservador)
-    # preserve=0 (min)  -> denoise=0.95 (muy creativo)
     denoise = 0.95 - (preserve * 0.65)
-    denoise = max(0.2, min(0.95, denoise))  # clamp entre 0.2-0.95
-    # steps: slider ya es el valor directo
+    denoise = max(0.2, min(0.95, denoise))
     
     ref_meta = {
         "character_ref": c_ref if use_c_ref else None,
@@ -70,38 +108,55 @@ def on_generate(img, p_text, creativity, preserve, steps, num_var, f_preserve, a
     results = []
     total_ops = len(work_images) * int(num_var)
     op_idx = 0
-    start_t = time.time()
 
     for img_idx, current_img in enumerate(work_images):
         for var_idx in range(int(num_var)):
             pct = (op_idx / total_ops) * 100
-            yield results, f"Procesando...", get_metrics_html(pct, f"{op_idx+1}/{total_ops}", "...", f"Pasos: {steps}")
+            yield results, f"Procesando...", get_metrics_html(pct, f"{op_idx+1}/{total_ops}", "...", f"Engine: {engine_val}")
 
             res_img, msg = manager.generate_intelligent(
                 image=current_img, prompt=p_text, num_inference_steps=steps,
                 face_preserve=f_preserve, auto_enhance=a_enhance, ref_metadata=ref_meta, 
-                engine=engine_val
+                engine=engine_val,
+                mask_image=manual_mask,
+                mask_mode=m_mode,
+                mask_prompt=m_prompt
             )
 
             if res_img: 
                 results.append(res_img)
                 op_idx += 1
-                yield results, "Generando...", get_metrics_html((op_idx/total_ops)*100, f"{op_idx}/{total_ops}", "...", "OK")
+                yield results, "OK", get_metrics_html((op_idx/total_ops)*100, f"{op_idx}/{total_ops}", "...", "Listo")
             else:
                 op_idx += 1
-                yield results, f"Error: {msg}", get_metrics_html((op_idx/total_ops)*100, f"{op_idx}/{total_ops}", "...", "Fallo")
+                yield results, f"Fallo: {msg}", get_metrics_html((op_idx/total_ops)*100, f"{op_idx}/{total_ops}", "...", "Error")
 
-    yield results, f"Completado", get_metrics_html(100, f"{len(results)}/{total_ops}", "...", "Listo")
+    yield results, f"Completado", get_metrics_html(100, f"{len(results)}/{total_ops}", "...", "Completado")
 
 def create_img_editor_tab():
     with gr.Row():
-        with gr.Column(scale=1):
-            input_img = gr.Image(label="Imagen Original", type="pil", height=300)
+        with gr.Column(scale=1.1):
+            # CANVAS DE INPAINTING PRO
+            input_img = create_maskable_image_input()
+            
+            with gr.Row(variant="compact"):
+                mask_mode = gr.Radio(
+                    choices=[("Todo", "global"), ("Pintar 🖌️", "manual"), ("IA (CLIPSeg) 🤖", "smart")],
+                    value="global",
+                    label="🎯 ¿Qué modificar?"
+                )
+                btn_preview_mask = gr.Button("👁️ Ver Máscara", visible=False, scale=1)
+                mask_prompt = gr.Textbox(
+                    label="IA: ¿Qué objeto?", 
+                    placeholder="ej: camisa, gafas, fondo...",
+                    visible=False,
+                    scale=2
+                )
             
             # Prompt row con botón de análisis
             with gr.Row():
-                prompt = gr.Textbox(label="¿Qué quieres cambiar?", placeholder="Ej: cámbiale la ropa por un vestido rojo...", lines=3, scale=4)
-                btn_analyze = gr.Button("🔍 Analizar Imagen", scale=1, variant="secondary")
+                prompt = gr.Textbox(label="Instrucción de Edición", placeholder="Ej: cámbiale la ropa por un vestido rojo...", lines=3, scale=4)
+                btn_analyze = gr.Button("🔍 Sugerir Prompt", scale=1)
             
             # Negative prompt (opcional, se puede expandir)
             negative_prompt = gr.Textbox(
@@ -114,14 +169,16 @@ def create_img_editor_tab():
             with gr.Row():
                 engine = gr.Dropdown(
                     choices=[
-                        ("FLUX.2-klein (4B)", "flux_klein"),
-                        ("FLUX.1-schnell (NF4, 4 pasos)", "flux_schnell"),
-                        ("HART (Autoregresivo, 512px)", "hart"),
-                        ("OmniGen2 (2B, 6GB)", "omnigen2")
+                        ("FLUX.2-klein (Editor, 4B)", "flux_klein"),
+                        ("FLUX.1-schnell (Editor, 4 pasos)", "flux_schnell"),
+                        ("HART (Generador puro, 512px)", "hart"),
+                        ("OmniGen2 (Editor, 2B, 6GB)", "omnigen2")
                     ],
                     value="flux_klein", label="Motor IA"
                 )
                 res = gr.Radio(["512p", "720p", "1024p"], value="1024p", label="Resolución")
+            
+            params_info = gr.HTML(value="<small style='color:#6b7280;'>Editores: usa Preservar/Creatividad | Generador: usa solo Guidance</small>")
             with gr.Row():
                 # Slider creativo: 0 = conservador, 1 = muy creativo
                 creativity = gr.Slider(
@@ -147,16 +204,6 @@ def create_img_editor_tab():
             with gr.Row():
                 f_preserve = gr.Checkbox(label="Restaurar Cara", value=True)
                 a_enhance = gr.Checkbox(label="Mejorar Prompt", value=True)
-
-            # Botones de configuración rápida
-            gr.Markdown("### 🎛️ Presets")
-            with gr.Row():
-                preset_eq = gr.Button("🎯 Equilibrado", variant="secondary", size="sm")
-                preset_nsfw = gr.Button("🔞 NSFW (desnudar)", variant="primary", size="sm")
-                preset_grupal = gr.Button("👥 Grupal (4+ personas)", variant="secondary", size="sm")
-                # Equilibrado: Preservar=0.5, Creatividad=0.5, Pasos=12
-                # NSFW: Preservar=0.15, Creatividad=0.85, Pasos=10
-                # Grupal: Preservar=0.1, Creatividad=0.9, Pasos=12 (más agresivo)
 
             # Guía completa en accordion (plegada por defecto para no saturar)
             with gr.Accordion("📖 Guía de uso (sliders, ejemplos, consejos)", open=False):
@@ -184,7 +231,7 @@ def create_img_editor_tab():
 
 ### ⚙️ Motores
 - **FLUX.2-klein (4B) + LoRA NSFW**: ✅ Edita sin censura. Calidad alta. 8-12 pasos → 10-20 min. **Recomendado para NSFW**.
-- **HART**: Generación pura (no edita). Sin censura pero crea imagen nueva (no mantiene pose/fondo).
+- **HART (Generador puro)**: ⚠️ NO edita. Generación autoregresiva, no edición. Genera imagen NUEVA inspirada en el prompt (512px).
 - **OmniGen2**: Rápido (~1-2 min), calidad moderada. Tiene safe filters.
 
 ### 🔄 Restaurar Cara (Face Preserve)
@@ -223,13 +270,19 @@ def create_img_editor_tab():
             status = gr.Textbox(label="Estado", interactive=False)
 
         with gr.Column(scale=1.5):
-            gallery = gr.Gallery(label="Resultados", columns=2, height=800, preview=True)
+            gallery = gr.Gallery(label="Resultados", columns=2, height=600, preview=True)
+            
+            # COMPARADOR VISUAL (Cortina)
+            with gr.Accordion("🌓 Comparar Antes/Después", open=False):
+                with gr.Row():
+                    compare_slider = gr.Slider(minimum=0, maximum=100, value=50, label="Desliza para comparar", info="Izquierda: Original | Derecha: Editada")
+                preview_compare = gr.Image(label="Vista de Comparación", interactive=False)
+
             with gr.Row():
                 gr.Button("[OPEN] Abrir Carpeta").click(lambda: os.startfile(os.path.abspath("output/img_editor")))
                 
                 def use_as_input(gallery_data):
                     if gallery_data and len(gallery_data) > 0:
-                        # Gradio gallery data puede ser una lista de dicts o tuplas
                         item = gallery_data[0]
                         if isinstance(item, dict): return item['name']
                         if isinstance(item, (list, tuple)): return item[0]
@@ -241,67 +294,129 @@ def create_img_editor_tab():
                     outputs=[input_img]
                 )
 
+    # --- EVENTOS DE MÁSCARA ---
+    def on_mask_mode_change(mode):
+        is_smart = (mode == "smart")
+        return gr.update(visible=is_smart), gr.update(visible=is_smart)
+
+    mask_mode.change(
+        fn=on_mask_mode_change, 
+        inputs=[mask_mode], 
+        outputs=[mask_prompt, btn_preview_mask]
+    )
+
+    def preview_mask_click(img_data, m_prompt, m_mode):
+        img = None
+        manual_mask = None
+        
+        if isinstance(img_data, dict):
+            img = img_data.get("background")
+            manual_mask = img_data.get("layers")[0] if img_data.get("layers") else None
+        else:
+            img = img_data
+
+        if not img: return None, "Sube una imagen primero"
+        
+        manager = get_img_editor_manager()
+        res_mask, msg = manager.preview_smart_mask(
+            image=img, 
+            mask_prompt=m_prompt, 
+            mask_image=manual_mask, 
+            mask_mode=m_mode
+        )
+        return res_mask, msg
+
+    btn_preview_mask.click(
+        fn=preview_mask_click,
+        inputs=[input_img, mask_prompt, mask_mode],
+        outputs=[preview_compare, status]
+    )
+
+    # --- GENERACIÓN ---
     gen_btn.click(
         on_generate,
-        [input_img, prompt, creativity, preserve, steps, num_var, f_preserve, a_enhance, res, char_ref_img, use_char_ref, batch_mode, batch_files, engine],
+        [input_img, prompt, creativity, preserve, steps, num_var, f_preserve, a_enhance, res, char_ref_img, use_char_ref, batch_mode, batch_files, engine, mask_mode, mask_prompt],
         [gallery, status, metrics]
     )
 
-    # === FUNCIÓN DE PRESETS ===
-    def set_preset_eq():
-        """Configuración equilibrada para uso general"""
-        return 0.5, 0.5, 12  # preserve, creativity, steps
+    # --- LÓGICA DE COMPARACIÓN ---
+    def update_comparison(original, results, split_pct):
+        if not original or not results or len(results) == 0:
+            return None
+        
+        # Obtener imágenes PIL
+        orig = original if not isinstance(original, dict) else original.get("background")
+        if not orig: return None
+        
+        gen = results[0] # Comparamos con el primer resultado
+        
+        # Asegurar mismo tamaño
+        if orig.size != gen.size:
+            gen = gen.resize(orig.size, Image.LANCZOS)
+        
+        # Crear imagen compuesta (cortina)
+        w, h = orig.size
+        split_x = int(w * (split_pct / 100))
+        
+        comp = Image.new("RGB", (w, h))
+        comp.paste(orig.crop((0, 0, split_x, h)), (0, 0))
+        comp.paste(gen.crop((split_x, 0, w, h)), (split_x, 0))
+        
+        # Añadir línea separadora
+        import PIL.ImageDraw as ImageDraw
+        draw = PIL.ImageDraw.Draw(comp)
+        draw.line([(split_x, 0), (split_x, h)], fill="white", width=4)
+        
+        return comp
 
-    def set_preset_nsfw():
-        """Configuración agresiva para desnudar (NSFW)"""
-        return 0.15, 0.85, 10  # preserve, creativity, steps
+    compare_slider.change(
+        fn=update_comparison,
+        inputs=[input_img, gallery, compare_slider],
+        outputs=[preview_compare]
+    )
 
-    def set_preset_grupal():
-        """Configuración para fotos grupales (4+ personas)"""
-        return 0.1, 0.9, 12  # preserve, creativity, steps (más agresivo)
+    def on_engine_change(engine_val):
+        if engine_val == "hart":
+            return gr.update(visible=False), gr.update(value=0.5, label="Guidance", info="0=Consistente, 1=Más creativo")
+        else:
+            return gr.update(visible=True), gr.update(value=0.7, label="Preservar original", info="0=Todo nuevo, 1=Igual al original")
 
-    # === FUNCIÓN DE ANÁLISIS DE IMAGEN PARA PROMPT ===
+    engine.change(fn=on_engine_change, inputs=[engine], outputs=[preserve, creativity])
+
+# === FUNCIÓN DE ANÁLISIS DE IMAGEN PARA PROMPT ===
     def analyze_image_click(img):
-        """
-        Callback para el botón 'Analizar Imagen'.
-        Toma la imagen actual y genera un prompt descriptivo NATURAL y completo.
-        
-        Args:
-            img: PIL Image o None
-        
-        Returns:
-            str: Prompt generado (positivo) o mensaje de error
-        """
         if img is None:
             return "ERROR: No hay imagen cargada. Sube una imagen primero."
         
         if not HAS_ANALYZER:
-            return "ERROR: Módulo de análisis no disponible. Ejecuta: pip install insightface opencv-python numpy"
+            return "ERROR: Módulo de análisis no disponible."
+        
+        # Handle Gradio 4.x/5.x ImageEditor dict format
+        if isinstance(img, dict):
+            img = img.get("background")
+        
+        if img is None:
+            return "ERROR: No se pudo extraer la imagen."
         
         try:
-            # Guardar imagen temporal para análisis
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
                 img.save(tmp.name)
                 tmp_path = tmp.name
             
-            # Analizar con generador inteligente
             from image_analyzer_for_prompt import ImageAnalyzer
             analyzer = ImageAnalyzer()
             result = analyzer.generate_full_prompt(tmp_path, nsfw_level='explicit')
             
-            # Limpiar temp
             try:
                 os.unlink(tmp_path)
             except:
                 pass
             
-            # Devolver prompt NATURAL generado
             generated_prompt = result['positive']
             
-            # Añadir información de personas detectadas
             num_people = result['analysis'].get('num_people', 0)
             if num_people > 0:
-                print(f"[ANALIZADOR] Detectadas {num_people} personas en la imagen")
+                print(f"[ANALIZADOR] Detectadas {num_people} personas")
                 for i, face in enumerate(result['analysis']['faces']):
                     g = face.get('gender', 'desconocido')
                     a = face.get('age', '?')
@@ -314,12 +429,6 @@ def create_img_editor_tab():
             traceback.print_exc()
             return f"ERROR: {str(e)}"
     
-    # Conectar botones
-    preset_eq.click(fn=set_preset_eq, inputs=None, outputs=[preserve, creativity, steps])
-    preset_nsfw.click(fn=set_preset_nsfw, inputs=None, outputs=[preserve, creativity, steps])
-    preset_grupal.click(fn=set_preset_grupal, inputs=None, outputs=[preserve, creativity, steps])
-    
-    # Conectar botón de análisis de imagen
     btn_analyze.click(
         fn=analyze_image_click,
         inputs=[input_img],

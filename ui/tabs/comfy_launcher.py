@@ -295,10 +295,8 @@ def start(
         # Usar el Python del venv de ComfyUI
         python_exe = COMFYUI_PYTHON if os.path.exists(COMFYUI_PYTHON) else sys.executable
         
-        # ComfyUI espera argumentos: python main.py --port 8189
-        # --lowvram habilita CPU offloading secuencial para GPUs con VRAM limitada
-        # Sin --cpu para usar GPU con PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync
-        cmd = [python_exe, "-u", exe, "--port", str(port), "--lowvram"]
+        # Usar --normalvram para mejor velocidad. GGUF ya optimiza la memoria.
+        cmd = [python_exe, "-u", exe, "--port", str(port), "--normalvram"]
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
         print(f"[ComfyLauncher] Directorio: {COMFYUI_DIR}")
         print(f"[ComfyLauncher] Python: {python_exe}")

@@ -57,7 +57,7 @@ class ImgEditorManager:
         self.client = None
         self.face_swapper = None
         self.face_analyzer = None
-        self.flux_edit_client = None # FLUX Image Edit fp8
+        self.flux_client = None # FLUX Image Edit fp8
         self.qwen_edit_client = None # Qwen Image Edit fp8
         self.zimage_edit_client = None # Z-Image Turbo GGUF
         self.hart_edit_client = None # HART (Hybrid Autoregressive Transformer)
@@ -737,6 +737,8 @@ class ImgEditorManager:
             
             # Detectar caras en imagen original
             original_rgb = np.array(original)
+            if original_rgb.ndim == 3 and original_rgb.shape[2] == 4:
+                original_rgb = cv2.cvtColor(original_rgb, cv2.COLOR_RGBA2RGB)
             faces_original = self.face_analyzer.get(original_rgb)
             print(f"[ImgEditor] 🔍 Caras detectadas en original: {len(faces_original)}")
             for i, face in enumerate(faces_original):
@@ -750,6 +752,8 @@ class ImgEditorManager:
             # Convertir generada a BGR para face swapper
             generated_cv = cv2.cvtColor(np.array(generated), cv2.COLOR_RGB2BGR)
             generated_rgb = np.array(generated)
+            if generated_rgb.ndim == 3 and generated_rgb.shape[2] == 4:
+                generated_rgb = cv2.cvtColor(generated_rgb, cv2.COLOR_RGBA2RGB)
             faces_generated = self.face_analyzer.get(generated_rgb)
             
             print(f"[ImgEditor] 🔍 Caras detectadas en generada: {len(faces_generated)}")
@@ -844,16 +848,16 @@ class ImgEditorManager:
         use_rewriter: bool = True,
         ref_metadata: dict = None,
         engine: str = "sd",
-        qwen_version: str = "q3",  # q3 = Q3_K_M, q2 = Q2_K
-        zimage_version: str = "q4",  # q4 = Q4_K_M, q5 = Q5_K_M
-        progress_callback=None  # AÑADIR CALLBACK
+        qwen_version: str = "q3",
+        zimage_version: str = "q4",
+        progress_callback=None,
+        mask_image: Optional[Image.Image] = None,  # NUEVO
+        mask_mode: str = "global",               # NUEVO
+        mask_prompt: str = ""                    # NUEVO
     ) -> Tuple[Optional[Image.Image], str]:
         """
         Generación de imágenes con ComfyUI inpainting u otros motores:
-        1. Mejora prompt
-        2. Crea máscara con gradiente
-        3. Genera con ComfyUI / VAR / Flux
-        4. Face swap (opcional)
+        Soporta modos Global, Manual (Paint) y Smart (CLIPSeg).
         """
         # Preparar imagen original para face preserve
         if isinstance(image, Image.Image):
@@ -865,6 +869,20 @@ class ImgEditorManager:
         else:
             original_image = None
 
+        # --- LÓGICA DE MÁSCARA ---
+        working_mask = None
+        if mask_mode == "manual" and mask_image:
+            print("[ImgEditor] 🖌️ Usando máscara manual pintada por el usuario")
+            working_mask = mask_image
+        elif mask_mode == "smart" and mask_prompt:
+            print(f"[ImgEditor] 🤖 Generando máscara inteligente para: '{mask_prompt}'")
+            try:
+                segmenter = get_clothing_segmenter()
+                mask_pil, _ = segmenter.segment_with_prompt(original_image, [mask_prompt])
+                working_mask = mask_pil
+            except Exception as e:
+                print(f"[ImgEditor] ❌ Error en CLIPSeg: {e}")
+        
         # Sobrescribir parámetros desde ref_metadata (sliders UI)
         if ref_metadata:
             if 'guidance_scale' in ref_metadata:
@@ -873,29 +891,29 @@ class ImgEditorManager:
                 denoise = ref_metadata['denoise']
 
         # --- MOTOR FLUX IMAGE EDIT vía ComfyUI ---
-        if engine in ["flux", "flux_klein", "flux_schnell"]:
+        if engine in ["flux", "flux_klein", "flux_dev", "flux_schnell"]:
             print("[ImgEditor] === FLUX IMAGE EDIT ===", flush=True)
-            print(f"[ImgEditor] Prompt: {prompt[:100]}", flush=True)
             try:
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
-                print("[ImgEditor] Import OK", flush=True)
+                if self.flux_client is None:
+                    self.flux_client = get_flux_edit_comfy_client()
 
-                if self.flux_edit_client is None:
-                    self.flux_edit_client = get_flux_edit_comfy_client()
-                    print("[ImgEditor] FLUX Client creado", flush=True)
+                # Mapear engine
+                flux_version_map = {
+                    "flux": "flux2-klein-4b-Q4_K_S.gguf",
+                    "flux_klein": "flux2-klein-4b-Q4_K_S.gguf",
+                    "flux_dev": "flux1-dev-Q4_K.gguf",
+                    "flux_schnell": "flux1-schnell-Q4_K_S.gguf",
+                }
+                flux_version = flux_version_map.get(engine, "flux2-klein-4b-Q4_K_S.gguf")
 
-                # Determinar versión FLUX
-                flux_version = "flux_klein" if engine in ["flux", "flux_klein"] else "flux_schnell"
-                if flux_version == "flux_schnell":
-                    print("[WARN] FLUX.1-schnell usa GGUF T5 que es MUY LENTO (~20+ min). Se recomienda FLUX.2-klein.")
-
-                # Calcular resolución objetivo desde ref_metadata
+                # Calcular resolución objetivo
                 target_w, target_h = None, None
                 if ref_metadata and 'resolution_label' in ref_metadata:
                     resolution = ref_metadata['resolution_label']
                     try:
                         max_side = int(resolution.replace('p', ''))
-                        w, h = image.size
+                        w, h = original_image.size
                         if w >= h:
                             target_w = max_side
                             target_h = int(h * (max_side / w))
@@ -904,33 +922,20 @@ class ImgEditorManager:
                             target_w = int(w * (max_side / h))
                         target_w = (target_w // 16) * 16
                         target_h = (target_h // 16) * 16
-                        print(f"[ImgEditor] Resolución objetivo: {target_w}x{target_h} (original {w}x{h})")
-                    except:
-                        pass
+                    except: pass
 
-                # Determinar denoise desde ref_metadata (configurado por slider UI)
-                denoise = strength  # fallback
-                if ref_metadata:
-                    denoise = ref_metadata.get('denoise', denoise)
-                print(f"[ImgEditor] Denoise configurado: {denoise:.3f} (desde slider 'Preservar original')")
-
-                # Aplicar guidance_scale desde ref_metadata si existe
-                if ref_metadata:
-                    guidance_scale = ref_metadata.get('guidance_scale', guidance_scale)
-                print(f"[ImgEditor] Guidance configurado: {guidance_scale:.3f} (desde slider 'Creatividad')")
+                denoise = ref_metadata.get('denoise', strength) if ref_metadata else strength
+                guidance_scale = ref_metadata.get('guidance_scale', guidance_scale) if ref_metadata else guidance_scale
 
                 print("[ImgEditor] Cargando modelos FLUX...", flush=True)
-                success, msg = self.flux_edit_client.load(
+                success, msg = self.flux_client.load(
                     progress_callback=progress_callback, flux_version=flux_version
                 )
-                print(f"[ImgEditor] Load result: {success} - {msg}", flush=True)
-                if not success:
-                    print(f"[ImgEditor] ERROR cargando FLUX: {msg}", flush=True)
-                    return None, f"Error Motor FLUX: {msg}"
+                if not success: return None, f"Error Motor FLUX: {msg}"
 
-                print("[ImgEditor] Generando con FLUX...", flush=True)
-                result_obj, msg = self.flux_edit_client.generate(
-                    image=image,
+                print(f"[ImgEditor] Generando con FLUX (modo: {mask_mode})...", flush=True)
+                result_obj, msg = self.flux_client.generate(
+                    image=original_image,
                     prompt=prompt,
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
@@ -938,22 +943,25 @@ class ImgEditorManager:
                     denoise=denoise,
                     target_width=target_w,
                     target_height=target_h,
+                    mask_image=working_mask, # PASAR MÁSCARA
                     flux_version=flux_version
                 )
-                print(f"[ImgEditor] Generate result: {result_obj is not None} - {msg}", flush=True)
 
                 if result_obj and result_obj.image:
                     final_image = result_obj.image
                     
-                    # PASADA 2: Restaurar cara si se solicita
                     if face_preserve:
-                        print("[ImgEditor] PASADA 2 (FLUX): Restaurando cara original...")
+                        print("[ImgEditor] PASADA 2 (FLUX): Restaurando cara original (0.95 blend)...")
+                        try:
+                            import roop.globals as rg
+                            rg.blend_ratio = 0.95
+                            rg.distance_threshold = 0.35
+                        except: pass
                         final_image = self._restore_face(original_image, final_image)
                     
                     return final_image, f"FLUX Edit completada ({result_obj.time_taken:.1f}s)"
                 return None, f"Fallo en FLUX Edit: {msg}"
             except Exception as e:
-                print(f"[ImgEditor] ERROR en motor FLUX: {e}", flush=True)
                 import traceback
                 print(traceback.format_exc(), flush=True)
                 return None, f"Error Motor FLUX: {str(e)}"
@@ -996,7 +1004,13 @@ class ImgEditorManager:
                 if result_obj and result_obj.image:
                     final_image = result_obj.image
                     if face_preserve and original_image is not None:
-                        print("[ImgEditor] PASADA 2 (Qwen): Restaurando cara original...")
+                        print("[ImgEditor] PASADA 2 (Qwen): Restaurando cara original (0.95 blend)...")
+                        try:
+                            import roop.globals as rg
+                            rg.blend_ratio = 0.95
+                            rg.distance_threshold = 0.35
+                        except:
+                            pass
                         final_image = self._restore_face(original_image, final_image)
                     return final_image, f"✅ Qwen Edit ({qwen_version}) completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en Qwen Edit: {msg}"
@@ -1044,7 +1058,14 @@ class ImgEditorManager:
                 if result_obj and result_obj.image:
                     final_image = result_obj.image
                     if face_preserve and original_image is not None:
-                        print("[ImgEditor] PASADA 2 (Z-Image): Restaurando cara original...")
+                        print("[ImgEditor] PASADA 2 (Z-Image): Restaurando cara original (0.95 blend)...")
+                        try:
+                            import roop.globals as rg
+                            rg.blend_ratio = 0.95
+                            rg.distance_threshold = 0.35
+                        except:
+                            pass
+                        final_image = self._restore_face(original_image, final_image)
                         final_image = self._restore_face(original_image, final_image)
                     return final_image, f"✅ Z-Image ({zimage_version}) completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en Z-Image: {msg}"
@@ -1131,7 +1152,13 @@ class ImgEditorManager:
                 if result_obj and result_obj.image:
                     final_image = result_obj.image
                     if face_preserve and original_image is not None:
-                        print("[ImgEditor] PASADA 2 (HART): Restaurando cara original...")
+                        print("[ImgEditor] PASADA 2 (HART): Restaurando cara original (0.95 blend)...")
+                        try:
+                            import roop.globals as rg
+                            rg.blend_ratio = 0.95
+                            rg.distance_threshold = 0.35
+                        except:
+                            pass
                         final_image = self._restore_face(original_image, final_image)
                     return final_image, f"✅ HART completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en HART: {msg}"
@@ -1173,7 +1200,13 @@ class ImgEditorManager:
                 if result_obj and result_obj.image:
                     final_image = result_obj.image
                     if face_preserve and original_image is not None:
-                        print("[ImgEditor] PASADA 2 (ICEdit): Restaurando cara original...")
+                        print("[ImgEditor] PASADA 2 (ICEdit): Restaurando cara original (0.95 blend)...")
+                        try:
+                            import roop.globals as rg
+                            rg.blend_ratio = 0.95
+                            rg.distance_threshold = 0.35
+                        except:
+                            pass
                         final_image = self._restore_face(original_image, final_image)
                     return final_image, f"✅ ICEdit completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en ICEdit: {msg}"
@@ -1216,7 +1249,13 @@ class ImgEditorManager:
                 if result_obj and result_obj.image:
                     final_image = result_obj.image
                     if face_preserve and original_image is not None:
-                        print("[ImgEditor] PASADA 2 (OmniGen2): Restaurando cara original...")
+                        print("[ImgEditor] PASADA 2 (OmniGen2): Restaurando cara original (0.95 blend)...")
+                        try:
+                            import roop.globals as rg
+                            rg.blend_ratio = 0.95
+                            rg.distance_threshold = 0.35
+                        except:
+                            pass
                         final_image = self._restore_face(original_image, final_image)
                     return final_image, f"✅ OmniGen2 GGUF completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en OmniGen2: {msg}"
@@ -2371,12 +2410,12 @@ class ImgEditorManager:
         # PASADA 2: Restaurar cara original con MÁXIMA preservación
         final_image = generated_image
         if face_preserve and image is not None:
-            print("[ImgEditor] 👤 PASADA 2: Restaurando cara original (máxima preservación)...")
+            print("[ImgEditor] 👤 PASADA 2: Restaurando cara original (0.95 blend)...")
             # Ajustar parámetros para máxima preservación
             try:
                 import roop.globals as rg
-                rg.blend_ratio = 0.98  # 98% cara original
-                rg.distance_threshold = 0.3  # Más estricto
+                rg.blend_ratio = 0.95  # 95% cara original
+                rg.distance_threshold = 0.35  # Más estricto
             except:
                 print("[ImgEditor] ⚠️ No se pudo ajustar blend_ratio, usando valores por defecto")
             final_image = self._restore_face(image, generated_image)
@@ -3016,52 +3055,50 @@ class ImgEditorManager:
             }
         }
     
-    def preview_clothing_mask(
+    def preview_smart_mask(
         self,
         image: Image.Image,
+        mask_prompt: str = "",
+        mask_image: Optional[Image.Image] = None,
+        mask_mode: str = "smart",
         threshold: float = 0.5
     ) -> Tuple[Optional[Image.Image], str]:
         """
-        Genera una vista previa de la máscara de ropa detectada.
-        
-        Útil para verificar qué áreas se modificarán antes de generar.
-        
-        Returns:
-            Tuple de (imagen con máscara superpuesta, mensaje)
+        Genera una vista previa de la máscara (manual o inteligente).
         """
         try:
-            if not is_clipseg_available():
-                return None, "CLIPSeg no disponible. Instala: pip install transformers"
-            
             segmenter = get_clothing_segmenter()
-            success, msg = segmenter.load()
-            if not success:
-                return None, f"Error cargando CLIPSeg: {msg}"
-            
-            # Generar máscara
-            mask_image, mask_array = segmenter.segment_clothing(
-                image=image,
-                threshold=threshold,
-                combine_mode="max",
-                include_skin_exclusion=True
-            )
-            
-            # Crear visualización
+            working_mask = None
+            msg = "Máscara generada"
+
+            if mask_mode == "manual" and mask_image:
+                working_mask = mask_image
+                msg = "👁️ Vista previa de máscara pintada"
+            elif mask_mode == "smart" and mask_prompt:
+                success, l_msg = segmenter.load()
+                if not success: return None, f"Error CLIPSeg: {l_msg}"
+                
+                mask_pil, mask_array = segmenter.segment_with_prompt(image, [mask_prompt])
+                working_mask = mask_pil
+                msg = f"🤖 IA detectó '{mask_prompt}'"
+            else:
+                return None, "Selecciona modo Pintar o IA y proporciona entrada"
+
+            if working_mask is None:
+                return None, "No se pudo generar la máscara"
+
+            # Crear visualización superpuesta (rojo semitransparente)
             preview = segmenter.visualize_mask(
                 image=image,
-                mask=mask_image,
-                color=(255, 0, 0),  # Rojo
+                mask=working_mask,
+                color=(255, 0, 0),
                 alpha=0.5
             )
             
-            mask_pixels = mask_array.sum() / 255
-            total_pixels = mask_array.shape[0] * mask_array.shape[1]
-            coverage = mask_pixels / total_pixels * 100
-            
-            return preview, f"Ropa detectada: {coverage:.1f}% de la imagen"
+            return preview, msg
             
         except Exception as e:
-            return None, f"Error: {str(e)}"
+            return None, f"Error en previsualización: {str(e)}"
     
     def _check_models_available(self):
         """Verifica qué modelos están disponibles"""

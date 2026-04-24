@@ -5,7 +5,7 @@ FLUX Image Edit ComfyUI Client
 Usa FLUX fp8 para edición de imágenes con instrucciones en lenguaje natural
 """
 
-import os, sys, json, time, requests, io
+import os, sys, json, time, requests, io, shutil
 from typing import Optional, Tuple
 from PIL import Image
 from dataclasses import dataclass
@@ -28,25 +28,46 @@ class FluxEditComfyClient:
         except:
             return False
     
-    def get_model_paths(self) -> dict:
+    def get_model_paths(self, flux_version="flux2-klein-4b-Q4_K_S.gguf") -> dict:
         """Rutas para FLUX GGUF (optimizado para GPU 8GB)"""
         base = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+        
+        # Asegurar extensión .gguf
+        if not flux_version.endswith(".gguf"):
+            flux_version += ".gguf"
+
+        is_klein = ("klein" in flux_version.lower()) or ("flux2" in flux_version.lower())
+
+        if is_klein:
+            # FLUX.2/Klein usa CLIPLoader(type=flux2) con Qwen (no DualCLIP de FLUX.1)
+            qwen_clip = os.path.join(base, "text_encoders", "qwen_3_4b.safetensors")
+            if not os.path.exists(qwen_clip):
+                qwen_clip = os.path.join(base, "text_encoders", "qwen_3_4b_fp4_flux2.safetensors")
+            flux2_vae = os.path.join(base, "vae", "flux2_vae.safetensors")
+            if not os.path.exists(flux2_vae):
+                flux2_vae = os.path.join(base, "vae", "flux2-vae.safetensors")
+
+            return {
+                "flux": os.path.join(base, "diffusion_models", flux_version),
+                "clip_flux2": qwen_clip,
+                "vae": flux2_vae,
+            }
 
         return {
-            # FLUX UNet GGUF Q4_K (~3.5GB VRAM)
-            "flux": os.path.join(base, "diffusion_models", "flux1-dev-Q4_K.gguf"),
+            # FLUX UNet GGUF dinámico
+            "flux": os.path.join(base, "diffusion_models", flux_version),
 
-            # FLUX text encoders - usar versión GGUF para reducir VRAM
+            # FLUX.1 text encoders - usar versión GGUF para reducir VRAM
             "clip_l": os.path.join(base, "text_encoders", "clip_l.safetensors"),
-            "t5xxl": os.path.join(base, "text_encoders", "t5-v1_1-xxl-encoder-Q8_0.gguf"),
+            "t5xxl": os.path.join(base, "text_encoders", "t5-v1_1-xxl-encoder-Q4_K_S.gguf"),
 
             # VAE estándar
             "vae": os.path.join(base, "vae", "ae.safetensors"),
         }
     
-    def check_models(self) -> Tuple[bool, str]:
+    def check_models(self, flux_version="flux2-klein-4b-Q4_K_S.gguf") -> Tuple[bool, str]:
         """Verifica que los modelos existan"""
-        paths = self.get_model_paths()
+        paths = self.get_model_paths(flux_version)
         missing = []
         
         for name, path in paths.items():
@@ -55,19 +76,33 @@ class FluxEditComfyClient:
         
         if missing:
             return False, f"Modelos faltantes:\n" + "\n".join(missing)
+
+        # Fix de integridad para FLUX.1 (clip_l en carpeta clip)
+        if "clip_l" in paths:
+            try:
+                base = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+                clip_folder_file = os.path.join(base, "clip", "clip_l.safetensors")
+                text_encoder_file = paths["clip_l"]
+                if os.path.exists(clip_folder_file):
+                    if os.path.getsize(clip_folder_file) == 0 and os.path.getsize(text_encoder_file) > 0:
+                        shutil.copy2(text_encoder_file, clip_folder_file)
+                        print("[FluxEdit] Reparado models/clip/clip_l.safetensors (0 bytes -> archivo válido)", flush=True)
+            except Exception as e:
+                print(f"[FluxEdit] Warning reparando clip_l: {e}", flush=True)
         
         self._model_paths = paths
         return True, "Modelos OK"
     
-    def load(self, progress_callback=None) -> Tuple[bool, str]:
+    def load(self, progress_callback=None, flux_version="flux2-klein-4b-Q4_K_S.gguf", **kwargs) -> Tuple[bool, str]:
         """Carga los modelos y verifica disponibilidad"""
-        if self._loaded:
+        # Si ya está cargado un modelo diferente, forzar recarga de rutas
+        if self._loaded and self._model_paths.get("flux", "").endswith(flux_version):
             return True, "FLUX Image Edit listo"
         
         if not self.is_available():
             return False, "ComfyUI no disponible en 127.0.0.1:8188"
         
-        ok, msg = self.check_models()
+        ok, msg = self.check_models(flux_version)
         if not ok:
             return False, msg
         
@@ -81,131 +116,143 @@ class FluxEditComfyClient:
         num_inference_steps: int = 25,
         guidance_scale: float = 3.5,
         seed: int = None,
-        denoise: float = 0.75,  # Nuevo parámetro para controlar la intensidad de edición
+        denoise: float = 0.75,
+        mask_image: Optional[Image.Image] = None,  # NUEVO: Soporte para máscara
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
         
         if not self._loaded:
             return None, "No cargado - llama a load() primero"
 
-        # NOTA: FLUX Dev en RTX 3060 Ti (8GB) con lowvram:
-        # - Cada paso tarda ~2m45s debido al CPU offloading secuencial
-        # - 8 pasos = ~22 min, pero con buena calidad de edición
-        # - Para pruebas rápidas, usar 4-6 pasos (~11-16 min)
-        # - Para producción, considerar GPU con 12GB+ VRAM
-
         t0 = time.time()
         print(f"[FluxEdit] Generando ({num_inference_steps} pasos, denoise={denoise})...", flush=True)
-        print(f"[FluxEdit] [OK] Modelos GGUF optimizados para GPU 8GB", flush=True)
-            print(f"[FluxEdit] Tiempo estimado: ~{num_inference_steps * 2.75:.0f} min (modo lowvram)", flush=True)
+        if mask_image:
+            print("[FluxEdit] 🎭 Usando máscara para inpainting selectivo", flush=True)
         
         # Negative prompt por defecto
         negative_prompt = "low quality, worst quality, bad quality, jpeg artifacts, blurry, out of focus, poorly drawn, bad anatomy, deformed, disfigured, mutated, extra limbs"
         
-        # FLUX Schnell usa 8 pasos, Dev usa 25
-        # Para img2img con GPU de 8GB en lowvram, usar máximo 6 pasos (rápido) o 8 (calidad)
-        # 6 pasos = ~16 min, 8 pasos = ~22 min
         if num_inference_steps > 8:
-            num_inference_steps = 8  # Balance calidad/velocidad para lowvram
+            num_inference_steps = 8
         
         try:
-            # 1. Redimensionar imagen a múltiplos de 64 (requerido por VAE)
-            w, h = image.size
+            requested_w = kwargs.get("target_width")
+            requested_h = kwargs.get("target_height")
+            if requested_w and requested_h:
+                w, h = int(requested_w), int(requested_h)
+            else:
+                w, h = image.size
+
             new_w = (w // 64) * 64
             new_h = (h // 64) * 64
             if new_w < 64: new_w = 64
             if new_h < 64: new_h = 64
-            if new_w != w or new_h != h:
-                print(f"[FluxEdit] Redimensionando {w}x{h} → {new_w}x{new_h} (múltiplo de 64)", flush=True)
+            
+            if new_w != image.size[0] or new_h != image.size[1]:
                 image = image.resize((new_w, new_h), Image.LANCZOS)
+            
+            # Ajustar máscara al mismo tamaño si existe
+            if mask_image:
+                mask_image = mask_image.convert("L").resize((new_w, new_h), Image.NEAREST)
 
-            # 2. Upload imagen
+            # 2. Upload imagen y máscara
             iname = f"flux_input_{int(t0)}.png"
             buf = io.BytesIO()
             image.save(buf, "PNG")
             buf.seek(0)
             
-            r = requests.post(f"{COMFY}/upload/image", 
-                            files={"image": (iname, buf, "image/png")})
-            if r.status_code != 200:
-                raise Exception(f"Upload failed: {r.text}")
+            r = requests.post(f"{COMFY}/upload/image", files={"image": (iname, buf, "image/png")})
+            if r.status_code != 200: raise Exception(f"Upload failed: {r.text}")
+
+            mname = None
+            if mask_image:
+                mname = f"flux_mask_{int(t0)}.png"
+                mbuf = io.BytesIO()
+                mask_image.save(mbuf, "PNG")
+                mbuf.seek(0)
+                rm = requests.post(f"{COMFY}/upload/image", files={"image": (mname, mbuf, "image/png")})
+                if rm.status_code != 200: raise Exception(f"Mask Upload failed: {rm.text}")
             
             # Nombres de archivos
             flux_name = os.path.basename(self._model_paths["flux"])
-            clip_l_name = os.path.basename(self._model_paths["clip_l"])
-            t5_name = os.path.basename(self._model_paths["t5xxl"])
+            clip_l_name = os.path.basename(self._model_paths.get("clip_l", "")) if "clip_l" in self._model_paths else None
+            t5_name = os.path.basename(self._model_paths.get("t5xxl", "")) if "t5xxl" in self._model_paths else None
+            clip_flux2_name = os.path.basename(self._model_paths.get("clip_flux2", "")) if "clip_flux2" in self._model_paths else None
             vae_name = os.path.basename(self._model_paths["vae"])
             
-            print(f"[FluxEdit] Modelos: flux={flux_name}, clip_l={clip_l_name}, t5={t5_name}, vae={vae_name}", flush=True)
+            is_schnell = "schnell" in flux_name.lower()
+            is_klein = "klein" in flux_name.lower() or "flux2" in flux_name.lower()
+
+            actual_guidance = max(1.5, min(3.0, guidance_scale)) if is_klein else (1.0 if is_schnell else guidance_scale)
+            actual_steps = max(4, min(12, num_inference_steps))
+            actual_denoise = max(0.15, min(0.95, denoise))
+
+            # Construir Workflow Dinámico
+            workflow = {}
+            workflow["1"] = {"class_type": "LoadImage", "inputs": {"image": iname, "upload": "image"}}
+            workflow["2"] = {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": flux_name, "device": "default"}}
             
-            # FLUX GGUF workflow - nodos directos de ComfyUI-GGUF
-            workflow = {
-                # 1. Cargar imagen de entrada
-                "1": {
-                    "class_type": "LoadImage",
-                    "inputs": {"image": iname, "upload": "image"}
-                },
-                # 2. GGUF Unet Loader
-                "2": {
-                    "class_type": "UnetLoaderGGUF",
-                    "inputs": {"unet_name": flux_name, "device": "default"}
-                },
-                # 3. CLIPLoader para FLUX - usar nodos GGUF del custom node ComfyUI-GGUF
-                # DualCLIPLoaderGGUF carga clip_l + t5xxl ambos en formato GGUF/safetensors
-                "3": {
-                    "class_type": "DualCLIPLoaderGGUF",
-                    "inputs": {"clip_name1": clip_l_name, "clip_name2": t5_name, "type": "flux"}
-                },
-                # 4. Load VAE
-                "4": {
-                    "class_type": "VAELoader",
-                    "inputs": {"vae_name": vae_name}
-                },
-                # 5. VAEEncode para inpaint
-                "5": {
-                    "class_type": "VAEEncode",
-                    "inputs": {"pixels": ["1", 0], "vae": ["4", 0]}
-                },
-                # 6. CLIPTextEncode para positivo
-                "6": {
-                    "class_type": "CLIPTextEncode",
-                    "inputs": {"text": prompt, "clip": ["3", 0]}
-                },
-                # 7. CLIPTextEncode para negativo
-                "7": {
-                    "class_type": "CLIPTextEncode",
-                    "inputs": {"text": negative_prompt, "clip": ["3", 0]}
-                },
-                # 8. KSampler
-                "8": {
-                    "class_type": "KSampler",
+            if is_klein:
+                workflow["3"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": clip_flux2_name, "type": "flux2", "device": "default"}}
+            else:
+                workflow["3"] = {"class_type": "DualCLIPLoaderGGUF", "inputs": {"clip_name1": clip_l_name, "clip_name2": t5_name, "type": "flux"}}
+            
+            workflow["4"] = {"class_type": "VAELoader", "inputs": {"vae_name": vae_name}}
+            
+            if mname:
+                # MODO INPAINT: Usar VAE Encode for Inpaint
+                workflow["12"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
+                workflow["5"] = {
+                    "class_type": "VAEEncodeForInpaint",
                     "inputs": {
-                        "model": ["2", 0],
-                        "positive": ["6", 0],
-                        "negative": ["7", 0],
-                        "latent_image": ["5", 0],
-                        "seed": seed or int(t0) % 1000000,
-                        "steps": num_inference_steps,
-                        "cfg": guidance_scale,
-                        "sampler_name": "euler",
-                        "scheduler": "normal",
-                        "denoise": denoise  # img2img: 0.75 permite edición manteniendo estructura original
-                    }
-                },
-                # 9. VAEDecode (con --lowvram, ComfyUI hace tiled automático si OOM)
-                "9": {
-                    "class_type": "VAEDecode",
-                    "inputs": {"samples": ["8", 0], "vae": ["4", 0]}
-                },
-                # 10. SaveImage
-                "10": {
-                    "class_type": "SaveImage",
-                    "inputs": {
-                        "images": ["9", 0],
-                        "filename_prefix": "FluxEdit_output"
+                        "pixels": ["1", 0],
+                        "vae": ["4", 0],
+                        "mask": ["12", 0],
+                        "grow_mask_by": 6
                     }
                 }
+            else:
+                workflow["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["4", 0]}}
+
+            workflow["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}}
+            workflow["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["3", 0]}}
+            
+            sampling_model = ["2", 0]
+            if not is_klein:
+                workflow["11"] = {
+                    "class_type": "ModelSamplingFlux",
+                    "inputs": {
+                        "model": ["2", 0],
+                        "max_shift": 1.15, "base_shift": 0.5,
+                        "width": new_w // 8, "height": new_h // 8
+                    }
+                }
+                sampling_model = ["11", 0]
+
+            workflow["8"] = {
+                "class_type": "KSampler",
+                "inputs": {
+                    "model": sampling_model,
+                    "positive": ["6", 0],
+                    "negative": ["7", 0],
+                    "latent_image": ["5", 0],
+                    "seed": seed or int(t0) % 1000000,
+                    "steps": actual_steps,
+                    "cfg": actual_guidance,
+                    "sampler_name": "euler",
+                    "scheduler": "normal",
+                    "denoise": actual_denoise
+                }
             }
+            
+            workflow["9"] = {
+                "class_type": "VAEDecodeTiled",
+                "inputs": {
+                    "samples": ["8", 0], "vae": ["4", 0],
+                    "tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8
+                }
+            }
+            workflow["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FluxEdit_output"}}
             
             # Queue workflow
             r = requests.post(f"{COMFY}/prompt", json={"prompt": workflow})
@@ -216,8 +263,8 @@ class FluxEditComfyClient:
             print(f"[FluxEdit] Prompt queued: {pid}", flush=True)
             
             # Wait for completion
-            # FLUX en lowvram con 8 pasos = ~22 min, con margen = 45 min
-            max_wait = 2700  # 45 minutos
+            # FLUX en lowvram con 8 pasos = ~22 min, con margen amplio para VAE decode = 90 min
+            max_wait = 5400  # 90 minutos
             last_comfy_check = 0
             
             for i in range(max_wait):
@@ -243,8 +290,8 @@ class FluxEditComfyClient:
                         pass
                 
                 try:
-                    # Timeout largo: history puede tardar si ComfyUI está haciendo VAE decode
-                    r = requests.get(f"{COMFY}/history/{pid}", timeout=30)
+                    # Timeout MUY largo: history puede tardar mucho si ComfyUI está haciendo VAE decode pesado
+                    r = requests.get(f"{COMFY}/history/{pid}", timeout=300)
                 except requests.exceptions.ConnectionError:
                     raise Exception("Conexión con ComfyUI perdida durante el procesamiento")
                 except requests.exceptions.ReadTimeout:
@@ -285,7 +332,7 @@ class FluxEditComfyClient:
                                             f"OK ({elapsed:.1f}s)"
                                         )
             
-            raise Exception("Timeout (>10 min)")
+            raise Exception(f"Timeout total excedido ({max_wait/60:.0f} min)")
             
         except Exception as e:
             print(f"[FluxEdit] ERROR: {str(e)}", flush=True)
