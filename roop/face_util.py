@@ -216,7 +216,7 @@ def _initialize_face_analyser_sync():
 def get_face_analyser():
     """Funcion optimizada para obtener el analizador de caras"""
     global FACE_ANALYSER, FACE_ANALYSER_STATUS
-
+    
     if FACE_ANALYSER is not None:
         return FACE_ANALYSER
 
@@ -225,23 +225,18 @@ def get_face_analyser():
             return FACE_ANALYSER
 
         if FACE_ANALYSER_STATUS == "initializing":
-            print("FaceAnalysis ya esta inicializando, esperando...")
             start_time = time.time()
             while FACE_ANALYSER_STATUS == "initializing" and (time.time() - start_time) < INIT_TIMEOUT:
                 time.sleep(0.5)
 
             if FACE_ANALYSER_STATUS == "ready":
                 return FACE_ANALYSER
-            elif FACE_ANALYSER_STATUS == "failed":
-                return None
             else:
-                print("Timeout esperando inicializacion de FaceAnalysis")
-                FACE_ANALYSER_STATUS = "failed"
                 return None
 
         try:
             FACE_ANALYSER_STATUS = "initializing"
-            print("[INFO] Iniciando FaceAnalysis con timeout de 15 segundos...")
+            print("[INFO] Iniciando FaceAnalysis...")
 
             future = EXECUTOR.submit(_initialize_face_analyser_sync)
             FACE_ANALYSER = future.result(timeout=INIT_TIMEOUT)

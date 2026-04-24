@@ -218,13 +218,10 @@ def run():
         
         print("[EXIT] Ventana cerrada")
         
-        # Kill ComfyUI processes aggressively
+        # Limpiar ComfyUI sin matar todos los procesos python del sistema.
+        # El kill global puede terminar Gradio/Uvicorn a mitad de respuesta HTTP.
         print("[CORE] Limpiando procesos ComfyUI...")
         try:
-            import subprocess
-            # Kill by process name first
-            subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], capture_output=True)
-            # Then by port
             from ui.tabs.comfy_launcher import stop
             success, msg = stop()
             print(f"[CORE] {msg}")

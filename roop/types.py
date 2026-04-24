@@ -23,7 +23,8 @@ class Frame:
     def __init__(self, data):  
         self.data = data  
   
-class FaceSet:  
-    def __init__(self):  
-        self.faces = []  
-        self.img_path = None 
+class FaceSet:
+    def __init__(self, faces=None, name=None):
+        self.faces = faces if faces is not None else []
+        self.name = name
+        self.img_path = None

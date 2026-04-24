@@ -40,7 +40,8 @@ def build_faceswap_ui():
                     input_faces = gr.Gallery(
                         label="Origen", columns=4, height=350,
                         elem_classes=["origin-gallery"], interactive=True,
-                        allow_preview=False, preview=False
+                        allow_preview=False, preview=False,
+                        visible=True
                     )
                     input_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
                     with gr.Row():
@@ -54,7 +55,8 @@ def build_faceswap_ui():
                     target_faces = gr.Gallery(
                         label="Destino", columns=4, height=350,
                         elem_classes=["target-gallery"], interactive=True,
-                        allow_preview=False, preview=False
+                        allow_preview=False, preview=False,
+                        visible=True
                     )
                     target_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
                     with gr.Row():
@@ -82,17 +84,22 @@ def build_faceswap_ui():
             
             with gr.Row():
                 bt_prev_file = gr.Button("📂 Archivo Anterior", size="sm")
+                bt_use_face_from_preview = gr.Button("🔍 BUSCAR CARAS EN ESTE FRAME", variant="primary")
                 bt_next_file = gr.Button("Archivo Siguiente 📂", size="sm")
 
             # Panel de Selección Dinámica (Aparece al detectar caras en un frame)
             with gr.Row(visible=False, variant="panel", elem_classes=["dynamic-panel"]) as dynamic_face_selection:
                 with gr.Column():
                     gr.Markdown("### ✨ Caras detectadas en este frame")
-                    gr.Markdown("Haz clic en una cara para añadirla a Destino.")
-                    face_selection = gr.Gallery(label="", columns=8, height=200, interactive=True)
+                    gr.Markdown("Haz clic en una cara o usa el slider para añadirla a Destino.")
+                    face_selection = gr.Gallery(
+                        label="", columns=8, height=200, 
+                        interactive=True, allow_preview=False, 
+                        preview=False, object_fit="cover"
+                    )
                     with gr.Row():
-                        face_selector_slider = gr.Slider(1, 1, value=1, step=1, label="O usa el slider", visible=False)
-                        bt_use_selected_face = gr.Button("✅ Confirmar selección", variant="primary", visible=False)
+                        face_selector_slider = gr.Slider(minimum=1, maximum=1, value=1, step=1, label="Selecciona el número de cara", interactive=True)
+                        bt_use_selected_face = gr.Button("✅ AÑADIR CARA SELECCIONADA", variant="primary")
 
             with gr.Row():
                 selected_face_detection = gr.Dropdown(
@@ -110,7 +117,8 @@ def build_faceswap_ui():
     return {
         "input_faces": input_faces, "target_faces": target_faces, "bt_srcfiles": bt_srcfiles, "bt_destfiles": bt_destfiles,
         "previewimage": previewimage, "preview_frame_num": preview_frame_num, "bt_prev_frame": bt_prev_frame, "bt_next_frame": bt_next_frame,
-        "bt_prev_file": bt_prev_file, "bt_next_file": bt_next_file, "dynamic_face_selection": dynamic_face_selection,
+        "bt_prev_file": bt_prev_file, "bt_next_file": bt_next_file, "bt_use_face_from_preview": bt_use_face_from_preview,
+        "dynamic_face_selection": dynamic_face_selection,
         "face_selection": face_selection, "face_selector_slider": face_selector_slider, "bt_use_selected_face": bt_use_selected_face,
         "selected_face_detection": selected_face_detection, "fake_preview": fake_preview, "bt_start": bt_start, "bt_stop": bt_stop, 
         "metrics_display": metrics_display, "input_page_info": input_page_info, "target_page_info": target_page_info,
