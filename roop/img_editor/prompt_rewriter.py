@@ -14,7 +14,7 @@ Soporta:
 
 import requests
 import json
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 
 class PromptRewriter:
@@ -43,16 +43,12 @@ class PromptRewriter:
         print("[PromptRewriter] ❌ Ollama no disponible, usando templates")
         return False
     
-    def rewrite(self, prompt: str, analysis: Dict[str, bool] = None) -> str:
+    def rewrite(self, prompt: str, analysis: Dict[str, bool] = None) -> Tuple[str, str]:
         """
-        Reescribe un prompt para hacerlo más detallado.
+        Reescribe un prompt y también clasifica la intensidad necesaria.
         
-        Args:
-            prompt: Prompt original del usuario
-            analysis: Análisis del prompt (use_openpose, use_tile, etc.)
-            
         Returns:
-            Prompt mejorado y detallado
+            (rewritten_prompt, intensity) where intensity is "low", "medium", or "high"
         """
         # Intentar con Ollama primero
         if self.check_availability():
@@ -62,53 +58,52 @@ class PromptRewriter:
                 print(f"[PromptRewriter] Error con Ollama: {e}")
         
         # Fallback a templates
-        return self._rewrite_with_templates(prompt, analysis)
+        return (self._rewrite_with_templates(prompt, analysis), "medium")
     
-    def _rewrite_with_ollama(self, prompt: str, analysis: Dict[str, bool] = None) -> str:
-        """Reescribe usando Ollama LLM"""
+    def _rewrite_with_ollama(self, prompt: str, analysis: Dict[str, bool] = None) -> Tuple[str, str]:
+        """Reescribe usando Ollama LLM y clasifica intensidad"""
         
-        # Construir system prompt
+        # System prompt mejorado: pide prompt + clasificación de intensidad
         system_prompt = """Eres un experto en Stable Diffusion y generación de imágenes.
-Tu trabajo es convertir prompts simples en prompts detallados y efectivos para SD.
 
-Reglas:
-1. Añade términos de calidad: "high quality, detailed, realistic, masterpiece, best quality"
-2. Describe la escena con más detalle
-3. Añade iluminación: "dramatic lighting, cinematic lighting, soft lighting"
-4. Añade ambiente: "atmospheric, moody, vibrant"
-5. Mantén el idioma original del prompt (español o inglés)
-6. No añadas contenido NSFW o prohibido
-7. Sé específico pero conciso (máximo 150 palabras)
+Tu tarea es:
+1. MEJORAR EL PROMPT: convertir prompts simples en prompts detallados para SD.
+2. CLASIFICAR LA INTENSIDAD DEL CAMBIO requerido:
 
-Ejemplos:
-- "bailando" → "dynamic dancing pose, energetic movement, flowing hair, dramatic lighting, high quality, detailed, masterpiece"
-- "sentado" → "person sitting comfortably, relaxed pose, natural posture, soft lighting, detailed face, high quality"
-- "mejora calidad" → "ultra detailed, sharp focus, 8K resolution, professional photography, masterpiece, best quality, realistic textures"
-- "cambia ropa" → "elegant outfit, fashionable clothing, detailed fabric texture, realistic folds, high quality, professional photography"
-"""
+CLASES DE INTENSIDAD:
+- HIGH: Transformación COMPLETA del cuerpo o escena. Incluye:
+  * Cambios de postura (bailando, sentado, de pie, acostado)
+  * Desnudez o quitar toda la ropa
+  * Cambiar el entorno/fondo completamente
+  * Cambios drásticos de apariencia (cabello, rostro entero)
+  * Acciones que afectan toda la imagen (corriendo, saltando, etc.)
+  
+- MEDIUM: Cambios moderados que afectan parte del cuerpo:
+  * Cambio de ropa (pero mantiene postura)
+  * Accesorios, colores, expresiones faciales
+  * Ajustes de iluminación/estilo
+  
+- LOW: Mejoras sutiles:
+  * Aumentar calidad, nitidez, resolución
+  * Cambios mínimos de color/brillo
+  * Eliminar pequeños defects
 
-        # Construir user prompt
-        user_prompt = f"""Mejora este prompt para Stable Diffusion:
+DEVUELVE SOLO ESTE FORMATO JSON (sin texto extra):
+{"intensity": "high|medium|low", "prompt": "el prompt mejorado aquí"}
 
-Prompt original: "{prompt}"
-"""
+Reglas para el prompt mejorado:
+- NO agregues términos de calidad automáticos (masterpiece, etc.) a menos que el usuario lo pida.
+- Añade iluminación cinematográfica: "cinematic lighting, dramatic lighting, professional photography"
+- Describe la escena con detalle (posición, ambiente, estilo)
+- Mantén el idioma original (español o inglés)
+- Máximo 150 palabras
+- No agregues contenido NSFW"""
+
+        # Construir user prompt (más conciso, el LLM ya sabe clasificar)
+        user_prompt = f"""Prompt original: "{prompt}"
+
+Analiza este prompt y devuelve JSON con "intensity" (high/medium/low) y "prompt" (mejorado)."""
         
-        if analysis:
-            enhancements = []
-            if analysis.get('use_openpose'):
-                enhancements.append("- Es una pose específica, describe el movimiento y posición del cuerpo")
-            if analysis.get('use_tile'):
-                enhancements.append("- Es mejora de calidad, enfatiza detalles, resolución y nitidez")
-            if analysis.get('use_inpaint'):
-                enhancements.append("- Es cambio de ropa/cuerpo, describe la nueva apariencia con detalle")
-            if analysis.get('use_face_edit'):
-                enhancements.append("- Es expresión facial, describe la emoción y expresión")
-            
-            if enhancements:
-                user_prompt += "\nConsideraciones:\n" + "\n".join(enhancements)
-        
-        user_prompt += "\n\nPrompt mejorado (solo el prompt, sin explicaciones):"
-
         # Llamar a Ollama
         try:
             response = requests.post(
@@ -119,132 +114,175 @@ Prompt original: "{prompt}"
                     "system": system_prompt,
                     "stream": False,
                     "options": {
-                        "temperature": 0.7,
-                        "max_tokens": 200
+                        "temperature": 0.3,  # Más determinístico para clasificación
+                        "max_tokens": 300
                     }
                 },
-                timeout=10
+                timeout=15
             )
             
             if response.status_code == 200:
                 result = response.json()
-                rewritten = result.get('response', '').strip()
+                response_text = result.get('response', '').strip()
                 
-                # Limpiar respuesta
-                rewritten = rewritten.replace('"', '').strip()
-                if len(rewritten) > 10:
-                    print(f"[PromptRewriter] ✅ Reescrito con Ollama: {rewritten[:50]}...")
-                    return rewritten
+                # Intentar parsear JSON
+                import json
+                try:
+                    # Extraer JSON si está dentro de texto
+                    json_start = response_text.find('{')
+                    json_end = response_text.rfind('}') + 1
+                    if json_start >= 0 and json_end > json_start:
+                        json_str = response_text[json_start:json_end]
+                        data = json.loads(json_str)
+                        rewritten = data.get('prompt', '').strip()
+                        intensity = data.get('intensity', 'medium').lower()
+                        
+                        # Validar intensidad
+                        if intensity not in ['high', 'medium', 'low']:
+                            intensity = 'medium'
+                        
+                        # Limpiar respuesta
+                        rewritten = rewritten.replace('"', '').strip()
+                        if len(rewritten) > 10:
+                            print(f"[PromptRewriter] ✅ Reescrito con Ollama (intensity={intensity}): {rewritten[:50]}...")
+                            return rewritten, intensity
+                except Exception as json_e:
+                    print(f"[PromptRewriter] Error parseando JSON: {json_e}, usando fallback")
+                    # Fallback: usar texto completo como prompt, intensidad basada en palabras
+                    intensity = self._estimate_intensity_fallback(prompt)
+                    return response_text[:300], intensity
                     
         except Exception as e:
             print(f"[PromptRewriter] Error en Ollama: {e}")
         
         # Fallback
-        return self._rewrite_with_templates(prompt, analysis)
+        return (self._rewrite_with_templates(prompt, analysis), self._estimate_intensity_fallback(prompt))
     
-    def _rewrite_with_templates(self, prompt: str, analysis: Dict[str, bool] = None) -> str:
-        """Reescribe usando templates predefinidos"""
+    def _estimate_intensity_fallback(self, prompt: str) -> str:
+        """Estima intensidad basada en palabras clave (fallback)"""
+        prompt_lower = prompt.lower()
+        # Palabras que sugieren alta intensidad (transformación completa)
+        high_keywords = ['desnuda', 'desnudo', 'naked', 'nude', 'sin ropa', 'cambia de postura', 
+                         'cambio de pose', 'bailando', 'sentado', 'de pie', 'acostado', 'cuerpo completo',
+                         'cuerpo entero', 'full body', 'transforma', 'convierte']
+        if any(kw in prompt_lower for kw in high_keywords):
+            return 'high'
         
+        # Palabras que sugieren baja intensidad
+        low_keywords = ['mejora', 'calidad', 'nitidez', 'resolución', 'afina', 'suave', 'ligero']
+        if any(kw in prompt_lower for kw in low_keywords):
+            return 'low'
+        
+        return 'medium'
+    
+    def _rewrite_with_templates(self, prompt: str, analysis: Dict[str, bool] = None) -> Tuple[str, str]:
+        """Reescribe usando templates predefinidos y estima intensidad - ESTILO IMAGINE"""
+
         prompt_lower = prompt.lower()
         enhancements = []
-        
-        # Términos de calidad base
-        quality_terms = "high quality, detailed, realistic, masterpiece, best quality, professional photography"
-        
+
         # Detectar tipo de prompt y aplicar template
         if analysis:
             if analysis.get('use_openpose'):
-                # Prompts de pose
+                # Prompts de pose - estilo imagine
                 if any(kw in prompt_lower for kw in ['bailando', 'bailar', 'dance']):
                     enhancements = [
                         "dynamic dancing pose",
                         "energetic movement",
                         "flowing hair",
-                        "dramatic lighting",
-                        "action shot"
+                        "motion blur background",
+                        "dramatic cinematic lighting",
+                        "action shot",
+                        "wide angle lens"
                     ]
                 elif any(kw in prompt_lower for kw in ['sentado', 'sit']):
                     enhancements = [
-                        "sitting comfortably",
-                        "relaxed pose",
+                        "sitting portraiture",
+                        "relaxed elegant pose",
                         "natural posture",
-                        "soft lighting",
-                        "detailed face"
+                        "soft cinematic lighting",
+                        "detailed face",
+                        "portrait photography",
+                        "shallow depth of field"
                     ]
                 elif any(kw in prompt_lower for kw in ['de pie', 'standing']):
                     enhancements = [
-                        "standing pose",
-                        "natural stance",
+                        "standing full body",
                         "confident posture",
-                        "full body shot",
-                        "professional lighting"
+                        "hero shot angle",
+                        "professional studio lighting",
+                        "cinematic composition",
+                        "dynamic pose"
                     ]
                 elif any(kw in prompt_lower for kw in ['acostado', 'lying']):
                     enhancements = [
                         "lying down pose",
-                        "relaxed position",
-                        "natural expression",
-                        "soft lighting",
-                        "detailed"
+                        "relaxed reclining",
+                        "sensual lighting",
+                        "soft shadows",
+                        "detailed skin texture"
                     ]
-                    
+
             elif analysis.get('use_tile'):
-                # Prompts de mejora de calidad
+                # Prompts de mejora de calidad - máxima calidad
                 enhancements = [
                     "ultra detailed",
                     "sharp focus",
-                    "8K resolution",
-                    "professional photography",
-                    "realistic textures",
+                    "8K HDR",
+                    "professional color grading",
                     "crystal clear",
-                    "HDR"
+                    "high resolution scan",
+                    "noise free"
                 ]
-                
+
             elif analysis.get('use_inpaint'):
-                # Prompts de cambio de ropa/cuerpo
+                # Prompts de cambio de ropa/cuerpo - estilo fashion/arte
                 if any(kw in prompt_lower for kw in ['desnuda', 'naked', 'nude', 'sin ropa']):
                     enhancements = [
-                        "natural skin",
-                        "realistic body",
-                        "detailed skin texture",
-                        "body details",
-                        "natural lighting"
+                        "natural skin texture",
+                        "anatomical accuracy",
+                        "realistic body proportions",
+                        "professional lighting",
+                        "artistic nude photography",
+                        "film noir style"
                     ]
                 elif any(kw in prompt_lower for kw in ['ropa', 'clothing', 'outfit', 'vestido']):
                     enhancements = [
-                        "elegant outfit",
-                        "fashionable clothing",
+                        "fashion photography",
+                        "designer outfit",
                         "detailed fabric texture",
-                        "realistic folds",
-                        "professional photography"
+                        "professional photoshoot",
+                        "runway style",
+                        "editorial photography"
                     ]
-                    
+
             elif analysis.get('use_face_edit'):
-                # Prompts de expresión facial
+                # Prompts de expresión facial - retrato de alta calidad
                 if any(kw in prompt_lower for kw in ['sonrisa', 'smile', 'feliz']):
                     enhancements = [
-                        "beautiful smile",
+                        "beautiful genuine smile",
                         "happy expression",
-                        "joyful",
-                        "warm lighting",
-                        "detailed face"
+                        "sparkling eyes",
+                        "warm golden hour lighting",
+                        "cinematic portrait",
+                        "detailed facial features"
                     ]
                 elif any(kw in prompt_lower for kw in ['triste', 'sad']):
                     enhancements = [
-                        "sad expression",
-                        "melancholic",
-                        "emotional",
-                        "moody lighting",
-                        "detailed face"
+                        "emotional depth",
+                        "melancholic mood",
+                        "dramatic chiaroscuro lighting",
+                        "cinematic portrait",
+                        "tear drops"
                     ]
-        
+
         # Construir prompt final
         if enhancements:
-            enhanced_prompt = f"{prompt}, {', '.join(enhancements)}, {quality_terms}"
+            enhanced_prompt = f"{prompt}, {', '.join(enhancements)}"
         else:
-            enhanced_prompt = f"{prompt}, {quality_terms}"
-        
-        print(f"[PromptRewriter] ✅ Reescrito con templates: {enhanced_prompt[:50]}...")
+            enhanced_prompt = f"{prompt}"
+
+        print(f"[PromptRewriter] ✅ Reescrito (limpio): {enhanced_prompt[:50]}...")
         return enhanced_prompt
 
 

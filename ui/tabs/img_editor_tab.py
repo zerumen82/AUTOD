@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Image Editor - Editor de Imágenes con IA (Versión Completa Restaurada)
+Image Editor - Versión Simplificada y Limpia (2026)
 """
 
 import gradio as gr
@@ -9,248 +9,319 @@ import os
 import sys
 import logging
 import time
-import threading
+import tempfile
 from PIL import Image
-import requests
 from roop.img_editor.img_editor_manager import get_img_editor_manager
 
-# Directorio de salida
-COMFYUI_OUTPUT_DIR = os.path.abspath(os.path.join(os.getcwd(), "output", "img_editor"))
-os.makedirs(COMFYUI_OUTPUT_DIR, exist_ok=True)
+# Añadir scripts al path para importar analizador
+SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts')
+sys.path.insert(0, os.path.abspath(SCRIPTS_DIR))
+try:
+    from image_analyzer_for_prompt import analyze_image_for_prompt
+    HAS_ANALYZER = True
+except ImportError:
+    HAS_ANALYZER = False
+    print("[WARN] No se pudo importar image_analyzer_for_prompt")
 
 def get_metrics_html(percent, variation, time_remaining, status):
-    """Genera HTML de métricas profesional"""
     progress_color = "#3b82f6" if status not in ["Error", "Completado"] else ("#10b981" if status == "Completado" else "#ef4444")
     bar_color = "linear-gradient(90deg, #3b82f6, #10b981)" if status != "Error" else "linear-gradient(90deg, #ef4444, #f59e0b)"
-    safe_percent = max(0, min(100, percent))  # Asegurar que está entre 0-100
     return f"""
-    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 15px; border-radius: 10px; margin: 10px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #334155;">
-        <h3 style="color: #3b82f6; margin-top: 0; font-size: 16px; border-bottom: 1px solid #334155; padding-bottom: 5px;">📊 Progreso en Tiempo Real</h3>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">PROGRESO</div><div style="color: {progress_color}; font-size: 22px; font-weight: bold;">{safe_percent:.1f}%</div></div>
-            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">RESTANTE</div><div style="color: #10b981; font-size: 22px; font-weight: bold;">{time_remaining}</div></div>
-            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">VARIACIÓN</div><div style="color: #f59e0b; font-size: 22px; font-weight: bold;">{variation}</div></div>
-            <div style="text-align: center;"><div style="color: #94a3b8; font-size: 11px;">ESTADO</div><div style="color: #8b5cf6; font-size: 14px; font-weight: bold;">{status}</div></div>
+    <div style="background: #111827; padding: 12px; border-radius: 8px; border: 1px solid #374151;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: #9ca3af; font-size: 12px;">PROGRESO: <b style="color: {progress_color}">{percent:.1f}%</b></span>
+            <span style="color: #9ca3af; font-size: 12px;">VARIACIÓN: <b>{variation}</b></span>
+            <span style="color: #9ca3af; font-size: 12px;">ESTADO: <b style="color: #8b5cf6;">{status}</b></span>
         </div>
-        <div style="margin-top: 15px; background: rgba(255,255,255,0.05); border-radius: 5px; height: 10px; overflow: hidden;">
-            <div style="width: {safe_percent}%; height: 100%; background: {bar_color}; transition: width 0.4s ease-out;"></div>
+        <div style="background: #374151; border-radius: 4px; height: 6px; overflow: hidden;">
+            <div style="width: {percent}%; height: 100%; background: {bar_color};"></div>
         </div>
     </div>
     """
 
-def apply_text_overlay(image: Image.Image, text_cfg: dict) -> Image.Image:
-    try:
-        from PIL import ImageDraw, ImageFont
-        res = image.copy(); draw = ImageDraw.Draw(res)
-        text, pos_key, style = text_cfg.get("text", ""), text_cfg.get("position", "bottom-center"), text_cfg.get("style", "modern")
-        if not text: return image
-        f_size = max(20, min(image.width, image.height) // 18)
-        try: font = ImageFont.truetype("arial.ttf", f_size)
-        except: font = ImageFont.load_default()
-        bbox = draw.textbbox((0, 0), text, font=font)
-        w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]; p = 30
-        pos_map = {
-            "top-left": (p, p), "top-center": ((image.width-w)//2, p), "top-right": (image.width-w-p, p),
-            "bottom-left": (p, image.height-h-p), "bottom-center": ((image.width-w)//2, image.height-h-p), "bottom-right": (image.width-w-p, image.height-h-p),
-            "center": ((image.width-w)//2, (image.height-h)//2)
-        }
-        x, y = pos_map.get(pos_key, pos_map["bottom-center"])
-        draw.text((x+2, y+2), text, font=font, fill="black") # Sombra
-        draw.text((x, y), text, font=font, fill="white") # Texto
-        return res
-    except: return image
-
-def on_enhance_prompt(prompt_text):
-    if not prompt_text or not prompt_text.strip(): 
-        return "⚠️ Escribe un prompt primero", ""
-    try:
-        manager = get_img_editor_manager()
-        enhanced = manager.rewrite_prompt(prompt_text)
-        return "✨ Prompt mejorado con éxito", enhanced
-    except Exception as e: 
-        return f"❌ Error: {str(e)}", ""
-
-def on_generate(img, p_text, num_var, quality, f_preserve, a_enhance, res_val, c_ref, r_list, use_c_ref, add_t, t_in, t_p, t_s, b_mode, b_files, engine_val, p_enh, qwen_version="q3", zimage_version="q4"):
-    logging.info(f"[OnGenerate] Motor: {engine_val}, Qwen: {qwen_version}, Z-Image: {zimage_version}")
-
-    # Validaciones de imagen
+def on_generate(img, p_text, creativity, preserve, steps, num_var, f_preserve, a_enhance, res_label, c_ref, use_c_ref, b_mode, b_files, engine_val):
     if b_mode:
-        if not b_files: yield [], "❌ Sube imágenes para Batch", get_metrics_html(0, "0/0", "--:--", "Error"); return
+        if not b_files: yield [], "Error: Sube imagenes", get_metrics_html(0, "0/0", "0s", "Error"); return
         work_images = [Image.open(f.name) for f in b_files]
     else:
-        if not img: yield [], "❌ Sube una imagen", get_metrics_html(0, "0/0", "--:--", "Error"); return
+        if not img: yield [], "Error: Sube una imagen", get_metrics_html(0, "0/0", "0s", "Error"); return
         work_images = [img]
 
     manager = get_img_editor_manager()
-    yield [], "Preparando motor de IA...", get_metrics_html(0, "0/0", "--:--", "⏳ Inicializando...")
+    yield [], "Preparando...", get_metrics_html(0, "0/0", "0s", "Inicializando")
 
-    # Preparación de Metadatos
-    final_p = p_enh if p_enh else p_text
+    # Convertir sliders a parámetros de generación
+    # creativity: 0-1 -> guidance_scale: 1.5-3.5 (rango óptimo para FLUX)
+    guidance = 1.5 + (creativity * 2.0)
+    # preserve: 0-1 -> denoise: invertido (mas preserv = MENOS denoise, para mantener original)
+    # preserve=1 (max) -> denoise=0.3 (muy conservador)
+    # preserve=0 (min)  -> denoise=0.95 (muy creativo)
+    denoise = 0.95 - (preserve * 0.65)
+    denoise = max(0.2, min(0.95, denoise))  # clamp entre 0.2-0.95
+    # steps: slider ya es el valor directo
+    
     ref_meta = {
         "character_ref": c_ref if use_c_ref else None,
-        "multi_refs": r_list if r_list else [],
-        "text_overlay": {"text": t_in, "position": t_p, "style": t_s} if add_t else None
+        "resolution_label": res_label,
+        "guidance_scale": guidance,
+        "denoise": denoise
     }
-
-    # Configuración de calidad
-    # FLUX con CPU offload necesita pocos pasos para ser usable
-    q_cfg = {"fast": 8, "balanced": 12, "high": 20}.get(quality, 12)
-
+    
     results = []
-    total_imgs = len(work_images)
-    total_vars = int(num_var)
-    total_ops = total_imgs * total_vars
+    total_ops = len(work_images) * int(num_var)
     op_idx = 0
     start_t = time.time()
 
-    # Bucle de Generación (Batch + Variaciones)
     for img_idx, current_img in enumerate(work_images):
-        for var_idx in range(total_vars):
+        for var_idx in range(int(num_var)):
             pct = (op_idx / total_ops) * 100
-            elapsed = time.time() - start_t
-            avg_time = elapsed / (op_idx + 1) if op_idx > 0 else 0
-            remaining_ops = total_ops - op_idx
-            time_remaining = f"{int(avg_time * remaining_ops)}s" if avg_time > 0 else "Calculando..."
-            status_msg = f"Imagen {img_idx+1}/{total_imgs} | Var {var_idx+1}/{total_vars}"
-            yield results, f"Procesando {status_msg}...", get_metrics_html(pct, f"{op_idx+1}/{total_ops}", time_remaining, f"Motor {engine_val.upper()}")
+            yield results, f"Procesando...", get_metrics_html(pct, f"{op_idx+1}/{total_ops}", "...", f"Pasos: {steps}")
 
             res_img, msg = manager.generate_intelligent(
-                image=current_img, prompt=final_p, num_inference_steps=q_cfg,
+                image=current_img, prompt=p_text, num_inference_steps=steps,
                 face_preserve=f_preserve, auto_enhance=a_enhance, ref_metadata=ref_meta, 
-                engine=engine_val, qwen_version=qwen_version, zimage_version=zimage_version
+                engine=engine_val
             )
 
-            if res_img:
-                if ref_meta["text_overlay"]: res_img = apply_text_overlay(res_img, ref_meta["text_overlay"])
+            if res_img: 
                 results.append(res_img)
+                op_idx += 1
+                yield results, "Generando...", get_metrics_html((op_idx/total_ops)*100, f"{op_idx}/{total_ops}", "...", "OK")
+            else:
+                op_idx += 1
+                yield results, f"Error: {msg}", get_metrics_html((op_idx/total_ops)*100, f"{op_idx}/{total_ops}", "...", "Fallo")
 
-            op_idx += 1
-            elapsed_total = time.time() - start_t
-            yield results, f"Completada {status_msg}", get_metrics_html((op_idx/total_ops)*100, f"{op_idx}/{total_ops}", f"{int(elapsed_total)}s", "OK")
-
-    elapsed_final = time.time() - start_t
-    yield results, f"✅ {len(results)} imágenes generadas con éxito", get_metrics_html(100, f"{len(results)}/{total_ops}", f"{int(elapsed_final)}s", "Finalizado")
+    yield results, f"Completado", get_metrics_html(100, f"{len(results)}/{total_ops}", "...", "Listo")
 
 def create_img_editor_tab():
-    gr.Markdown("## 🎨 Image Editor")
-    
-    # Estados
-    current_img_state = gr.State(); char_ref_state = gr.State(); ref_list_state = gr.State(value=[])
-
     with gr.Row():
         with gr.Column(scale=1):
-            with gr.Accordion("📦 Procesamiento por Lote (Batch)", open=False):
-                batch_mode = gr.Checkbox(label="Activar Modo Batch", value=False)
-                batch_files = gr.File(label="Sube múltiples imágenes", file_count="multiple", visible=False)
+            input_img = gr.Image(label="Imagen Original", type="pil", height=300)
             
-            input_img = gr.Image(label="Imagen Original", type="pil", height=250)
-            prompt = gr.Textbox(label="Instrucciones", placeholder="Ej: cámbiale la pose a bailando...", lines=3)
-            enhance_btn = gr.Button("✨ Auto-Mejorar Prompt", variant="secondary")
-            prompt_enh = gr.Textbox(label="Prompt Optimizado (Sugerencia)", interactive=False)
-
-            with gr.Accordion("👤 Referencias de Personaje/Estilo", open=False):
-                char_ref_img = gr.Image(label="Character Reference", type="pil", height=150)
-                use_char_ref = gr.Checkbox(label="Usar Character Reference", value=False)
-                gr.Markdown("---")
-                gr.Markdown("**📚 Multi-Reference (Estilo/Entorno)**")
-                with gr.Row():
-                    r1 = gr.Image(label="R1", type="pil", height=80); r2 = gr.Image(label="R2", type="pil", height=80); r3 = gr.Image(label="R3", type="pil", height=80)
-
-            with gr.Accordion("📝 Texto y Logos", open=False):
-                add_text = gr.Checkbox(label="Añadir texto sobre la imagen")
-                t_in = gr.Textbox(label="Contenido del texto", visible=False)
-                t_p = gr.Radio(choices=[("Arriba", "top-center"), ("Abajo", "bottom-center"), ("Centro", "center")], value="bottom-center", label="Posición", visible=False)
-                t_s = gr.Radio(choices=[("Moderno", "modern"), ("Clásico", "classic")], value="modern", label="Estilo", visible=False)
-
-            with gr.Accordion("⚙️ Configuración del Motor", open=True):
-                gr.Markdown("**🎯 Recomendado: OmniGen2 (nuevo AR) > Z-Image > Qwen > HART**")
-                with gr.Row():
-                    engine = gr.Radio(
-                        choices=[
-                            ("🐷 OmniGen2 GGUF (AR)", "omnigen2"),
-                            ("⚡ Z-Image Turbo (híbrido)", "zimage"),
-                            ("🤖 Qwen 2509 (AR)", "qwen2509"),
-                            ("🤖 Qwen 2512 (AR)", "qwen2512"),
-                            ("🔬 HART (AR)", "hart"),
-                            ("🔷 FLUX (DiT)", "flux")
-                        ],
-                        value="omnigen2",
-                        label="Motor"
-                    )
-                    with gr.Column(scale=1):
-                        with gr.Row():
-                            qwen_version = gr.Radio(
-                                choices=[
-                                    ("Q3", "q3"),
-                                    ("Q2", "q2")
-                                ],
-                                value="q3",
-                                visible=True,
-                                label="Qwen"
-                            )
-                            zimage_version = gr.Radio(
-                                choices=[
-                                    ("Q4 (6GB)", "q4"),
-                                    ("Q5 (8GB)", "q5")
-                                ],
-                                value="q4",
-                                visible=True,
-                                label="Z-Image"
-                            )
-                num_var = gr.Slider(1, 8, 1, step=1, label="Variaciones")
-                quality = gr.Radio(
-                    ["fast", "balanced", "high"], 
-                    value="fast", 
-                    label="Velocidad",
-                    info="Fast=8 pasos | Balanced=12 | High=20"
+            # Prompt row con botón de análisis
+            with gr.Row():
+                prompt = gr.Textbox(label="¿Qué quieres cambiar?", placeholder="Ej: cámbiale la ropa por un vestido rojo...", lines=3, scale=4)
+                btn_analyze = gr.Button("🔍 Analizar Imagen", scale=1, variant="secondary")
+            
+            # Negative prompt (opcional, se puede expandir)
+            negative_prompt = gr.Textbox(
+                label="Negative Prompt (opcional)", 
+                placeholder="Dejar vacío para默认...",
+                lines=2,
+                value="clothed, dressed, safe, censored, blurry, low quality, bad anatomy, deformed, ugly, watermark, text, logo, children, minor, underage, worst quality"
+            )
+            
+            with gr.Row():
+                engine = gr.Dropdown(
+                    choices=[
+                        ("FLUX.2-klein (4B)", "flux_klein"),
+                        ("FLUX.1-schnell (NF4, 4 pasos)", "flux_schnell"),
+                        ("HART (Autoregresivo, 512px)", "hart"),
+                        ("OmniGen2 (2B, 6GB)", "omnigen2")
+                    ],
+                    value="flux_klein", label="Motor IA"
                 )
-                res = gr.Radio(["480p", "720p", "1024p"], value="720p", label="Resolución")
-                with gr.Row():
-                    f_preserve = gr.Checkbox(label="Preservar Cara", value=True)
-                    a_enhance = gr.Checkbox(label="Auto-Mejorar", value=True)
+                res = gr.Radio(["512p", "720p", "1024p"], value="1024p", label="Resolución")
+            with gr.Row():
+                # Slider creativo: 0 = conservador, 1 = muy creativo
+                creativity = gr.Slider(
+                    minimum=0.0, maximum=1.0, value=0.5, step=0.05,
+                    label="Creatividad",
+                    info="0=Fiel a original, 1=Mas cambios"
+                )
+                # Slider denoise: cuánto respeta la imagen original
+                preserve = gr.Slider(
+                    minimum=0.0, maximum=1.0, value=0.7, step=0.05,
+                    label="Preservar original",
+                    info="0=Todo nuevo, 1=Igual al original"
+                )
 
             with gr.Row():
-                gen_btn = gr.Button("🎨 Generar Imágenes", variant="primary", size="lg")
-                clear_btn = gr.Button("🗑️ Limpiar Todo", variant="stop")
-            
-            status = gr.Textbox(label="Estado del Sistema", interactive=False)
-            metrics = gr.HTML(value=get_metrics_html(0, "0/0", "--:--", "Listo para empezar"))
+                steps = gr.Slider(
+                    minimum=4, maximum=20, value=8, step=1,
+                    label="Pasos de calidad",
+                    info="4-8 rapido, 20 mas calidad (FLUX)"
+                )
+                num_var = gr.Number(value=1, label="Variaciones", precision=0)
 
-        with gr.Column(scale=2):
-            gallery = gr.Gallery(label="Galería de Resultados", columns=2, height=750, preview=True)
             with gr.Row():
-                btn_open = gr.Button("📂 Abrir Carpeta de Salida"); btn_input = gr.Button("🔄 Usar como Nuevo Input")
+                f_preserve = gr.Checkbox(label="Restaurar Cara", value=True)
+                a_enhance = gr.Checkbox(label="Mejorar Prompt", value=True)
 
-    # --- Lógica de Callbacks ---
-    
-    # Batch Toggle
-    batch_mode.change(lambda c: {input_img: gr.update(visible=not c), batch_files: gr.update(visible=c)}, [batch_mode], [input_img, batch_files])
-    
-    # Texto Toggle
-    add_text.change(lambda c: {t_in: gr.update(visible=c), t_p: gr.update(visible=c), t_s: gr.update(visible=c)}, [add_text], [t_in, t_p, t_s])
-    
-    # Enhance Prompt
-    enhance_btn.click(on_enhance_prompt, [prompt], [status, prompt_enh])
-    
-    # Multi-Ref Handler
-    def on_ref_change(i1, i2, i3):
-        refs = [x for x in [i1, i2, i3] if x is not None]
-        return refs, f"📚 {len(refs)} referencias cargadas"
-    r1.upload(on_ref_change, [r1, r2, r3], [ref_list_state, status])
-    r2.upload(on_ref_change, [r1, r2, r3], [ref_list_state, status])
-    r3.upload(on_ref_change, [r1, r2, r3], [ref_list_state, status])
+            # Botones de configuración rápida
+            gr.Markdown("### 🎛️ Presets")
+            with gr.Row():
+                preset_eq = gr.Button("🎯 Equilibrado", variant="secondary", size="sm")
+                preset_nsfw = gr.Button("🔞 NSFW (desnudar)", variant="primary", size="sm")
+                preset_grupal = gr.Button("👥 Grupal (4+ personas)", variant="secondary", size="sm")
+                # Equilibrado: Preservar=0.5, Creatividad=0.5, Pasos=12
+                # NSFW: Preservar=0.15, Creatividad=0.85, Pasos=10
+                # Grupal: Preservar=0.1, Creatividad=0.9, Pasos=12 (más agresivo)
 
-    # GENERACIÓN PRINCIPAL
+            # Guía completa en accordion (plegada por defecto para no saturar)
+            with gr.Accordion("📖 Guía de uso (sliders, ejemplos, consejos)", open=False):
+                gr.Markdown("""
+### 🎯 Sliders (ajustes libres)
+| Control | Rango | Qué hace |
+|---|---|---|
+| **Preservar original** | 0.0 - 1.0 | Cuánto mantiene la imagen base. **Alto** (0.7-1.0) = fondo/pose intactos. **Bajo** (0.1-0.3) = regenera casi todo. |
+| **Creatividad** | 0.0 - 1.0 | Libertad del modelo. Alto (0.7-1.0) = más cambios, Bajo (0-0.3) = fiel al prompt. |
+| **Pasos** | 4 - 20 | Calidad vs velocidad. FLUX: 8-12 óptimo en 8GB. Más pasos → más lento, poca mejora. |
+
+### 📝 Ejemplos prácticos
+- **Cambiar ropa/color** (mantener fondo):  
+  `Preservar original`=0.7-0.9 | `Creatividad`=0.2-0.4 | Pasos=8 | Prompt: *"camisa azul, manteniendo el fondo"*
+- **Cambiar cara/peinado** (entorno similar):  
+  `Preservar`=0.5-0.7 | `Creatividad`=0.4-0.6 | Pasos=10-12 | Prompt: *"pelo más oscuro, expresión sonriendo"*
+- **🔞 Desnudar 1 persona**:  
+  `Preservar`=0.15-0.2 | `Creatividad`=0.8-0.9 | Pasos=10-12 | Prompt: *"completely naked, nude, no clothing, explicit nsfw"*
+- **👥 Desnudar GRUPAL (4+ personas)**:  
+  `Preservar`=0.1-0.15 | `Creatividad`=0.9 | Pasos=12 | Prompt: *"4 naked people, 1 man and 3 women, explicit nsfw, full body"*
+- **Cambiar pose** (sentarse, girar):  
+  `Preservar`=0.1-0.3 | `Creatividad`=0.7-0.8 | Pasos=12-16 | Prompt: *"sentado en una silla"*, *"girando 90°"*
+- **Escena nueva** (reemplazar todo):  
+  `Preservar`=0.0-0.1 | `Creatividad`=0.9-1.0 | Pasos=16-20 | Prompt: *"astronauta en el espacio"*
+
+### ⚙️ Motores
+- **FLUX.2-klein (4B) + LoRA NSFW**: ✅ Edita sin censura. Calidad alta. 8-12 pasos → 10-20 min. **Recomendado para NSFW**.
+- **HART**: Generación pura (no edita). Sin censura pero crea imagen nueva (no mantiene pose/fondo).
+- **OmniGen2**: Rápido (~1-2 min), calidad moderada. Tiene safe filters.
+
+### 🔄 Restaurar Cara (Face Preserve)
+- **Activado**: Restaura **TODAS las caras** detectadas en la imagen original → identidad 100% preservada para cada persona.
+  - Usar con: **NSFW individual** y **Grupal (4+ personas)**.
+  - Requiere cara detectable en imagen original para cada persona.
+- **Desactivado**: FLUX genera caras nuevas (pueden ser otras personas).
+
+### 💡 Consejos para FOTOS GRUPALES (4+ personas)
+1. **Preservar MUY BAJO** (0.1-0.15): así FLUX regenera completamente los cuerpos/ropa.
+2. **Creatividad ALTA** (0.85-0.9): para que siga el prompt "naked people" sin bloquear.
+3. **Prompt explícito**: menciona número y género: *"4 naked people, 1 man and 3 women, explicit nsfw"*
+4. **Restaurar Cara ACTIVADO**: restaurará automáticamente las 4 caras originales (o tantas como detecte).
+5. Si alguna cara **no se restaura**: verifica que esté bien detectada en el original (buena resolución, frontal).
+6. **Pasos 12**: suficiente calidad sin ser excesivamente lento.
+
+### 🛠️ Solución de problemas
+- **FLUX genera ropa aún con LoRA**: 
+  1. Asegúrate de que `NSFW_MASTER_FLUX.safetensors` está en `models/loras/`
+  2. Usa `Preservar` ≤ 0.2
+  3. Prompt con palabras clave: `nude, naked, no clothing, explicit`
+- **Solo restaura 1 cara (no 4)**: versión antigua — actualiza a la última versión del código (multi-face ya está implementado).
+- **HART falla (OOM)**: HART necesita 10-12GB para 1024px. En 8GB usa solo FLUX.
+""", elem_classes=["help-text"])
+
+            with gr.Accordion("[TOOLS] Opciones Avanzadas", open=False):
+                with gr.Tab("[BATCH] Batch"):
+                    batch_mode = gr.Checkbox(label="Activar Procesamiento por Lotes", value=False)
+                    batch_files = gr.File(label="Imágenes", file_count="multiple")
+                with gr.Tab("[CHAR] Personaje"):
+                    char_ref_img = gr.Image(label="Referencia de Rostro", type="pil")
+                    use_char_ref = gr.Checkbox(label="Usar esta cara", value=False)
+
+            gen_btn = gr.Button("[IMG] GENERAR CAMBIOS", variant="primary", size="lg")
+            metrics = gr.HTML(value=get_metrics_html(0, "0/0", "0s", "Listo"))
+            status = gr.Textbox(label="Estado", interactive=False)
+
+        with gr.Column(scale=1.5):
+            gallery = gr.Gallery(label="Resultados", columns=2, height=800, preview=True)
+            with gr.Row():
+                gr.Button("[OPEN] Abrir Carpeta").click(lambda: os.startfile(os.path.abspath("output/img_editor")))
+                
+                def use_as_input(gallery_data):
+                    if gallery_data and len(gallery_data) > 0:
+                        # Gradio gallery data puede ser una lista de dicts o tuplas
+                        item = gallery_data[0]
+                        if isinstance(item, dict): return item['name']
+                        if isinstance(item, (list, tuple)): return item[0]
+                    return None
+
+                gr.Button("[RELOAD] Usar como Input").click(
+                    fn=use_as_input,
+                    inputs=[gallery],
+                    outputs=[input_img]
+                )
+
     gen_btn.click(
         on_generate,
-        [input_img, prompt, num_var, quality, f_preserve, a_enhance, res, char_ref_img, ref_list_state, use_char_ref, add_text, t_in, t_p, t_s, batch_mode, batch_files, engine, prompt_enh, qwen_version, zimage_version],
+        [input_img, prompt, creativity, preserve, steps, num_var, f_preserve, a_enhance, res, char_ref_img, use_char_ref, batch_mode, batch_files, engine],
         [gallery, status, metrics]
     )
-    
-    # Utilidades
-    btn_open.click(lambda: os.startfile(COMFYUI_OUTPUT_DIR) if os.name=="nt" else None)
-    btn_input.click(lambda imgs: imgs[0] if imgs else None, [gallery], [input_img])
-    clear_btn.click(lambda: (None, "", None, None, None, None, None, ""), outputs=[input_img, prompt, char_ref_img, r1, r2, r3, gallery, status])
 
-def img_editor_tab():
-    create_img_editor_tab()
+    # === FUNCIÓN DE PRESETS ===
+    def set_preset_eq():
+        """Configuración equilibrada para uso general"""
+        return 0.5, 0.5, 12  # preserve, creativity, steps
+
+    def set_preset_nsfw():
+        """Configuración agresiva para desnudar (NSFW)"""
+        return 0.15, 0.85, 10  # preserve, creativity, steps
+
+    def set_preset_grupal():
+        """Configuración para fotos grupales (4+ personas)"""
+        return 0.1, 0.9, 12  # preserve, creativity, steps (más agresivo)
+
+    # === FUNCIÓN DE ANÁLISIS DE IMAGEN PARA PROMPT ===
+    def analyze_image_click(img):
+        """
+        Callback para el botón 'Analizar Imagen'.
+        Toma la imagen actual y genera un prompt descriptivo NATURAL y completo.
+        
+        Args:
+            img: PIL Image o None
+        
+        Returns:
+            str: Prompt generado (positivo) o mensaje de error
+        """
+        if img is None:
+            return "ERROR: No hay imagen cargada. Sube una imagen primero."
+        
+        if not HAS_ANALYZER:
+            return "ERROR: Módulo de análisis no disponible. Ejecuta: pip install insightface opencv-python numpy"
+        
+        try:
+            # Guardar imagen temporal para análisis
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                img.save(tmp.name)
+                tmp_path = tmp.name
+            
+            # Analizar con generador inteligente
+            from image_analyzer_for_prompt import ImageAnalyzer
+            analyzer = ImageAnalyzer()
+            result = analyzer.generate_full_prompt(tmp_path, nsfw_level='explicit')
+            
+            # Limpiar temp
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+            
+            # Devolver prompt NATURAL generado
+            generated_prompt = result['positive']
+            
+            # Añadir información de personas detectadas
+            num_people = result['analysis'].get('num_people', 0)
+            if num_people > 0:
+                print(f"[ANALIZADOR] Detectadas {num_people} personas en la imagen")
+                for i, face in enumerate(result['analysis']['faces']):
+                    g = face.get('gender', 'desconocido')
+                    a = face.get('age', '?')
+                    print(f"  - Persona {i+1}: {g}, {a} años")
+            
+            return generated_prompt
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return f"ERROR: {str(e)}"
+    
+    # Conectar botones
+    preset_eq.click(fn=set_preset_eq, inputs=None, outputs=[preserve, creativity, steps])
+    preset_nsfw.click(fn=set_preset_nsfw, inputs=None, outputs=[preserve, creativity, steps])
+    preset_grupal.click(fn=set_preset_grupal, inputs=None, outputs=[preserve, creativity, steps])
+    
+    # Conectar botón de análisis de imagen
+    btn_analyze.click(
+        fn=analyze_image_click,
+        inputs=[input_img],
+        outputs=[prompt]
+    )

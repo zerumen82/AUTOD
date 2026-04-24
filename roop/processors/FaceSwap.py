@@ -309,8 +309,8 @@ class FaceSwap:
             else:
                 M_inv = cv2.invertAffineTransform(M)
 
-            # Blend ratio OPTIMIZADO para mayor realismo (0.9 = 90% source, 10% target)
-            blend_ratio = getattr(roop.globals, 'blend_ratio', 0.9)
+            # Blend ratio OPTIMIZADO para máxima similitud al origen (0.95 = 95% source, 5% target)
+            blend_ratio = getattr(roop.globals, 'blend_ratio', 0.95)
             blend_ratio = max(0.0, min(1.0, blend_ratio))
 
             # WARP con LANCZOS4 (mejor calidad para downscaling)

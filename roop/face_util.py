@@ -149,7 +149,7 @@ def _initialize_face_analyser_sync():
 
         import roop.globals
         from insightface.app import FaceAnalysis
-        import onnxruntime as ort
+        import torch
 
         model_root = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "models", "buffalo_l"
@@ -158,79 +158,50 @@ def _initialize_face_analyser_sync():
         if not os.path.exists(model_root):
             print(f"[ERROR] No se encontro el modelo en: {model_root}")
             return None
-
-        available_providers = ort.get_available_providers()
-        print(f"[INFO] Proveedores ONNX Runtime disponibles: {available_providers}")
-
-        # USAR CUDA POR DEFECTO
-        current_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-        print("[INFO] USANDO CUDA PARA FACE DETECTION")
+        
+        # Usar torch.cuda para detectar GPU (más confiable que onnxruntime)
+        use_cuda = torch.cuda.is_available()
+        ctx_id = 0 if use_cuda else -1
+        
+        print(f"[INFO] Inicializando FaceAnalysis con {'CUDA' if use_cuda else 'CPU'}")
 
         analyser_instance = None
         try:
+            # Set providers based on CUDA availability
+            if use_cuda:
+                providers = ['CUDAExecutionProvider']
+                try:
+                    import onnxruntime as ort
+                    if 'CUDAExecutionProvider' in ort.get_available_providers():
+                        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+                    else:
+                        print("[WARN] ONNX Runtime no tiene CUDA, usando CPU")
+                        providers = ['CPUExecutionProvider']
+                except:
+                    providers = ['CPUExecutionProvider']
+            else:
+                providers = ['CPUExecutionProvider']
+            
+            print(f"[INFO] Proveedores InsightFace: {providers}")
+            
             analyser_instance = FaceAnalysis(
                 name="buffalo_l",
-                root=os.path.dirname(os.path.dirname(__file__)),
+                root=model_root,
                 download=True,
-                providers=current_providers,
+                providers=providers
             )
-
-            # Preparar el analizador antes de verificar proveedores
+            
             analyser_instance.prepare(
-                ctx_id=0,
-                det_size=DETECTION_SIZE,
+                ctx_id=ctx_id,
+                det_size=(640, 640),
                 det_thresh=0.1
             )
-
-            # Verificar y forzar CUDA en cada modelo
-            if hasattr(analyser_instance, 'models'):
-                print("\n[INFO] Verificando proveedores de cada modelo:")
-                for model_name, model in analyser_instance.models.items():
-                    if hasattr(model, 'session') and hasattr(model.session, 'get_providers'):
-                        providers_used = model.session.get_providers()
-                        print(f"  - {model_name}: {providers_used}")
-
-                        if 'CPUExecutionProvider' in providers_used and 'CUDAExecutionProvider' in available_providers:
-                            print(f"    Recargando {model_name} con CUDA...")
-                            try:
-                                model_path = model.session._model_path if hasattr(model.session, '_model_path') else None
-                                if not model_path and hasattr(model, 'model_path'):
-                                    model_path = model.model_path
-
-                                if model_path and os.path.exists(model_path):
-                                    sess_options = ort.SessionOptions()
-                                    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-                                    sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-
-                                    new_session = ort.InferenceSession(
-                                        model_path,
-                                        providers=['CUDAExecutionProvider', 'CPUExecutionProvider'],
-                                        provider_options=[{
-                                            'device_id': 0,
-                                            'gpu_mem_limit': 2 * 1024 * 1024 * 1024,
-                                            'arena_extend_strategy': 'kSameAsRequested',
-                                            'cudnn_conv_algo_search': 'EXHAUSTIVE',
-                                            'do_copy_in_default_stream': True,
-                                        }, {}],
-                                        sess_options=sess_options
-                                    )
-                                    model.session = new_session
-                                    print(f"    OK {model_name} ahora usa: {new_session.get_providers()}")
-                                else:
-                                    print(f"    ERROR No se pudo encontrar ruta del modelo para {model_name}")
-                            except Exception as e:
-                                print(f"    ERROR No se pudo recargar {model_name} con CUDA: {e}")
-
-            if hasattr(analyser_instance, 'models') and 'genderage' in analyser_instance.models:
-                print("[INFO] Modelo genderage disponible en FaceAnalysis")
-            else:
-                print("[WARN] Modelo genderage NO disponible en FaceAnalysis")
-
-            print("\n[SUCCESS] FaceAnalysis inicializado con CUDA")
+            
+            print(f"[SUCCESS] FaceAnalysis inicializado {'con CUDA' if use_cuda else 'con CPU'}")
             return analyser_instance
 
-        except Exception as e_cuda:
-            print(f"[ERROR] Error inicializando FaceAnalysis con CUDA: {e_cuda}")
+        except Exception as e:
+            print(f"[ERROR] Error inicializando FaceAnalysis: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -458,8 +429,8 @@ def extract_face_images(
         results = []
         for face_idx, face_data in enumerate(faces):
             try:
-                # FILTRO DE CALIDAD: Verificar score mínimo
-                if hasattr(face_data, 'det_score') and face_data.det_score < 0.25:
+                # FILTRO DE CALIDAD: Verificar score mínimo (Reducido para detectar caras en bordes)
+                if hasattr(face_data, 'det_score') and face_data.det_score < 0.15:
                     continue
                 
                 # FILTRO DE CALIDAD: Verificar que el bbox sea razonable

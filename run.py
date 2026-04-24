@@ -10,6 +10,23 @@ import tempfile
 import glob
 import threading
 
+# Añadir CUDA 12.4 bin al PATH para que onnxruntime encuentre cublasLt64_12.dll
+_cuda_bin = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin"
+if os.path.exists(_cuda_bin):
+    os.environ["PATH"] = _cuda_bin + ";" + os.environ.get("PATH", "")
+    print(f"[INFO] CUDA 12.4 bin añadido al PATH: {_cuda_bin}")
+else:
+    # Intentar encontrar la versión más alta de CUDA disponible
+    cuda_base = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+    if os.path.exists(cuda_base):
+        versions = [d for d in os.listdir(cuda_base) if os.path.isdir(os.path.join(cuda_base, d)) and d.startswith('v')]
+        versions.sort(key=lambda x: [int(v) for v in x[1:].split('.')], reverse=True)
+        if versions:
+            latest = os.path.join(cuda_base, versions[0], "bin")
+            if os.path.exists(latest):
+                os.environ["PATH"] = latest + ";" + os.environ.get("PATH", "")
+                print(f"[INFO] CUDA {versions[0]} bin añadido al PATH: {latest}")
+
 
 def cleanup_old_temps_async():
     """Limpia los temporales antiguos de C: y del proyecto en un hilo separado."""
@@ -227,9 +244,37 @@ if __name__ == "__main__":
     print("\n[STEP 2] Cargando motores de Inteligencia Artificial...")
     try:
         import torch
-        print(f"  - PyTorch CUDA: {'OK' if torch.cuda.is_available() else 'FALLO'}")
-        import onnxruntime as ort
-        print(f"  - ONNX Providers: {ort.get_available_providers()}")
+        print(f"  - PyTorch version: {torch.__version__}")
+        
+        cuda_ok = torch.cuda.is_available()
+        print(f"  - PyTorch CUDA: {'OK' if cuda_ok else 'FALLO'}")
+        
+        if cuda_ok:
+            print(f"  - GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
+        
+        # Verificar ONNX Runtime - FORZAR actualización de providers
+        print("  - Verificando ONNX Runtime...")
+        import importlib
+        import onnxruntime
+        importlib.reload(onnxruntime)
+        
+        providers = onnxruntime.get_available_providers()
+        print(f"    Providers disponibles: {providers}")
+        
+        has_cuda = 'CUDAExecutionProvider' in providers
+        has_tensorrt = 'TensorrtExecutionProvider' in providers
+        
+        if cuda_ok and not has_cuda:
+            print("    [WARNING] PyTorch tiene CUDA pero ONNX Runtime no!")
+            print("    [WARNING] Posible conflicto de versiones de onnxruntime")
+            print("    [INFO] Intentando forzar providers manualmente...")
+            try:
+                onnxruntime.set_default_session_options(onnxruntime.SessionOptions())
+            except:
+                pass
+        
+        provider_status = 'TensorRT+CUDA+CPU' if has_tensorrt else ('CUDA+CPU' if has_cuda else 'CPU only')
+        print(f"  - ONNX Runtime: {provider_status}")
         
         print("\n[STEP 3] Lanzando interfaz Gradio...")
         # Importamos roop.core al final para que vea todos los parches anteriores

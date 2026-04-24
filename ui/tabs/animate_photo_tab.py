@@ -31,7 +31,11 @@ def init_detect_models():
     global AVAILABLE_MODELS, DEFAULT_MODEL
     if AVAILABLE_MODELS is None:
         AVAILABLE_MODELS = detect_available_models()
-        # PRIORIDAD: WanVideo > LTX > Zeroscope > CogVideo (SVD deshabilitado)
+        # PRIORIDAD PARA 8GB VRAM (calidad/equilibrio):
+        # 1. Wan 2.2 (14B GGUF) - Máxima calidad, más lento
+        # 2. LTX Video v2.3 - Velocidad, duración larga, audio integrado
+        # 3. Zeroscope v2 XL - Alternativa respetable
+        # 4. CogVideoX - Requiere descarga, inestable local
         if AVAILABLE_MODELS["wan_video"]:
             DEFAULT_MODEL = "wan_video"
         elif AVAILABLE_MODELS["ltx_video"]:
@@ -80,167 +84,175 @@ def detect_available_models():
     available = {
         "cogvideo": False,
         "ltx_video": False,
-        "svd_turbo": False,
-        "svd_xt": False,
+        "wan_video": False,
+        "zeroscope": False
+        # svd_turbo/xt deshabilitados
+    }
+    
+def detect_available_models():
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    COMFY_MODELS_DIR = os.path.abspath(os.path.join(current_dir, "..", "tob", "ComfyUI", "models"))
+    
+    print(f"[AnimatePhoto] COMFY_MODELS_DIR = {COMFY_MODELS_DIR}")
+    
+    available = {
+        "cogvideo": False,
+        "ltx_video": False,
         "wan_video": False,
         "zeroscope": False
     }
     
-    # Detectar LTX Video
-    # Priorizar 0.9.5 sobre 0.9.1 (0.9.5 tiene VAE compatible con ComfyUI)
+def detect_available_models():
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    COMFY_MODELS_DIR = os.path.abspath(os.path.join(current_dir, "..", "tob", "ComfyUI", "models"))
+    
+    print(f"[AnimatePhoto] COMFY_MODELS_DIR = {COMFY_MODELS_DIR}")
+    
+    available = {
+        "cogvideo": False,
+        "ltx_video": False,
+        "wan_video": False,
+        "zeroscope": False
+    }
+    
+    # --- DETECTAR WAN 2.2 (GGUF Q4/Q5) ---
+    print("[AnimatePhoto] Buscando WanVideo en rutas conocidas...")
+    wan_paths = [
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2-I2V-Q4_K_M"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2-I2V-Q5_K_M"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2-I2V"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.1-I2V-14B-480P-Q4_K_M"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "wan"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "WanVideo"),
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "Wan2.2-I2V-Q4_K_M"),
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "Wan2.1-I2V-14B-480P-Q4_K_M"),
+    ]
+    wan_model_found = False
+    for wan_path in wan_paths:
+        print(f"[AnimatePhoto]   Probando: {wan_path}")
+        if os.path.exists(wan_path):
+            model_file = os.path.join(wan_path, "transformer.safetensors")
+            if not os.path.exists(model_file):
+                model_file = os.path.join(wan_path, "model.safetensors")
+            if os.path.exists(model_file):
+                wan_model_found = True
+                print(f"[AnimatePhoto]   ✅ Modelo Wan encontrado en: {wan_path}")
+                break
+            else:
+                print(f"[AnimatePhoto]   ⚠️ Carpeta existe pero falta archivo de modelo")
+    
+    # Verificar VAE de WanVideo
+    vae_paths = [
+        os.path.join(COMFY_MODELS_DIR, "vae", "Wan2.2_VAE.safetensors"),
+        os.path.join(COMFY_MODELS_DIR, "vae", "Wan2.1_VAE.safetensors"),
+        os.path.join(COMFY_MODELS_DIR, "vae", "WanVideoVAE.safetensors"),
+    ]
+    vae_found = False
+    for vae_path in vae_paths:
+        print(f"[AnimatePhoto]   Buscando VAE en: {vae_path}")
+        if os.path.exists(vae_path):
+            vae_found = True
+            print(f"[AnimatePhoto]   ✅ VAE encontrado: {vae_path}")
+            break
+    
+    if wan_model_found and vae_found:
+        available["wan_video"] = True
+        print("[AnimatePhoto] ✅ WanVideo COMPLETO (modelo + VAE)")
+    elif wan_model_found and not vae_found:
+        print("[AnimatePhoto] ⚠️ WanVideo modelo detectado pero FALTA VAE")
+    else:
+        print("[AnimatePhoto] ❌ WanVideo no disponible")
+    
+    # --- DETECTAR LTX VIDEO v2.3 ---
+    print("[AnimatePhoto] Buscando LTX Video...")
     ltx_paths = [
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "ltx-video-0.9.5"),
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "ltx-video-0.9.1"),
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "ltx-video"),
         os.path.join(COMFY_MODELS_DIR, "diffusion_models", "ltx-video-0.9.5"),
         os.path.join(COMFY_MODELS_DIR, "diffusion_models", "ltx-video-0.9.1"),
         os.path.join(COMFY_MODELS_DIR, "diffusion_models", "ltx-video"),
-        os.path.join(COMFY_MODELS_DIR, "checkpoints", "ltx-video-0.9.5"),
-        os.path.join(COMFY_MODELS_DIR, "checkpoints", "ltx-video-0.9.1"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "ltxvideo"),
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "ltxvideo"),
     ]
-    
+    ltx_found = False
     for ltx_path in ltx_paths:
+        print(f"[AnimatePhoto]   Probando: {ltx_path}")
         if os.path.exists(ltx_path):
-            # Verificar que tenga el archivo transformer.safetensors o model.safetensors
             model_file = os.path.join(ltx_path, "transformer.safetensors")
             if not os.path.exists(model_file):
                 model_file = os.path.join(ltx_path, "model.safetensors")
             if os.path.exists(model_file):
-                available["ltx_video"] = True
+                ltx_found = True
+                print(f"[AnimatePhoto]   ✅ LTX encontrado en: {ltx_path}")
                 break
+            else:
+                print(f"[AnimatePhoto]   ⚠️ Carpeta existe pero no hay archivo de modelo")
     
-    # Detectar SVD Turbo - buscar en checkpoints y diffusion_models
-    svd_possible_names = ["svd", "stable_video_diffusion", "stablevideodiffusion", 
-                          "stable-diffusion-turbo", "stablediffusionturbo", "turbo"]
+    if ltx_found:
+        available["ltx_video"] = True
+        print("[AnimatePhoto] ✅ LTX Video disponible")
+    else:
+        print("[AnimatePhoto] ❌ LTX Video no encontrado")
     
-    # Buscar en checkpoints
-    checkpoints_dir = os.path.join(COMFY_MODELS_DIR, "checkpoints")
-    if os.path.exists(checkpoints_dir):
-        for filename in os.listdir(checkpoints_dir):
-            filename_lower = filename.lower()
-            for name in svd_possible_names:
-                if name in filename_lower and "svd_xt" not in filename_lower:
-                    available["svd_turbo"] = True
-                    break
-            if available["svd_turbo"]:
-                break
-    
-    # Buscar también en diffusion_models
-    diffusion_models_dir = os.path.join(COMFY_MODELS_DIR, "diffusion_models")
-    if os.path.exists(diffusion_models_dir) and not available["svd_turbo"]:
-        for item in os.listdir(diffusion_models_dir):
-            item_lower = item.lower()
-            for name in svd_possible_names:
-                if name in item_lower and "svd_xt" not in item_lower:
-                    available["svd_turbo"] = True
-                    break
-            if available["svd_turbo"]:
-                break
-    
-    # SVD DESHABILITADO - No funciona con ComfyUI (model type not detected)
-    # svd_xt_path = os.path.join(COMFY_MODELS_DIR, "diffusion_models", "svd_xt")
-    # if os.path.exists(svd_xt_path):
-    #     unet_file = os.path.join(svd_xt_path, "unet", "diffusion_pytorch_model.safetensors")
-    #     if os.path.exists(unet_file) and os.path.getsize(unet_file) > 100_000_000:
-    #         available["svd_xt"] = True
-    #         available["svd_turbo"] = True
-    
-    # Detectar WanVideo - buscar en diffusion_models (archivo GGUF o carpeta wan)
-    # IMPORTANTE: WanVideo requiere VAE compatible con la version actual de ComfyUI-WanVideoWrapper
-    wan_paths = [
-        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.1-I2V-14B-480P-Q4_K_M"),
-        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2-I2V-Q4_K_M"),
-        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "wan"),
-        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "Wan2.2"),
-    ]
-    
-    wan_gguf_found = False
-    for wan_path in wan_paths:
-        if os.path.exists(wan_path):
-            wan_gguf_found = True
-            break
-    
-    # Verificar si el VAE de WanVideo es compatible
-    # El VAE de WanVideo ( Wan2.1/Wan2.2) tiene estructura anidada (downsamples.X.downsamples.Y)
-    # Esta es la estructura CORRECTA y compatible
-    wan_vae_compatible = False
-    vae_path = os.path.join(COMFY_MODELS_DIR, "vae")
-    vae_file = os.path.join(vae_path, "Wan2.2_VAE.safetensors")
-    if os.path.exists(vae_file):
-        try:
-            import safetensors.torch
-            import re
-            with safetensors.torch.safe_open(vae_file, framework="pt") as f:
-                keys = list(f.keys())
-                
-                # La estructura correcta del VAE de WanVideo tiene downsamples.X.residual
-                # No requiere dos 'downsamples' anidados
-                has_downsamples = any("downsamples" in k for k in keys)
-                
-                # Tambien verificar que tenga la estructura basica de VAE
-                has_encoder = any(k.startswith("encoder.") for k in keys)
-                has_decoder = any(k.startswith("decoder.") for k in keys)
-                
-                if has_downsamples and has_encoder and has_decoder:
-                    # Estructura con downsamples + encoder/decoder = WANVIDEO VAE COMPATIBLE
-                    wan_vae_compatible = True
-                    print(f"[AnimatePhoto] WanVideo VAE compatible detectada (estructura downsamples)")
-                elif has_encoder and has_decoder:
-                    # Estructura plana - verificar canales
-                    # Buscar conv2.weight para verificar canales
-                    conv2_shape = None
-                    for k in keys:
-                        if k == "conv2.weight":
-                            conv2_shape = f.get_tensor(k).shape
-                            break
-                    if conv2_shape and len(conv2_shape) == 4:
-                        in_channels = conv2_shape[1]
-                        out_channels = conv2_shape[0]
-                        print(f"[AnimatePhoto] VAE canales: in={in_channels}, out={out_channels}")
-                        # WanVideoVAE38 tiene 48 canales, WanVideoVAE (original) tiene 16 canales
-                        if in_channels == 48 or out_channels == 48 or in_channels == 16 or out_channels == 16:
-                            wan_vae_compatible = True
-                            print(f"[AnimatePhoto] WanVideo VAE compatible detectada ({in_channels} canales)")
-                        else:
-                            print(f"[AnimatePhoto] WanVideo VAE INCOMPATIBLE - canales no reconocidos")
-                    else:
-                        print(f"[AnimatePhoto] WanVideo VAE INCOMPATIBLE - no se pudieron verificar canales")
-                else:
-                    print(f"[AnimatePhoto] WanVideo VAE INCOMPATIBLE - falta estructura encoder/decoder")
-        except Exception as e:
-            print(f"[AnimatePhoto] Error verificando VAE WanVideo: {e}")
-    
-    # WanVideo disponible si tiene modelo GGUF Y VAE compatible
-    if wan_gguf_found and wan_vae_compatible:
-        available["wan_video"] = True
-    elif wan_gguf_found and not wan_vae_compatible:
-        print(f"[AnimatePhoto] WanVideo detectado pero VAE incompatible - no disponible")
-    
-    # Detectar Zeroscope - buscar en diffusion_models
+    # --- DETECTAR ZEROSCOPE v2 XL ---
+    print("[AnimatePhoto] Buscando Zeroscope...")
     zeroscope_paths = [
         os.path.join(COMFY_MODELS_DIR, "diffusion_models", "zeroscope_v2_XL"),
         os.path.join(COMFY_MODELS_DIR, "diffusion_models", "zeroscope"),
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "zeroscope_v2_XL"),
+        os.path.join(COMFY_MODELS_DIR, "checkpoints", "zeroscope"),
     ]
+    zs_found = False
     for zs_path in zeroscope_paths:
+        print(f"[AnimatePhoto]   Probando: {zs_path}")
         if os.path.exists(zs_path):
-            # Verificar que tenga los componentes necesarios (UNET, TEXT_ENCODER)
             unet_path = os.path.join(zs_path, "UNET")
             text_encoder_path = os.path.join(zs_path, "TEXT_ENCODER")
             if os.path.exists(unet_path) and os.path.exists(text_encoder_path):
-                available["zeroscope"] = True
-                print(f"[AnimatePhoto] Zeroscope detectado en: {zs_path}")
+                zs_found = True
+                print(f"[AnimatePhoto]   ✅ Zeroscope completo en: {zs_path}")
                 break
+            else:
+                print(f"[AnimatePhoto]   ⚠️ Carpeta existe pero faltan UNET/TEXT_ENCODER")
     
-    # Verificar CogVideoX
-    cogvideo_path = os.path.join(COMFY_MODELS_DIR, "CogVideo", "CogVideoX-5b-1.5")
-    if os.path.exists(cogvideo_path):
-        # Verificar componentes necesarios
-        transformer_path = os.path.join(cogvideo_path, "transformer_I2V", "diffusion_pytorch_model.safetensors")
-        vae_path = os.path.join(cogvideo_path, "vae", "diffusion_pytorch_model.safetensors")
-        text_encoder_path = os.path.join(cogvideo_path, "text_encoder", "model-00001-of-00002.safetensors")
-        
-        if os.path.exists(transformer_path) and os.path.exists(vae_path) and os.path.exists(text_encoder_path):
-            available["cogvideo"] = True
-            print(f"[AnimatePhoto] CogVideoX-5B-I2V detectado!")
+    if zs_found:
+        available["zeroscope"] = True
+        print("[AnimatePhoto] ✅ Zeroscope v2 XL disponible")
+    else:
+        print("[AnimatePhoto] ❌ Zeroscope no encontrado")
     
-    print(f"[AnimatePhoto] Modelos detectados: {available}")
+    # --- DETECTAR CogVideoX ---
+    print("[AnimatePhoto] Buscando CogVideoX...")
+    cogvideo_paths = [
+        os.path.join(COMFY_MODELS_DIR, "CogVideo", "CogVideoX-5b-I2V"),
+        os.path.join(COMFY_MODELS_DIR, "CogVideo", "CogVideoX-5b-1.5"),
+        os.path.join(COMFY_MODELS_DIR, "CogVideoX", "CogVideoX-5b-I2V"),
+        os.path.join(COMFY_MODELS_DIR, "CogVideoX", "CogVideoX-1.5"),
+        os.path.join(COMFY_MODELS_DIR, "diffusion_models", "CogVideoX-5b-I2V"),
+    ]
+    cog_found = False
+    for cogvideo_path in cogvideo_paths:
+        print(f"[AnimatePhoto]   Probando: {cogvideo_path}")
+        if os.path.exists(cogvideo_path):
+            transformer_path = os.path.join(cogvideo_path, "transformer_I2V", "diffusion_pytorch_model.safetensors")
+            vae_path = os.path.join(cogvideo_path, "vae", "diffusion_pytorch_model.safetensors")
+            text_encoder_path = os.path.join(cogvideo_path, "text_encoder", "model-00001-of-00002.safetensors")
+            if os.path.exists(transformer_path) and os.path.exists(vae_path) and os.path.exists(text_encoder_path):
+                cog_found = True
+                print(f"[AnimatePhoto]   ✅ CogVideoX encontrado en: {cogvideo_path}")
+                break
+            else:
+                print(f"[AnimatePhoto]   ⚠️ Carpeta existe pero faltan archivos")
+    
+    if cog_found:
+        available["cogvideo"] = True
+        print("[AnimatePhoto] ✅ CogVideoX disponible")
+    else:
+        print("[AnimatePhoto] ❌ CogVideoX no encontrado")
+    
+    print(f"[AnimatePhoto] Resultado final: {available}")
     return available
 
 
@@ -633,14 +645,14 @@ def animate_photo(
                 log(f"[WARN] Error de VAE en WanVideo: {result}")
                 log("[INFO] Intentando con LTX Video como alternativa...")
                 
-                # Reintentar con LTX
+                # Reintentar con LTX (usando workflows_fixed)
                 try:
-                    import roop.comfy_workflows_ltx as workflows_ltx
-                    ltx_wf = workflows_ltx.get_ltx_video_workflow(
+                    import roop.comfy_workflows_fixed as workflows_fixed
+                    ltx_wf = workflows_fixed.get_ltxvideo2_workflow(
                         image_filename=image_filename,
                         prompt=action_prompt,
                         seed=int(timestamp),
-                        width=768, height=512, frames=49, fps=24
+                        width=768, height=512, frames=49, fps=fps
                     )
                     output_path = os.path.join(output_dir, f"ltx_video_{timestamp}.mp4")
                     success2, result2 = client.generate_video(temp_image_path, ltx_wf, output_path)
@@ -709,33 +721,28 @@ def animate_photo_tab():
     
     def get_choices_fn(models, current_value=None):
         if models is None:
-            return [("Sin modelos", "none")], "none"
+            return [("Sin modelos detectados", "none")], "none"
         choices = []
         default_value = "none"
-        # ORDEN: WanVideo > LTX > Zeroscope > CogVideo (SVD deshabilitado)
+        # ORDEN DE PRIORIDAD (mejores para 8GB primero)
         if models["wan_video"]:
-            choices.append(("WanVideo (Image-to-Video)", "wan_video"))
+            choices.append(("🌟 Wan 2.2 (14B GGUF) - Máxima calidad", "wan_video"))
             if default_value == "none":
                 default_value = "wan_video"
-        # SVD deshabilitado porque no funciona con ComfyUI
-        # if models["svd_xt"]:
-        #     choices.append(("SVD XT (Image-to-Video)", "svd_xt"))
-        # if models["svd_turbo"]:
-        #     choices.append(("SVD Turbo", "svd_turbo"))
         if models["ltx_video"]:
-            choices.append(("LTX Video (Image-to-Video)", "ltx_video"))
+            choices.append(("⚡ LTX Video v2.3 - Velocidad + audio integrado", "ltx_video"))
             if default_value == "none":
                 default_value = "ltx_video"
         if models["zeroscope"]:
-            choices.append(("Zeroscope (Image-to-Video)", "zeroscope"))
+            choices.append(("Zeroscope v2 XL - Buena calidad", "zeroscope"))
             if default_value == "none":
                 default_value = "zeroscope"
         if models["cogvideo"]:
-            choices.append(("CogVideoX (Image-to-Video)", "cogvideo"))
+            choices.append(("CogVideoX-5B - Experimental (descarga automática)", "cogvideo"))
             if default_value == "none":
                 default_value = "cogvideo"
         if not choices:
-            choices.append(("Sin modelos", "none"))
+            choices.append(("Sin modelos compatibles", "none"))
             default_value = "none"
         value_to_use = current_value if current_value in [c[1] for c in choices] else default_value
         return choices, value_to_use
@@ -846,8 +853,46 @@ def animate_photo_tab():
                         step=64,
                         info="Alto (recomendado): WanVideo 512 | LTX 512 | SVD 576. Multiplos de 8"
                     )
-
+                
+                # INFO del modelo seleccionado (presets)
+                model_preset_info = gr.Textbox(
+                    value="💡 Selecciona un modelo para ver configuración recomendada",
+                    label="⚙️ Configuración óptima por modelo",
+                    lines=5,
+                    interactive=False
+                )
+                
                 btn_animate = gr.Button("✨ Animar", variant="primary", size="lg")
+                
+                # Guía de modelos (accordion)
+                with gr.Accordion("📖 Guía de modelos y configuración", open=False):
+                    gr.Markdown("""
+### 🏆 Modelos recomendados (8GB VRAM)
+| Modelo | Calidad | Velocidad | Caso de uso |
+|---|---|---|---|
+| **Wan 2.2 (14B GGUF)** | ★★★★★ | 20-30 min/clip | Cine, cortos de alta calidad, control de cámara (zoom, paneo) |
+| **LTX Video v2.3** | ★★★★☆ | 2-5 min/clip | Contenido rápido (TikTok/Reels), audio integrado automático |
+| **Zeroscope v2 XL** | ★★★☆☆ | ~10 min | Alternativa sólida si faltan los anteriores |
+
+### ⚙️ Presets automáticos
+Al seleccionar un modelo, los sliders se ajustan automáticamente a los valores óptimos para 8GB:
+- **Wan 2.2**: 832×480, 25 frames (4n+1), 24 fps. Usa LoRA Lightx2v → 6 pasos en vez de 20.
+- **LTX Video**: 768×512, 49 frames (8n+1), 24 fps. Genera audio sincronizado en un solo paso.
+- **Zeroscope**: 576×320, 24 frames.
+
+### 📋 Requisitos de modelos
+- **WanVideo**: Necesita `Wan2.2-I2V-Q4_K_M` (o Q5) en `ComfyUI/models/diffusion_models/` + `Wan2.2_VAE.safetensors` en `ComfyUI/models/vae/`.
+- **LTX Video**: Necesita `ltx-video-0.9.5` en `ComfyUI/models/checkpoints/` o `diffusion_models/`.
+- **Zeroscope**: Necesita `zeroscope_v2_XL` con carpetas `UNET` y `TEXT_ENCODER`.
+- **CogVideoX**: Se descarga automáticamente (puede fallar).
+
+### 💡 Consejos
+1. Usa **Wan 2.2** para calidad máxima; ten paciencia (20-30 min).
+2. Usa **LTX Video** para resultados rápidos y clips cortos (<10s).
+3. Si el video se ve entrecortado, reduce resolución o frames.
+4. Para videos más largos (>10s), LTX es la única opción viable en 8GB.
+5. Activa `Temporal Smoothing` en FaceSwap si vas a animar caras.
+                    """)
 
             with gr.Column(scale=1):
                 output_video = gr.Video(
@@ -896,28 +941,122 @@ def animate_photo_tab():
             outputs=[status]
         )
         
-        # Función para actualizar visibilidad del prompt según modelo
+        # Función para actualizar configuración según modelo seleccionado
         def on_model_change(model):
-            if model in ["svd_turbo", "svd_xt"]:
-                return {
-                    action_prompt: gr.update(placeholder="Escribe un prompt para controlar el video", interactive=True),
-                    prompt_info: gr.update(visible=True)
+            """Ajusta sliders y placeholders según el modelo (presets para 8GB)"""
+            presets = {
+                "wan_video": {
+                    "frames": 25,      # WanVideo: debe ser 4n+1 (21,25,29,33...). 25 buen equilibrio
+                    "fps": 24,
+                    "width": 832,      # 720p approx (máximo cómodo para 8GB)
+                    "height": 480,
+                    "prompt_placeholder": "Describe movimiento/cámara (ej: 'camara lenta zoom', 'personaje caminando suave')",
+                    "prompt_info": "WanVideo entiende prompts de movimiento y estilo de cámara.",
+                    "info": (
+                        "**🌟 Wan 2.2 (14B GGUF)** - Máxima calidad.\n"
+                        "• Resolución: 832x480 (720p)\n"
+                        "• Frames: 25 (4n+1, ej: 21,25,29,33)\n"
+                        "• Tiempo: 20-30 min (8GB, Q4/Q5 GGUF)\n"
+                        "• Usa LoRA Lightx2v para acelerar (6 pasos)\n"
+                        "• Control: zoom, paneo, estilo de luz"
+                    )
+                },
+                "ltx_video": {
+                    "frames": 49,      # LTX requiere 8n+1. 49 = 6s a 8fps o ~2s a 24fps
+                    "fps": 24,
+                    "width": 768,      # Resolución nativa LTX
+                    "height": 512,
+                    "prompt_placeholder": "Describe la escena (ej: 'saltando', 'rotando')",
+                    "prompt_info": "LTX Video: rápido, con audio integrado opcional.",
+                    "info": (
+                        "**⚡ LTX Video v2.3** - Velocidad + audio integrado.\n"
+                        "• Resolución: 768x512\n"
+                        "• Frames: 49 (8n+1) → ~2s a 24fps\n"
+                        "• Tiempo: 2-5 min (8GB, GGUF Q6)\n"
+                        "• Genera audio sincronizado automáticamente\n"
+                        "• Ideal para clips cortos (TikTok/Reels)"
+                    )
+                },
+                "zeroscope": {
+                    "frames": 24,
+                    "fps": 24,
+                    "width": 576,
+                    "height": 320,
+                    "prompt_placeholder": "Describe la acción...",
+                    "prompt_info": "Zeroscope: calidad moderada, buena para pruebas.",
+                    "info": (
+                        "**Zeroscope v2 XL** - Buena calidad.\n"
+                        "• Resolución: 576x320\n"
+                        "• Frames: 24 (~1s a 24fps)\n"
+                        "• Tiempo: ~5-10 min\n"
+                        "• Alternativa sólida si falta Wan/LTX"
+                    )
+                },
+                "cogvideo": {
+                    "frames": 24,
+                    "fps": 24,
+                    "width": 512,
+                    "height": 512,
+                    "prompt_placeholder": "Describe la escena... (puede requerir descarga)",
+                    "prompt_info": "CogVideoX: experimental, puede descargar modelos automáticamente.",
+                    "info": (
+                        "**CogVideoX-5B-I2V** - Experimental.\n"
+                        "• Resolución: 512x512\n"
+                        "• Puede descargar pesos automáticamente\n"
+                        "• Lento en 8GB, usar con paciencia"
+                    )
+                },
+                "none": {
+                    "frames": 24,
+                    "fps": 24,
+                    "width": 512,
+                    "height": 512,
+                    "prompt_placeholder": "Selecciona un modelo primero",
+                    "prompt_info": "",
+                    "info": "⚠️ No hay modelos detectados. Instala al menos uno en ComfyUI/models/"
                 }
-            else:
-                return {
-                    action_prompt: gr.update(placeholder="Ej: 'personaje caminando'", interactive=True),
-                    prompt_info: gr.update(visible=False)
-                }
+            }
+            
+            p = presets.get(model, presets["none"])
+            
+            # Actualizar placeholders e info del prompt
+            action_prompt_update = gr.update(
+                placeholder=p["prompt_placeholder"],
+                interactive=True
+            )
+            prompt_info_update = gr.update(
+                value=p["prompt_info"],
+                visible=bool(p["prompt_info"])
+            ) if p["prompt_info"] else gr.update(visible=False)
+            
+            # Actualizar sliders
+            frames_update = gr.update(value=p["frames"])
+            fps_update = gr.update(value=p["fps"])
+            width_update = gr.update(value=p["width"])
+            height_update = gr.update(value=p["height"])
+            
+            # Actualizar info del modelo
+            model_info_update = gr.update(value=p["info"])
+            
+            return (
+                action_prompt_update,
+                prompt_info_update,
+                frames_update,
+                fps_update,
+                width_update,
+                height_update,
+                model_info_update
+            )
         
         model_selector.change(
             fn=on_model_change,
             inputs=[model_selector],
-            outputs=[action_prompt, prompt_info]
+            outputs=[action_prompt, prompt_info, frames, fps, width, height, model_preset_info]
         )
 
 
 def get_model_status_text(models=None, default_model=None):
-    """Retorna texto con el estado de los modelos"""
+    """Retorna texto con el estado de los modelos detectados"""
     lines = []
     
     if models is None:
@@ -925,21 +1064,27 @@ def get_model_status_text(models=None, default_model=None):
     if default_model is None:
         _, default_model = init_detect_models()
     
-    if models["ltx_video"]:
-        lines.append("[OK] LTX Video 0.9.1 (⭐)")
-    else:
-        lines.append("[X] LTX Video 0.9.1")
+    # Estado de cada modelo
+    status_ltx = "🟢" if models.get("ltx_video", False) else "🔴"
+    status_wan = "🟢" if models.get("wan_video", False) else "🔴"
+    status_zs = "🟢" if models.get("zeroscope", False) else "🔴"
+    status_cog = "🟢" if models.get("cogvideo", False) else "🔴"
     
-    lines.append("[X] SVD (deshabilitado)")
+    lines.append(f"{status_ltx} LTX Video v2.3 (⭐ recomendado 8GB)")
+    lines.append(f"{status_wan} Wan 2.2 (14B GGUF) - Máxima calidad")
+    lines.append(f"{status_zs} Zeroscope v2 XL")
+    lines.append(f"{status_cog} CogVideoX-5B (experimental)")
+    lines.append("")
     
-    if models["cogvideo"]:
-        lines.append("[OK] CogVideoX-5B-I2V ⭐")
+    # Modelo por defecto
+    if default_model and default_model != "none":
+        lines.append(f"✅ Default: {default_model}")
     else:
-        lines.append("[X] CogVideoX-5B-I2V")
-    
-    if models["wan_video"]:
-        lines.append("[OK] WanVideo")
-    else:
-        lines.append("[X] WanVideo")
+        lines.append("⚠️ No hay modelos disponibles")
+        lines.append("")
+        lines.append("**Instala modelos en:**")
+        lines.append("`ComfyUI/models/diffusion_models/`")
+        lines.append("`ComfyUI/models/checkpoints/`")
+        lines.append("`ComfyUI/models/vae/` (para Wan)")
     
     return "\n".join(lines)

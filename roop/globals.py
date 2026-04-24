@@ -48,10 +48,10 @@ similarity_threshold_fallback = 0.08 # Fallback más bajo para asegurar detecci�
 default_det_size = True  # Usar tamaño de detector por defecto - más rápido
 
 # Mejores umbrales para matching en selected_faces_frame - MÁXIMA PRECISIÓN
-face_match_embedding_threshold = 0.35  # Más estricto para mejor matching de embeddings
+face_match_embedding_threshold = 0.45  # Aumentado de 0.35 para evitar falsos positivos
 face_match_bbox_iou_threshold = 0.35   # Más estricto para mejor coincidencia de bounding boxes
 show_face_area = False  # Variable para mostrar área de cara en preview
-use_enhancer = True  # Mejora la calidad de la cara generada
+use_enhancer = False  # Desactivado por defecto para velocidad real-time (CodeFormer ~1.2 FPS, muy lento)
 blend_mode = 'seamless'  # Mejor integración visual que Poisson
 use_color_correction = True  # Ajusta color de la cara swappeada a la del target
 use_color_matching = True  # Matching de histograma LAB para tono de piel natural
@@ -74,7 +74,7 @@ color_match_strength = 0.05
 
 # CodeFormer es el MEJOR para face swap - LMD 5.38 (mejor identidad)
 # RestoreFormer++ es mejor para restauración - FID 38.41 (mejor calidad visual)
-default_enhancer = 'CodeFormer'  # Mejor preservación de identidad para face swap
+default_enhancer = 'None'  # Desactivado por defecto para velocidad; CodeFormer muy lento (1.2 FPS)
 
 # BATCH PROCESSING - Procesamiento en paralelo para videos
 # Número de frames a procesar simultáneamente

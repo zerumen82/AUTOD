@@ -681,7 +681,7 @@ class ImgEditorManager:
             )
             # ctx_id=0 usa GPU si está disponible, ctx_id=-1 usa CPU
             ctx_id = 0 if use_cuda else -1
-            self.face_analyzer.prepare(ctx_id=ctx_id, det_size=(640, 640))
+            self.face_analyzer.prepare(ctx_id=ctx_id, det_size=(320, 320))
             print(f"[ImgEditor] ✅ Face Analyzer inicializado (ctx_id={ctx_id}, CUDA={use_cuda})")
             
             # 2. Inicializar Face Swapper (Reactor/Inswapper)
@@ -727,72 +727,105 @@ class ImgEditorManager:
     
     def _restore_face(self, original: Image.Image, generated: Image.Image) -> Image.Image:
         """
-        Restaura la cara original en la imagen generada usando face swap.
-        
-        Este es el paso 2 del enfoque de dos pasadas.
+        Restaura TODAS las caras originales en la imagen generada (multi-face swap).
+        Versión mejorada: detecta N caras en original y M en generada, empareja por proximidad.
         """
         try:
             if not self._init_face_swap():
                 print("[ImgEditor] Face swap no disponible, devolviendo imagen generada")
                 return generated
             
-            # Extraer cara del original (RGB para InsightFace)
+            # Detectar caras en imagen original
             original_rgb = np.array(original)
             faces_original = self.face_analyzer.get(original_rgb)
-            
             print(f"[ImgEditor] 🔍 Caras detectadas en original: {len(faces_original)}")
-            if len(faces_original) > 0:
-                # Mostrar bounding boxes
-                for i, face in enumerate(faces_original):
-                    bbox = face.bbox
-                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                    print(f"   Cara {i}: bbox={bbox.tolist()}, área={area:.1f}")
+            for i, face in enumerate(faces_original):
+                bbox = face.bbox
+                print(f"   Cara {i}: bbox={bbox.tolist()}")
             
             if len(faces_original) == 0:
                 print("[ImgEditor] ❌ No se detectaron caras en el original")
                 return generated
             
-            # Usar la cara mas grande del original
-            source_face = max(faces_original, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-            print(f"[ImgEditor] ✅ Cara fuente seleccionada: bbox={source_face.bbox.tolist()}")
-            
-            # Convertir imagen generada a formato OpenCV (BGR) para face swapper
+            # Convertir generada a BGR para face swapper
             generated_cv = cv2.cvtColor(np.array(generated), cv2.COLOR_RGB2BGR)
-            
-            # Detectar caras en la imagen generada (RGB para InsightFace)
             generated_rgb = np.array(generated)
             faces_generated = self.face_analyzer.get(generated_rgb)
             
             print(f"[ImgEditor] 🔍 Caras detectadas en generada: {len(faces_generated)}")
-            if len(faces_generated) > 0:
-                for i, face in enumerate(faces_generated):
-                    bbox = face.bbox
-                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                    print(f"   Cara {i}: bbox={bbox.tolist()}, área={area:.1f}")
+            for i, face in enumerate(faces_generated):
+                bbox = face.bbox
+                print(f"   Cara {i}: bbox={bbox.tolist()}")
             
             if len(faces_generated) == 0:
-                print("[ImgEditor] No se detectaron caras en la generada, haciendo swap directo")
-                # No hay cara en la generada, intentar swap directo
-                # Crear una cara target ficticia basada en la posicion del original
-                result = self.face_swapper.Run(source_face, source_face, generated_cv, paste_back=True)
+                print("[ImgEditor] No hay caras en generada, intentando colocar todas las originales")
+                # No hay caras detectadas en generada: intentar inyectar todas las originales
+                result = generated_cv.copy()
+                for face_orig in faces_original:
+                    res = self.face_swapper.Run(face_orig, face_orig, result, paste_back=True)
+                    if res is not None:
+                        result = res
                 if result is not None:
                     return Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
                 return generated
             
-            # Hacer face swap: cara del original -> imagen generada
-            target_face = max(faces_generated, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            # Calcular centros NORMALIZADOS (0.0-1.0) para emparejamiento entre resoluciones distintas
+            w_orig, h_orig = original.size
+            w_gen, h_gen = generated.size
             
-            result = self.face_swapper.Run(source_face, target_face, generated_cv, paste_back=True)
+            def get_normalized_center(face, w, h):
+                x1, y1, x2, y2 = face.bbox
+                cx = (x1 + x2) / 2 / w
+                cy = (y1 + y2) / 2 / h
+                return (cx, cy)
             
-            if result is not None:
-                print("[ImgEditor] Cara restaurada correctamente")
-                return Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
+            orig_centers = [(get_normalized_center(f, w_orig, h_orig), f) for f in faces_original]
+            gen_centers = [(get_normalized_center(f, w_gen, h_gen), f) for f in faces_generated]
+            
+            # Emparejamiento greedy: cada cara original -> cara generada más cercana no asignada
+            assigned = [False] * len(faces_generated)
+            swaps = []
+            
+            for (ox, oy), orig_face in orig_centers:
+                min_dist = float('inf')
+                best_idx = -1
+                for i, ((gx, gy), gen_face) in enumerate(gen_centers):
+                    if assigned[i]:
+                        continue
+                    # Distancia euclídea en espacio normalizado (independiente de resolución)
+                    dist = ((ox - gx)**2 + (oy - gy)**2)**0.5
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_idx = i
+                
+                # Umbral de seguridad: si la cara más cercana está a más de 0.5 del centro (50% de la imagen), 
+                # es probable que no sea la misma persona en esa posición.
+                if best_idx != -1 and min_dist < 0.5:
+                    assigned[best_idx] = True
+                    _, target_face = gen_centers[best_idx]
+                    swaps.append((orig_face, target_face))
+                    print(f"[ImgEditor] Emparejamiento (norm dist={min_dist:.3f}): cara original {orig_face.bbox.tolist()} -> generada {target_face.bbox.tolist()}")
+                else:
+                    print(f"[ImgEditor] Ignorando cara original (no se encontró pareja cercana en generada, dist={min_dist if best_idx != -1 else 'N/A'})")
+            
+            # Aplicar swaps en secuencia
+            result_img = generated_cv.copy()
+            for source_face, target_face in swaps:
+                res = self.face_swapper.Run(source_face, target_face, result_img, paste_back=True)
+                if res is not None:
+                    result_img = res
+                else:
+                    print(f"[ImgEditor] Warning: swap falló para una cara")
+            
+            if result_img is not None:
+                print(f"[ImgEditor] ✅ Restauradas {len(swaps)} caras de {len(faces_original)}")
+                return Image.fromarray(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB))
             else:
-                print("[ImgEditor] Face swap fallo, devolviendo imagen generada")
+                print("[ImgEditor] Face swap falló, devolviendo imagen generada")
                 return generated
                 
         except Exception as e:
-            print(f"[ImgEditor] Error restaurando cara: {e}")
+            print(f"[ImgEditor] Error en multi-face swap: {e}")
             import traceback
             traceback.print_exc()
             return generated
@@ -822,9 +855,26 @@ class ImgEditorManager:
         3. Genera con ComfyUI / VAR / Flux
         4. Face swap (opcional)
         """
+        # Preparar imagen original para face preserve
+        if isinstance(image, Image.Image):
+            original_image = image.copy()
+        elif hasattr(image, 'name'):
+            original_image = Image.open(image.name).copy()
+        elif isinstance(image, str) and os.path.exists(image):
+            original_image = Image.open(image).copy()
+        else:
+            original_image = None
+
+        # Sobrescribir parámetros desde ref_metadata (sliders UI)
+        if ref_metadata:
+            if 'guidance_scale' in ref_metadata:
+                guidance_scale = ref_metadata['guidance_scale']
+            if 'denoise' in ref_metadata:
+                denoise = ref_metadata['denoise']
+
         # --- MOTOR FLUX IMAGE EDIT vía ComfyUI ---
-        if engine == "flux":
-            print("[ImgEditor] === ⚡ USANDO FLUX IMAGE EDIT ===", flush=True)
+        if engine in ["flux", "flux_klein", "flux_schnell"]:
+            print("[ImgEditor] === FLUX IMAGE EDIT ===", flush=True)
             print(f"[ImgEditor] Prompt: {prompt[:100]}", flush=True)
             try:
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
@@ -834,11 +884,48 @@ class ImgEditorManager:
                     self.flux_edit_client = get_flux_edit_comfy_client()
                     print("[ImgEditor] FLUX Client creado", flush=True)
 
+                # Determinar versión FLUX
+                flux_version = "flux_klein" if engine in ["flux", "flux_klein"] else "flux_schnell"
+                if flux_version == "flux_schnell":
+                    print("[WARN] FLUX.1-schnell usa GGUF T5 que es MUY LENTO (~20+ min). Se recomienda FLUX.2-klein.")
+
+                # Calcular resolución objetivo desde ref_metadata
+                target_w, target_h = None, None
+                if ref_metadata and 'resolution_label' in ref_metadata:
+                    resolution = ref_metadata['resolution_label']
+                    try:
+                        max_side = int(resolution.replace('p', ''))
+                        w, h = image.size
+                        if w >= h:
+                            target_w = max_side
+                            target_h = int(h * (max_side / w))
+                        else:
+                            target_h = max_side
+                            target_w = int(w * (max_side / h))
+                        target_w = (target_w // 16) * 16
+                        target_h = (target_h // 16) * 16
+                        print(f"[ImgEditor] Resolución objetivo: {target_w}x{target_h} (original {w}x{h})")
+                    except:
+                        pass
+
+                # Determinar denoise desde ref_metadata (configurado por slider UI)
+                denoise = strength  # fallback
+                if ref_metadata:
+                    denoise = ref_metadata.get('denoise', denoise)
+                print(f"[ImgEditor] Denoise configurado: {denoise:.3f} (desde slider 'Preservar original')")
+
+                # Aplicar guidance_scale desde ref_metadata si existe
+                if ref_metadata:
+                    guidance_scale = ref_metadata.get('guidance_scale', guidance_scale)
+                print(f"[ImgEditor] Guidance configurado: {guidance_scale:.3f} (desde slider 'Creatividad')")
+
                 print("[ImgEditor] Cargando modelos FLUX...", flush=True)
-                success, msg = self.flux_edit_client.load(progress_callback=progress_callback)
+                success, msg = self.flux_edit_client.load(
+                    progress_callback=progress_callback, flux_version=flux_version
+                )
                 print(f"[ImgEditor] Load result: {success} - {msg}", flush=True)
                 if not success:
-                    print(f"[ImgEditor] ❌ Error cargando FLUX: {msg}", flush=True)
+                    print(f"[ImgEditor] ERROR cargando FLUX: {msg}", flush=True)
                     return None, f"Error Motor FLUX: {msg}"
 
                 print("[ImgEditor] Generando con FLUX...", flush=True)
@@ -847,18 +934,30 @@ class ImgEditorManager:
                     prompt=prompt,
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
-                    seed=seed
+                    seed=seed,
+                    denoise=denoise,
+                    target_width=target_w,
+                    target_height=target_h,
+                    flux_version=flux_version
                 )
                 print(f"[ImgEditor] Generate result: {result_obj is not None} - {msg}", flush=True)
 
                 if result_obj and result_obj.image:
-                    return result_obj.image, f"✅ FLUX Edit completada ({result_obj.time_taken:.1f}s)"
-                return None, f"❌ Fallo en FLUX Edit: {msg}"
+                    final_image = result_obj.image
+                    
+                    # PASADA 2: Restaurar cara si se solicita
+                    if face_preserve:
+                        print("[ImgEditor] PASADA 2 (FLUX): Restaurando cara original...")
+                        final_image = self._restore_face(original_image, final_image)
+                    
+                    return final_image, f"FLUX Edit completada ({result_obj.time_taken:.1f}s)"
+                return None, f"Fallo en FLUX Edit: {msg}"
             except Exception as e:
-                print(f"[ImgEditor] ❌ Error en motor FLUX: {e}", flush=True)
+                print(f"[ImgEditor] ERROR en motor FLUX: {e}", flush=True)
                 import traceback
                 print(traceback.format_exc(), flush=True)
                 return None, f"Error Motor FLUX: {str(e)}"
+
 
         # --- MOTOR QWEN IMAGE EDIT vía ComfyUI ---
         if engine in ["qwen", "qwen2509", "qwen2512"]:
@@ -889,12 +988,17 @@ class ImgEditorManager:
                     prompt=prompt,
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
-                    seed=seed
+                    seed=seed,
+                    denoise=denoise
                 )
                 print(f"[ImgEditor] Generate result: {result_obj is not None} - {msg}", flush=True)
 
                 if result_obj and result_obj.image:
-                    return result_obj.image, f"✅ Qwen Edit ({qwen_version}) completada ({result_obj.time_taken:.1f}s)"
+                    final_image = result_obj.image
+                    if face_preserve and original_image is not None:
+                        print("[ImgEditor] PASADA 2 (Qwen): Restaurando cara original...")
+                        final_image = self._restore_face(original_image, final_image)
+                    return final_image, f"✅ Qwen Edit ({qwen_version}) completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en Qwen Edit: {msg}"
             except Exception as e:
                 print(f"[ImgEditor] ❌ Error en motor Qwen: {e}", flush=True)
@@ -932,12 +1036,17 @@ class ImgEditorManager:
                     prompt=prompt,
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
-                    seed=seed
+                    seed=seed,
+                    denoise=denoise
                 )
                 print(f"[ImgEditor] Generate result: {result_obj is not None} - {msg}", flush=True)
 
                 if result_obj and result_obj.image:
-                    return result_obj.image, f"✅ Z-Image ({zimage_version}) completada ({result_obj.time_taken:.1f}s)"
+                    final_image = result_obj.image
+                    if face_preserve and original_image is not None:
+                        print("[ImgEditor] PASADA 2 (Z-Image): Restaurando cara original...")
+                        final_image = self._restore_face(original_image, final_image)
+                    return final_image, f"✅ Z-Image ({zimage_version}) completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en Z-Image: {msg}"
             except Exception as e:
                 print(f"[ImgEditor] ❌ Error en motor Z-Image: {e}", flush=True)
@@ -959,13 +1068,30 @@ class ImgEditorManager:
 
                 print("[ImgEditor] Cargando modelos HART...", flush=True)
                 
-                # Cerrar ComfyUI para liberar VRAM antes de generar con HART
+                 # Cerrar ComfyUI para liberar VRAM antes de generar con HART
                 try:
                     from ui.tabs.comfy_launcher import stop
                     print("[ImgEditor] Cerrando ComfyUI para liberar VRAM...", flush=True)
                     stop()
+                    # Esperar más tiempo para que PyTorch libere memoria (8GB limitados)
                     import time
-                    time.sleep(2)
+                    time.sleep(5)  # Aumentado de 2 a 5 segundos
+                    # Forzar limpieza de caché CUDA
+                    try:
+                        import torch
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        # Verificar VRAM libre
+                        if torch.cuda.is_available():
+                            total = torch.cuda.get_device_properties(0).total_memory / 1e9
+                            allocated = torch.cuda.memory_allocated(0) / 1e9
+                            free = total - allocated
+                            print(f"[ImgEditor] VRAM después de cerrar ComfyUI: {free:.2f}GB libre de {total:.2f}GB", flush=True)
+                            if free < 5.5:  # HART necesita ~6GB mínimo
+                                print(f"[ImgEditor] ⚠️ Advertencia: VRAM insuficiente para HART ({free:.2f}GB < 5.5GB). Podría fallar.", flush=True)
+                        print("[ImgEditor] VRAM cache limpiada", flush=True)
+                    except Exception as e:
+                        print(f"[ImgEditor] Warning: No se pudo limpiar VRAM cache: {e}", flush=True)
                     print("[ImgEditor] ComfyUI cerrado", flush=True)
                 except Exception as e:
                     print(f"[ImgEditor] Warning: No se pudo cerrar ComfyUI: {e}", flush=True)
@@ -982,8 +1108,8 @@ class ImgEditorManager:
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
                     seed=seed,
-                    width=1024,
-                    height=1024,
+                    width=512,
+                    height=512,
                     venv_path=r"D:\PROJECTS\AUTOAUTO\venv_ext"
                 )
                 print(f"[ImgEditor] Generate result: {result_obj is not None} - {msg}", flush=True)
@@ -1003,7 +1129,11 @@ class ImgEditorManager:
                     print(f"[ImgEditor] Warning: No se pudo reiniciar ComfyUI: {e}", flush=True)
 
                 if result_obj and result_obj.image:
-                    return result_obj.image, f"✅ HART completada ({result_obj.time_taken:.1f}s)"
+                    final_image = result_obj.image
+                    if face_preserve and original_image is not None:
+                        print("[ImgEditor] PASADA 2 (HART): Restaurando cara original...")
+                        final_image = self._restore_face(original_image, final_image)
+                    return final_image, f"✅ HART completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en HART: {msg}"
             except Exception as e:
                 print(f"[ImgEditor] ❌ Error en motor HART: {e}", flush=True)
@@ -1041,7 +1171,11 @@ class ImgEditorManager:
                 print(f"[ImgEditor] Generate result: {result_obj is not None} - {msg}", flush=True)
 
                 if result_obj and result_obj.image:
-                    return result_obj.image, f"✅ ICEdit completada ({result_obj.time_taken:.1f}s)"
+                    final_image = result_obj.image
+                    if face_preserve and original_image is not None:
+                        print("[ImgEditor] PASADA 2 (ICEdit): Restaurando cara original...")
+                        final_image = self._restore_face(original_image, final_image)
+                    return final_image, f"✅ ICEdit completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en ICEdit: {msg}"
             except Exception as e:
                 print(f"[ImgEditor] ❌ Error en motor ICEdit: {e}", flush=True)
@@ -1074,12 +1208,17 @@ class ImgEditorManager:
                     prompt=prompt,
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
-                    seed=seed
+                    seed=seed,
+                    denoise=denoise
                 )
                 print(f"[ImgEditor] Generate result: {result_obj is not None} - {msg}", flush=True)
 
                 if result_obj and result_obj.image:
-                    return result_obj.image, f"✅ OmniGen2 GGUF completada ({result_obj.time_taken:.1f}s)"
+                    final_image = result_obj.image
+                    if face_preserve and original_image is not None:
+                        print("[ImgEditor] PASADA 2 (OmniGen2): Restaurando cara original...")
+                        final_image = self._restore_face(original_image, final_image)
+                    return final_image, f"✅ OmniGen2 GGUF completada ({result_obj.time_taken:.1f}s)"
                 return None, f"❌ Fallo en OmniGen2: {msg}"
             except Exception as e:
                 print(f"[ImgEditor] ❌ Error en motor OmniGen2: {e}", flush=True)

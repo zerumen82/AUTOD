@@ -7,9 +7,14 @@ from roop.types import Frame
 
 def get_image_frame(filename: str):
     try:
-        return cv2.imdecode(np.fromfile(filename, dtype=np.uint8), cv2.IMREAD_COLOR)
-    except:
-        print(f"Exception reading {filename}")
+        # Método 1: np.fromfile (soporta Unicode)
+        img = cv2.imdecode(np.fromfile(filename, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is not None:
+            return img
+        # Método 2: fallback a imread regular
+        return cv2.imread(filename, cv2.IMREAD_COLOR)
+    except Exception as e:
+        print(f"Error reading {filename}: {e}")
     return None
 
 

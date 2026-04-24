@@ -197,7 +197,7 @@ class ZImageEditComfyClient:
             }
 
             # Ejecutar workflow
-            r = requests.post(f"{COMFY}/prompt", json={"workflow": workflow})
+            r = requests.post(f"{COMFY}/prompt", json={"prompt": workflow})
             if r.status_code != 200:
                 raise Exception(f"Workflow failed: {r.text}")
             

@@ -30,8 +30,8 @@ def get_face_analyser():
                 root=os.path.dirname(os.path.dirname(__file__))
             )
             ctx_id = 0 if use_cuda else -1
-            FACE_ANALYSER.prepare(ctx_id=ctx_id, det_size=(640, 640))
-            print(f"[SUCCESS] [OK] FaceAnalysis inicializado con {providers[0]}")
+            FACE_ANALYSER.prepare(ctx_id=ctx_id, det_size=(320, 320))
+            print(f"[SUCCESS] [OK] FaceAnalysis inicializado con {providers[0]} (det_size=320x320)")
             
         except Exception as e:
             print(f"[ERROR] Falló inicialización: {e}")
@@ -42,8 +42,8 @@ def get_face_analyser():
                 providers=['CPUExecutionProvider'],
                 root=os.path.dirname(os.path.dirname(__file__))
             )
-            FACE_ANALYSER.prepare(ctx_id=-1, det_size=(640, 640))
-            print(f"[INFO] FaceAnalysis usando CPU por fallback")
+            FACE_ANALYSER.prepare(ctx_id=-1, det_size=(320, 320))
+            print(f"[INFO] FaceAnalysis usando CPU por fallback (det_size=320x320)")
     
     return FACE_ANALYSER  
 

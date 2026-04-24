@@ -116,6 +116,7 @@ from PIL import Image
 import numpy as np
 
 os.environ['HF_HUB_DISABLE_XDG_CACHE'] = '1'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
 hart_module_path = r"{os.path.join(os.path.dirname(__file__), '..', '..', 'ui', 'tob', 'ComfyUI', 'custom_nodes', 'hart')}"
 sys.path.insert(0, hart_module_path)
@@ -129,68 +130,85 @@ from hart.utils import encode_prompts, llm_system_prompt
 
 device = torch.device("cuda")
 torch.cuda.empty_cache()
+torch.cuda.synchronize()
 
 model_path = r"{self._model_paths['hart_model']}"
 text_model_path = r"{self._model_paths['qwen2_vl']}"
 
-# Load HART on GPU with compile for memory efficiency
-print("Loading HART on GPU...", flush=True)
-model = HARTForT2I.from_pretrained(model_path).to(device)
+# Cargar en CPU primero para evitar OOM
+print("[HART] Cargando modelo en CPU...", flush=True)
+model = HARTForT2I.from_pretrained(model_path, device_map="cpu")
+print("[HART] Modelo base cargado", flush=True)
 
-# Try to use torch compile if available for memory savings
+# Compilar si está disponible (ahorra memoria)
 try:
     import torch._dynamo
     torch._dynamo.config.suppress_errors = True
     model = torch.compile(model, mode="reduce-overhead")
-    print("HART compiled", flush=True)
-except:
-    print("HART compiled skipped", flush=True)
+    print("[HART] Modelo compilado", flush=True)
+except Exception as e:
+    print(f"[HART] Compile skipped: {e}", flush=True)
 
 torch.cuda.empty_cache()
+torch.cuda.synchronize()
 
-# Load EMA weights from CPU
-print("Loading EMA weights...", flush=True)
+print("[HART] Cargando EMA weights (CPU)...", flush=True)
 ema_state = torch.load(os.path.join(model_path, "ema_model.bin"), map_location="cpu", weights_only=False)
 model.load_state_dict(ema_state)
 del ema_state
 torch.cuda.empty_cache()
+torch.cuda.synchronize()
 
-# Use inference_mode which frees more memory than eval()
-with model.inference_mode():
-    print("HART ready", flush=True)
-    
-    # Load Qwen2-VL and encode prompt
-    print("Loading Qwen2-VL...", flush=True)
+# Mover a GPU con manejo de OOM
+print("[HART] Moviendo a GPU...", flush=True)
+try:
+    model = model.to(device)
+except RuntimeError as e:
+    if "out of memory" in str(e).lower():
+        print("[HART] ⚠️ OOM en GPU. Usando CPU (lento, pero funciona)", flush=True)
+        device = torch.device("cpu")
+        model = model.to(device)
+    else:
+        raise
+
+print("[HART] Modelo listo", flush=True)
+torch.cuda.empty_cache()
+torch.cuda.synchronize()
+
+# Generación
+with torch.inference_mode():
+    print("[HART] Cargando Qwen2-VL (CPU)...", flush=True)
     text_model = AutoModel.from_pretrained(text_model_path).to("cpu")
     text_tokenizer = AutoTokenizer.from_pretrained(text_model_path)
-
-    print("Encoding prompt...", flush=True)
+    
+    print("[HART] Encoding prompt...", flush=True)
     with torch.no_grad():
         context_tokens, context_mask, context_position_ids, context_tensor = encode_prompts(
             ["{prompt}"], text_model, text_tokenizer, 300, llm_system_prompt, True
         )
         context_tensor = context_tensor.float()
-
+    
     del text_model, text_tokenizer
     torch.cuda.empty_cache()
-    print("Prompt encoded", flush=True)
-
+    torch.cuda.synchronize()
+    print("[HART] Prompt codificado", flush=True)
+    
     context_tensor = context_tensor.to(device)
-    print("Generating...", flush=True)
-
+    print("[HART] Generando (8 pasos)...", flush=True)
+    
     output = model.autoregressive_infer_cfg(
         B=1, label_B=context_tensor, cfg={guidance_scale}, g_seed={seed or 42}, more_smooth=True,
         context_position_ids=context_position_ids, context_mask=context_mask
     )
-
-    print("Done", flush=True)
+    
+    print("[HART] Generación completada", flush=True)
 
 img_np = output[0].permute(1, 2, 0).mul_(255).cpu().numpy().astype(np.uint8)
 img = Image.fromarray(img_np)
 output_dir = r"{os.path.join(os.path.dirname(__file__), '..', '..', 'ui', 'tob', 'output')}"
 os.makedirs(output_dir, exist_ok=True)
 img.save(os.path.join(output_dir, "hart_generated.png"))
-print("Saved!")
+print("[HART] Imagen guardada!", flush=True)
 '''
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:

@@ -14,7 +14,19 @@ def get_face_swapper():
     with THREAD_LOCK:  
         if FACE_SWAPPER is None:  
             model_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), '../models/inswapper_128.onnx')  
-            FACE_SWAPPER = insightface.model_zoo.get_model(model_path, providers=roop.globals.providers)  
+            # Detector GPU antes de inicializar
+            try:
+                import torch
+                use_cuda = torch.cuda.is_available()
+            except ImportError:
+                use_cuda = False
+            
+            if use_cuda:
+                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                providers = roop.globals.providers
+            
+            FACE_SWAPPER = insightface.model_zoo.get_model(model_path, providers=providers)
     return FACE_SWAPPER  
   
 def process_img(source_img, target_path, output_file):

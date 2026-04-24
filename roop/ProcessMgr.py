@@ -177,10 +177,11 @@ class ProcessMgr:
 
         self._initialize_processors()
 
-    def initialize(self, input_facesets, target_faces, options):
+    def initialize(self, input_facesets, target_faces, options, face_swap_mode=None):
         self.input_facesets = input_facesets or []
         self.target_faces = target_faces or []
         self.options = options
+        self.face_swap_mode = face_swap_mode  # Guardar modo para optimizaciones
         self.is_initialized = True
 
         self._cache_source_embeddings()
@@ -234,12 +235,13 @@ class ProcessMgr:
             devname = "cuda" if use_cuda else "cpu"
 
             print(f"[ProcessMgr] Inicializando FaceSwap con devicename={devname}")
+            print(f"[ProcessMgr] torch.cuda.is_available() = {use_cuda}")
             self.processors["faceswap"] = FaceSwap()
             self.processors["faceswap"].Initialize({"devicename": devname})
-            print(f"[ProcessMgr] FaceSwap inicializado correctamente")
+            print(f"[ProcessMgr] FaceSwap inicializado correctamente, usando device: {self.processors['faceswap'].devicename}")
 
             # Obtener el enhancer seleccionado
-            selected_enhancer = getattr(roop.globals, 'selected_enhancer', 'CodeFormer')
+            selected_enhancer = getattr(roop.globals, 'selected_enhancer', 'None')
             use_enhancer = getattr(roop.globals, 'use_enhancer', True)
 
             if use_enhancer and selected_enhancer and selected_enhancer != "None":
@@ -341,9 +343,14 @@ class ProcessMgr:
                         video_path = file_path
                     
                     if video_path:
-                        # FIX: Unificar busqueda en selected_face_references
                         video_basename = os.path.basename(video_path)
                         video_key = f"selected_face_ref_{video_basename}"
+                        
+                        # NUEVO: Inicializar si es el primer frame de este video
+                        assigned_attr = f'_target_face_assigned_{video_basename}'
+                        if not hasattr(self, assigned_attr):
+                            print(f"[SELECTED_FACES_FRAME] Inicializando tracking para {video_basename}")
+                            self._setup_selected_faces_frame_for_video(video_path, valid_faces)
                         
                         # Verificar si hay referencia guardada en selected_face_references
                         has_ref = False
@@ -391,17 +398,26 @@ class ProcessMgr:
                         face_found = False
                         
                         if hasattr(roop.globals, 'selected_face_references'):
+                            face_ref_data = None
                             if video_key in roop.globals.selected_face_references:
                                 face_ref_data = roop.globals.selected_face_references[video_key]
-                                target_face = face_ref_data.get('face_obj')
+                            else:
+                                # Buscar con clave sin prefijo o parcial para compatibilidad
+                                for k, v in roop.globals.selected_face_references.items():
+                                    if k == filename or k.endswith(f"_{filename}") or filename in k:
+                                        face_ref_data = v
+                                        break
+                            
+                            if face_ref_data:
+                                target_face_ref = face_ref_data.get('face_obj')
                                 
-                                if target_face is not None and hasattr(target_face, 'bbox') and target_face.bbox is not None:
+                                if target_face_ref is not None and hasattr(target_face_ref, 'bbox') and target_face_ref.bbox is not None:
                                     best_match = None
                                     best_iou = 0.0
                                     for face in valid_faces:
                                         if not hasattr(face, 'bbox'):
                                             continue
-                                        iou = self._bbox_iou(target_face.bbox, face.bbox)
+                                        iou = self._bbox_iou(target_face_ref.bbox, face.bbox)
                                         if iou > best_iou:
                                             best_iou = iou
                                             best_match = face
@@ -410,53 +426,19 @@ class ProcessMgr:
                                         faces_to_process = [best_match]
                                         face_found = True
                                     # Si no hay match por bbox, intentar por embedding
-                                    elif hasattr(target_face, 'embedding') and target_face.embedding is not None:
+                                    elif hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None:
                                         # Buscar por similitud de embedding
                                         best_emb_match = None
                                         best_score = 0.0
                                         for face in valid_faces:
                                             if hasattr(face, 'embedding') and face.embedding is not None:
-                                                score = self._calculate_similarity(target_face.embedding, face.embedding)
+                                                score = self._calculate_similarity(target_face_ref.embedding, face.embedding)
                                                 if score > best_score:
                                                     best_score = score
                                                     best_emb_match = face
-                                        if best_emb_match and best_score > 0.3:
+                                        if best_emb_match and best_score > 0.45:
                                             faces_to_process = [best_emb_match]
                                             face_found = True
-                            else:
-                                # Buscar con clave sin prefijo para compatibilidad
-                                for k, v in roop.globals.selected_face_references.items():
-                                    if k == filename or k.endswith(f"_{filename}"):
-                                        face_ref_data = v
-                                        target_face = face_ref_data.get('face_obj')
-                                        
-                                        if target_face is not None and hasattr(target_face, 'bbox') and target_face.bbox is not None:
-                                            best_match = None
-                                            best_iou = 0.0
-                                            for face in valid_faces:
-                                                if not hasattr(face, 'bbox'):
-                                                    continue
-                                                iou = self._bbox_iou(target_face.bbox, face.bbox)
-                                                if iou > best_iou:
-                                                    best_iou = iou
-                                                    best_match = face
-                                            
-                                            if best_match and best_iou > 0.3:
-                                                faces_to_process = [best_match]
-                                                face_found = True
-                                            elif hasattr(target_face, 'embedding') and target_face.embedding is not None:
-                                                best_emb_match = None
-                                                best_score = 0.0
-                                                for face in valid_faces:
-                                                    if hasattr(face, 'embedding') and face.embedding is not None:
-                                                        score = self._calculate_similarity(target_face.embedding, face.embedding)
-                                                        if score > best_score:
-                                                            best_score = score
-                                                            best_emb_match = face
-                                                if best_emb_match and best_score > 0.3:
-                                                    faces_to_process = [best_emb_match]
-                                                    face_found = True
-                                        break
                         
                         # Si no se encontró cara seleccionada, NO procesar esta imagen
                         if not face_found:
@@ -514,27 +496,12 @@ class ProcessMgr:
             if not candidate_faces:
                 return None
 
-            # Según la guía: docs/FACESWAP_SD_TAB_GUIDE.md
-            # DEBUG: Contar cuántas caras únicas hay en el faceset
-            unique_faces = set()
-            for f in candidate_faces:
-                if hasattr(f, 'embedding') and f.embedding is not None:
-                    try:
-                        # Convertir a numpy array si no lo es
-                        emb_array = np.array(f.embedding) if not isinstance(f.embedding, np.ndarray) else f.embedding
-                        emb_tuple = tuple(emb_array[:10].flatten()) if len(emb_array) > 10 else tuple(emb_array.flatten())
-                        unique_faces.add(emb_tuple)
-                    except:
-                        pass
-            print(f"[DEBUG] _select_source_face: modo={face_swap_mode}, candidatos={len(candidate_faces)}, unicos={len(unique_faces)}")
-            
             # Modo "Selected Faces Frame" (Tracking de video):
-            # - Source: MISMA CARA para todo el video (la más grande del faceset)
             if face_swap_mode == 'selected_faces_frame':
                 best_face = max(candidate_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-                print(f"[SELECT_SOURCE] Modo selected_faces_frame: usando cara más grande (área={ (best_face.bbox[2]-best_face.bbox[0])*(best_face.bbox[3]-best_face.bbox[1]):.0f})")
+                print(f"[SELECT_SOURCE] Modo selected_faces_frame: usando cara más grande")
                 return best_face
-            
+
             # Modo "Selected" y "Selected Faces" (Selección por imagen):
             # - Source: ALEATORIO del faceset de origen
             if face_swap_mode in ['selected', 'selected_faces']:
@@ -546,8 +513,7 @@ class ProcessMgr:
                 else:
                     return candidate_faces[0]
 
-            # Modo "All" (Automático):
-            # - Source: Cara de origen más grande/del primer faceset
+            # Modo "All": cara más grande
             best_face = max(candidate_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
             return best_face
 
@@ -600,7 +566,7 @@ class ProcessMgr:
                             break
 
             # Guardar flag para saber si el usuario seleccionó una cara
-            setattr(self, f'_user_selected_face_{video_path}', user_has_selected_face)
+            setattr(self, f'_user_selected_face_{video_basename}', user_has_selected_face)
 
             # En modo selected_faces_frame:
             # - Si el usuario seleccionó cara: usar ESA cara como referencia (sin fallback)
@@ -647,12 +613,11 @@ class ProcessMgr:
                 emb = np.array(selected_face.embedding, dtype=np.float32)
                 norm = np.linalg.norm(emb)
                 if norm > 0:
-                    setattr(self, f'_fallback_embedding_{video_path}', emb / norm)
+                    setattr(self, f'_fallback_embedding_{video_basename}', emb / norm)
 
-            attr_name = f'_reference_face_selected_{video_path}'
-            setattr(self, f'global_source_for_all_id_{video_path}', id(selected_face))
-            setattr(self, f'global_source_bbox_{video_path}', selected_face.bbox)
-            setattr(self, f'_target_face_assigned_{video_path}', selected_face)
+            setattr(self, f'global_source_for_all_id_{video_basename}', id(selected_face))
+            setattr(self, f'global_source_bbox_{video_basename}', selected_face.bbox)
+            setattr(self, f'_target_face_assigned_{video_basename}', selected_face)
             
             has_embedding = False
             if hasattr(selected_face, 'embedding') and selected_face.embedding is not None:
@@ -661,13 +626,17 @@ class ProcessMgr:
                     norm = np.linalg.norm(emb)
                     if norm > 0:
                         emb = emb / norm
-                        setattr(self, f'global_source_embedding_{video_path}', emb)
-                        setattr(self, f'_original_embedding_{video_path}', emb.copy())
+                        setattr(self, f'global_source_embedding_{video_basename}', emb)
+                        setattr(self, f'_original_embedding_{video_basename}', emb.copy())
                         has_embedding = True
                 except Exception as e:
                     print(f"[SETUP] {video_basename}: Error embedding: {e}")
 
-            setattr(self, attr_name, True)
+            setattr(self, f'_tracking_lost_count_{video_basename}', 0)
+            setattr(self, f'_position_history_{video_basename}', [get_face_center(selected_face)])
+            setattr(self, f'_frame_count_{video_basename}', 0)
+
+            setattr(self, f'_reference_face_selected_{video_basename}', True)
             print(f"[SETUP] {video_basename}: {selection_method}, embedding={'✓' if has_embedding else '✗'}")
 
         except Exception as e:
@@ -678,8 +647,10 @@ class ProcessMgr:
     def _find_target_face_for_selected_mode(self, video_path, valid_faces):
         """Encuentra la cara objetivo que coincide con la seleccionada por el usuario."""
         try:
+            video_basename = os.path.basename(video_path)
+            
             # Verificar si el usuario ha seleccionado una cara
-            user_selected_attr = f'_user_selected_face_{video_path}'
+            user_selected_attr = f'_user_selected_face_{video_basename}'
             user_selected = getattr(self, user_selected_attr, True)  # True si el usuario seleccionó una cara
 
             # En modo selected_faces_frame: 
@@ -694,18 +665,19 @@ class ProcessMgr:
             if not valid_faces:
                 return None
 
-            video_basename = os.path.basename(video_path)
             video_key = f"selected_face_ref_{video_basename}"
 
-            assigned_attr = f'_target_face_assigned_{video_path}'
-            original_embedding_attr = f'_original_embedding_{video_path}'
-            tracking_lost_attr = f'_tracking_lost_count_{video_path}'
-            position_history_attr = f'_position_history_{video_path}'
-            frame_count_attr = f'_frame_count_{video_path}'
+            assigned_attr = f'_target_face_assigned_{video_basename}'
+            original_embedding_attr = f'_original_embedding_{video_basename}'
+            tracking_lost_attr = f'_tracking_lost_count_{video_basename}'
+            position_history_attr = f'_position_history_{video_basename}'
+            frame_count_attr = f'_frame_count_{video_basename}'
 
             MIN_SCORE_THRESHOLD = 0.015  # Reducido para ser más permisivo
             REACQUIRE_EMB_THRESHOLD = 0.02  # Reducido para facilitar reacquire
             HIGH_CONFIDENCE_THRESHOLD = 0.04  # Reducido
+            # Umbral de verificación de embedding para tracking (reducido para permitir variabilidad de expresiones)
+            EMBEDDING_VERIFICATION_THRESHOLD = 0.08  # Reducido para ser más tolerante a variaciones en expresiones
             # Umbral de distancia mínima entre caras para considerar que hay superposición significativa
             MIN_FACE_DISTANCE = 40  # píxeles mínimos entre centros de caras
             # Si dos caras están más cerca que esto, considerar que hay conflicto (beso/abrazo)
@@ -737,7 +709,7 @@ class ProcessMgr:
                     return None
                 return ((face.bbox[0] + face.bbox[2]) / 2, (face.bbox[1] + face.bbox[3]) / 2)
 
-            def is_consistent_with_history(face, history, tolerance=50):
+            def is_consistent_with_history(face, history, tolerance=80):
                 """Check if face position is consistent with position history"""
                 if not history or len(history) < 2:
                     return True
@@ -761,175 +733,7 @@ class ProcessMgr:
             # Si hay caras muy cerca, aumentar estricto en la verificación
             strict_mode = nearby_faces_count > 0
 
-            if not hasattr(self, assigned_attr) or getattr(self, assigned_attr) is None:
-                if hasattr(roop.globals, 'selected_face_references') and video_key in roop.globals.selected_face_references:
-                    face_ref_data = roop.globals.selected_face_references[video_key]
-                    user_bbox = face_ref_data.get('bbox')
-                    user_embedding = face_ref_data.get('embedding')
-                    user_face_obj = face_ref_data.get('face_obj')
-
-                    best_match = None
-                    best_score = -1
-
-                    for face in valid_faces:
-                        if not hasattr(face, 'bbox'):
-                            continue
-
-                        # Verificar que la cara no esté demasiado cerca de otras caras (evita confusión en besos)
-                        too_close = False
-                        for other_face in valid_faces:
-                            if face is other_face:
-                                continue
-                            if is_face_too_close(face, other_face, MIN_FACE_DISTANCE):
-                                too_close = True
-                                break
-
-                        if user_bbox is not None:
-                            iou = self._bbox_iou(user_bbox, face.bbox)
-                            if iou > best_score:
-                                best_score = iou
-                                best_match = face
-
-                        if user_embedding is not None and hasattr(face, 'embedding') and face.embedding is not None:
-                            emb_score = self._calculate_similarity(user_embedding, face.embedding)
-                            if emb_score > best_score:
-                                best_score = emb_score
-                                best_match = face
-
-                    # Si hay caras muy cerca, priorizar la que mejor coincida con el embedding
-                    if best_match and too_close and user_embedding is not None:
-                        # Recalcular solo con embedding para evitar ambiguity
-                        best_emb_score = -1
-                        best_emb_match = None
-                        for face in valid_faces:
-                            if not hasattr(face, 'embedding') or face.embedding is None:
-                                continue
-                            emb_score = self._calculate_similarity(user_embedding, face.embedding)
-                            if emb_score > best_emb_score:
-                                best_emb_score = emb_score
-                                best_emb_match = face
-
-                        if best_emb_match and best_emb_score > 0.02:
-                            best_match = best_emb_match
-                            best_score = best_emb_score
-
-                    if best_match and best_score > 0.15:
-                        setattr(self, assigned_attr, best_match)
-                        if hasattr(best_match, 'embedding') and best_match.embedding is not None:
-                            emb = np.array(best_match.embedding, dtype=np.float32)
-                            norm = np.linalg.norm(emb)
-                            if norm > 0:
-                                setattr(self, original_embedding_attr, emb / norm)
-
-                        face_center = ((best_match.bbox[0] + best_match.bbox[2]) / 2,
-                                       (best_match.bbox[1] + best_match.bbox[3]) / 2)
-                        setattr(self, position_history_attr, [face_center])
-                        setattr(self, tracking_lost_attr, 0)
-
-                        print(f"[TRACK] Primer frame: cara seleccionada, score={best_score:.2f}")
-                        return best_match
-
-            if hasattr(self, assigned_attr):
-                assigned_face = getattr(self, assigned_attr)
-                if assigned_face and hasattr(assigned_face, 'bbox'):
-                    best_match = None
-                    best_score = -1
-
-                    expected_center = None
-                    if len(position_history) >= 2:
-                        last_pos = position_history[-1]
-                        prev_pos = position_history[-2]
-                        velocity = (last_pos[0] - prev_pos[0], last_pos[1] - prev_pos[1])
-                        expected_center = (last_pos[0] + velocity[0], last_pos[1] + velocity[1])
-
-                    for face in valid_faces:
-                        if not hasattr(face, 'bbox'):
-                            continue
-
-                        # Verificar que la cara no esté demasiado cerca de otras caras
-                        too_close = False
-                        for other_face in valid_faces:
-                            if face is other_face:
-                                continue
-                            if is_face_too_close(face, other_face, MIN_FACE_DISTANCE):
-                                too_close = True
-                                break
-
-                        # Si está muy cerca de otra cara, aumentar el umbral para esta cara
-                        proximity_penalty = 0.0
-                        if too_close:
-                            # Penalizar caras que están muy cerca de otras
-                            proximity_penalty = 0.08
-
-                        iou = self._bbox_iou(assigned_face.bbox, face.bbox)
-
-                        emb_score = 0.0
-                        original_embedding = getattr(self, original_embedding_attr, None)
-
-                        if hasattr(face, 'embedding') and face.embedding is not None:
-                            if original_embedding is not None:
-                                emb_score = self._calculate_similarity(original_embedding, face.embedding)
-                            else:
-                                if hasattr(assigned_face, 'embedding') and assigned_face.embedding is not None:
-                                    emb_score = self._calculate_similarity(assigned_face.embedding, face.embedding)
-
-                        # Si hay caras cerca, requerir embedding score mayor
-                        min_emb_required = 0.03 if not too_close else 0.05
-
-                        position_bonus = 0.0
-                        if expected_center:
-                            face_center = get_face_center(face)
-                            if face_center:
-                                distance = np.sqrt((face_center[0] - expected_center[0])**2 + (face_center[1] - expected_center[1])**2)
-                                max_distance = 200
-                                position_bonus = max(0, 0.10 * (1 - distance / max_distance))
-
-                        # Solo considerar caras con embedding score suficiente cuando hay conflicto
-                        if too_close and emb_score < min_emb_required:
-                            score = -1  # Descartar esta cara
-                        elif emb_score > 0:
-                            score = (iou * 0.30) + (emb_score * 0.60) + position_bonus - proximity_penalty
-                        else:
-                            score = (iou * 0.90) + position_bonus - proximity_penalty
-
-                        if score > best_score:
-                            best_score = score
-                            best_match = face
-
-                    if best_match and best_score >= MIN_SCORE_THRESHOLD:
-                        face_center = get_face_center(best_match)
-                        if face_center:
-                            position_history.append(face_center)
-                            if len(position_history) > 10:
-                                position_history.pop(0)
-                            setattr(self, position_history_attr, position_history)
-
-                        if best_score >= HIGH_CONFIDENCE_THRESHOLD:
-                            setattr(self, assigned_attr, best_match)
-                        elif strict_mode:
-                            # En modo estricto, solo actualizar si hay alta confianza
-                            if best_score >= 0.05:
-                                setattr(self, assigned_attr, best_match)
-
-                        setattr(self, tracking_lost_attr, 0)
-
-                        if strict_mode:
-                            print(f"[TRACK] Frame {frame_count}: cara encontrada (modo estricto, score={best_score:.2f}, caras_cerca={nearby_faces_count})")
-                        return best_match
-
-            lost_count += 1
-            setattr(self, tracking_lost_attr, lost_count)
-
-            # Si hay demasiados fallos seguidos, resetear el tracking completamente
-            MAX_CONSECUTIVE_FAILURES = 15
-            if lost_count >= MAX_CONSECUTIVE_FAILURES:
-                print(f"[TRACK] Reset completo después de {lost_count} fallos")
-                # Resetear todo y empezar de nuevo
-                setattr(self, assigned_attr, None)
-                setattr(self, tracking_lost_attr, 0)
-                setattr(self, position_history_attr, [])
-                return None
-
+            # 1. Obtener embedding de referencia para verificación y reacquire
             original_embedding = getattr(self, original_embedding_attr, None) if hasattr(self, original_embedding_attr) else None
 
             if original_embedding is None:
@@ -946,10 +750,86 @@ class ProcessMgr:
                 
                 # Fallback: usar embedding guardado del setup inicial
                 if original_embedding is None:
-                    original_embedding = getattr(self, f'_fallback_embedding_{video_path}', None)
+                    original_embedding = getattr(self, f'_fallback_embedding_{video_basename}', None)
 
-            # Reacquire con embedding - requerir score mayor si hay caras cerca
-            min_reacquire_score = 0.015 if not strict_mode else 0.03
+            # 2. Tracking por PROXIMIDAD (si ya tenemos una cara asignada)
+            if hasattr(self, assigned_attr):
+                assigned_face = getattr(self, assigned_attr)
+                if assigned_face and hasattr(assigned_face, 'bbox'):
+                    
+                    def get_face_center(face):
+                        if not hasattr(face, 'bbox'):
+                            return None
+                        return ((face.bbox[0] + face.bbox[2]) / 2, (face.bbox[1] + face.bbox[3]) / 2)
+
+                    assigned_center = get_face_center(assigned_face)
+                    if not assigned_center:
+                        lost_count += 1
+                        setattr(self, tracking_lost_attr, lost_count)
+                        return None
+
+                    # Buscar la cara más cercana
+                    best_match = None
+                    min_distance = float('inf')
+                    for face in valid_faces:
+                        face_center = get_face_center(face)
+                        if face_center:
+                            dist = ((face_center[0] - assigned_center[0])**2 + (face_center[1] - assigned_center[1])**2)**0.5
+                            if dist < min_distance:
+                                min_distance = dist
+                                best_match = face
+
+                     # Umbral de distancia (200px)
+                    distance_threshold = 200
+                    if best_match and min_distance <= distance_threshold:
+                        # VERIFICACIÓN OPCIONAL CON EMBEDDING (si está disponible)
+                        # Evita saltar a otra persona que pase muy cerca
+                        if original_embedding is not None and hasattr(best_match, 'embedding') and best_match.embedding is not None:
+                            emb_score = self._calculate_similarity(original_embedding, best_match.embedding)
+                            # Si la similitud es muy baja, es probable que no sea la misma persona
+                            if emb_score < EMBEDDING_VERIFICATION_THRESHOLD:
+                                # Permitir si el movimiento es consistente con el historial (tolerancia a expresiones)
+                                if is_consistent_with_history(best_match, position_history, tolerance=80):
+                                    print(f"[TRACK] Embedding bajo ({emb_score:.2f}) pero movimiento consistente, aceptando")
+                                else:
+                                    print(f"[TRACK] Cara cerca pero embedding no coincide (score={emb_score:.2f}), ignorando proximidad")
+                                    best_match = None
+
+                        if best_match:
+                            setattr(self, assigned_attr, best_match)
+                            new_center = get_face_center(best_match)
+                            if new_center:
+                                position_history.append(new_center)
+                                if len(position_history) > 10:
+                                    position_history.pop(0)
+                                setattr(self, position_history_attr, position_history)
+                            setattr(self, tracking_lost_attr, 0)
+                            print(f"[TRACK] Frame {frame_count}: cara seguida, dist={min_distance:.1f}px")
+                            return best_match
+
+                    # Si llegamos aquí, se perdió el tracking por proximidad
+                    lost_count += 1
+                    setattr(self, tracking_lost_attr, lost_count)
+                    if best_match:
+                        print(f"[TRACK] Frame {frame_count}: cara muy lejos o diferente (dist={min_distance:.1f}px), tracking perdido")
+                    else:
+                        print(f"[TRACK] Frame {frame_count}: no se encontró cara válida cerca")
+                    
+                    MAX_CONSECUTIVE_FAILURES = 15
+                    if lost_count >= MAX_CONSECUTIVE_FAILURES:
+                        print(f"[TRACK] Reset completo después de {lost_count} fallos")
+                        setattr(self, assigned_attr, None)
+                        setattr(self, tracking_lost_attr, 0)
+                        setattr(self, position_history_attr, [])
+                        return None
+
+            # 3. REACQUIRE por EMBEDDING (si se perdió el tracking o es el primer frame)
+            # Reacquire con embedding - usar umbral BAJO para máxima recuperación
+            min_reacquire_score = getattr(roop.globals, 'face_match_embedding_threshold', 0.20)
+            
+            # Si hay caras muy cerca, ser aún más estrictos para evitar saltar a la cara equivocada
+            if strict_mode:
+                min_reacquire_score = min_reacquire_score + 0.1  # Ejemplo: 0.30 + 0.1 = 0.40 en modo estricto
 
             if original_embedding is not None:
                 best_reacquire = None
@@ -971,60 +851,65 @@ class ProcessMgr:
                     emb_score = self._calculate_similarity(original_embedding, face.embedding)
 
                     # Si está muy cerca de otra cara, requerir embedding mayor
-                    if face_too_close and emb_score < 0.06:
+                    if face_too_close and emb_score < (min_reacquire_score + 0.1):
                         continue
 
                     if emb_score > best_reacquire_score:
                         best_reacquire_score = emb_score
                         best_reacquire = face
 
-                if best_reacquire and best_reacquire_score >= min_reacquire_score:
-                    setattr(self, assigned_attr, best_reacquire)
-                    setattr(self, tracking_lost_attr, 0)
-
-                    face_center = get_face_center(best_reacquire)
-                    if face_center:
-                        position_history = [face_center]
-                        setattr(self, position_history_attr, position_history)
-
-                    print(f"[REACQUIRE] Frame {frame_count}: emb={best_reacquire_score:.2f} ({'modo estricto' if strict_mode else 'normal'})")
-                    return best_reacquire
-
-            # Fallback cuando se pierde tracking:
-            # - Si hay embedding guardado (fallback inicial): buscar cara más similar al embedding
-            # - Si usuario seleccionó cara: NO fallback, retornar None
-            # - Si no hay embedding: usar cara más grande (solo primer frame sin selección)
-            
-            fallback_embedding = getattr(self, f'_fallback_embedding_{video_path}', None)
-            
-            if fallback_embedding is not None:
-                # Usar embedding para encontrar cara consistente (evita parpadeo)
-                best_fallback = None
-                best_fallback_score = 0.0
-                
-                for face in valid_faces:
-                    if not hasattr(face, 'embedding') or face.embedding is None:
-                        continue
+                if best_reacquire:
+                    # Si el score es bajo pero hay consistencia de movimiento, aceptar (umbral dinámico)
+                    dynamic_threshold = min_reacquire_score
+                    if best_reacquire_score < min_reacquire_score and best_reacquire_score >= 0.20:
+                        if position_history and is_consistent_with_history(best_reacquire, position_history, tolerance=100):
+                            print(f"[TRACK] Reacquire: score borderline ({best_reacquire_score:.2f}) pero movimiento consistente, aceptando")
+                            dynamic_threshold = 0.20  # Aceptar si movimiento coincide
                     
-                    emb_score = self._calculate_similarity(fallback_embedding, face.embedding)
-                    if emb_score > best_fallback_score:
-                        best_fallback_score = emb_score
-                        best_fallback = face
-                
-                if best_fallback and best_fallback_score > 0.015:
-                    print(f"[FALLBACK] Usando embedding (score={best_fallback_score:.2f})")
-                    return best_fallback
-            
-            # Sin embedding: usuario seleccionó cara -> NO fallback
+                    if best_reacquire_score >= dynamic_threshold:
+                        setattr(self, assigned_attr, best_reacquire)
+                        setattr(self, tracking_lost_attr, 0)
+                        
+                        # REFINAR EMBEDDING: actualizar referencia con la cara actual para seguir expresiones
+                        if hasattr(best_reacquire, 'embedding') and best_reacquire.embedding is not None:
+                            emb = np.array(best_reacquire.embedding, dtype=np.float32)
+                            norm = np.linalg.norm(emb)
+                            if norm > 0:
+                                refined_emb = emb / norm
+                                setattr(self, original_embedding_attr, refined_emb)
+                                setattr(self, f'_fallback_embedding_{video_basename}', refined_emb)
+                                print(f"[TRACK] Embedding refinado (score={best_reacquire_score:.2f})")
+
+                        face_center = get_face_center(best_reacquire)
+                        if face_center:
+                            # Mantener historial de posición (máximo 10)
+                            position_history.append(face_center)
+                            if len(position_history) > 10:
+                                position_history.pop(0)
+                            setattr(self, position_history_attr, position_history)
+
+                        print(f"[TRACK] Frame {frame_count}: REACQUIRE exitoso (score={best_reacquire_score:.2f})")
+                        return best_reacquire
+
+            # Sin reacquire exitoso: usuario seleccionó cara -> NO fallback
             if not use_fallback:
                 if lost_count == 1 or lost_count % 50 == 0:
-                    print(f"[LOST] Tracking perdido #{lost_count} - OMITIENDO frame")
+                    print(f"[LOST] Tracking perdido #{lost_count} - OMITIENDO frame (similitud insuficiente)")
                 return None
             
-            # Solo aquí: fallback a cara más grande (caso raro sin embedding)
+            # Solo aquí (si NO hubo selección): fallback a cara más grande (caso modo auto-grande)
             if lost_count == 1 or lost_count % 50 == 0:
                 print(f"[FALLBACK] Tracking perdido #{lost_count}, usando cara más grande")
-            return max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            
+            best_fallback = max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            if best_fallback:
+                setattr(self, assigned_attr, best_fallback)
+                if original_embedding is None and hasattr(best_fallback, 'embedding') and best_fallback.embedding is not None:
+                    emb = np.array(best_fallback.embedding, dtype=np.float32)
+                    norm = np.linalg.norm(emb)
+                    if norm > 0:
+                        setattr(self, original_embedding_attr, emb / norm)
+            return best_fallback
 
         except Exception as e:
             print(f"[ERROR] _find_target_face_for_selected_mode: {e}")
@@ -1288,7 +1173,10 @@ class ProcessMgr:
                         video_key = None  # No usar tracking para imágenes
 
                     # Calcular blend ratio DINÁMICO basado en apertura de boca
-                    dynamic_blend = 0.50 + (mouth_open_ratio * 0.40)
+                    # Mejorado para MÁXIMA similitud al origen:
+                    #  0% boca abierta → 0.95 (100% valor por defecto)
+                    # 100% boca abierta → 0.90 (solo baja 5%)
+                    dynamic_blend = 0.95 - (mouth_open_ratio * 0.05)
                     dynamic_blend = min(0.90, max(0.50, dynamic_blend))
 
                     # SUAVIZADO TEMPORAL: Solo para videos (tracking)

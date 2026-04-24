@@ -96,8 +96,8 @@ class FluxEditComfyClient:
 
         t0 = time.time()
         print(f"[FluxEdit] Generando ({num_inference_steps} pasos, denoise={denoise})...", flush=True)
-        print(f"[FluxEdit] ✅ Modelos GGUF optimizados para GPU 8GB", flush=True)
-        print(f"[FluxEdit] ⏱️ Tiempo estimado: ~{num_inference_steps * 2.75:.0f} min (modo lowvram)", flush=True)
+        print(f"[FluxEdit] [OK] Modelos GGUF optimizados para GPU 8GB", flush=True)
+            print(f"[FluxEdit] Tiempo estimado: ~{num_inference_steps * 2.75:.0f} min (modo lowvram)", flush=True)
         
         # Negative prompt por defecto
         negative_prompt = "low quality, worst quality, bad quality, jpeg artifacts, blurry, out of focus, poorly drawn, bad anatomy, deformed, disfigured, mutated, extra limbs"
@@ -226,7 +226,7 @@ class FluxEditComfyClient:
                 # Mostrar progreso cada 2 minutos
                 if i > 0 and i % 120 == 0:
                     elapsed_min = i / 60
-                    print(f"[FluxEdit] ⏳ Procesando... {elapsed_min:.1f} min transcurridos (lowvram mode)", flush=True)
+                    print(f"[FluxEdit] Procesando... {elapsed_min:.1f} min transcurridos (lowvram mode)", flush=True)
                 
                 # Verificar que ComfyUI sigue vivo cada 10 segundos (no cada 5, para no interferir)
                 if i - last_comfy_check >= 10:
