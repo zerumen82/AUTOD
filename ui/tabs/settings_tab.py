@@ -135,21 +135,11 @@ def on_settings_changed(evt: gr.SelectData):
 
 
 def clean_temp():
+    from ui.tabs.faceswap.logic import cleanup_temp_files
     from ui.main import prepare_environment
 
-    if not roop.globals.CFG.use_os_temp_folder:
-        def onerror(func, path, excinfo):
-            # Ignorar errores de permiso y otros errores comunes (archivos en uso, directorio no vacío)
-            if isinstance(excinfo[1], OSError):
-                pass
-            else:
-                raise
-
-        try:
-            shutil.rmtree(os.environ["TEMP"], onerror=onerror)
-        except OSError as e:
-            gr.Warning(f'Error al limpiar carpeta temporal: {e}')
-            return None, None, None, None
+    # Usar limpieza segura en lugar de borrar todo el directorio TEMP
+    cleanup_temp_files()
     prepare_environment()
 
     ui.globals.ui_input_thumbs.clear()

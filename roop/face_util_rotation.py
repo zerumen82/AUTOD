@@ -206,9 +206,8 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None) -> L
         else:
             threshold = min_score
         
-        # ULTRA PERMISIVO: InsightFace puede dar scores bajos para caras difíciles
-        # Usar un umbral mínimo de 0.1 para maximizar detección
-        effective_threshold = max(0.1, threshold * 0.5)  # Mitad del umbral configurado, mínimo 0.1
+        # Umbral para deteccion: usar al menos 0.15 para evitar falsos positivos
+        effective_threshold = max(0.15, threshold * 0.5)  # Mitad del umbral configurado, minimo 0.15
         
         try:
             faces = analizador.get(frame_rgb)

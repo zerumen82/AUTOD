@@ -119,16 +119,18 @@ if face_swap_mode == 'selected_faces':
 
 ```python
 if face_swap_mode == 'selected_faces_frame':
-    # Video: MISMA CARA para todo el video (la más grande)
-    source_face = max(candidate_faces, key=lambda f: area)
+    # Video: MISMA CARA fija para todo el video (tracking)
+    # Usar la cara de referencia establecida para este video
+    source_face = reference_face  # La cara que el usuario seleccionó
 else:
-    # Imagen (selected_faces): ALEATORIO
-    source_face = random.choice(candidate_faces)
+    # Imagen (selected_faces): CUALQUIER cara aleatoria del face set
+    # El usuario seleccionó varias caras, se elige una al azar
+    source_face = random.choice(candidate_faces)  # Random del face set
 ```
 
 **Resumen:**
-- `"selected_faces"`: Source = aleatorio, Target = usuario selecciona manualmente
-- `"selected_faces_frame"`: Source = cara más grande, Target = tracking
+- `"selected_faces"`: Source = aleatorio del face set, Target = usuario selecciona manualmente
+- `"selected_faces_frame"`: Source = cara fija con tracking, Target = tracking de video
 - `"all"`: Source = cara más grande, Target = todas las caras
 
 ### Paso 5: Inswapper (Face Swap)

@@ -43,8 +43,15 @@ class MouthDetector:
     TONGUE_TIP = 156  # Punta de lengua (aproximado)
     
     def __init__(self):
-        """Inicializa MediaPipe Face Mesh"""
+        """Inicializa MediaPipe Face Mesh con importación robusta"""
+        self.is_initialized = False
         try:
+            import mediapipe as mp
+            # Verificar si solutions existe (a veces la instalación es corrupta)
+            if not hasattr(mp, 'solutions') or not hasattr(mp.solutions, 'face_mesh'):
+                # Si falla, simplemente marcamos como no inicializado silenciosamente
+                return
+
             self.mp_face_mesh = mp.solutions.face_mesh
             self.face_mesh = self.mp_face_mesh.FaceMesh(
                 static_image_mode=True,
@@ -57,7 +64,6 @@ class MouthDetector:
             print("[MouthDetector] MediaPipe Face Mesh inicializado (468 landmarks)")
         except Exception as e:
             print(f"[MouthDetector] Error inicializando MediaPipe: {e}")
-            self.is_initialized = False
     
     def detect_mouth_open(self, image: np.ndarray) -> Tuple[bool, float, Optional[Dict]]:
         """

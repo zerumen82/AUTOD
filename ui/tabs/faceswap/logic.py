@@ -48,16 +48,38 @@ def validate_image_file(file_path):
     except: return False
 
 def cleanup_temp_files():
+    """Limpieza completa de archivos temporales al inicio y final"""
     import tempfile
     import shutil
+    patterns = ("temp_frame_", "faceset_", "faceswap_", "roop_", "gradio_")
+    
+    # 1. Limpiar temp del sistema
     temp_dir = tempfile.gettempdir()
     try:
         for item in os.listdir(temp_dir):
             item_path = os.path.join(temp_dir, item)
-            if os.path.isdir(item_path) and item.startswith("faceset_"):
-                shutil.rmtree(item_path, ignore_errors=True)
-            elif os.path.isfile(item_path) and item.startswith("temp_frame_") and item.endswith(".png"):
-                os.remove(item_path)
+            if any(item.startswith(p) for p in patterns):
+                try:
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path, ignore_errors=True)
+                    else:
+                        os.remove(item_path)
+                except: pass
+    except: pass
+    
+    # 2. Limpiar temp del proyecto (D:\.autodeep_temp)
+    project_temp = "D:\\.autodeep_temp"
+    try:
+        if os.path.exists(project_temp):
+            for item in os.listdir(project_temp):
+                item_path = os.path.join(project_temp, item)
+                if any(item.startswith(p) for p in patterns):
+                    try:
+                        if os.path.isdir(item_path):
+                            shutil.rmtree(item_path, ignore_errors=True)
+                        else:
+                            os.remove(item_path)
+                    except: pass
     except: pass
 
 def load_folder_history():
@@ -132,7 +154,15 @@ def translate_swap_mode(mode_text):
     if mode_text == "All faces": return "all"
     return "selected"
 
+def get_mode_text(mode):
+    if mode == "all": return "All faces"
+    if mode == "selected": return "Selected faces"
+    if mode == "selected_faces_frame": return "Selected faces frame"
+    return "Selected faces"
+
 def start_swap_process(files, detection, enhancer, face_distance, blend_ratio):
+    # Limpieza de temporales al inicio
+    cleanup_temp_files()
     from roop.core import batch_process_regular
     state.is_processing = True
     total_files = len(state.list_files_process)
@@ -164,3 +194,171 @@ def update_pagination_buttons(total_faces, gallery_type):
     prev_enabled = current_page > 0
     next_enabled = current_page < total_pages - 1
     return gr.update(interactive=prev_enabled), gr.update(interactive=next_enabled)
+
+
+def start_swap(enhancer, detection, keep_frames, wait_after_extraction, skip_audio, face_distance, blend_ratio, blend_mode, selected_mask_engine, processing_method, no_face_action, vr_mode, use_single_source_all, autorotate, temporal_smoothing, num_swap_steps, imagemask):
+    """Inicia el procesamiento de face swap - Versión modular"""
+    # LIMPIEZA DE TEMPORALES AL INICIO
+    cleanup_temp_files()
+    
+    from roop.core import batch_process_regular
+    import time
+    import shutil
+    from ui.main import prepare_environment
+    
+    # EMITIR ESTADO INICIAL INMEDIATAMENTE
+    yield (
+        gr.update(variant="secondary", interactive=False),
+        gr.update(variant="primary", interactive=True),
+        get_metrics_html(0, 0, 0, "00:00", "--:--", "Validando..."),
+    )
+
+    # Verificar archivos de destino
+    if not state.list_files_process or len(state.list_files_process) <= 0:
+        error_msg = "[ERROR] No hay archivos de destino configurados."
+        print(f"[DIAGNÓSTICO] {error_msg}")
+        gr.Error(error_msg)
+        yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin archivos"))
+        return
+    
+    # Verificar caras de entrada
+    if not hasattr(roop.globals, "INPUT_FACESETS") or len(roop.globals.INPUT_FACESETS) <= 0:
+        error_msg = "[ERROR] ERROR: No hay caras de origen configuradas. Carga imágenes con caras en 'Archivos Origen'."
+        print(f"[DIAGNÓSTICO] {error_msg}")
+        gr.Error(error_msg)
+        yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin caras origen"))
+        return
+    
+    # Configurar parámetros
+    face_swap_mode = translate_swap_mode(detection)
+    roop.globals.face_swap_mode = face_swap_mode
+    roop.globals.selected_enhancer = enhancer if enhancer else "None"
+    roop.globals.distance_threshold = face_distance
+    roop.globals.blend_ratio = blend_ratio
+    roop.globals.blend_mode = blend_mode
+    roop.globals.keep_frames = keep_frames
+
+    # Verificar caras de destino para modos que las requieren
+    if face_swap_mode == 'selected_faces' and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0):
+        error_msg = "[ERROR] ERROR: No hay caras de destino seleccionadas. Haz clic en una cara detectada para añadirla a 'Caras de Destino'."
+        print(f"[DIAGNÓSTICO] {error_msg}")
+        gr.Error(error_msg)
+        yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin caras destino"))
+        return
+    roop.globals.skip_audio = skip_audio
+    roop.globals.temporal_smoothing = temporal_smoothing
+    roop.globals.num_swap_steps = num_swap_steps
+    roop.globals.autorotate_faces = autorotate
+    
+    print(f"[OK] Iniciando swap en modo: {face_swap_mode}")
+    print(f"[OK] Archivos destino: {len(state.list_files_process)}")
+    print(f"[OK] Caras origen: {len(roop.globals.INPUT_FACESETS)}")
+    
+    # Preparar entorno (configura output_path, etc.)
+    try:
+        prepare_environment()
+        if not os.path.exists(roop.globals.output_path):
+            os.makedirs(roop.globals.output_path, exist_ok=True)
+        print(f"[OK] Entorno preparado. output_path: {roop.globals.output_path}")
+    except Exception as e:
+        print(f"[WARNING] Error preparando entorno: {e}")
+    
+    # Limpiar directorio de salida si está configurado
+    if getattr(roop.globals, 'CFG', None) and roop.globals.CFG.clear_output:
+        if hasattr(roop.globals, 'output_path') and roop.globals.output_path:
+            try:
+                shutil.rmtree(roop.globals.output_path)
+                print(f"[OK] Directorio de salida limpiado: {roop.globals.output_path}")
+            except Exception as e:
+                print(f"[WARNING] No se pudo limpiar output_path: {e}")
+    
+    # Configurar parámetros adicionales que espera batch_process_regular
+    if hasattr(roop.globals, 'CFG'):
+        roop.globals.execution_threads = roop.globals.CFG.max_threads
+        roop.globals.video_encoder = roop.globals.CFG.output_video_codec
+        roop.globals.video_quality = roop.globals.CFG.video_quality
+        roop.globals.max_memory = roop.globals.CFG.memory_limit if roop.globals.CFG.memory_limit > 0 else None
+    
+    # Iniciar procesamiento
+    state.is_processing = True
+    start_t = time.time()
+    total_files = len(state.list_files_process)
+    
+    # Preparar mask_engine
+    mask_engine = selected_mask_engine if selected_mask_engine != "None" else None
+    
+    # Yield estado inicial (botones)
+    yield (
+        gr.update(variant="secondary", interactive=False),
+        gr.update(variant="primary", interactive=True),
+        get_metrics_html(0, 0, total_files, "00:00", "--:--", "Iniciando..."),
+    )
+    
+    try:
+        for progress_percent, progress_message in batch_process_regular(
+            state.list_files_process,
+            mask_engine,
+            "",
+            processing_method == "In-Memory processing",
+            {"layers": []},
+            roop.globals.num_swap_steps,
+            None,
+            0,
+            temporal_smoothing,
+        ):
+            elapsed = time.time() - start_t
+            elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+            files_done = int(progress_percent / 100.0 * total_files) if total_files > 0 else 0
+            time_remaining = "--:--"
+            if progress_percent > 0 and files_done > 0:
+                rate = files_done / elapsed
+                remaining = (total_files - files_done) / rate if rate > 0 else 0
+                time_remaining = time.strftime("%H:%M:%S", time.gmtime(remaining))
+            
+            print(f"[UI] Progreso: {progress_percent:.1f}% - {progress_message}")
+            
+            yield (
+                gr.update(variant="secondary", interactive=False),
+                gr.update(variant="primary", interactive=True),
+                get_metrics_html(progress_percent, files_done, total_files, elapsed_str, time_remaining, progress_message),
+            )
+        
+        # Completado
+        elapsed = time.time() - start_t
+        elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+        gr.Info(f"✅ Procesamiento completado. Archivos gestionados: {total_files}")
+        print(f"[OK] Procesamiento completado en {elapsed_str}")
+        
+        yield (
+            gr.update(variant="primary", interactive=True),
+            gr.update(variant="secondary", interactive=False),
+            get_metrics_html(100, total_files, total_files, elapsed_str, "--:--", "Completado"),
+        )
+        
+    except Exception as e:
+        error_msg = f"[ERROR] ERROR durante el procesamiento: {str(e)}"
+        print(f"[DIAGNÓSTICO] {error_msg}")
+        import traceback
+        traceback.print_exc()
+        gr.Error(error_msg)
+        
+        yield (
+            gr.update(variant="primary", interactive=True),
+            gr.update(variant="secondary", interactive=False),
+            get_metrics_html(0, 0, total_files, "--:--", "--:--", "Error"),
+        )
+    finally:
+        state.is_processing = False
+        # Limpiar archivos temporales
+        cleanup_temp_files()
+
+
+def stop_swap():
+    """Detiene el procesamiento"""
+    roop.globals.processing = False
+    gr.Info("Abortando el procesamiento: espere a que se detengan los subprocesos restantes")
+    return (
+        gr.update(variant="primary", interactive=True),
+        gr.update(variant="secondary", interactive=False),
+        None,
+    )

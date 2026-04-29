@@ -174,7 +174,10 @@ def open_sd_webview():
 def create_ui():
     atexit.register(cleanup_comfyui)
     
-    with gr.Blocks(title="AutoAuto - AI Editor") as demo:
+    with gr.Blocks(title="AutoAuto - AI Editor", css="""
+        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+        .main-tabs { width: 100% !important; }
+    """) as demo:
         # Header simple
         gr.Markdown("# AutoAuto")
         

@@ -424,8 +424,9 @@ def extract_face_images(
         results = []
         for face_idx, face_data in enumerate(faces):
             try:
-                # FILTRO DE CALIDAD: Verificar score mínimo (Reducido para detectar caras en bordes)
-                if hasattr(face_data, 'det_score') and face_data.det_score < 0.15:
+                # FILTRO DE CALIDAD: Verificar score mínimo (0.3 = 30% confianza minima)
+                if hasattr(face_data, 'det_score') and face_data.det_score < 0.3:
+                    print(f"[DEBUG] Cara {face_idx} rechazada: det_score={face_data.det_score:.2f} < 0.3")
                     continue
                 
                 # FILTRO DE CALIDAD: Verificar que el bbox sea razonable
@@ -433,21 +434,25 @@ def extract_face_images(
                 face_w = x2 - x1
                 face_h = y2 - y1
                 
-                # Cara muy pequeña
-                if face_w < 20 or face_h < 20:
+                # Cara muy pequena (minimo 50px para swap decente)
+                if face_w < 50 or face_h < 50:
+                    print(f"[DEBUG] Cara {face_idx} rechazada: size {face_w}x{face_h} < 50")
                     continue
                     
                 # Aspect ratio muy extremo (no es una cara humana)
                 aspect_ratio = face_w / face_h if face_h > 0 else 0
                 if aspect_ratio < 0.3 or aspect_ratio > 2.0:
+                    print(f"[DEBUG] Cara {face_idx} rechazada: aspect ratio={aspect_ratio:.2f}")
                     continue
                 
                 # FILTRO DE CALIDAD: Verificar que tenga embedding válido
                 if not hasattr(face_data, 'embedding') or face_data.embedding is None:
+                    print(f"[DEBUG] Cara {face_idx} rechazada: sin embedding")
                     continue
                 
                 # FILTRO DE CALIDAD: Verificar que tenga keypoints válidos
                 if not hasattr(face_data, 'kps') or face_data.kps is None or len(face_data.kps) < 5:
+                    print(f"[DEBUG] Cara {face_idx} rechazada: kps={'None' if not hasattr(face_data, 'kps') else len(face_data.kps) if face_data.kps else 'None'}")
                     continue
                 
                 # Calcular normed_embedding
@@ -468,7 +473,7 @@ def extract_face_images(
                     score=face_data.score,
                     det_score=face_data.det_score,
                     kps=face_data.kps.tolist() if face_data.kps is not None else None,
-                    embedding=face_data.embedding.tolist() if face_data.embedding is not None else None,
+                    embedding=face_data.embedding if face_data.embedding is not None else None,
                     normed_embedding=normed_embedding,
                     landmark_106=landmark_106
                 )
@@ -498,18 +503,29 @@ def extract_face_images(
                     continue
 
                 results.append([face_obj, face_img])
-
+                
             except Exception as e:
                 logger.error(f"Error procesando cara {face_idx + 1}: {e}")
                 continue
-
-        # Ordenar por tamano si no es target_face_detection
-        if not target_face_detection and len(results) > 0:
-            results.sort(
-                key=lambda x: (x[0].bbox[2] - x[0].bbox[0]) * (x[0].bbox[3] - x[0].bbox[1]),
-                reverse=True,
-            )
-            results = [results[0]]
+        
+        # Ordenar por calidad de detección
+        if len(results) > 0:
+            if target_face_detection:
+                # Para selección en UI: ordenar por det_score (mejor primero) y limitar a 20 caras
+                results.sort(
+                    key=lambda x: x[0].det_score if hasattr(x[0], 'det_score') and x[0].det_score is not None else 0.0,
+                    reverse=True,
+                )
+                # Limitar a máximo 20 caras para evitar abrumar la UI
+                if len(results) > 20:
+                    results = results[:20]
+            else:
+                # Para source face: ordenar por tamaño y usar solo la cara más grande
+                results.sort(
+                    key=lambda x: (x[0].bbox[2] - x[0].bbox[0]) * (x[0].bbox[3] - x[0].bbox[1]),
+                    reverse=True,
+                )
+                results = [results[0]]
 
         CACHE_RESULTADOS[cache_key] = results
         return results

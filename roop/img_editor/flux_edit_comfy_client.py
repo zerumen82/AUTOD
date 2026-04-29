@@ -113,11 +113,11 @@ class FluxEditComfyClient:
         self,
         image: Image.Image,
         prompt: str,
-        num_inference_steps: int = 25,
+        num_inference_steps: int = 8,
         guidance_scale: float = 3.5,
         seed: int = None,
         denoise: float = 0.75,
-        mask_image: Optional[Image.Image] = None,  # NUEVO: Soporte para máscara
+        mask_image: Optional[Image.Image] = None,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
         
@@ -125,15 +125,12 @@ class FluxEditComfyClient:
             return None, "No cargado - llama a load() primero"
 
         t0 = time.time()
-        print(f"[FluxEdit] Generando ({num_inference_steps} pasos, denoise={denoise})...", flush=True)
+        print(f"[FluxEdit] Generando ({num_inference_steps} pasos, denoise={denoise:.3f}, cfg={guidance_scale:.1f})...", flush=True)
         if mask_image:
             print("[FluxEdit] 🎭 Usando máscara para inpainting selectivo", flush=True)
         
         # Negative prompt por defecto
         negative_prompt = "low quality, worst quality, bad quality, jpeg artifacts, blurry, out of focus, poorly drawn, bad anatomy, deformed, disfigured, mutated, extra limbs"
-        
-        if num_inference_steps > 8:
-            num_inference_steps = 8
         
         try:
             requested_w = kwargs.get("target_width")
@@ -180,12 +177,12 @@ class FluxEditComfyClient:
             clip_flux2_name = os.path.basename(self._model_paths.get("clip_flux2", "")) if "clip_flux2" in self._model_paths else None
             vae_name = os.path.basename(self._model_paths["vae"])
             
-            is_schnell = "schnell" in flux_name.lower()
             is_klein = "klein" in flux_name.lower() or "flux2" in flux_name.lower()
 
-            actual_guidance = max(1.5, min(3.0, guidance_scale)) if is_klein else (1.0 if is_schnell else guidance_scale)
-            actual_steps = max(4, min(12, num_inference_steps))
-            actual_denoise = max(0.15, min(0.95, denoise))
+            # LOS PARÁMETROS YA VIENEN RESOLVIDOS POR EL MANAGER
+            actual_guidance = guidance_scale
+            actual_steps = num_inference_steps
+            actual_denoise = denoise
 
             # Construir Workflow Dinámico
             workflow = {}
@@ -202,12 +199,13 @@ class FluxEditComfyClient:
             if mname:
                 # MODO INPAINT: Usar VAE Encode for Inpaint
                 workflow["12"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
+                workflow["13"] = {"class_type": "ImageToMask", "inputs": {"image": ["12", 0], "method": "intensity", "channel": "red"}}
                 workflow["5"] = {
                     "class_type": "VAEEncodeForInpaint",
                     "inputs": {
                         "pixels": ["1", 0],
                         "vae": ["4", 0],
-                        "mask": ["12", 0],
+                        "mask": ["13", 0],
                         "grow_mask_by": 6
                     }
                 }

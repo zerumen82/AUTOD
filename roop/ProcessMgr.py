@@ -218,6 +218,7 @@ class ProcessMgr:
             from roop.processors.FaceSwap import FaceSwap
             from roop.processors.Enhance_CodeFormer import Enhance_CodeFormer
             from roop.processors.Enhance_RestoreFormerPPlus import Enhance_RestoreFormerPPlus
+            from roop.processors.Enhance_GFPGAN import Enhance_GFPGAN
 
             try:
                 # FORZAR GPU si PyTorch tiene CUDA disponible (más confiable)
@@ -254,6 +255,10 @@ class ProcessMgr:
                         self.processors["enhance_restoreformer"] = Enhance_RestoreFormerPPlus()
                         self.processors["enhance_restoreformer"].Initialize({"devicename": devname})
                         print(f"Restoreformer++ Enhancer initialized (devicename={devname})")
+                    elif selected_enhancer == "GFPGAN":
+                        self.processors["enhance_gfpgan"] = Enhance_GFPGAN()
+                        self.processors["enhance_gfpgan"].Initialize({"devicename": devname})
+                        print(f"GFPGAN Enhancer initialized (devicename={devname})")
                 except Exception as e:
                     print(f"Failed to initialize {selected_enhancer} Enhancer: {e}")
 
@@ -390,7 +395,6 @@ class ProcessMgr:
                     # Modo "Selected Faces": Procesa UNA cara por imagen automáticamente
                     # Target = user-selected face per image (de selected_face_references)
                     # Source = ALEATORIO del faceset de origen
-                    # IMPORTANTE: Si el usuario NO seleccionó una cara para esta imagen, NO se procesa
                     
                     if file_path:
                         filename = os.path.basename(file_path)
@@ -399,14 +403,16 @@ class ProcessMgr:
                         
                         if hasattr(roop.globals, 'selected_face_references'):
                             face_ref_data = None
-                            if video_key in roop.globals.selected_face_references:
-                                face_ref_data = roop.globals.selected_face_references[video_key]
-                            else:
-                                # Buscar con clave sin prefijo o parcial para compatibilidad
-                                for k, v in roop.globals.selected_face_references.items():
-                                    if k == filename or k.endswith(f"_{filename}") or filename in k:
-                                        face_ref_data = v
-                                        break
+                            # Intentar varias combinaciones de claves
+                            keys_to_try = [video_key, filename]
+                            for k in roop.globals.selected_face_references.keys():
+                                if filename in k or k in filename:
+                                    keys_to_try.append(k)
+                            
+                            for k in keys_to_try:
+                                if k in roop.globals.selected_face_references:
+                                    face_ref_data = roop.globals.selected_face_references[k]
+                                    break
                             
                             if face_ref_data:
                                 target_face_ref = face_ref_data.get('face_obj')
@@ -425,9 +431,9 @@ class ProcessMgr:
                                     if best_match and best_iou > 0.3:
                                         faces_to_process = [best_match]
                                         face_found = True
+                                        print(f"[SELECTED_FACES] Cara encontrada por IoU ({best_iou:.2f})")
                                     # Si no hay match por bbox, intentar por embedding
                                     elif hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None:
-                                        # Buscar por similitud de embedding
                                         best_emb_match = None
                                         best_score = 0.0
                                         for face in valid_faces:
@@ -436,17 +442,19 @@ class ProcessMgr:
                                                 if score > best_score:
                                                     best_score = score
                                                     best_emb_match = face
-                                        if best_emb_match and best_score > 0.45:
+                                        if best_emb_match and best_score > 0.4:
                                             faces_to_process = [best_emb_match]
                                             face_found = True
+                                            print(f"[SELECTED_FACES] Cara encontrada por Embedding ({best_score:.2f})")
                         
-                        # Si no se encontró cara seleccionada, NO procesar esta imagen
+                        # FALLBACK: Si no se encontró cara seleccionada explícitamente, pero estamos en modo selected, 
+                        # usamos la más grande para no abortar el proceso si el usuario espera que algo pase.
                         if not face_found:
-                            print(f"[SELECTED_FACES] ⚠️ No hay cara seleccionada para {filename} - OMITIENDO procesamiento")
-                            faces_to_process = []
+                            print(f"[SELECTED_FACES] ⚠️ No hay cara seleccionada explícita para {filename}, usando cara más grande como fallback")
+                            faces_to_process = [max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))]
                     else:
-                        # Sin file_path, no procesar
-                        faces_to_process = []
+                        # Sin file_path, usar la más grande
+                        faces_to_process = [max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))]
                     
                 else:
                     faces_to_process = valid_faces
@@ -495,31 +503,54 @@ class ProcessMgr:
         try:
             if not candidate_faces:
                 return None
-
+            
             # Modo "Selected Faces Frame" (Tracking de video):
             if face_swap_mode == 'selected_faces_frame':
-                best_face = max(candidate_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-                print(f"[SELECT_SOURCE] Modo selected_faces_frame: usando cara más grande")
-                return best_face
-
+                # Usar la cara de referencia guardada para este video (tracking)
+                if video_path:
+                    video_basename = os.path.basename(video_path)
+                    video_key = f"selected_face_ref_{video_basename}"
+                    if hasattr(roop.globals, 'selected_face_references') and video_key in roop.globals.selected_face_references:
+                        face_ref_data = roop.globals.selected_face_references[video_key]
+                        ref_embedding = face_ref_data.get('embedding')
+                        
+                        # Buscar la cara en candidate_faces que coincida con la referencia
+                        if ref_embedding is not None:
+                            best_match = None
+                            best_score = -1
+                            for face in candidate_faces:
+                                if hasattr(face, 'embedding') and face.embedding is not None:
+                                    score = self._calculate_similarity(ref_embedding, face.embedding)
+                                    if score > best_score:
+                                        best_score = score
+                                        best_match = face
+                            if best_match and best_score > 0.15:
+                                print(f"[SELECT_SOURCE] Modo selected_faces_frame: cara de referencia (score={best_score:.2f})")
+                                return best_match
+                
+                # NO HACER FALLBACK - Si no hay referencia, no hacer swap
+                print(f"[SELECT_SOURCE] Modo selected_faces_frame: SIN referencia, no se hace swap")
+                return None
+            
             # Modo "Selected" y "Selected Faces" (Selección por imagen):
-            # - Source: ALEATORIO del faceset de origen
+            # - Source: CUALQUIER cara aleatoria del face set (random)
+            # - Requisito: Las caras en INPUT_FACESETS son las seleccionadas por el usuario
             if face_swap_mode in ['selected', 'selected_faces']:
-                if len(candidate_faces) > 1:
-                    # Importante: usar random.choice directamente sin caching
-                    source_face = random.choice(candidate_faces)
-                    print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara aleatoria #{candidate_faces.index(source_face)+1} de {len(candidate_faces)}")
-                    return source_face
-                else:
-                    return candidate_faces[0]
-
+                if not candidate_faces:
+                    return None
+                # Usar una cara aleatoria del face set (cualquier cara del set)
+                source_face = random.choice(candidate_faces)
+                print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara aleatoria #{candidate_faces.index(source_face)+1} de {len(candidate_faces)}")
+                return source_face
+            
             # Modo "All": cara más grande
             best_face = max(candidate_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
             return best_face
-
+            
         except Exception as e:
             print(f"[ERROR] _select_source_face: {e}")
-            return candidate_faces[0] if candidate_faces else None
+            # NO HACER FALLBACK - En caso de error, no hacer swap
+            return None
 
     def _setup_selected_faces_frame_for_video(self, video_path, valid_faces):
         """
@@ -1068,8 +1099,8 @@ class ProcessMgr:
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
 
-            # Blend del enhancer (0.3 = 30% enhanced + 70% original - balance calidad/velocidad)
-            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.3)
+            # Blend del enhancer (0.5 por defecto para reconstruir identidad)
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.5)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
@@ -1324,22 +1355,24 @@ class ProcessMgr:
         try:
             if emb1 is None or emb2 is None:
                 return 0.0
-                
-            emb1 = np.array(emb1, dtype=np.float32)
-            emb2 = np.array(emb2, dtype=np.float32)
+            
+            emb1 = np.array(emb1, dtype=np.float32).flatten()
+            emb2 = np.array(emb2, dtype=np.float32).flatten()
             
             norm1 = np.linalg.norm(emb1)
             norm2 = np.linalg.norm(emb2)
             
             if norm1 == 0 or norm2 == 0:
                 return 0.0
-                
+            
             emb1_norm = emb1 / norm1
             emb2_norm = emb2 / norm2
             
-            similarity = np.dot(emb1_norm, emb2_norm)
+            # Asegurar que sea escalar
+            similarity = float(np.dot(emb1_norm, emb2_norm))
             return max(0.0, min(1.0, similarity))
         except Exception as e:
+            print(f"[SIMILARITY_ERROR] {e}")
             return 0.0
 
     def run_batch_inmem(self, video_path, output_path, start_frame=0, end_frame=None, fps=24.0, num_threads=1, skip_audio=False):

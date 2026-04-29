@@ -17,8 +17,10 @@ def faceswap_tab():
     
     # 2. Configurar parámetros de calidad por defecto (High Fidelity)
     roop.globals.blend_ratio = 1.0
-    roop.globals.distance_threshold = 0.6
+    roop.globals.distance_threshold = 0.40
     roop.globals.face_swap_mode = 'selected_faces' # Por defecto
+    roop.globals.selected_enhancer = 'GFPGAN' # Activar nitidez por defecto
+    roop.globals.use_enhancer = True
     
     # 3. Construir la UI
     ui_components = faceswap_ui.build_faceswap_ui()

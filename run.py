@@ -32,11 +32,33 @@ def cleanup_old_temps_async():
     """Limpia los temporales antiguos de C: y del proyecto en un hilo separado."""
     cleaned_count = 0
     
-    def _safe_remove_old_items(base_dir, min_age_seconds=6 * 3600):
-        """Elimina solo elementos antiguos para evitar carreras con archivos en uso."""
+    def _safe_remove_old_items(base_dir, min_age_seconds=6 * 3600, patterns=None):
+        """Elimina elementos temporales, opcionalmente filtrando por patrones."""
         local_count = 0
         if not os.path.exists(base_dir):
             return local_count
+        now = time.time()
+        for item in os.listdir(base_dir):
+            item_path = os.path.join(base_dir, item)
+            # Si hay patrones, solo borrar los que coincidan
+            if patterns and not any(item.startswith(p) for p in patterns):
+                continue
+            try:
+                age = now - os.path.getmtime(item_path)
+            except Exception:
+                continue
+            # Evitar borrar artefactos recientes que la app podría estar sirviendo (solo si no hay patrones)
+            if min_age_seconds > 0 and age < min_age_seconds and not patterns:
+                continue
+            try:
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path, ignore_errors=True)
+                else:
+                    os.remove(item_path)
+                local_count += 1
+            except Exception:
+                pass # Ignorar errores de archivos en uso
+        return local_count
         now = time.time()
         for item in os.listdir(base_dir):
             item_path = os.path.join(base_dir, item)
@@ -68,7 +90,7 @@ def cleanup_old_temps_async():
                 print(f"[CLEANUP] Omitiendo temp activo de Gradio: {gradio_temp}")
             elif os.path.exists(gradio_temp):
                 print(f"[CLEANUP] Limpiando temporales antiguos de Gradio: {gradio_temp}")
-                cleaned_count += _safe_remove_old_items(gradio_temp)
+                cleaned_count += _safe_remove_old_items(gradio_temp, min_age_seconds=3600)  # 1 hora
     except Exception as e:
         print(f"[CLEANUP] Error limpiando temporales de Gradio: {e}")
     
@@ -84,17 +106,14 @@ def cleanup_old_temps_async():
     except Exception as e:
         print(f"[CLEANUP] Error limpiando temporales de roop: {e}")
     
-    # 3. Limpiar temporales del proyecto (D:\.autodeep_temp) si existe
+    # 3. Limpiar temporales del proyecto (D:\.autodeep_temp) - usar patrones específicos
     try:
         project_temp_path = "D:\\.autodeep_temp"
-        active_temp = os.path.abspath(tempfile.gettempdir())
         if os.path.exists(project_temp_path):
-            # No limpiar la carpeta temporal activa de esta misma sesión.
-            if os.path.abspath(project_temp_path) == active_temp:
-                print(f"[CLEANUP] Omitiendo temp activo del proyecto: {project_temp_path}")
-            else:
-                print(f"[CLEANUP] Limpiando temporales antiguos del proyecto: {project_temp_path}")
-                cleaned_count += _safe_remove_old_items(project_temp_path)
+            print(f"[CLEANUP] Limpiando temporales del proyecto: {project_temp_path}")
+            # Patrones: solo borrar archivos temporales conocidos, no toda la carpeta
+            patterns = ("temp_frame_", "faceset_", "faceswap_", "roop_", "gradio_")
+            cleaned_count += _safe_remove_old_items(project_temp_path, min_age_seconds=0, patterns=patterns)
     except Exception as e:
         print(f"[CLEANUP] Error limpiando temporales del proyecto: {e}")
     

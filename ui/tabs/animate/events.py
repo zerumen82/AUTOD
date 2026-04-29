@@ -34,7 +34,7 @@ def wire_animate_events(ui):
     )
 
     def on_animate_click(img_data, p, m_mode, m_prompt, motion, frames, fps, model, stabilize):
-        if img_data is None: yield None, "Falta imagen", "Error"; return
+        if img_data is None: yield None, "Falta imagen"; return
         
         # Extraer imagen y máscara manual del componente ImageEditor
         img = img_data if not isinstance(img_data, dict) else img_data.get("background")
@@ -42,10 +42,10 @@ def wire_animate_events(ui):
         if isinstance(img_data, dict) and m_mode == "manual":
             manual_mask = img_data.get("layers")[0] if img_data.get("layers") else None
             
-        if img is None: yield None, "Error: Imagen no válida", "Error"; return
+        if img is None: yield None, "Error: Imagen no válida"; return
         
         state.is_animating = True
-        yield None, "Iniciando Animación Inteligente...", "Procesando"
+        yield None, "Iniciando Animación Inteligente..."
         
         video, msg = logic.generate_grok_animation(
             img, p, motion, frames, fps, model, stabilize,
@@ -53,7 +53,7 @@ def wire_animate_events(ui):
         )
         
         state.is_animating = False
-        yield video, msg, "Listo"
+        yield video, msg
 
     ui["btn_animate"].click(
         fn=on_animate_click,
@@ -61,5 +61,18 @@ def wire_animate_events(ui):
             ui["input_img"], ui["prompt"], ui["mask_mode"], ui["mask_prompt"],
             ui["motion_bucket"], ui["num_frames"], ui["fps"], ui["model_choice"], ui["face_stabilize"]
         ],
+        outputs=[ui["video_output"], ui["progress_html"]]
+    )
+
+    def on_upscale(video_path):
+        if not video_path: return None, "No hay vídeo generado"
+        from roop.animate.animate_manager import get_animate_manager
+        manager = get_animate_manager()
+        res_path, msg = manager.upscale_video(video_path)
+        return res_path, msg
+
+    ui["btn_upscale"].click(
+        fn=on_upscale,
+        inputs=[ui["video_output"]],
         outputs=[ui["video_output"], ui["progress_html"]]
     )
