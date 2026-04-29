@@ -24,23 +24,17 @@ class FacePreserver:
         self.face_detector = None
         self._initialized = False
     
-    def initialize(self) -> Tuple[bool, str]:
-        """
-        Inicializa el detector de rostros.
-        
-        Returns:
-            (success, message)
-        """
+def initialize(self) -> Tuple[bool, str]:
         try:
             import insightface
             from insightface.app import FaceAnalysis
-            
-            self.analyzer = FaceAnalysis()
+
+            self.analyzer = FaceAnalysis(allowed_modules=['detection', 'recognition'])
             self.analyzer.prepare(ctx_id=0, det_size=(640, 640))
             self._initialized = True
-            
+
             return True, "Face detector inicializado"
-            
+
         except ImportError:
             return False, "InsightFace no disponible. Instala con: pip install insightface"
         except Exception as e:
@@ -50,17 +44,46 @@ class FacePreserver:
         """Check si el detector esta inicializado"""
         return self._initialized
     
-    def detect_faces(self, image: Image.Image) -> List[dict]:
-        """
-        Detecta rostros en una imagen.
-        
-        Args:
-            image: Imagen PIL
-            
-        Returns:
-            Lista de diccionarios con informacion de cada rostro
-        """
+def detect_faces(self, image: Image.Image) -> List[dict]:
         if not self._initialized:
+            return []
+
+        try:
+            np_image = np.array(image)
+            faces = self.analyzer.get(np_image)
+
+            results = []
+            for face in faces:
+                bbox = face.bbox.tolist() if hasattr(face.bbox, 'tolist') else list(face.bbox)
+                kps = face.kps.tolist() if hasattr(face.kps, 'tolist') else list(face.kps)
+                results.append({
+                    "bbox": bbox,
+                    "kps": kps,
+                    "embedding": face.embedding,
+                    "det_score": face.det_score,
+                })
+
+            return results
+
+        except Exception as e:
+            if 'conv_1_relu' in str(e) or 'broadcast' in str(e):
+                print(f"[FacePreserver] ONNX shape error (genderage), redimensionando imagen...")
+                try:
+                    w, h = image.size
+                    scale = 512 / max(w, h)
+                    if scale < 1:
+                        sm = image.resize((int(w*scale), int(h*scale)), Image.LANCZOS)
+                        np_image = np.array(sm)
+                        faces = self.analyzer.get(np_image)
+                        results = []
+                        for face in faces:
+                            bbox = [c / scale for c in (face.bbox.tolist() if hasattr(face.bbox, 'tolist') else list(face.bbox))]
+                            results.append({"bbox": bbox, "kps": [], "embedding": face.embedding, "det_score": face.det_score})
+                        print(f"[FacePreserver] OK tras redimensionar: {len(results)} rostros")
+                        return results
+                except:
+                    pass
+            print(f"[FacePreserver] Error detectando rostros: {e}")
             return []
         
         try:

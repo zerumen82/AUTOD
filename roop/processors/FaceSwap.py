@@ -31,16 +31,52 @@ class FaceSwap:
                 print(f"[FaceSwap] Error carga: {e}")
 
     def Run(self, source_face: Face, target_face: Face, temp_frame: Frame, paste_back: bool = True) -> Any:
-        if self.model is None: return None
+        if self.model is None:
+            return None
         try:
-            if not isinstance(temp_frame, np.ndarray): temp_frame = np.array(temp_frame)
-            res_data = self.model.get(temp_frame, target_face, source_face, paste_back=False)
-            if res_data is None: return None
-            swapped_face, M = res_data
-            if not paste_back: return swapped_face
+            if not isinstance(temp_frame, np.ndarray):
+                temp_frame = np.array(temp_frame)
+            for attr in ['kps', 'embedding', 'normed_embedding', 'bbox']:
+                for face in (target_face, source_face):
+                    val = getattr(face, attr, None)
+                    if isinstance(val, list):
+                        setattr(face, attr, np.array(val, dtype=np.float32))
+                    elif val is None and attr == 'normed_embedding':
+                        emb = getattr(face, 'embedding', None)
+                        if emb is not None:
+                            nrm = np.array(emb, dtype=np.float32)
+                            norm = np.linalg.norm(nrm)
+                            if norm > 0:
+                                nrm = nrm / norm
+                            setattr(face, attr, nrm)
+            try:
+                res_data = self.model.get(temp_frame, target_face, source_face, paste_back=False)
+            except Exception as e_inner:
+                print(f"[FaceSwap] model.get() falló con paste_back=False: {e_inner}")
+                print(f"[FaceSwap] Intentando paste_back=True como fallback...")
+                try:
+                    result = self.model.get(temp_frame, target_face, source_face, paste_back=True)
+                    if result is not None:
+                        return result
+                except Exception as e2:
+                    print(f"[FaceSwap] model.get() también falló con paste_back=True: {e2}")
+                return None
+            if res_data is None:
+                return None
+            if isinstance(res_data, tuple):
+                swapped_face, M = res_data
+            else:
+                return res_data
+            if not paste_back:
+                return swapped_face
+            if isinstance(swapped_face, list):
+                swapped_face = np.array(swapped_face)
+            if isinstance(M, list):
+                M = np.array(M, dtype=np.float64)
             return self.paste_back_robust(temp_frame, swapped_face, M)
         except Exception as e:
-            print(f"[ERROR] FaceSwap Run: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def paste_back_robust(self, target_img, source_face_img, M):
