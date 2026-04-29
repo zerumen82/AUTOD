@@ -30,10 +30,13 @@ def build_faceswap_ui():
                 margin-top: 15px;
                 box-shadow: 0 4px 15px rgba(139, 92, 246, 0.1);
             }
-            .small-face-gallery { min-height: auto !important; }
-            .small-face-gallery .grid-wrap { gap: 8px !important; }
-            .small-face-gallery button.thumbnail-item { width: 256px !important; height: 256px !important; flex: none !important; }
-            .small-face-gallery img { width: 256px !important; height: 256px !important; object-fit: cover !important; border-radius: 10px; }
+            .small-face-gallery { min-height: auto !important; gap: 0 !important; }
+            .small-face-gallery > div { gap: 5px !important; padding: 0 !important; }
+            .small-face-gallery .grid-container { margin: 0 !important; padding: 0 !important; gap: 5px !important; }
+            .small-face-gallery .grid-wrap { gap: 5px !important; padding: 0 !important; margin: 0 !important; }
+            .small-face-gallery button.thumbnail-item { width: 120px !important; height: 120px !important; flex: none !important; margin: 0 !important; padding: 0 !important; border-radius: 8px !important; }
+            .small-face-gallery img { width: 120px !important; height: 120px !important; object-fit: cover !important; border-radius: 8px !important; }
+            .small-face-gallery .gallery-wrapper { padding: 0 !important; margin: 0 !important; }
             .frame-btn { min-width: 45px !important; font-weight: bold !important; }
             .grok-start-btn { 
                 background: linear-gradient(90deg, #3b82f6, #8b5cf6) !important; 
@@ -134,12 +137,12 @@ def build_faceswap_ui():
                     autorotate = gr.Checkbox(label="🔄 Auto-Rotar (Mejora Perfiles/Inclinadas)", value=True)
                     smoothing = gr.Checkbox(label="🛡️ Suavizado Temporal (Anti-Parpadeo)", value=True)
                 with gr.Row():
-                    face_distance = gr.Slider(0.01, 1.0, value=0.40, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
+                    face_distance = gr.Slider(0.01, 1.0, value=0.30, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
                     blend_ratio = gr.Slider(0.0, 1.0, value=1.0, step=0.01, label="🎨 Mezcla de Piel (1.0 = Máxima Calidad)")
                 with gr.Row():
                     enhancer = gr.Dropdown(
-                        choices=["None", "GFPGAN", "CodeFormer", "Restoreformer++"],
-                        value="GFPGAN", label="✨ Enhancer de Calidad (CodeFormer = Máxima Fidelidad)"
+                        choices=["None", "CodeFormer", "GFPGAN", "Restoreformer++"],
+                        value="CodeFormer", label="✨ Enhancer de Calidad (CodeFormer = Máxima Fidelidad)"
                     )
 
             with gr.Row():

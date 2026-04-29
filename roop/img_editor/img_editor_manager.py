@@ -1,114 +1,103 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-ImgEditor Manager - Edición de imágenes con ComfyUI y Motores Modernos (FLUX, HART, OmniGen2)
-Versión Refactorizada y Alineada (2026)
-"""
-
-import os
-import sys
-import tempfile
-import time
-import json
-import torch
-import gc
+import os, sys, time
 from typing import Optional, Tuple, Dict
 from PIL import Image
 import numpy as np
-import cv2
 import roop.globals
 
-from roop.comfy_client import get_comfyui_url
-from roop.img_editor.clothing_segmenter import get_clothing_segmenter, is_clipseg_available
-from roop.img_editor.controlnet_utils import get_controlnet_utils
-
 class ImgEditorManager:
-    """Gestiona la edición de imágenes con ComfyUI y otros motores modernos"""
-
     def __init__(self):
-        self.client = None
-        self.face_swapper = None
-        self.face_analyzer = None
-        self.flux_client = None
-        self.hart_edit_client = None
+        self.flux_klein_client = None
+        self.flux_schnell_client = None
         self.omnigen2_client = None
-        self.controlnet_utils = None
+        self.face_preserver = None
+        self.prompt_analyzer = None
+        self.prompt_rewriter = None
         self._last_context = "normal"
 
-    def resolve_engine_params(self, engine: str, creativity: float, preserve: float, steps: int, resolution_label: str = "1024p") -> Dict:
-        """
-        Centraliza la resolución de parámetros según el motor y la intención.
-        Sigue la 'Alignment Guide' para evitar overrides opacos.
-        """
-        # 1. Mapeo de denoise (basado en 'preserve')
-        base_denoise = 1.0 - preserve
-        
-        # 2. Mapeo de guidance (basado en 'creativity')
-        base_guidance = 1.5 + (creativity * 5.0) 
+    def _get_prompt_analyzer(self):
+        if self.prompt_analyzer is None:
+            from roop.img_editor.prompt_analyzer import PromptAnalyzer, EditingMode
+            self.prompt_analyzer = PromptAnalyzer()
+            self.EditingMode = EditingMode
+        return self.prompt_analyzer
 
-        params = {
-            "engine": engine,
-            "denoise": base_denoise,
-            "guidance_scale": base_guidance,
-            "num_inference_steps": steps,
-            "target_width": 1024,
-            "target_height": 1024,
-            "supports_mask": True,
-            "mode": "edit"
-        }
+    def _get_face_preserver(self):
+        if self.face_preserver is None:
+            from roop.img_editor.face_preserver import FacePreserver
+            fp = FacePreserver()
+            ok, _ = fp.initialize()
+            if ok:
+                self.face_preserver = fp
+        return self.face_preserver
 
-        # 3. Ajustes específicos por motor
-        if engine in ["flux_klein", "flux"]:
-            params["guidance_scale"] = 3.5 + (creativity * 1.5)
-            params["num_inference_steps"] = max(8, min(30, steps))
-            params["denoise"] = max(0.15, min(0.95, base_denoise))
-        
-        elif engine == "omnigen2":
-            params["guidance_scale"] = 1.0 + (creativity * 4.0)
-            params["num_inference_steps"] = max(10, min(30, steps))
-            params["denoise"] = max(0.2, min(0.9, base_denoise))
+    def _get_rewriter(self):
+        if self.prompt_rewriter is None:
+            from roop.img_editor.prompt_rewriter import get_prompt_rewriter
+            self.prompt_rewriter = get_prompt_rewriter()
+        return self.prompt_rewriter
 
-        # 4. Resolución de dimensiones
-        try:
-            max_side = int(resolution_label.replace('p', ''))
-            params["target_width"] = max_side
-            params["target_height"] = max_side 
-        except:
-            pass
+    def auto_detect_params(self, prompt: str, engine: str) -> Dict:
+        analyzer = self._get_prompt_analyzer()
+        mode, confidence = analyzer.analyze(prompt)
 
-        return params
-
-    def rewrite_prompt(self, prompt: str) -> str:
-        """
-        Analizador semántico estilo Grok: realismo extremo y protección de identidad.
-        """
         prompt_lower = prompt.lower()
-        enhanced_prompt = prompt
-        
-        # Detección de acción/pose
-        pose_keywords = ["salte", "jump", "rodillas", "kneel", "corra", "run", "parado", "stand", "sentado", "sit", "dance", "baila", "pose", "postura", "caminando", "walk", "movimiento", "move"]
-        is_action = any(kw in prompt_lower for kw in pose_keywords)
-        
-        # Estilo de fotografía de ALTA CALIDAD - FOCO EN COLOR Y PIEL
-        style = "professional high-definition photography, vivid colors, natural skin tones, cinematic sharp focus, 8k resolution"
-        protection = "exact same characters, keep original clothes and background colors"
-        
-        if is_action:
-            print("[ImgEditor] 🏃 Acción detectada - Optimizando para movimiento realista")
-            enhanced_prompt = f"{style}, {prompt}, {protection}, in motion"
-            self._last_context = "pose_change"
+        has_scene_change = any(kw in prompt_lower for kw in [
+            "fondo", "background", "playa", "beach", "ciudad", "city",
+            "bosque", "forest", "montaña", "mountain", "espacio", "space",
+            "calle", "street", "interior", "habitación", "room"
+        ])
+        has_clothing_change = any(kw in prompt_lower for kw in [
+            "ropa", "clothing", "outfit", "vestido", "dress", "camisa",
+            "shirt", "pantalones", "pants", "zapatos", "shoes"
+        ])
+        has_expression_change = any(kw in prompt_lower for kw in [
+            "sonrisa", "smile", "feliz", "happy", "expresion", "expression",
+            "serio", "serious", "triste", "sad"
+        ])
+
+        if mode == self.EditingMode.INPAINT:
+            denoise = 0.65
+            steps = 8
+            guidance = 4.0
+        elif mode == self.EditingMode.OUTPAINT:
+            denoise = 0.75
+            steps = 10
+            guidance = 4.5
         else:
-            enhanced_prompt = f"{style}, {prompt}, {protection}"
-            self._last_context = "normal"
-            
-        return enhanced_prompt
+            if has_scene_change and has_clothing_change:
+                denoise = 0.60
+            elif has_scene_change:
+                denoise = 0.55
+            elif has_clothing_change:
+                denoise = 0.50
+            elif has_expression_change:
+                denoise = 0.40
+            else:
+                denoise = 0.45
+            steps = 8
+            guidance = 3.5
+
+        if engine == "flux_schnell":
+            steps = min(steps, 4)
+        elif "klein" in engine:
+            steps = min(steps, 8)
+
+        print(f"[ImgEditor] Auto-params: mode={mode.value}, denoise={denoise}, steps={steps}, guidance={guidance}")
+        return {
+            "denoise": denoise,
+            "num_inference_steps": steps,
+            "guidance_scale": guidance,
+            "mode": mode.value
+        }
 
     def generate_intelligent(
         self,
         image,
         prompt: str,
-        num_inference_steps: int = 25,
-        guidance_scale: float = 7.5,
+        num_inference_steps: int = None,
+        guidance_scale: float = None,
         seed: int = None,
         face_preserve: bool = True,
         use_rewriter: bool = True,
@@ -118,161 +107,106 @@ class ImgEditorManager:
         mask_mode: str = "global",
         mask_prompt: str = ""
     ) -> Tuple[Optional[Image.Image], str]:
-        """Generación modular enfocada en ELIMINAR EL GRIS Y MANTENER IDENTIDAD."""
-        
-        # Preparar imagen original
+
         if isinstance(image, Image.Image):
-            original_image = image.copy().convert("RGB")
-        elif hasattr(image, 'name'):
-            original_image = Image.open(image.name).copy().convert("RGB")
+            img = image.copy().convert("RGB")
         else:
-            return None, "Error: Imagen inválida"
+            img = Image.open(image.name).copy().convert("RGB")
 
-        # 1. RESOLVER PARÁMETROS CENTRALIZADOS
-        creativity = ref_metadata.get('creativity', 0.78) if ref_metadata else 0.78
-        preserve = ref_metadata.get('preserve', 0.22) if ref_metadata else 0.22
-        res_label = ref_metadata.get('resolution_label', '1024p') if ref_metadata else '1024p'
-        
-        p = self.resolve_engine_params(engine, creativity, preserve, num_inference_steps, res_label)
-        
-        # 2. REESCRITURA DE PROMPT
-        final_prompt = self.rewrite_prompt(prompt) if use_rewriter else prompt
+        params = self.auto_detect_params(prompt, engine)
+        if num_inference_steps:
+            params["num_inference_steps"] = num_inference_steps
+        if guidance_scale:
+            params["guidance_scale"] = guidance_scale
 
-        # AJUSTE PARA ACCIÓN (Fuerza Bruta contra el gris)
-        if self._last_context == "pose_change":
-            p["denoise"] = 0.78
-            p["num_inference_steps"] = 30 # Forzamos 30 pasos para detalle
-            p["guidance_scale"] = 5.0
-            if mask_mode == "global":
-                mask_mode, mask_prompt = "smart", "person"
+        prompt_enhanced = prompt
+        if use_rewriter:
+            try:
+                rewriter = self._get_rewriter()
+                rewritten, intensity = rewriter.rewrite(prompt)
+                if len(rewritten) > len(prompt):
+                    prompt_enhanced = rewritten
+                    print(f"[ImgEditor] Prompt mejorado: {prompt_enhanced[:60]}...")
+            except Exception as e:
+                print(f"[ImgEditor] Rewriter falló: {e}")
 
-        print(f"[ImgEditor] === LÓGICA DE MOTOR: {engine} ===")
-        print(f" > Prompt: {final_prompt[:60]}...")
-        print(f" > Denoise: {p['denoise']:.3f} | CFG: {p['guidance_scale']:.1f} | Steps: {p['num_inference_steps']}")
+        print(f"[ImgEditor] Engine={engine} | Steps={params['num_inference_steps']} | Denoise={params['denoise']} | Mode={params['mode']}")
 
-        # 3. LÓGICA DE MÁSCARA
-        working_mask = None
-        if p["supports_mask"]:
-            if mask_mode == "manual" and mask_image:
-                working_mask = mask_image
-            elif mask_mode == "smart" and (mask_prompt or self._last_context == "pose_change"):
-                m_prompt = mask_prompt if mask_prompt else "person"
-                try:
-                    segmenter = get_clothing_segmenter()
-                    mask_pil, _ = segmenter.segment_with_prompt(original_image, [m_prompt], threshold=0.3, dilation=50)
-                    working_mask = mask_pil
-                except Exception as e:
-                    print(f"[ImgEditor] ❌ CLIPSeg falló: {e}")
-
-        # 4. EJECUCIÓN POR MOTOR
         try:
-            if engine in ["flux", "flux_klein", "flux_dev", "flux_schnell"]:
+            result = None
+            msg = ""
+
+            if engine == "flux_schnell":
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
-                if self.flux_client is None: self.flux_client = get_flux_edit_comfy_client()
-                
-                flux_v = "flux2-klein-4b-Q4_K_S.gguf" if "klein" in engine or engine=="flux" else \
-                         ("flux1-dev-Q4_K.gguf" if "dev" in engine else "flux1-schnell-Q4_K_S.gguf")
-                
-                success, msg = self.flux_client.load(flux_version=flux_v)
-                if not success: return None, f"Error FLUX: {msg}"
-
-                result_obj, msg = self.flux_client.generate(
-                    image=original_image, prompt=final_prompt,
-                    num_inference_steps=p["num_inference_steps"],
-                    guidance_scale=p["guidance_scale"], seed=seed,
-                    denoise=p["denoise"], mask_image=working_mask,
-                    target_width=p["target_width"], target_height=p["target_height"]
+                if self.flux_schnell_client is None:
+                    self.flux_schnell_client = get_flux_edit_comfy_client()
+                client = self.flux_schnell_client
+                success, msg = client.load(flux_version="flux1-schnell-Q4_K_S.gguf")
+                if not success:
+                    return None, msg
+                result_obj, msg = client.generate(
+                    image=img, prompt=prompt_enhanced,
+                    num_inference_steps=params["num_inference_steps"],
+                    guidance_scale=params["guidance_scale"],
+                    seed=seed, denoise=params["denoise"],
+                    mask_image=mask_image if mask_mode == "manual" else None
                 )
+                if result_obj: result = result_obj.image
 
-                if result_obj and result_obj.image:
-                    final_image = result_obj.image
-                    if face_preserve:
-                        final_image = self._restore_face(original_image, final_image)
-                    return final_image, f"OK ({result_obj.time_taken:.1f}s)"
-                return None, f"Fallo FLUX: {msg}"
+            elif engine == "omnigen2":
+                from roop.img_editor.omnigen2_gguf_comfy_client import get_omnigen2_client
+                if self.omnigen2_client is None:
+                    self.omnigen2_client = get_omnigen2_client()
+                client = self.omnigen2_client
+                success, msg = client.load()
+                if not success:
+                    return None, msg
+                result_obj, msg = client.generate(
+                    image=img, prompt=prompt_enhanced,
+                    num_inference_steps=params["num_inference_steps"],
+                    guidance_scale=params["guidance_scale"],
+                    seed=seed, denoise=params["denoise"]
+                )
+                if result_obj: result = result_obj.image
 
-            return None, "Motor no implementado"
-
-        except Exception as e:
-            return None, f"Error Motor {engine}: {str(e)}"
-
-    def _init_face_swap(self):
-        if self.face_analyzer is not None and self.face_swapper is not None: return True
-        try:
-            import insightface
-            from insightface.app import FaceAnalysis
-            self.face_analyzer = FaceAnalysis(allowed_modules=['detection', 'recognition'])
-            self.face_analyzer.prepare(ctx_id=0 if torch.cuda.is_available() else -1, det_size=(640, 640))
-            from roop.processors.FaceSwap import FaceSwap
-            self.face_swapper = FaceSwap()
-            self.face_swapper.Initialize({'devicename': 'cuda' if torch.cuda.is_available() else 'cpu', 'model': 'inswapper_128.onnx'})
-            return True
-        except Exception as e:
-            print(f"[ImgEditor] Error face swap init: {e}")
-            return False
-
-    def _restore_face(self, original: Image.Image, generated: Image.Image) -> Image.Image:
-        """Restaura caras con lógica de 'fallback' forzada."""
-        if not self._init_face_swap(): return generated
-        try:
-            import roop.globals
-            orig_cv = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
-            gen_cv = cv2.cvtColor(np.array(generated), cv2.COLOR_RGB2BGR)
-            
-            faces_orig = self.face_analyzer.get(orig_cv)
-            faces_gen = self.face_analyzer.get(gen_cv)
-            
-            if not faces_orig: return generated
-
-            w_orig, h_orig = original.size
-            w_gen, h_gen = generated.size
-            
-            def get_norm_center(face, w, h):
-                x1, y1, x2, y2 = face.bbox
-                return ((x1+x2)/2/w, (y1+y2)/2/h)
-
-            orig_data = [(get_norm_center(f, w_orig, h_orig), f) for f in faces_orig]
-            
-            result = gen_cv.copy()
-            assigned = [False] * len(faces_gen) if faces_gen else []
-            
-            for (ox, oy), f_o in orig_data:
-                best_i, min_d = -1, 1.0
-                if faces_gen:
-                    gen_data = [(get_norm_center(f, w_gen, h_gen), f) for f in faces_gen]
-                    for i, ((gx, gy), f_g) in enumerate(gen_data):
-                        if assigned[i]: continue
-                        d = ((ox-gx)**2 + (oy-gy)**2)**0.5
-                        if d < min_d: min_d, best_i = d, i
-                
-                # Forzar swap: si hay match por proximidad o simplemente por coordenadas originales
-                target_f = faces_gen[best_i] if best_i != -1 and min_d < 0.4 else f_o
-                
-                old_blend = roop.globals.blend_ratio
-                roop.globals.blend_ratio = 1.0
-                res = self.face_swapper.Run(f_o, target_f, result, paste_back=True)
-                roop.globals.blend_ratio = old_blend
-                if res is not None: result = res
-            
-            return Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
-        except Exception as e:
-            print(f"[ImgEditor] Face Restore error: {e}")
-            return generated
-
-    def preview_smart_mask(self, image: Image.Image, mask_prompt: str = "", mask_image: Optional[Image.Image] = None, mask_mode: str = "smart") -> Tuple[Optional[Image.Image], str]:
-        try:
-            segmenter = get_clothing_segmenter()
-            if mask_mode == "manual": m = mask_image
             else:
-                ok, _ = segmenter.load()
-                if not ok: return None, "Error CLIPSeg"
-                m, _ = segmenter.segment_with_prompt(image, [mask_prompt])
-            if not m: return None, "Sin máscara"
-            return segmenter.visualize_mask(image, m), "Máscara OK"
-        except Exception as e: return None, str(e)
+                from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
+                if self.flux_klein_client is None:
+                    self.flux_klein_client = get_flux_edit_comfy_client()
+                client = self.flux_klein_client
+                success, msg = client.load(flux_version="flux2-klein-4b-Q4_K_S.gguf")
+                if not success:
+                    return None, msg
+                result_obj, msg = client.generate(
+                    image=img, prompt=prompt_enhanced,
+                    num_inference_steps=params["num_inference_steps"],
+                    guidance_scale=params["guidance_scale"],
+                    seed=seed, denoise=params["denoise"],
+                    mask_image=mask_image if mask_mode == "manual" else None
+                )
+                if result_obj: result = result_obj.image
+
+            if result is not None and face_preserve:
+                try:
+                    fp = self._get_face_preserver()
+                    if fp:
+                        result = fp.preserve_faces(img, result, method="blend")
+                        print(f"[ImgEditor] Face preservation aplicada")
+                except Exception as e:
+                    print(f"[ImgEditor] Face preservation falló: {e}")
+
+            if result is not None:
+                return result, msg
+            return None, msg if msg else "Error: no se generó resultado"
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return None, f"Error: {str(e)}"
 
 _manager = None
 def get_img_editor_manager() -> ImgEditorManager:
     global _manager
-    if _manager is None: _manager = ImgEditorManager()
+    if _manager is None:
+        _manager = ImgEditorManager()
     return _manager

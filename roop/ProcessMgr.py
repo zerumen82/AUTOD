@@ -532,15 +532,25 @@ class ProcessMgr:
                 print(f"[SELECT_SOURCE] Modo selected_faces_frame: SIN referencia, no se hace swap")
                 return None
             
-            # Modo "Selected" y "Selected Faces" (Selección por imagen):
-            # - Source: CUALQUIER cara aleatoria del face set (random)
-            # - Requisito: Las caras en INPUT_FACESETS son las seleccionadas por el usuario
             if face_swap_mode in ['selected', 'selected_faces']:
                 if not candidate_faces:
                     return None
-                # Usar una cara aleatoria del face set (cualquier cara del set)
-                source_face = random.choice(candidate_faces)
-                print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara aleatoria #{candidate_faces.index(source_face)+1} de {len(candidate_faces)}")
+                # Buscar la cara MÁS SIMILAR por embedding (máxima identidad)
+                if hasattr(target_face, 'embedding') and target_face.embedding is not None:
+                    best_match = None
+                    best_score = -1
+                    for face in candidate_faces:
+                        if hasattr(face, 'embedding') and face.embedding is not None:
+                            score = self._calculate_similarity(target_face.embedding, face.embedding)
+                            if score > best_score:
+                                best_score = score
+                                best_match = face
+                    if best_match:
+                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara por embedding (score={best_score:.2f})")
+                        return best_match
+                # Fallback: primera cara disponible
+                source_face = candidate_faces[0]
+                print(f"[SELECT_SOURCE] Modo {face_swap_mode}: primera cara (fallback)")
                 return source_face
             
             # Modo "All": cara más grande
@@ -704,14 +714,11 @@ class ProcessMgr:
             position_history_attr = f'_position_history_{video_basename}'
             frame_count_attr = f'_frame_count_{video_basename}'
 
-            MIN_SCORE_THRESHOLD = 0.015  # Reducido para ser más permisivo
-            REACQUIRE_EMB_THRESHOLD = 0.02  # Reducido para facilitar reacquire
-            HIGH_CONFIDENCE_THRESHOLD = 0.04  # Reducido
-            # Umbral de verificación de embedding para tracking (reducido para permitir variabilidad de expresiones)
-            EMBEDDING_VERIFICATION_THRESHOLD = 0.08  # Reducido para ser más tolerante a variaciones en expresiones
-            # Umbral de distancia mínima entre caras para considerar que hay superposición significativa
-            MIN_FACE_DISTANCE = 40  # píxeles mínimos entre centros de caras
-            # Si dos caras están más cerca que esto, considerar que hay conflicto (beso/abrazo)
+            MIN_SCORE_THRESHOLD = 0.25
+            REACQUIRE_EMB_THRESHOLD = 0.30
+            HIGH_CONFIDENCE_THRESHOLD = 0.40
+            EMBEDDING_VERIFICATION_THRESHOLD = 0.20
+            MIN_FACE_DISTANCE = 60
 
             if not hasattr(self, tracking_lost_attr):
                 setattr(self, tracking_lost_attr, 0)
@@ -810,8 +817,7 @@ class ProcessMgr:
                                 min_distance = dist
                                 best_match = face
 
-                     # Umbral de distancia (200px)
-                    distance_threshold = 200
+                    distance_threshold = 120
                     if best_match and min_distance <= distance_threshold:
                         # VERIFICACIÓN OPCIONAL CON EMBEDDING (si está disponible)
                         # Evita saltar a otra persona que pase muy cerca
@@ -846,7 +852,7 @@ class ProcessMgr:
                     else:
                         print(f"[TRACK] Frame {frame_count}: no se encontró cara válida cerca")
                     
-                    MAX_CONSECUTIVE_FAILURES = 15
+                    MAX_CONSECUTIVE_FAILURES = 8
                     if lost_count >= MAX_CONSECUTIVE_FAILURES:
                         print(f"[TRACK] Reset completo después de {lost_count} fallos")
                         setattr(self, assigned_attr, None)
@@ -854,13 +860,10 @@ class ProcessMgr:
                         setattr(self, position_history_attr, [])
                         return None
 
-            # 3. REACQUIRE por EMBEDDING (si se perdió el tracking o es el primer frame)
-            # Reacquire con embedding - usar umbral BAJO para máxima recuperación
-            min_reacquire_score = getattr(roop.globals, 'face_match_embedding_threshold', 0.20)
+            min_reacquire_score = getattr(roop.globals, 'face_match_embedding_threshold', 0.35)
             
-            # Si hay caras muy cerca, ser aún más estrictos para evitar saltar a la cara equivocada
             if strict_mode:
-                min_reacquire_score = min_reacquire_score + 0.1  # Ejemplo: 0.30 + 0.1 = 0.40 en modo estricto
+                min_reacquire_score = min(min_reacquire_score + 0.15, 0.65)
 
             if original_embedding is not None:
                 best_reacquire = None
@@ -890,12 +893,11 @@ class ProcessMgr:
                         best_reacquire = face
 
                 if best_reacquire:
-                    # Si el score es bajo pero hay consistencia de movimiento, aceptar (umbral dinámico)
                     dynamic_threshold = min_reacquire_score
-                    if best_reacquire_score < min_reacquire_score and best_reacquire_score >= 0.20:
-                        if position_history and is_consistent_with_history(best_reacquire, position_history, tolerance=100):
+                    if best_reacquire_score < min_reacquire_score and best_reacquire_score >= 0.28:
+                        if position_history and is_consistent_with_history(best_reacquire, position_history, tolerance=60):
                             print(f"[TRACK] Reacquire: score borderline ({best_reacquire_score:.2f}) pero movimiento consistente, aceptando")
-                            dynamic_threshold = 0.20  # Aceptar si movimiento coincide
+                            dynamic_threshold = 0.28
                     
                     if best_reacquire_score >= dynamic_threshold:
                         setattr(self, assigned_attr, best_reacquire)
@@ -1054,16 +1056,19 @@ class ProcessMgr:
             mouth_open_ratio = 0.0
 
             if preserve_mouth:
-                from roop.processors.FaceSwap import detect_mouth_open, create_mouth_preservation_mask
-                landmarks_106 = getattr(target_face, 'landmark_106', None)
-                # Pasar la imagen completa para MediaPipe
-                mouth_open, mouth_region, mouth_open_ratio = detect_mouth_open(target_face, landmarks_106, result_frame)
-
-                # DEBUG: Verificar tipo de mouth_region
-                print(f"[MOUTH_DEBUG] mouth_open={mouth_open}, mouth_region type={type(mouth_region).__name__}, ratio={mouth_open_ratio}")
-
-                if mouth_open:
-                    print(f"[MOUTH_PRESERVE] Frame {call_num}: Boca abierta (ratio={mouth_open_ratio:.2f})")
+                try:
+                    from roop.processors.FaceSwap import detect_mouth_open, create_mouth_preservation_mask
+                except ImportError:
+                    print(f"[MOUTH] detect_mouth_open no disponible, omitiendo preservación de boca")
+                    mouth_open = False
+                    mouth_region = None
+                    mouth_open_ratio = 0.0
+                else:
+                    landmarks_106 = getattr(target_face, 'landmark_106', None)
+                    mouth_open, mouth_region, mouth_open_ratio = detect_mouth_open(target_face, landmarks_106, result_frame)
+                    print(f"[MOUTH_DEBUG] mouth_open={mouth_open}, mouth_region type={type(mouth_region).__name__}, ratio={mouth_open_ratio}")
+                    if mouth_open:
+                        print(f"[MOUTH_PRESERVE] Frame {call_num}: Boca abierta (ratio={mouth_open_ratio:.2f})")
 
             # Obtener bbox de la cara (ya suavizado si aplica)
             x1, y1, x2, y2 = target_face.bbox
@@ -1100,7 +1105,7 @@ class ProcessMgr:
                 enhancer_key = "enhance_restoreformer"
 
             # Blend del enhancer (0.5 por defecto para reconstruir identidad)
-            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.5)
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.85)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
@@ -1207,8 +1212,8 @@ class ProcessMgr:
                     # Mejorado para MÁXIMA similitud al origen:
                     #  0% boca abierta → 0.95 (100% valor por defecto)
                     # 100% boca abierta → 0.90 (solo baja 5%)
-                    dynamic_blend = 0.95 - (mouth_open_ratio * 0.05)
-                    dynamic_blend = min(0.90, max(0.50, dynamic_blend))
+                    dynamic_blend = 0.95 - (mouth_open_ratio * 0.03)
+                    dynamic_blend = min(0.95, max(0.70, dynamic_blend))
 
                     # SUAVIZADO TEMPORAL: Solo para videos (tracking)
                     if video_key and video_key in self._mouth_blend_smooth:
