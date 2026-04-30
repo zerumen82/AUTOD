@@ -23,8 +23,8 @@ class FacePreserver:
         self.analyzer = None
         self.face_detector = None
         self._initialized = False
-    
-def initialize(self) -> Tuple[bool, str]:
+
+    def initialize(self) -> Tuple[bool, str]:
         try:
             import insightface
             from insightface.app import FaceAnalysis
@@ -39,12 +39,12 @@ def initialize(self) -> Tuple[bool, str]:
             return False, "InsightFace no disponible. Instala con: pip install insightface"
         except Exception as e:
             return False, f"Error inicializando face detector: {str(e)}"
-    
+
     def is_initialized(self) -> bool:
         """Check si el detector esta inicializado"""
         return self._initialized
-    
-def detect_faces(self, image: Image.Image) -> List[dict]:
+
+    def detect_faces(self, image: Image.Image) -> List[dict]:
         if not self._initialized:
             return []
 

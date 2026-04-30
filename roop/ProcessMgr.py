@@ -447,11 +447,9 @@ class ProcessMgr:
                                             face_found = True
                                             print(f"[SELECTED_FACES] Cara encontrada por Embedding ({best_score:.2f})")
                         
-                        # FALLBACK: Si no se encontró cara seleccionada explícitamente, pero estamos en modo selected, 
-                        # usamos la más grande para no abortar el proceso si el usuario espera que algo pase.
                         if not face_found:
-                            print(f"[SELECTED_FACES] ⚠️ No hay cara seleccionada explícita para {filename}, usando cara más grande como fallback")
-                            faces_to_process = [max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))]
+                            print(f"[SELECTED_FACES] No hay cara seleccionada para {filename}, saltando frame")
+                            faces_to_process = []
                     else:
                         # Sin file_path, usar la más grande
                         faces_to_process = [max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))]

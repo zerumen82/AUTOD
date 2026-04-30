@@ -37,9 +37,9 @@ class FluxEditComfyClient:
             return False, "ComfyUI no responde en 127.0.0.1:8188. ¿Está iniciado?"
 
         clip_map = {
-            "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2", False),
-            "flux1-schnell-Q4_K_S.gguf": ("clip_l.safetensors", "t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux", True),
-            "flux1-dev-Q4_K.gguf": ("clip_l.safetensors", "t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux", True),
+            "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
+            "flux1-schnell-Q4_K_S.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
+            "flux1-dev-Q4_K.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
         }
 
         if flux_version not in clip_map:
