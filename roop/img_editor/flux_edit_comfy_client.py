@@ -38,6 +38,7 @@ class FluxEditComfyClient:
 
         clip_map = {
             "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
+            "flux2-klein-base-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
             "flux1-schnell-Q4_K_S.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
             "flux1-dev-Q4_K.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
         }
@@ -111,11 +112,10 @@ class FluxEditComfyClient:
             "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": self._clip_name, "type": self._clip_type, "device": "default"}},
             "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
             "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}},
-            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry, deformed, ugly, bad anatomy", "clip": ["3", 0]}},
             "8": {
                 "class_type": "KSampler",
                 "inputs": {
-                    "model": ["2", 0], "positive": ["6", 0], "negative": ["7", 0],
+                    "model": ["2", 0], "positive": ["6", 0],
                     "latent_image": ["5", 0], "seed": seed or int(t0) % 1000000,
                     "steps": num_inference_steps, "cfg": guidance_scale,
                     "sampler_name": "euler", "scheduler": "beta", "denoise": denoise
