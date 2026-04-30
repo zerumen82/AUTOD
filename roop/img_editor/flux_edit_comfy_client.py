@@ -40,18 +40,27 @@ class FluxEditComfyClient:
             "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
             "flux1-schnell-Q4_K_S.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
             "flux1-dev-Q4_K.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
-            "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
         }
+        self._dual_clip = False
+        self._clip_name2 = None
 
-        if flux_version not in clip_map:
+        if flux_version == "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf":
+            clip_name = "clip_l.safetensors"
+            clip_name2 = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+            clip_type = "flux"
+            self._dual_clip = True
+            self._clip_name2 = clip_name2
+        elif flux_version not in clip_map:
             return False, f"Versión FLUX no soportada: {flux_version}"
-
-        clip_name, clip_type = clip_map[flux_version]
+        else:
+            clip_name, clip_type = clip_map[flux_version]
 
         checks = [
             ("diffusion_models", flux_version, f"Modelo FLUX {flux_version}"),
             ("text_encoders", clip_name, f"CLIP {clip_name}"),
         ]
+        if self._dual_clip:
+            checks.append(("text_encoders", self._clip_name2, f"CLIP2 {self._clip_name2}"))
         vae_name = "flux2_vae.safetensors" if "flux2" in flux_version else "ae.safetensors"
         checks.append(("vae", vae_name, f"VAE {vae_name}"))
 
@@ -109,7 +118,7 @@ class FluxEditComfyClient:
         wf = {
             "1": {"class_type": "LoadImage", "inputs": {"image": iname, "upload": "image"}},
             "2": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": self._flux_version, "device": "default"}},
-            "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": self._clip_name, "type": self._clip_type, "device": "default"}},
+            "3": {"class_type": "DualCLIPLoaderGGUF" if self._dual_clip else "CLIPLoader", "inputs": {"clip_name1": self._clip_name, "clip_name2": self._clip_name2, "type": self._clip_type} if self._dual_clip else {"clip_name": self._clip_name, "type": self._clip_type, "device": "default"}},
             "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
             "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}},
             "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry, pixelated, low resolution, JPEG artifacts", "clip": ["3", 0]}},
