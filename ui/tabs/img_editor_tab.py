@@ -74,8 +74,8 @@ def create_img_editor_tab():
 
                 with gr.Accordion("⚙️ Opciones (Automático)", open=False):
                     engine = gr.Dropdown(
-                        choices=[("FLUX.2 Klein BASE (sin censura)", "flux_klein_base"), ("FLUX.2 Klein (rápido)", "flux_klein"), ("FLUX.1 Dev (calidad)", "flux_dev"), ("FLUX.1 Schnell (más rápido)", "flux_schnell")],
-                        value="flux_klein_base", label="Motor"
+                        choices=[("FLUX.1 Dev Abliterated (sin censura)", "flux_dev_abliterated"), ("FLUX.2 Klein (rápido, 8GB)", "flux_klein"), ("FLUX.1 Dev (calidad)", "flux_dev"), ("FLUX.1 Schnell (más rápido)", "flux_schnell")],
+                        value="flux_dev_abliterated", label="Motor"
                     )
                     f_preserve = gr.Checkbox(label="Preservar rostros", value=True)
 

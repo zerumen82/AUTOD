@@ -9,9 +9,9 @@ import roop.globals
 class ImgEditorManager:
     def __init__(self):
         self.flux_klein_client = None
-        self.flux_klein_base_client = None
         self.flux_schnell_client = None
         self.flux_dev_client = None
+        self.flux_dev_abl_client = None
         self.omnigen2_client = None
         self.face_preserver = None
         self.prompt_analyzer = None
@@ -155,12 +155,12 @@ class ImgEditorManager:
                 )
                 if result_obj: result = result_obj.image
 
-            elif engine == "flux_klein_base":
+            elif engine == "flux_dev":
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
-                if self.flux_klein_base_client is None:
-                    self.flux_klein_base_client = get_flux_edit_comfy_client()
-                client = self.flux_klein_base_client
-                success, msg = client.load(flux_version="flux2-klein-base-4b-Q4_K_S.gguf")
+                if self.flux_dev_client is None:
+                    self.flux_dev_client = get_flux_edit_comfy_client()
+                client = self.flux_dev_client
+                success, msg = client.load(flux_version="flux1-dev-Q4_K.gguf")
                 if not success:
                     return None, msg
                 result_obj, msg = client.generate(
@@ -172,12 +172,12 @@ class ImgEditorManager:
                 )
                 if result_obj: result = result_obj.image
 
-            elif engine == "flux_dev":
+            elif engine == "flux_dev_abliterated":
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
-                if self.flux_dev_client is None:
-                    self.flux_dev_client = get_flux_edit_comfy_client()
-                client = self.flux_dev_client
-                success, msg = client.load(flux_version="flux1-dev-Q4_K.gguf")
+                if self.flux_dev_abl_client is None:
+                    self.flux_dev_abl_client = get_flux_edit_comfy_client()
+                client = self.flux_dev_abl_client
+                success, msg = client.load(flux_version="T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf")
                 if not success:
                     return None, msg
                 result_obj, msg = client.generate(
