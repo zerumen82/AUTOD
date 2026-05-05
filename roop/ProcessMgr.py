@@ -537,7 +537,7 @@ class ProcessMgr:
                 return source_face
             
             if face_swap_mode in ['selected', 'selected_faces']:
-if not candidate_faces:
+                if not candidate_faces:
                     return None
                 # Buscar la cara MÁS SIMILAR por embedding (máxima identidad)
                 if hasattr(target_face, 'embedding') and target_face.embedding is not None:
