@@ -38,18 +38,18 @@ face_swap_mode = None
 flip_faces = None
 face_rotation_correction = None
 face_rotation_angle = None
-blend_ratio = 0.98  # 98% source, 2% target - PROFESIONAL: máxima similitud al origen, color correction evita máscara
-distance_threshold = 0.35  # Más estricto en matching para mayor fidelidad
+blend_ratio = 1.0  # 100% source - MÁXIMA SIMILITUD AL ORIGEN
+distance_threshold = 0.30  # MÁS ESTRICTO: solo matches muy cercanos al origen
 
 # Thresholds optimizados para MÁXIMA FIDELIDAD
-similarity_threshold_selected = 0.35  # Subido de 0.2 para ser más estricto
-similarity_threshold_auto = 0.25     # Subido de 0.15
-similarity_threshold_fallback = 0.15 # Subido de 0.08
+similarity_threshold_selected = 0.2  # ESTRICTO para máxima semejanza al origen
+similarity_threshold_auto = 0.15     # ESTRICTO para matching automático
+similarity_threshold_fallback = 0.1  # FALLBACK estricto
 default_det_size = True  # Usar tamaño de detector por defecto - más rápido
 
-# Mejores umbrales para matching en selected_faces_frame - MÁXIMA PRECISIÓN
-face_match_embedding_threshold = 0.55  # Subido de 0.45 para ser más estricto
-face_match_bbox_iou_threshold = 0.35   # Más estricto para mejor coincidencia de bounding boxes
+# Threshold más estricto para MÁXIMA FIDELIDAD al origen
+face_match_embedding_threshold = 0.25  # ESTRICTO - solo usar caras muy similares
+face_match_bbox_iou_threshold = 0.50   # Muy estricto para mejor coincidencia
 show_face_area = False  # Variable para mostrar área de cara en preview
 use_enhancer = False  # Desactivado por defecto para velocidad real-time (CodeFormer ~1.2 FPS, muy lento)
 blend_mode = 'seamless'  # Mejor integración visual que Poisson
@@ -61,17 +61,16 @@ use_color_matching = True  # Matching de histograma LAB para tono de piel natura
 
 # Factor de blending del enhancer (0-1)
 # 0 = sin enhancer, 1 = enhancer completo
-# ÓPTIMO PARA FIDELIDAD: 0.5 (50% enhancer, 50% cara original) - Ayuda a reconstruir rasgos del origen
-enhancer_blend_factor = 0.5
+# MÁXIMA CALIDAD: 0.8 (80% enhancer, 20% cara swap) para nitidez extrema
+enhancer_blend_factor = 0.8
 
 # Ajuste de brillo (0-1)
-# ÓPTIMO PARA FIDELIDAD: 0.15 (ajuste moderado para coherencia visual)
-brightness_strength = 0.15
+# ÓPTIMO PARA FIDELIDAD: 0.25 (ajuste moderado para coherencia visual)
+brightness_strength = 0.25
 
-# Matching de color (0-1)  
-# ÓPTIMO PARA FIDELIDAD: 0.15 (ajuste moderado para tono de piel natural)
-color_match_strength = 0.15
-
+# Matching de color (0-1)
+# ÓPTIMO PARA FIDELIDAD: 0.30 (ajuste moderado para tono de piel natural)
+color_match_strength = 0.30
 # CodeFormer es el MEJOR para face swap - LMD 5.38 (mejor identidad)
 # RestoreFormer++ es mejor para restauración - FID 38.41 (mejor calidad visual)
 default_enhancer = 'CodeFormer'  # CodeFormer activado por defecto para máxima identidad
@@ -139,43 +138,39 @@ def apply_conservative_defaults():
     # Verificar si CFG está disponible y usar valores del config.yaml
     if CFG is not None:
         try:
-            # Usar valores del config.yaml si están disponibles
-            blend_ratio = getattr(CFG, 'face_swap_blend_ratio', 0.98)  # 98% source para PROFESIONAL: máxima similitud
-            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.35)  # Más estricto para mayor fidelidad
+            blend_ratio = getattr(CFG, 'face_swap_blend_ratio', 1.0)
+            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.35)
             face_swap_mode = getattr(CFG, 'face_swap_mode', 'selected_faces')
             CONSERVATIVE_MODE = getattr(CFG, 'conservative_mode', False)
 
-            # Configurar providers basado en CFG
             if CFG.force_cpu or CFG.provider.lower() == 'cpu':
                 execution_providers = ["CPUExecutionProvider"]
             else:
                 execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
             print("[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:")
-            print(f"   [OK] Blend ratio: {blend_ratio} ({blend_ratio*100:.0f}% cara original, {(1-blend_ratio)*100:.0f}% cara target)")
+            print(f"   [OK] Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")
             print(f"   [OK] Distance threshold: {distance_threshold} (similitud mínima para match facial)")
             print(f"   [OK] Face swap mode: {face_swap_mode}")
             print(f"   [OK] Execution providers: {execution_providers}")
         except:
-            # Fallback a valores por defecto OPTIMIZADOS PARA FIDELIDAD + VELOCIDAD
-            blend_ratio = 0.98  # 98% source para PROFESIONAL: máxima similitud
-            distance_threshold = 0.35  # Más estricto para mejor matching
+            blend_ratio = 1.0
+            distance_threshold = 0.35
             face_swap_mode = "selected_faces"
             execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             print("[CONFIG] CONFIGURACION OPTIMIZADA POR DEFECTO:")
-            print(f"   [OK] Blend ratio: {blend_ratio} ({blend_ratio*100:.0f}% cara original, {(1-blend_ratio)*100:.0f}% cara target)")
+            print(f"   [OK] Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")
             print(f"   [OK] Distance threshold: {distance_threshold} (similitud mínima para match facial)")
             print(f"   [OK] Face swap mode: {face_swap_mode}")
             print(f"   [OK] Execution providers: {execution_providers}")
     else:
-        # Valores por defecto optimizados PARA FIDELIDAD + VELOCIDAD
-        blend_ratio = 0.98  # 98% source para PROFESIONAL: máxima similitud
-        distance_threshold = 0.35  # Más estricto para mejor matching
+        blend_ratio = 1.0
+        distance_threshold = 0.35
         face_swap_mode = "selected_faces"
         execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
         print("[CONFIG] CONFIGURACION OPTIMIZADA ACTIVADA:")
-        print(f"   [OK] Blend ratio: {blend_ratio} ({blend_ratio*100:.0f}% cara original, {(1-blend_ratio)*100:.0f}% cara target)")
+        print(f"   [OK] Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")
         print(f"   [OK] Distance threshold: {distance_threshold} (similitud mínima para match facial)")
         print(f"   [OK] Face swap mode: {face_swap_mode}")
         print(f"   [OK] Execution providers: {execution_providers}")
@@ -189,13 +184,12 @@ def apply_config_from_file():
 
     if CFG is not None:
         try:
-            # Usar valores del config.yaml - OPTIMIZADOS PARA MÁXIMA FIDELIDAD + VELOCIDAD
-            blend_ratio = getattr(CFG, 'face_swap_blend_ratio', 0.98)  # 98% source para PROFESIONAL: máxima similitud
-            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.35)  # Más estricto para mayor fidelidad
+            blend_ratio = getattr(CFG, 'face_swap_blend_ratio', 1.0)
+            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.35)
             face_swap_mode = getattr(CFG, 'face_swap_mode', 'selected_faces')
 
             print("CONFIGURACION DESDE config.yaml APLICADA:")
-            print(f"   - Blend ratio: {blend_ratio} ({blend_ratio*100:.0f}% cara original, {(1-blend_ratio)*100:.0f}% cara target)")
+            print(f"   - Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")
             print(f"   - Distance threshold: {distance_threshold} (similitud mínima para match facial)")
             print(f"   - Face swap mode: {face_swap_mode} (desde config.yaml)")
         except Exception as e:

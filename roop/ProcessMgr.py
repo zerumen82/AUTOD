@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
 import numpy as np
-import torch
 
 import roop.globals
 from roop.utils import run_ffmpeg
@@ -368,21 +367,20 @@ class ProcessMgr:
                                         has_ref = True
                                         break
                         
-                        if has_ref:
-                            target_face = self._find_target_face_for_selected_mode(video_path, valid_faces)
-                            if target_face:
-                                target_key = self._get_face_key(target_face)
-                                if target_key in self._frame_processed_faces:
-                                    print(f"[DEBUG] Cara ya procesada en este frame, saltando")
-                                    return frame
-                                self._frame_processed_faces[target_key] = True
-                                faces_to_process = [target_face]
-                            else:
-                                # No se encontró la cara objetivo, NO procesar
-                                faces_to_process = []
+                        # Intentar encontrar la cara objetivo (solo si hay selección o tracking activo)
+                        target_face = self._find_target_face_for_selected_mode(video_path, valid_faces)
+                        
+                        if target_face:
+                            target_key = self._get_face_key(target_face)
+                            if target_key in self._frame_processed_faces:
+                                print(f"[DEBUG] Cara ya procesada en este frame, saltando")
+                                return frame
+                            self._frame_processed_faces[target_key] = True
+                            faces_to_process = [target_face]
                         else:
-                            # No hay selección del usuario, NO procesar este video
-                            print(f"[SELECTED_FACES_FRAME] ⚠️ No hay cara seleccionada para {video_basename} - OMITIENDO procesamiento")
+                            # No se encontró la cara objetivo (requiere selección manual)
+                            if not has_ref:
+                                print(f"[SELECTED_FACES_FRAME] ⚠️ No hay cara seleccionada por el usuario para {video_basename} - OMITIENDO")
                             faces_to_process = []
                     else:
                         # Sin video_path, no procesar
@@ -400,9 +398,9 @@ class ProcessMgr:
                         filename = os.path.basename(file_path)
                         video_key = f"selected_face_ref_{filename}"
                         face_found = False
+                        face_ref_data = None
                         
                         if hasattr(roop.globals, 'selected_face_references'):
-                            face_ref_data = None
                             # Intentar varias combinaciones de claves
                             keys_to_try = [video_key, filename]
                             for k in roop.globals.selected_face_references.keys():
@@ -442,17 +440,24 @@ class ProcessMgr:
                                                 if score > best_score:
                                                     best_score = score
                                                     best_emb_match = face
-                                        if best_emb_match and best_score > 0.4:
+                                        # Threshold BAJO para permitir más swaps (era 0.4, ahora 0.15)
+                                        if best_emb_match and best_score > 0.15:
                                             faces_to_process = [best_emb_match]
                                             face_found = True
                                             print(f"[SELECTED_FACES] Cara encontrada por Embedding ({best_score:.2f})")
+                                        # Fallback: usar el mejor match por embedding aunque sea bajo
+                                        if not face_found and best_emb_match is not None:
+                                            faces_to_process = [best_emb_match]
+                                            face_found = True
+                                            print(f"[SELECTED_FACES] Fallback por embedding ({best_score:.2f} - bajo, pero usando de todas formas)")
                         
-                        if not face_found:
-                            print(f"[SELECTED_FACES] No hay cara seleccionada para {filename}, saltando frame")
-                            faces_to_process = []
+                            if best_match:
+                                faces_to_process = [best_match]
+                                face_found = True
+                                print(f"[SELECTED_FACES] Fallback por IoU ({best_iou:.2f})")
                     else:
-                        # Sin file_path, usar la más grande
-                        faces_to_process = [max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))]
+                        # Sin file_path, no procesar
+                        faces_to_process = []
                     
                 else:
                     faces_to_process = valid_faces
@@ -460,7 +465,7 @@ class ProcessMgr:
                 processed_faces = 0
                 result_frame = frame.copy()
                 
-                faces_to_process_limited = faces_to_process[:1] if face_swap_mode in ['selected_faces_frame', 'selected_faces'] else faces_to_process
+                faces_to_process_limited = faces_to_process[:1] if face_swap_mode in ['selected_faces_frame', 'selected_faces', 'selected'] else faces_to_process
                 
                 for i, target_face in enumerate(faces_to_process_limited):
                     try:
@@ -512,7 +517,7 @@ class ProcessMgr:
                         face_ref_data = roop.globals.selected_face_references[video_key]
                         ref_embedding = face_ref_data.get('embedding')
                         
-                        # Buscar la cara en candidate_faces que coincida con la referencia
+                        # Buscar la cara en candidate_faces que coincida con la referencia (con fallback)
                         if ref_embedding is not None:
                             best_match = None
                             best_score = -1
@@ -522,35 +527,65 @@ class ProcessMgr:
                                     if score > best_score:
                                         best_score = score
                                         best_match = face
-                            if best_match and best_score > 0.15:
+                            if best_match and best_score > 0.0:
                                 print(f"[SELECT_SOURCE] Modo selected_faces_frame: cara de referencia (score={best_score:.2f})")
                                 return best_match
                 
-                # NO HACER FALLBACK - Si no hay referencia, no hacer swap
-                print(f"[SELECT_SOURCE] Modo selected_faces_frame: SIN referencia, no se hace swap")
-                return None
+                # Fallback: primera cara disponible
+                source_face = candidate_faces[0]
+                print(f"[SELECT_SOURCE] Modo selected_faces_frame: primera cara (fallback)")
+                return source_face
             
             if face_swap_mode in ['selected', 'selected_faces']:
-                if not candidate_faces:
+if not candidate_faces:
                     return None
                 # Buscar la cara MÁS SIMILAR por embedding (máxima identidad)
                 if hasattr(target_face, 'embedding') and target_face.embedding is not None:
                     best_match = None
                     best_score = -1
+                    best_size = 0
                     for face in candidate_faces:
                         if hasattr(face, 'embedding') and face.embedding is not None:
                             score = self._calculate_similarity(target_face.embedding, face.embedding)
+                            face_size = 0
+                            if hasattr(face, 'bbox') and face.bbox is not None:
+                                x1, y1, x2, y2 = face.bbox
+                                face_size = (x2 - x1) * (y2 - y1)
                             if score > best_score:
                                 best_score = score
                                 best_match = face
+                                best_size = face_size
+                            elif face_size > best_size:
+                                best_size = face_size
+                                if not hasattr(self, '_largest_candidate'):
+                                    self._largest_candidate = face
+                    
+                    # FALLBACK: si embedding es muy bajo, usar cara más grande
+                    if best_match and best_score < 0.10 and best_size > 0:
+                        if hasattr(self, '_largest_candidate') and self._largest_candidate is not None:
+                            largest = self._largest_candidate
+                            if hasattr(largest, 'bbox') and largest.bbox is not None:
+                                x1, y1, x2, y2 = largest.bbox
+                                largest_size = (x2 - x1) * (y2 - y1)
+                                if largest_size > best_size * 1.3:
+                                    print(f"[SELECT_SOURCE] Modo {face_swap_mode}: embedding bajo ({best_score:.2f}), usando cara más grande")
+                                    best_match = largest
+                                    best_score = -1
+                    
                     if best_match:
-                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara por embedding (score={best_score:.2f})")
+                        if best_score >= 0:
+                            print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara por embedding (score={best_score:.2f})")
+                        else:
+                            print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara más grande (fallback)")
                         return best_match
+                    else:
+                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: sin match, fallback")
+                        return None
                 # Fallback: primera cara disponible
                 source_face = candidate_faces[0]
-                print(f"[SELECT_SOURCE] Modo {face_swap_mode}: primera cara (fallback)")
+                print(f"[SELECT_SOURCE] Modo {face_swap_mode}: primera cara (fallback sin embedding)")
                 return source_face
-            
+             
             # Modo "All": cara más grande
             best_face = max(candidate_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
             return best_face
@@ -712,10 +747,10 @@ class ProcessMgr:
             position_history_attr = f'_position_history_{video_basename}'
             frame_count_attr = f'_frame_count_{video_basename}'
 
-            MIN_SCORE_THRESHOLD = 0.25
-            REACQUIRE_EMB_THRESHOLD = 0.30
-            HIGH_CONFIDENCE_THRESHOLD = 0.40
-            EMBEDDING_VERIFICATION_THRESHOLD = 0.20
+            MIN_SCORE_THRESHOLD = 0.35
+            REACQUIRE_EMB_THRESHOLD = 0.40
+            HIGH_CONFIDENCE_THRESHOLD = 0.50
+            EMBEDDING_VERIFICATION_THRESHOLD = 0.30
             MIN_FACE_DISTANCE = 60
 
             if not hasattr(self, tracking_lost_attr):
@@ -858,7 +893,7 @@ class ProcessMgr:
                         setattr(self, position_history_attr, [])
                         return None
 
-            min_reacquire_score = getattr(roop.globals, 'face_match_embedding_threshold', 0.35)
+            min_reacquire_score = getattr(roop.globals, 'face_match_embedding_threshold', 0.10)  # Lowered for better tracking
             
             if strict_mode:
                 min_reacquire_score = min(min_reacquire_score + 0.15, 0.65)
@@ -891,29 +926,13 @@ class ProcessMgr:
                         best_reacquire = face
 
                 if best_reacquire:
-                    dynamic_threshold = min_reacquire_score
-                    if best_reacquire_score < min_reacquire_score and best_reacquire_score >= 0.28:
-                        if position_history and is_consistent_with_history(best_reacquire, position_history, tolerance=60):
-                            print(f"[TRACK] Reacquire: score borderline ({best_reacquire_score:.2f}) pero movimiento consistente, aceptando")
-                            dynamic_threshold = 0.28
-                    
-                    if best_reacquire_score >= dynamic_threshold:
+                    if best_reacquire_score >= min_reacquire_score:
+                        # NO actualizar embedding - mantener referencia original para máxima fidelidad
                         setattr(self, assigned_attr, best_reacquire)
                         setattr(self, tracking_lost_attr, 0)
                         
-                        # REFINAR EMBEDDING: actualizar referencia con la cara actual para seguir expresiones
-                        if hasattr(best_reacquire, 'embedding') and best_reacquire.embedding is not None:
-                            emb = np.array(best_reacquire.embedding, dtype=np.float32)
-                            norm = np.linalg.norm(emb)
-                            if norm > 0:
-                                refined_emb = emb / norm
-                                setattr(self, original_embedding_attr, refined_emb)
-                                setattr(self, f'_fallback_embedding_{video_basename}', refined_emb)
-                                print(f"[TRACK] Embedding refinado (score={best_reacquire_score:.2f})")
-
                         face_center = get_face_center(best_reacquire)
                         if face_center:
-                            # Mantener historial de posición (máximo 10)
                             position_history.append(face_center)
                             if len(position_history) > 10:
                                 position_history.pop(0)
@@ -979,8 +998,9 @@ class ProcessMgr:
             best_face = None
             best_similarity = -1
             
-            similarity_threshold = getattr(roop.globals, 'face_similarity_threshold', 0.2)
-            use_gender_filter = getattr(roop.globals, 'use_gender_filter', True)
+            # NO usar umbral - siempre elegir la más similar (máxima fidelidad)
+            # usa_gender_filter = getattr(roop.globals, 'use_gender_filter', True)
+            use_gender_filter = True  # SIEMPRE activo para mejor match
             
             target_emb = None
             if hasattr(target_face, "embedding") and target_face.embedding is not None:
@@ -999,14 +1019,11 @@ class ProcessMgr:
                         face_gender = get_gender(face)
                         if target_gender and face_gender and target_gender == face_gender:
                             similarity += 0.1
-                    
-                    if similarity < similarity_threshold:
-                        continue
                 
                 if similarity > best_similarity:
                     best_similarity = similarity
                     best_face = face
-                    
+            
             return best_face if best_face else candidate_faces[0]
         except Exception as e:
             return candidate_faces[0] if candidate_faces else None
@@ -1102,7 +1119,6 @@ class ProcessMgr:
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
 
-            # Blend del enhancer (0.5 por defecto para reconstruir identidad)
             enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.85)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
@@ -1146,19 +1162,17 @@ class ProcessMgr:
                             if enhanced_face.shape[:2] != swapped_face.shape[:2]:
                                 enhanced_face = cv2.resize(enhanced_face, (swapped_face.shape[1], swapped_face.shape[0]), cv2.INTER_LANCZOS4)
 
-                            # Blending
+                            # Blending local para el enhancer
                             region_h, region_w = enhanced_face.shape[:2]
-                            soft_mask = create_soft_mask((0, 0, region_w, region_h), (region_h, region_w), feather=30)
-
-                            mask_3ch = np.stack([soft_mask] * 3, axis=-1)
-                            swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * mask_3ch +
-                                           swapped_face.astype(np.float32) * (1 - enhancer_blend_factor * mask_3ch)).astype(np.uint8)
-
-                            print(f"[QUALITY] {selected_enhancer} aplicado (blend={enhancer_blend_factor:.2f})")
+                            enhancer_soft_mask = create_soft_mask((0, 0, region_w, region_h), (region_h, region_w), feather=20)
+                            enhancer_mask_3ch = np.stack([enhancer_soft_mask] * 3, axis=-1)
                             
-                            # Sharpening SUTIL - solo para dar nitidez, no exagerar
-                            # Aplicar solo si no es demasiado fuerte
-                            use_sharpening = getattr(roop.globals, 'use_sharpening', True)
+                            swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * enhancer_mask_3ch +
+                                           swapped_face.astype(np.float32) * (1 - enhancer_blend_factor * enhancer_mask_3ch)).astype(np.uint8)
+
+                            print(f"[QUALITY] {selected_enhancer} aplicado con fuerza {enhancer_blend_factor:.2f}")
+                            
+                            use_sharpening = getattr(roop.globals, 'use_sharpening', False)
                             if use_sharpening:
                                 kernel = np.array([[0, -1, 0],
                                                    [-1,  5, -1],
@@ -1172,20 +1186,18 @@ class ProcessMgr:
             # ============================================
             # 3. COLOR MATCHING Y AJUSTE DE BRILLO
             # ============================================
-            # REACTIVADO con corrección: swapped_face viene en RGB del face swap
+            # REACTIVADO: Ajuste de color y brillo para integración natural
             try:
                 if swapped_face.size > 0 and original_face_region.size > 0:
-                    # Ajuste de brillo - usar con moderación
-                    brightness_strength = getattr(roop.globals, 'brightness_strength', 0.15)
+                    # Ajuste de brillo para coherencia visual
+                    brightness_strength = getattr(roop.globals, 'brightness_strength', 0.25)
                     if brightness_strength > 0:
                         swapped_face = adjust_face_brightness(swapped_face, original_face_region, strength=brightness_strength)
                     
-                    # Color matching - DESACTIVADO porque causa artefactos
-                    # El face swap ya hace buen trabajo de integración de color
-                    # color_match_strength = getattr(roop.globals, 'color_match_strength', 0.15)
-                    # use_color_match = getattr(roop.globals, 'use_color_matching', True)
-                    # if use_color_match and color_match_strength > 0:
-                    #     swapped_face = match_color_histogram(swapped_face, original_face_region, blend_factor=color_match_strength)
+                    # Color matching para igualar tonos de piel
+                    color_match_strength = getattr(roop.globals, 'color_match_strength', 0.30)
+                    if color_match_strength > 0:
+                        swapped_face = match_color_histogram(swapped_face, original_face_region, blend_factor=color_match_strength)
             except Exception as e:
                 print(f"[COLOR_MATCH] Error: {e}")
             
@@ -1252,10 +1264,10 @@ class ProcessMgr:
                     mouth_mask_3ch = cv2.GaussianBlur(mouth_mask_3ch, (blur_kernel, blur_kernel), 0)
                     mouth_mask_3ch = np.clip(mouth_mask_3ch, 0.0, 1.0)
 
-                    # Combinar: swapped_face donde mouth_mask=1, original donde mouth_mask=0
+                    # Combinar: ORIGINAL donde mouth_mask=1, SWAPPED donde mouth_mask=0
                     swapped_face = (
-                        swapped_face.astype(np.float32) * mouth_mask_3ch +
-                        original_face_region.astype(np.float32) * (1.0 - mouth_mask_3ch)
+                        original_face_region.astype(np.float32) * mouth_mask_3ch +
+                        swapped_face.astype(np.float32) * (1.0 - mouth_mask_3ch)
                     ).astype(np.uint8)
 
                     print(f"[MOUTH_PRESERVE] Frame {call_num}: boca preservada (ratio={smooth_blend:.2f}, open={mouth_open_ratio:.2f})")
@@ -1268,26 +1280,26 @@ class ProcessMgr:
             # ============================================
             # 5. BLENDING FINAL CON MÁSCARA SUAVE
             # ============================================
-            # Reducido feather de 30 a 15 para preservar más la identidad de la cara swappeada
             try:
-                # Crear máscara suave elíptica para el blending final
-                face_h, face_w = y2 - y1, x2 - x1
-                soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=15)
+                # Usar un nombre único para evitar shadowing de bloques anteriores
+                final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=15)
+                final_mask_3ch = np.stack([final_soft_mask] * 3, axis=-1)
                 
-                # Aplicar blending suave con el frame original
-                mask_3ch = np.stack([soft_mask] * 3, axis=-1)
-                result_frame = (swapped_face.astype(np.float32) * mask_3ch[y1:y2, x1:x2] + 
-                               original_face_region.astype(np.float32) * (1 - mask_3ch[y1:y2, x1:x2])).astype(np.uint8)
+                # Extraer regiones para blending seguro
+                mask_region = final_mask_3ch[y1:y2, x1:x2]
+                
+                # Blending final: (Mejorado + original)
+                blended_face = (swapped_face.astype(np.float32) * mask_region + 
+                                original_face_region.astype(np.float32) * (1 - mask_region)).astype(np.uint8)
                 
                 # Colocar de vuelta en el frame
-                full_result = original_frame.copy()
-                full_result[y1:y2, x1:x2] = result_frame
-                result_frame = full_result
+                result_frame[y1:y2, x1:x2] = blended_face
                 
             except Exception as e:
                 print(f"[BLENDING] Error: {e}")
-                # Fallback: simplemente colocar la cara
-                result_frame[y1:y2, x1:x2] = swapped_face
+                # Fallback: colocar la cara directamente si falla el blending
+                if swapped_face.shape == original_face_region.shape:
+                    result_frame[y1:y2, x1:x2] = swapped_face
             
             return result_frame if result_frame is not None else original_frame
             

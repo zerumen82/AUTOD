@@ -25,18 +25,63 @@ def build_faceswap_ui():
             .dynamic-panel {
                 background: linear-gradient(180deg, rgba(59, 130, 246, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%);
                 border: 1px solid #8b5cf6;
-                padding: 15px !important;
-                border-radius: 15px;
-                margin-top: 15px;
-                box-shadow: 0 4px 15px rgba(139, 92, 246, 0.1);
+                padding: 6px !important;
+                border-radius: 8px;
+                margin-top: 2px;
+                margin-bottom: 2px;
+                box-shadow: 0 1px 5px rgba(139, 92, 246, 0.1);
             }
-            .small-face-gallery { min-height: auto !important; gap: 0 !important; }
-            .small-face-gallery > div { gap: 5px !important; padding: 0 !important; }
-            .small-face-gallery .grid-container { margin: 0 !important; padding: 0 !important; gap: 5px !important; }
-            .small-face-gallery .grid-wrap { gap: 5px !important; padding: 0 !important; margin: 0 !important; }
-            .small-face-gallery button.thumbnail-item { width: 120px !important; height: 120px !important; flex: none !important; margin: 0 !important; padding: 0 !important; border-radius: 8px !important; }
-            .small-face-gallery img { width: 120px !important; height: 120px !important; object-fit: cover !important; border-radius: 8px !important; }
-            .small-face-gallery .gallery-wrapper { padding: 0 !important; margin: 0 !important; }
+            /* Galeria de caras detectadas - mejorada para visualizacion */
+            .small-face-gallery { 
+                min-height: 220px !important; 
+                gap: 6px !important; 
+                padding: 6px 4px !important; 
+            }
+            .small-face-gallery > div { 
+                gap: 6px !important; 
+                padding: 0 !important; 
+            }
+            .small-face-gallery .grid-container { 
+                margin: 0 !important; 
+                padding: 0 !important; 
+                gap: 6px !important; 
+            }
+            .small-face-gallery .grid-wrap { 
+                gap: 6px !important; 
+                padding: 0 !important; 
+                margin: 0 !important; 
+            }
+            .small-face-gallery button.thumbnail-item { 
+                width: 140px !important; 
+                height: 140px !important; 
+                flex: none !important; 
+                margin: 0 !important; 
+                padding: 0 !important; 
+                border-radius: 8px !important; 
+            }
+            .small-face-gallery img { 
+                width: 140px !important; 
+                height: 140px !important; 
+                object-fit: cover !important; 
+                border-radius: 8px !important; 
+            }
+            .small-face-gallery .gallery-wrapper { 
+                padding: 0 !important; 
+                margin: 0 !important; 
+            }
+            /* Reducir espacio del título y descripción del panel */
+            .dynamic-panel h3 { 
+                margin: 2px 0 !important; 
+                padding: 0 !important; 
+                font-size: 14px !important; 
+                line-height: 1.2 !important;
+            }
+            .dynamic-panel p { 
+                margin: 2px 0 !important; 
+                padding: 0 !important; 
+                font-size: 12px !important; 
+                line-height: 1.2 !important;
+            }
             .frame-btn { min-width: 45px !important; font-weight: bold !important; }
             .grok-start-btn { 
                 background: linear-gradient(90deg, #3b82f6, #8b5cf6) !important; 
@@ -113,12 +158,12 @@ def build_faceswap_ui():
             # Panel de Selección Dinámica
             with gr.Row(visible=False, variant="panel", elem_classes=["dynamic-panel"]) as dynamic_face_selection:
                 with gr.Column():
-                    gr.Markdown("### ✨ Caras detectadas en este frame")
-                    gr.Markdown("Haz clic en una cara para añadirla a Destino.")
+                    face_detection_title = gr.Markdown("### ✨ Busca caras en el frame")
+                    gr.Markdown("👆 Haz clic en una cara para añadirla a Destino.")
                     face_selection = gr.Gallery(
-                        label="", columns=4, 
+                        label="", columns=4,
                         interactive=True, allow_preview=False, 
-                        preview=False, object_fit="cover",
+                        preview=False, object_fit="contain",
                         elem_classes=["small-face-gallery"]
                     )
                     with gr.Row(visible=False): # Ocultamos el slider viejo
@@ -127,7 +172,7 @@ def build_faceswap_ui():
 
             with gr.Row():
                 selected_face_detection = gr.Dropdown(
-                    choices=["First found", "Selected faces", "Selected faces frame", "All faces"],
+                    choices=["Selected faces", "Selected faces frame"],
                     value="Selected faces frame", label="🎭 Modo de Intercambio"
                 )
                 fake_preview = gr.Checkbox(label="Previsualizar Swap (Realtime)", value=False)
@@ -137,8 +182,8 @@ def build_faceswap_ui():
                     autorotate = gr.Checkbox(label="🔄 Auto-Rotar (Mejora Perfiles/Inclinadas)", value=True)
                     smoothing = gr.Checkbox(label="🛡️ Suavizado Temporal (Anti-Parpadeo)", value=True)
                 with gr.Row():
-                    face_distance = gr.Slider(0.01, 1.0, value=0.30, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
-                    blend_ratio = gr.Slider(0.0, 1.0, value=1.0, step=0.01, label="🎨 Mezcla de Piel (1.0 = Máxima Calidad)")
+                    face_distance = gr.Slider(0.01, 1.0, value=0.20, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
+                    blend_ratio = gr.Slider(0.0, 1.0, value=0.95, step=0.01, label="🎨 Mezcla de Piel (1.0 = Máxima Calidad)")
                 with gr.Row():
                     enhancer = gr.Dropdown(
                         choices=["None", "CodeFormer", "GFPGAN", "Restoreformer++"],
@@ -154,7 +199,7 @@ def build_faceswap_ui():
 
     return {
         "input_faces": input_faces, "target_faces": target_faces, "bt_srcfiles": bt_srcfiles, "bt_destfiles": bt_destfiles,
-        "previewimage": previewimage, "preview_frame_num": preview_frame_num, 
+        "previewimage": previewimage, "preview_frame_num": preview_frame_num, "face_detection_title": face_detection_title, 
         "bt_prev_frame": bt_prev_frame, "bt_next_frame": bt_next_frame,
         "bt_jump_back_10": bt_jump_back_10, "bt_jump_fwd_10": bt_jump_fwd_10,
         "bt_jump_back_100": bt_jump_back_100, "bt_jump_fwd_100": bt_jump_fwd_100,
