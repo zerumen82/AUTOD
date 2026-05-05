@@ -318,7 +318,7 @@ class ProcessMgr:
         try:
             if "faceswap" in self.processors and len(self.input_facesets) > 0:
                 from roop.face_util_rotation import get_all_faces_smart
-                target_faces_detected = get_all_faces_smart(frame, min_score=None)
+                target_faces_detected = get_all_faces_smart(frame, min_score=None, for_target=True)
 
                 valid_faces = target_faces_detected
                 

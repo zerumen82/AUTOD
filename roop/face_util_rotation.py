@@ -171,7 +171,7 @@ def filter_duplicate_faces(faces: List[Face], iou_threshold: float = 0.5) -> Lis
     return filtered
 
 
-def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None) -> List[Face]:
+def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_target: bool = False) -> List[Face]:
     """
     Detecta caras en un frame probando solo la orientación original para máxima velocidad.
     Retorna las caras encontradas con sus coordenadas corregidas a la orientación original.
@@ -180,6 +180,7 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None) -> L
         frame: Imagen en formato numpy array (BGR)
         min_score: Puntuación mínima para filtrar caras detectadas (opcional)
                    Si es None, usa roop.globals.distance_threshold con fallback permisivo
+        for_target: Si True, usar umbral más permisivo para detección de destino
 
     Returns:
         Lista de objetos Face detectados
@@ -206,8 +207,12 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None) -> L
         else:
             threshold = min_score
         
-        # Umbral para deteccion: usar al menos 0.15 para evitar falsos positivos
-        effective_threshold = max(0.15, threshold * 0.5)  # Mitad del umbral configurado, minimo 0.15
+        # Para detección de destino (target): usar umbral muy bajo (0.05) para detectar más caras
+        # Para origen (source): usar umbral normal (min 0.15)
+        if for_target:
+            effective_threshold = 0.05  # Muy permisivo para detectar primer planos y caras parciales
+        else:
+            effective_threshold = max(0.15, threshold * 0.5)
         
         try:
             faces = analizador.get(frame_rgb)
