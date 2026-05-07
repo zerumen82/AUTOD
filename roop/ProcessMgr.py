@@ -26,6 +26,14 @@ def is_valid_progress_callback(callback):
         print(f"[WARNING] Error verificando callback: {e}")
         return False
 
+
+def get_face_center(face):
+    """Get center coordinates of a face"""
+    if not hasattr(face, 'bbox'):
+        return None
+    return ((face.bbox[0] + face.bbox[2]) / 2, (face.bbox[1] + face.bbox[3]) / 2)
+
+
 def get_gender(face):
     """Obtiene el género de una cara"""
     try:
@@ -412,12 +420,16 @@ class ProcessMgr:
                                     face_ref_data = roop.globals.selected_face_references[k]
                                     break
                             
-                            if face_ref_data:
+                        if face_ref_data:
                                 target_face_ref = face_ref_data.get('face_obj')
                                 
+                                # Inicializar variables de búsqueda SIEMPRE para evitar "referenced before assignment"
+                                best_match = None
+                                best_iou = 0.0
+                                best_emb_match = None
+                                best_score = 0.0
+                                
                                 if target_face_ref is not None and hasattr(target_face_ref, 'bbox') and target_face_ref.bbox is not None:
-                                    best_match = None
-                                    best_iou = 0.0
                                     for face in valid_faces:
                                         if not hasattr(face, 'bbox'):
                                             continue
@@ -426,35 +438,34 @@ class ProcessMgr:
                                             best_iou = iou
                                             best_match = face
                                     
-                                    if best_match and best_iou > 0.3:
+                                    if best_match and best_iou > 0.1:  # Umbral BAJADO para más matches
                                         faces_to_process = [best_match]
                                         face_found = True
                                         print(f"[SELECTED_FACES] Cara encontrada por IoU ({best_iou:.2f})")
                                     # Si no hay match por bbox, intentar por embedding
                                     elif hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None:
-                                        best_emb_match = None
-                                        best_score = 0.0
                                         for face in valid_faces:
                                             if hasattr(face, 'embedding') and face.embedding is not None:
                                                 score = self._calculate_similarity(target_face_ref.embedding, face.embedding)
                                                 if score > best_score:
                                                     best_score = score
                                                     best_emb_match = face
-                                        # Threshold BAJO para permitir más swaps (era 0.4, ahora 0.15)
-                                        if best_emb_match and best_score > 0.15:
+                                        # Usar MEJOR match disponible (umbral BAJADO a 0.05)
+                                        if best_emb_match and best_score > 0.05:
                                             faces_to_process = [best_emb_match]
                                             face_found = True
                                             print(f"[SELECTED_FACES] Cara encontrada por Embedding ({best_score:.2f})")
-                                        # Fallback: usar el mejor match por embedding aunque sea bajo
-                                        if not face_found and best_emb_match is not None:
+                                        # Fallback: usar el mejor match por embedding aunque sea muy bajo
+                                        elif not face_found and best_emb_match is not None:
                                             faces_to_process = [best_emb_match]
                                             face_found = True
-                                            print(f"[SELECTED_FACES] Fallback por embedding ({best_score:.2f} - bajo, pero usando de todas formas)")
-                        
-                            if best_match:
-                                faces_to_process = [best_match]
-                                face_found = True
-                                print(f"[SELECTED_FACES] Fallback por IoU ({best_iou:.2f})")
+                                            print(f"[SELECTED_FACES] Fallback por embedding ({best_score:.2f})")
+                                
+                                # Fallback por IoU solo si no se encontró nada más
+                                if not face_found and best_match and best_iou > 0.1:
+                                    faces_to_process = [best_match]
+                                    face_found = True
+                                    print(f"[SELECTED_FACES] Fallback por IoU ({best_iou:.2f})")
                     else:
                         # Sin file_path, no procesar
                         faces_to_process = []
@@ -539,7 +550,8 @@ class ProcessMgr:
             if face_swap_mode in ['selected', 'selected_faces']:
                 if not candidate_faces:
                     return None
-                # Buscar la cara MÁS SIMILAR por embedding (máxima identidad)
+                # Buscar la cara MÁS SIMILAR por embedding (máxima similitud con cara origen)
+                # BAJAMOS umbrales: queremos que se parezca LO MÁS POSIBLE a la cara origen
                 if hasattr(target_face, 'embedding') and target_face.embedding is not None:
                     best_match = None
                     best_score = -1
@@ -560,27 +572,13 @@ class ProcessMgr:
                                 if not hasattr(self, '_largest_candidate'):
                                     self._largest_candidate = face
                     
-                    # FALLBACK: si embedding es muy bajo, usar cara más grande
-                    if best_match and best_score < 0.10 and best_size > 0:
-                        if hasattr(self, '_largest_candidate') and self._largest_candidate is not None:
-                            largest = self._largest_candidate
-                            if hasattr(largest, 'bbox') and largest.bbox is not None:
-                                x1, y1, x2, y2 = largest.bbox
-                                largest_size = (x2 - x1) * (y2 - y1)
-                                if largest_size > best_size * 1.3:
-                                    print(f"[SELECT_SOURCE] Modo {face_swap_mode}: embedding bajo ({best_score:.2f}), usando cara más grande")
-                                    best_match = largest
-                                    best_score = -1
-                    
+                    # SIEMPRE usar best_match (aunque score sea bajo) - el usuario quiere swap sí o sí
                     if best_match:
-                        if best_score >= 0:
-                            print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara por embedding (score={best_score:.2f})")
-                        else:
-                            print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara más grande (fallback)")
+                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara por embedding (score={best_score:.2f})")
                         return best_match
                     else:
-                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: sin match, fallback")
-                        return None
+                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: sin embedding, usando primera cara")
+                        return candidate_faces[0]
                 # Fallback: primera cara disponible
                 source_face = candidate_faces[0]
                 print(f"[SELECT_SOURCE] Modo {face_swap_mode}: primera cara (fallback sin embedding)")
@@ -718,97 +716,198 @@ class ProcessMgr:
             import traceback
             traceback.print_exc()
 
+    def _init_tracking_scene(self, video_path, valid_faces, frame_count):
+        """Initialize scene understanding for intelligent tracking"""
+        video_basename = os.path.basename(video_path)
+        scene_attr = f'_scene_state_{video_basename}'
+        
+        if hasattr(self, scene_attr):
+            return getattr(self, scene_attr)
+        
+        # Initialize scene state
+        scene_state = {
+            'initialized': False,
+            'camera_moving': False,
+            'avg_face_size': 0,
+            'face_count_history': [],
+            'lighting_baseline': None,
+            'last_scene_cut': 0,
+            'total_scene_changes': 0,
+            'typical_motion_speed': 0,
+            'is_close_up': False
+        }
+        
+        if valid_faces:
+            # Calculate average face size
+            face_sizes = []
+            for face in valid_faces:
+                if hasattr(face, 'bbox') and face.bbox is not None:
+                    w = face.bbox[2] - face.bbox[0]
+                    h = face.bbox[3] - face.bbox[1]
+                    face_sizes.append(w * h)
+            
+            if face_sizes:
+                scene_state['avg_face_size'] = sum(face_sizes) / len(face_sizes)
+                scene_state['is_close_up'] = scene_state['avg_face_size'] > 10000
+        
+        scene_state['initialized'] = True
+        setattr(self, scene_attr, scene_state)
+        return scene_state
+
+    def _update_scene_state(self, video_path, valid_faces, frame_count, position_history):
+        """Update scene understanding based on new frame"""
+        video_basename = os.path.basename(video_path)
+        scene_attr = f'_scene_state_{video_basename}'
+        
+        if not hasattr(self, scene_attr):
+            return self._init_tracking_scene(video_path, valid_faces, frame_count)
+        
+        scene = getattr(self, scene_attr)
+        
+        # Update face count history
+        current_face_count = len(valid_faces)
+        scene['face_count_history'].append(current_face_count)
+        if len(scene['face_count_history']) > 30:
+            scene['face_count_history'].pop(0)
+        
+        # Detect camera movement based on face size changes
+        if len(position_history) >= 5:
+            recent_sizes = []
+            for face in valid_faces[:5]:
+                if hasattr(face, 'bbox') and face.bbox is not None:
+                    w = face.bbox[2] - face.bbox[0]
+                    h = face.bbox[3] - face.bbox[1]
+                    recent_sizes.append(w * h)
+            
+            if recent_sizes and scene['avg_face_size'] > 0:
+                size_ratio = sum(recent_sizes) / len(recent_sizes) / scene['avg_face_size']
+                # If face size changes >30% rapidly, camera might be zooming
+                if abs(size_ratio - 1.0) > 0.3:
+                    scene['camera_moving'] = True
+                else:
+                    scene['camera_moving'] = False
+        
+        setattr(self, scene_attr, scene)
+        return scene
+
+    def _predict_next_position(self, position_history, scene_state=None):
+        """Predict next position using motion modeling"""
+        if not position_history or len(position_history) < 2:
+            return None
+        
+        # Simple Kalman-like prediction
+        if len(position_history) >= 3:
+            # Calculate velocity (using last 3 positions)
+            vx = (position_history[-1][0] - position_history[-3][0]) / 2
+            vy = (position_history[-1][1] - position_history[-3][1]) / 2
+            
+            # Calculate acceleration (if enough history)
+            if len(position_history) >= 4:
+                ax = (position_history[-1][0] - 2*position_history[-2][0] + position_history[-3][0]) / 4
+                ay = (position_history[-1][1] - 2*position_history[-2][1] + position_history[-3][1]) / 4
+                
+                # Predict with acceleration
+                pred_x = position_history[-1][0] + vx + 0.5 * ax
+                pred_y = position_history[-1][1] + vy + 0.5 * ay
+            else:
+                # Predict with velocity only
+                pred_x = position_history[-1][0] + vx
+                pred_y = position_history[-1][1] + vy
+            
+            # Adapt prediction confidence based on scene
+            if scene_state and scene_state.get('camera_moving'):
+                # Less confident in prediction if camera is moving
+                confidence = 0.5
+            else:
+                confidence = 0.7
+            
+            return (pred_x, pred_y, confidence)
+        
+        elif len(position_history) >= 2:
+            # Simple linear prediction
+            vx = position_history[-1][0] - position_history[-2][0]
+            vy = position_history[-1][1] - position_history[-2][1]
+            return (position_history[-1][0] + vx, position_history[-1][1] + vy, 0.6)
+        
+        return None
+
+    def _calculate_motion_consistency(self, face, position_history):
+        """Check if face motion is consistent with expectations"""
+        if not position_history or len(position_history) < 3:
+            return 1.0
+        
+        center = get_face_center(face)
+        if not center:
+            return 0.0
+        
+        prediction = self._predict_next_position(position_history)
+        if not prediction:
+            return 0.5
+        
+        pred_x, pred_y, conf = prediction
+        actual_distance = np.sqrt((center[0] - pred_x)**2 + (center[1] - pred_y)**2)
+        
+        # Calculate expected position variance
+        if len(position_history) >= 5:
+            recent_dists = []
+            for i in range(-5, -1):
+                if abs(i) <= len(position_history):
+                    d = np.sqrt((position_history[i][0] - position_history[i-1][0])**2 + 
+                                (position_history[i][1] - position_history[i-1][1])**2)
+                    recent_dists.append(d)
+            
+            if recent_dists:
+                avg_speed = sum(recent_dists) / len(recent_dists)
+                # Motion is consistent if within 2 standard deviations
+                if actual_distance < avg_speed * 2:
+                    return 1.0
+                elif actual_distance < avg_speed * 4:
+                    return 0.5
+                else:
+                    return 0.0
+        
+        return 0.5
+
     def _find_target_face_for_selected_mode(self, video_path, valid_faces):
-        """Encuentra la cara objetivo que coincide con la seleccionada por el usuario."""
+        """Intelligent tracking with scene analysis and motion prediction"""
         try:
             video_basename = os.path.basename(video_path)
             
-            # Verificar si el usuario ha seleccionado una cara
+            # Verify if user selected a face
             user_selected_attr = f'_user_selected_face_{video_basename}'
-            user_selected = getattr(self, user_selected_attr, True)  # True si el usuario seleccionó una cara
-
-            # En modo selected_faces_frame: 
-            # - Si el usuario seleccionó cara: NO usar fallback, retornar None si se pierde tracking
-            # - Si el usuario NO seleccionó cara: usar fallback a la cara más grande
+            user_selected = getattr(self, user_selected_attr, True)
             use_fallback = not user_selected
-
-            # Asegurar que selected_face_references exista
-            if not hasattr(roop.globals, 'selected_face_references'):
-                roop.globals.selected_face_references = {}
 
             if not valid_faces:
                 return None
 
             video_key = f"selected_face_ref_{video_basename}"
-
+            
+            # Initialize scene understanding
+            frame_count_attr = f'_frame_count_{video_basename}'
+            frame_count = getattr(self, frame_count_attr, 0) + 1
+            setattr(self, frame_count_attr, frame_count)
+            
+            # Update scene state with current frame
+            scene_state = self._update_scene_state(video_path, valid_faces, frame_count, [])
+            
             assigned_attr = f'_target_face_assigned_{video_basename}'
             original_embedding_attr = f'_original_embedding_{video_basename}'
             tracking_lost_attr = f'_tracking_lost_count_{video_basename}'
             position_history_attr = f'_position_history_{video_basename}'
-            frame_count_attr = f'_frame_count_{video_basename}'
-
-            MIN_SCORE_THRESHOLD = 0.35
-            REACQUIRE_EMB_THRESHOLD = 0.40
-            HIGH_CONFIDENCE_THRESHOLD = 0.50
-            EMBEDDING_VERIFICATION_THRESHOLD = 0.30
-            MIN_FACE_DISTANCE = 60
-
-            if not hasattr(self, tracking_lost_attr):
-                setattr(self, tracking_lost_attr, 0)
-            if not hasattr(self, position_history_attr):
-                setattr(self, position_history_attr, [])
-            if not hasattr(self, frame_count_attr):
-                setattr(self, frame_count_attr, 0)
-
+            consecutive_success_attr = f'_consecutive_tracking_success_{video_basename}'
+            
+            # Initialize attributes if needed
+            for attr, default in [(tracking_lost_attr, 0), (position_history_attr, []), (consecutive_success_attr, 0)]:
+                if not hasattr(self, attr):
+                    setattr(self, attr, default)
+            
             lost_count = getattr(self, tracking_lost_attr)
             position_history = getattr(self, position_history_attr)
-            frame_count = getattr(self, frame_count_attr) + 1
-            setattr(self, frame_count_attr, frame_count)
-
-            def is_face_too_close(face1, face2, min_distance=MIN_FACE_DISTANCE):
-                """Check if two faces are too close (could cause confusion in kisses/embraces)"""
-                if not hasattr(face1, 'bbox') or not hasattr(face2, 'bbox'):
-                    return False
-                c1 = ((face1.bbox[0] + face1.bbox[2]) / 2, (face1.bbox[1] + face1.bbox[3]) / 2)
-                c2 = ((face2.bbox[0] + face2.bbox[2]) / 2, (face2.bbox[1] + face2.bbox[3]) / 2)
-                distance = np.sqrt((c1[0] - c2[0])**2 + (c1[1] - c2[1])**2)
-                return distance < min_distance
-
-            def get_face_center(face):
-                """Get center coordinates of a face"""
-                if not hasattr(face, 'bbox'):
-                    return None
-                return ((face.bbox[0] + face.bbox[2]) / 2, (face.bbox[1] + face.bbox[3]) / 2)
-
-            def is_consistent_with_history(face, history, tolerance=80):
-                """Check if face position is consistent with position history"""
-                if not history or len(history) < 2:
-                    return True
-                last_pos = history[-1]
-                center = get_face_center(face)
-                if not center:
-                    return False
-                distance = np.sqrt((center[0] - last_pos[0])**2 + (center[1] - last_pos[1])**2)
-                return distance < tolerance
-
-            # Detectar si hay múltiples caras muy cerca (escenario de beso/abrazo)
-            nearby_faces_count = 0
-            assigned_face = getattr(self, assigned_attr, None) if hasattr(self, assigned_attr) else None
-            if assigned_face:
-                for face in valid_faces:
-                    if face is assigned_face:
-                        continue
-                    if is_face_too_close(assigned_face, face, MIN_FACE_DISTANCE):
-                        nearby_faces_count += 1
-
-            # Si hay caras muy cerca, aumentar estricto en la verificación
-            strict_mode = nearby_faces_count > 0
-
-            # 1. Obtener embedding de referencia para verificación y reacquire
-            original_embedding = getattr(self, original_embedding_attr, None) if hasattr(self, original_embedding_attr) else None
-
+            
+            # Get original embedding
+            original_embedding = getattr(self, original_embedding_attr, None)
             if original_embedding is None:
-                # Intentar obtener embedding de referencias
                 if hasattr(roop.globals, 'selected_face_references') and video_key in roop.globals.selected_face_references:
                     face_ref_data = roop.globals.selected_face_references[video_key]
                     user_embedding = face_ref_data.get('embedding')
@@ -818,149 +917,216 @@ class ProcessMgr:
                         if norm > 0:
                             original_embedding = emb / norm
                             setattr(self, original_embedding_attr, original_embedding)
-                
-                # Fallback: usar embedding guardado del setup inicial
-                if original_embedding is None:
-                    original_embedding = getattr(self, f'_fallback_embedding_{video_basename}', None)
-
-            # 2. Tracking por PROXIMIDAD (si ya tenemos una cara asignada)
+            
+            # INTELLIGENT TRACKING SECTION
             if hasattr(self, assigned_attr):
                 assigned_face = getattr(self, assigned_attr)
+                
                 if assigned_face and hasattr(assigned_face, 'bbox'):
-                    
-                    def get_face_center(face):
-                        if not hasattr(face, 'bbox'):
-                            return None
-                        return ((face.bbox[0] + face.bbox[2]) / 2, (face.bbox[1] + face.bbox[3]) / 2)
-
                     assigned_center = get_face_center(assigned_face)
+                    
                     if not assigned_center:
                         lost_count += 1
                         setattr(self, tracking_lost_attr, lost_count)
                         return None
-
-                    # Buscar la cara más cercana
+                    
+                    # Get scene-aware threshold
+                    base_threshold = 200
+                    if scene_state.get('is_close_up'):
+                        # More lenient for close-ups
+                        base_threshold = max(200, 0.5 * (assigned_face.bbox[2] - assigned_face.bbox[0]))
+                    elif scene_state.get('camera_moving'):
+                        # More aggressive tracking if camera is moving
+                        base_threshold = max(300, 0.7 * (assigned_face.bbox[2] - assigned_face.bbox[0]))
+                    else:
+                        base_threshold = max(200, 0.5 * (assigned_face.bbox[2] - assigned_face.bbox[0]))
+                    
+                    # Predict next position using motion modeling
+                    prediction = self._predict_next_position(position_history, scene_state)
+                    
+                    # Find best match with intelligent scoring
                     best_match = None
-                    min_distance = float('inf')
+                    best_score = -1
+                    best_distance = float('inf')
+                    
                     for face in valid_faces:
                         face_center = get_face_center(face)
-                        if face_center:
-                            dist = ((face_center[0] - assigned_center[0])**2 + (face_center[1] - assigned_center[1])**2)**0.5
-                            if dist < min_distance:
-                                min_distance = dist
-                                best_match = face
-
-                    distance_threshold = 120
-                    if best_match and min_distance <= distance_threshold:
-                        # VERIFICACIÓN OPCIONAL CON EMBEDDING (si está disponible)
-                        # Evita saltar a otra persona que pase muy cerca
-                        if original_embedding is not None and hasattr(best_match, 'embedding') and best_match.embedding is not None:
-                            emb_score = self._calculate_similarity(original_embedding, best_match.embedding)
-                            # Si la similitud es muy baja, es probable que no sea la misma persona
-                            if emb_score < EMBEDDING_VERIFICATION_THRESHOLD:
-                                # Permitir si el movimiento es consistente con el historial (tolerancia a expresiones)
-                                if is_consistent_with_history(best_match, position_history, tolerance=80):
-                                    print(f"[TRACK] Embedding bajo ({emb_score:.2f}) pero movimiento consistente, aceptando")
+                        if not face_center:
+                            continue
+                        
+                        # Calculate distance
+                        dist = np.sqrt((face_center[0] - assigned_center[0])**2 + 
+                                     (face_center[1] - assigned_center[1])**2)
+                        
+                        # Skip if too far
+                        if dist > base_threshold:
+                            continue
+                        
+                        # INTELLIGENT SCORING
+                        score = 0.0
+                        
+                        # 1. Distance component (normalized 0-1)
+                        dist_normalized = 1.0 - (dist / base_threshold)
+                        score += dist_normalized * 0.4  # 40% weight on distance
+                        
+                        # 2. Embedding similarity
+                        if original_embedding is not None and hasattr(face, 'embedding') and face.embedding is not None:
+                            emb_score = self._calculate_similarity(original_embedding, face.embedding)
+                            
+                            # Dynamic threshold based on scene
+                            if scene_state.get('is_close_up'):
+                                emb_thresh = 0.12  # More lenient for close-ups
+                            elif scene_state.get('camera_moving'):
+                                emb_thresh = 0.20  # Moderate for moving camera
+                            else:
+                                emb_thresh = 0.25
+                                
+                            if emb_score >= emb_thresh:
+                                score += emb_score * 0.35  # 35% weight on embedding
+                            else:
+                                # Check motion consistency - if motion is good, still consider it
+                                motion_consistency = self._calculate_motion_consistency(face, position_history)
+                                if motion_consistency > 0.7:
+                                    score += emb_score * 0.20 + motion_consistency * 0.15
+                                    print(f"[TRACK] Low emb ({emb_score:.2f}) but good motion ({motion_consistency:.2f})")
                                 else:
-                                    print(f"[TRACK] Cara cerca pero embedding no coincide (score={emb_score:.2f}), ignorando proximidad")
-                                    best_match = None
-
-                        if best_match:
-                            setattr(self, assigned_attr, best_match)
-                            new_center = get_face_center(best_match)
-                            if new_center:
-                                position_history.append(new_center)
-                                if len(position_history) > 10:
-                                    position_history.pop(0)
-                                setattr(self, position_history_attr, position_history)
+                                    score -= 0.3  # Penalize bad embedding + bad motion
+                        else:
+                            # No embedding - rely more on distance and motion
+                            score += 0.25
+                        
+                        # 3. Motion prediction bonus
+                        if prediction:
+                            pred_x, pred_y, pred_conf = prediction
+                            pred_dist = np.sqrt((face_center[0] - pred_x)**2 + (face_center[1] - pred_y)**2)
+                            if pred_dist < base_threshold * 0.5:  # Within 50% of threshold
+                                score += pred_conf * 0.15  # Up to 15% bonus for matching prediction
+                        
+                        # 4. Size consistency
+                        if hasattr(face, 'bbox') and hasattr(assigned_face, 'bbox'):
+                            curr_w = face.bbox[2] - face.bbox[0]
+                            curr_h = face.bbox[3] - face.bbox[1]
+                            prev_w = assigned_face.bbox[2] - assigned_face.bbox[0]
+                            prev_h = assigned_face.bbox[3] - assigned_face.bbox[1]
+                            size_ratio = (curr_w * curr_h) / (prev_w * prev_h) if prev_w * prev_h > 0 else 1.0
+                            if 0.7 < size_ratio < 1.4:  # Size hasn't changed dramatically
+                                score += 0.1
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_match = face
+                            best_distance = dist
+                    
+                    # Decision making
+                    if best_match and best_score > 0.35:  # Minimum confidence threshold
+                        # Update state
+                        setattr(self, assigned_attr, best_match)
+                        new_center = get_face_center(best_match)
+                        
+                        if new_center:
+                            position_history.append(new_center)
+                            if len(position_history) > 15:  # Keep more history
+                                position_history.pop(0)
+                            setattr(self, position_history_attr, position_history)
+                        
+                        setattr(self, tracking_lost_attr, 0)
+                        consec_success = getattr(self, consecutive_success_attr, 0) + 1
+                        setattr(self, consecutive_success_attr, consec_success)
+                        
+                        # Intelligent embedding update (only if very high confidence)
+                        if consec_success >= 30 and hasattr(best_match, 'embedding') and best_match.embedding is not None:
+                            if not scene_state.get('camera_moving') and best_score > 0.85:
+                                new_emb = np.array(best_match.embedding, dtype=np.float32)
+                                norm = np.linalg.norm(new_emb)
+                                if norm > 0:
+                                    setattr(self, original_embedding_attr, new_emb / norm)
+                                    setattr(self, consecutive_success_attr, 0)
+                                    print(f"[TRACK] Frame {frame_count}: Reference embedding refined (score={best_score:.2f})")
+                        
+                        print(f"[TRACK] Frame {frame_count}: Success (score={best_score:.2f}, dist={best_distance:.1f}px)")
+                        return best_match
+                    
+                    # ==========================================================
+                    # INTELLIGENT FALLBACK: Tracking lost, try Recognition
+                    # ==========================================================
+                    print(f"[TRACK] Frame {frame_count}: Local tracking failed, attempting Global Recognition...")
+                    
+                    if original_embedding is not None:
+                        best_recognition = None
+                        best_rec_score = -1
+                        
+                        for face in valid_faces:
+                            if not hasattr(face, 'embedding') or face.embedding is None:
+                                continue
+                            
+                            # Use original embedding to find the face anywhere in the frame
+                            rec_score = self._calculate_similarity(original_embedding, face.embedding)
+                            if rec_score > best_rec_score:
+                                best_rec_score = rec_score
+                                best_recognition = face
+                        
+                        # Threshold for recognition can be slightly lower if we just lost tracking
+                        rec_threshold = 0.30 if lost_count < 5 else 0.40
+                        
+                        if best_recognition and best_rec_score >= rec_threshold:
+                            print(f"[TRACK] Frame {frame_count}: 💡 RE-ACQUIRED via Global Recognition (score={best_rec_score:.2f})")
+                            
+                            # Reset tracking state to this new position
+                            setattr(self, assigned_attr, best_recognition)
                             setattr(self, tracking_lost_attr, 0)
-                            print(f"[TRACK] Frame {frame_count}: cara seguida, dist={min_distance:.1f}px")
-                            return best_match
-
-                    # Si llegamos aquí, se perdió el tracking por proximidad
+                            new_center = get_face_center(best_recognition)
+                            if new_center:
+                                setattr(self, position_history_attr, [new_center])
+                            return best_recognition
+                    
+                    # Tracking truly lost
                     lost_count += 1
                     setattr(self, tracking_lost_attr, lost_count)
-                    if best_match:
-                        print(f"[TRACK] Frame {frame_count}: cara muy lejos o diferente (dist={min_distance:.1f}px), tracking perdido")
-                    else:
-                        print(f"[TRACK] Frame {frame_count}: no se encontró cara válida cerca")
+                    setattr(self, consecutive_success_attr, 0)
                     
-                    MAX_CONSECUTIVE_FAILURES = 8
-                    if lost_count >= MAX_CONSECUTIVE_FAILURES:
-                        print(f"[TRACK] Reset completo después de {lost_count} fallos")
-                        setattr(self, assigned_attr, None)
-                        setattr(self, tracking_lost_attr, 0)
-                        setattr(self, position_history_attr, [])
-                        return None
-
-            min_reacquire_score = getattr(roop.globals, 'face_match_embedding_threshold', 0.10)  # Lowered for better tracking
+                    print(f"[TRACK] Frame {frame_count}: Lost (score={best_score:.2f}), attempts {lost_count}/15")
+                    
+                    # If not too many failures, keep last valid face position as an anchor
+                    if lost_count < 15:
+                        if assigned_face:
+                            return assigned_face
+                    
+                    # Reset
+                    print(f"[TRACK] Resetting state after {lost_count} failures")
+                    setattr(self, assigned_attr, None)
+                    setattr(self, position_history_attr, [])
+                    return None
             
-            if strict_mode:
-                min_reacquire_score = min(min_reacquire_score + 0.15, 0.65)
-
+            # Initial acquisition or reacquisition
             if original_embedding is not None:
                 best_reacquire = None
                 best_reacquire_score = -1
-
+                
                 for face in valid_faces:
                     if not hasattr(face, 'embedding') or face.embedding is None:
                         continue
-
-                    # Verificar si esta cara está muy cerca de otra
-                    face_too_close = False
-                    for other_face in valid_faces:
-                        if face is other_face:
-                            continue
-                        if is_face_too_close(face, other_face, MIN_FACE_DISTANCE):
-                            face_too_close = True
-                            break
-
+                    
                     emb_score = self._calculate_similarity(original_embedding, face.embedding)
-
-                    # Si está muy cerca de otra cara, requerir embedding mayor
-                    if face_too_close and emb_score < (min_reacquire_score + 0.1):
-                        continue
-
-                    if emb_score > best_reacquire_score:
+                    
+                    # Dynamic threshold
+                    face_area = (face.bbox[2]-face.bbox[0]) * (face.bbox[3]-face.bbox[1]) if hasattr(face, 'bbox') else 0
+                    threshold = 0.12 if face_area > 10000 else 0.15
+                    
+                    if emb_score >= threshold and emb_score > best_reacquire_score:
                         best_reacquire_score = emb_score
                         best_reacquire = face
-
-                if best_reacquire:
-                    if best_reacquire_score >= min_reacquire_score:
-                        # NO actualizar embedding - mantener referencia original para máxima fidelidad
-                        setattr(self, assigned_attr, best_reacquire)
-                        setattr(self, tracking_lost_attr, 0)
-                        
-                        face_center = get_face_center(best_reacquire)
-                        if face_center:
-                            position_history.append(face_center)
-                            if len(position_history) > 10:
-                                position_history.pop(0)
-                            setattr(self, position_history_attr, position_history)
-
-                        print(f"[TRACK] Frame {frame_count}: REACQUIRE exitoso (score={best_reacquire_score:.2f})")
-                        return best_reacquire
-
-            # Sin reacquire exitoso: usuario seleccionó cara -> NO fallback
-            if not use_fallback:
-                if lost_count == 1 or lost_count % 50 == 0:
-                    print(f"[LOST] Tracking perdido #{lost_count} - OMITIENDO frame (similitud insuficiente)")
-                return None
+                
+                if best_reacquire and best_reacquire_score >= 0.15:
+                    setattr(self, assigned_attr, best_reacquire)
+                    setattr(self, tracking_lost_attr, 0)
+                    center = get_face_center(best_reacquire)
+                    if center:
+                        setattr(self, position_history_attr, [center])
+                    print(f"[TRACK] Reacquired (score={best_reacquire_score:.2f})")
+                    return best_reacquire
             
-            # Solo aquí (si NO hubo selección): fallback a cara más grande (caso modo auto-grande)
-            if lost_count == 1 or lost_count % 50 == 0:
-                print(f"[FALLBACK] Tracking perdido #{lost_count}, usando cara más grande")
+            return None
             
-            best_fallback = max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-            if best_fallback:
-                setattr(self, assigned_attr, best_fallback)
-                if original_embedding is None and hasattr(best_fallback, 'embedding') and best_fallback.embedding is not None:
-                    emb = np.array(best_fallback.embedding, dtype=np.float32)
-                    norm = np.linalg.norm(emb)
-                    if norm > 0:
-                        setattr(self, original_embedding_attr, emb / norm)
-            return best_fallback
-
         except Exception as e:
             print(f"[ERROR] _find_target_face_for_selected_mode: {e}")
             import traceback
@@ -1038,16 +1204,17 @@ class ProcessMgr:
             if not hasattr(target_face, 'bbox') or target_face.bbox is None:
                 return original_frame
 
-            # ============================================
+# ============================================
             # SUAVIZADO TEMPORAL DE BBOX (anti-parpadeo)
             # ============================================
             if enable_temporal_smoothing:
                 video_key = getattr(self, '_current_video_key', 'default')
                 prev_bbox = getattr(self, '_prev_face_bbox', {}).get(video_key)
+                prev_frame_result = getattr(self, '_prev_frame_result', {}).get(video_key)
 
                 if prev_bbox is not None:
-                    # Interpolar bbox: 70% actual, 30% anterior (suaviza transiciones)
-                    smooth_factor = 0.7
+                    # Interpolar bbox: 85% actual, 15% anterior (más suave)
+                    smooth_factor = 0.85
                     curr_bbox = np.array(target_face.bbox)
                     prev_bbox_arr = np.array(prev_bbox)
                     smoothed_bbox = (smooth_factor * curr_bbox + (1 - smooth_factor) * prev_bbox_arr).astype(int)
@@ -1098,12 +1265,22 @@ class ProcessMgr:
             # ============================================
             res = self.processors["faceswap"].Run(source_face, target_face, result_frame, paste_back=True)
             if res is None:
+                # Si falla el swap, mantener frame anterior si existe
+                if enable_temporal_smoothing and prev_frame_result is not None:
+                    return prev_frame_result
                 return original_frame
             result_frame = res
             
             # Extraer región swappeada
             swapped_face = result_frame[y1:y2, x1:x2].copy()
             original_face_region = original_frame[y1:y2, x1:x2].copy()
+            
+            # NUEVO: Extraer región de la cara de origen (source) para color correction
+            source_face_region = None
+            if hasattr(source_face, 'face_img_ref') and source_face.face_img_ref is not None:
+                source_face_region = cv2.resize(source_face.face_img_ref, (x2-x1, y2-y1), interpolation=cv2.INTER_LANCZOS4)
+            elif hasattr(source_face, 'face_img') and source_face.face_img is not None:
+                source_face_region = cv2.resize(source_face.face_img, (x2-x1, y2-y1), interpolation=cv2.INTER_LANCZOS4)
             
             # ============================================
             # 2. ENHANCER (CALIDAD MEJORADA)
@@ -1119,7 +1296,8 @@ class ProcessMgr:
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
 
-            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.85)
+            # Aumentado de 0.4 a 0.8 para que se vea MEJOR la cara de origen (más nítida)
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.8)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
@@ -1137,8 +1315,10 @@ class ProcessMgr:
                         ref_face_img = source_face.face_img_ref = source_face.face_img
                     
                     # Upscale de la imagen de referencia si es pequeña
-                    if ref_face_img is not None and ref_face_img.shape[0] < 256:
-                        ref_face_img = cv2.resize(ref_face_img, (256, 256), interpolation=cv2.INTER_LANCZOS4)
+                    # Use 512px minimum for high quality (was 256)
+                    min_face_size = max(512, (x2-x1), (y2-y1))
+                    if ref_face_img is not None and (ref_face_img.shape[0] < min_face_size or ref_face_img.shape[1] < min_face_size):
+                        ref_face_img = cv2.resize(ref_face_img, (min_face_size, min_face_size), interpolation=cv2.INTER_LANCZOS4)
                         if hasattr(source_face, 'face_img_ref'):
                             source_face.face_img_ref = ref_face_img
                         elif hasattr(source_face, 'face_img'):
@@ -1164,7 +1344,8 @@ class ProcessMgr:
 
                             # Blending local para el enhancer
                             region_h, region_w = enhanced_face.shape[:2]
-                            enhancer_soft_mask = create_soft_mask((0, 0, region_w, region_h), (region_h, region_w), feather=20)
+                            # Feather reducido a 15 para menos desenfoque en bordes
+                            enhancer_soft_mask = create_soft_mask((0, 0, region_w, region_h), (region_h, region_w), feather=15)
                             enhancer_mask_3ch = np.stack([enhancer_soft_mask] * 3, axis=-1)
                             
                             swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * enhancer_mask_3ch +
@@ -1186,18 +1367,21 @@ class ProcessMgr:
             # ============================================
             # 3. COLOR MATCHING Y AJUSTE DE BRILLO
             # ============================================
-            # REACTIVADO: Ajuste de color y brillo para integración natural
+            # OPTIMIZADO: Ajuste de color y brillo PARA INTEGRAR MEJOR CON EL TARGET
             try:
-                if swapped_face.size > 0 and original_face_region.size > 0:
-                    # Ajuste de brillo para coherencia visual
-                    brightness_strength = getattr(roop.globals, 'brightness_strength', 0.25)
+                # Usar TARGET (original_face_region) como referencia para que se integre mejor
+                # El swapped_face debe adaptarse al color/brillo del target, no al revés
+                reference_region = original_face_region  # Target region for color matching
+                if swapped_face.size > 0 and reference_region is not None and reference_region.size > 0:
+                    # Ajuste de brillo: igualar brillo del target
+                    brightness_strength = getattr(roop.globals, 'brightness_strength', 0.3)
                     if brightness_strength > 0:
-                        swapped_face = adjust_face_brightness(swapped_face, original_face_region, strength=brightness_strength)
-                    
-                    # Color matching para igualar tonos de piel
-                    color_match_strength = getattr(roop.globals, 'color_match_strength', 0.30)
+                        swapped_face = adjust_face_brightness(swapped_face, reference_region, strength=brightness_strength)
+
+                    # Color matching: adaptar colores al target para mejor integración
+                    color_match_strength = getattr(roop.globals, 'color_match_strength', 0.4)
                     if color_match_strength > 0:
-                        swapped_face = match_color_histogram(swapped_face, original_face_region, blend_factor=color_match_strength)
+                        swapped_face = match_color_histogram(swapped_face, reference_region, blend_factor=color_match_strength)
             except Exception as e:
                 print(f"[COLOR_MATCH] Error: {e}")
             
@@ -1277,29 +1461,69 @@ class ProcessMgr:
                     import traceback
                     traceback.print_exc()
             
+                # ============================================
+                # 5. BLENDING FINAL SIN HALOS (Poisson + Fallback)
+                # ============================================
+                try:
+                    # Crear máscara suave con feather aumentado
+                    # Feather reducido a 15 para menos desenfoque
+                    final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=15)
+                    final_mask_3ch = np.stack([final_soft_mask] * 3, axis=-1)
+                    
+                    # Crear máscara binaria para Poisson blending
+                    mask_poisson = (final_soft_mask[y1:y2, x1:x2] > 0.5).astype(np.uint8) * 255
+                    
+                    # Centro para seamlessClone (coordenadas en result_frame)
+                    center_x = x1 + swapped_face.shape[1] // 2
+                    center_y = y1 + swapped_face.shape[0] // 2
+                    center_poisson = (center_x, center_y)
+                    
+                    # Intentar Poisson blending (elimina halos negros)
+                    try:
+                        result_poisson = cv2.seamlessClone(
+                            swapped_face.astype(np.uint8),
+                            result_frame.astype(np.uint8),
+                            mask_poisson,
+                            center_poisson,
+                            cv2.MIXED_CLONE
+                        )
+                        result_frame = result_poisson
+                        print(f"[BLENDING] Poisson blending aplicado (sin halos)")
+                    except Exception as e_poisson:
+                        # Fallback a alpha blending mejorado
+                        print(f"[BLENDING] Poisson falló: {e_poisson}, usando alpha blending")
+                        mask_region = final_mask_3ch[y1:y2, x1:x2]
+                        blended_face = (swapped_face.astype(np.float32) * mask_region + 
+                                        original_face_region.astype(np.float32) * (1 - mask_region)).astype(np.uint8)
+                        result_frame[y1:y2, x1:x2] = blended_face
+                    
+                except Exception as e:
+                    print(f"[BLENDING] Error: {e}")
+                    # Fallback extremo: colocar cara directamente
+                    if swapped_face.shape == original_face_region.shape:
+                        result_frame[y1:y2, x1:x2] = swapped_face
+            
             # ============================================
-            # 5. BLENDING FINAL CON MÁSCARA SUAVE
+            # SUAVIZADO TEMPORAL FINAL (anti-parpadeo visual)
             # ============================================
-            try:
-                # Usar un nombre único para evitar shadowing de bloques anteriores
-                final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=15)
-                final_mask_3ch = np.stack([final_soft_mask] * 3, axis=-1)
+            if enable_temporal_smoothing and video_key:
+                prev_frame = getattr(self, '_prev_frame_result', {}).get(video_key)
+                if prev_frame is not None:
+                    # Suavizado: 85% actual, 15% anterior para eliminar parpadeo sin desenfoque
+                    blend_alpha = 0.85
+                    result_frame = cv2.addWeighted(
+                        result_frame.astype(np.float32),
+                        blend_alpha,
+                        prev_frame.astype(np.float32),
+                        1.0 - blend_alpha,
+                        0
+                    ).astype(np.uint8)
+                    print(f"[TEMPORAL_SMOOTH_FINAL] Imagen suavizada (alpha={blend_alpha})")
                 
-                # Extraer regiones para blending seguro
-                mask_region = final_mask_3ch[y1:y2, x1:x2]
-                
-                # Blending final: (Mejorado + original)
-                blended_face = (swapped_face.astype(np.float32) * mask_region + 
-                                original_face_region.astype(np.float32) * (1 - mask_region)).astype(np.uint8)
-                
-                # Colocar de vuelta en el frame
-                result_frame[y1:y2, x1:x2] = blended_face
-                
-            except Exception as e:
-                print(f"[BLENDING] Error: {e}")
-                # Fallback: colocar la cara directamente si falla el blending
-                if swapped_face.shape == original_face_region.shape:
-                    result_frame[y1:y2, x1:x2] = swapped_face
+                # Guardar frame resultante para siguiente iteración
+                if not hasattr(self, '_prev_frame_result'):
+                    self._prev_frame_result = {}
+                self._prev_frame_result[video_key] = result_frame.copy()
             
             return result_frame if result_frame is not None else original_frame
             
@@ -1422,7 +1646,10 @@ class ProcessMgr:
                 start_frame = 0
 
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
+            
+            # Calcular total de frames a procesar
+            total_frames_to_process = end_frame - start_frame
+            
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             temp_output = output_path + ".temp.mp4"
             out = cv2.VideoWriter(temp_output, fourcc, fps_video, (width, height))
@@ -1459,50 +1686,29 @@ class ProcessMgr:
             # Inicializar contador de frames
             current_frame = start_frame
             
-            # Leer frames en memoria
-            frames_to_process = []
-            frame_indices = []
-            
-            with tqdm(total=end_frame - start_frame, desc="Leyendo frames", unit="frame") as pbar:
-                while True:
-                    ret, frame = cap.read()
-                    if not ret or current_frame >= end_frame:
-                        break
-                    
-                    if frame is not None:
-                        frames_to_process.append(frame.copy())
-                        frame_indices.append(current_frame)
-                    
-                    current_frame += 1
-                    pbar.update(1)
-            
-            cap.release()
-            
-            total_frames_to_process = len(frames_to_process)
-            print(f"[BATCH] {total_frames_to_process} frames cargados en memoria")
-            
-            if total_frames_to_process == 0:
-                print("[BATCH] Error: No hay frames para procesar")
-                out.release()
-                return
-            
-            # ============================================
-            # Procesar frames SECUENCIALMENTE (necesario para suavizado temporal)
-            # El paralelismo rompe el orden frame-a-frame causando parpadeo
-            # ============================================
-            processed_frames_dict = {}
-
-            print(f"[BATCH] Iniciando procesamiento secuencial (temporal smoothing activo)...")
+            print(f"[BATCH] Iniciando procesamiento secuencial con streaming...")
             start_time = time.time()
             last_yield_time = time.time()
             yield_interval = 1.0  # Actualizar UI cada 1 segundo
-
-            for i, (frame_idx, frame) in enumerate(zip(frame_indices, frames_to_process)):
+            
+            processed_count = 0
+            
+            # Procesar frames uno a uno sin cargarlos todos en memoria
+            while True:
+                ret, frame = cap.read()
+                if not ret or current_frame >= end_frame:
+                    break
+                
                 try:
                     # Procesar frame secuencialmente con smoothing
                     processed = self.process_frame(frame, enable_temporal_smoothing=True, file_path=video_path)
-                    processed_frames_dict[frame_idx] = processed
+                    if processed is not None:
+                        out.write(processed)
+                    else:
+                        out.write(frame)
 
+                    processed_count += 1
+                    
                     # Métricas
                     try:
                         from roop.metrics_tracker import _current_tracker
@@ -1515,48 +1721,28 @@ class ProcessMgr:
                     current_time = time.time()
                     if current_time - last_yield_time >= yield_interval:
                         elapsed_processing = current_time - start_time
-                        fps_current = (i + 1) / elapsed_processing if elapsed_processing > 0 else 0
-                        progress_pct = ((i + 1) / total_frames_to_process) * 100
-                        remaining_frames = total_frames_to_process - (i + 1)
+                        fps_current = processed_count / elapsed_processing if elapsed_processing > 0 else 0
+                        progress_pct = (processed_count / total_frames_to_process) * 100
+                        remaining_frames = total_frames_to_process - processed_count
                         eta_seconds = remaining_frames / fps_current if fps_current > 0 else 0
                         eta_str = f"{int(eta_seconds // 60):02d}:{int(eta_seconds % 60):02d}"
 
-                        yield (progress_pct, f"⚡ {fps_current:.1f} FPS | {i+1}/{total_frames_to_process} frames | ETA: {eta_str}")
+                        yield (progress_pct, f"⚡ {fps_current:.1f} FPS | {processed_count}/{total_frames_to_process} frames | ETA: {eta_str}")
                         last_yield_time = current_time
 
                 except Exception as e:
-                    print(f"[BATCH] Error frame {frame_idx}: {e}")
-                    processed_frames_dict[frame_idx] = frame  # Usar frame original si hay error
+                    print(f"[BATCH] Error frame {current_frame}: {e}")
+                    out.write(frame)
+                
+                current_frame += 1
             
-            elapsed_time = time.time() - start_time
-            fps_processed = total_frames_to_process / elapsed_time if elapsed_time > 0 else 0
-
-            print(f"[BATCH] Procesamiento completado en {elapsed_time:.2f}s ({fps_processed:.2f} fps)")
-            print(f"[BATCH] Velocidad: {fps_processed / fps_video:.2f}x tiempo real")
-
-            # Yield final de métricas
-            yield (95, f"✅ Procesamiento completado: {fps_processed:.1f} FPS")
-
-            # ============================================
-            # Escribir frames procesados en orden
-            # ============================================
-            print(f"[BATCH] Escribiendo frames procesados...")
-            
-            with tqdm(total=total_frames_to_process, desc="Escribiendo video", unit="frame") as pbar:
-                for frame_idx in sorted(processed_frames_dict.keys()):
-                    processed_frame = processed_frames_dict[frame_idx]
-                    if processed_frame is not None:
-                        out.write(processed_frame)
-                    pbar.update(1)
-            
+            cap.release()
             out.release()
             
-            # ============================================
-            # CLEANUP - Liberar memoria
-            # ============================================
-            del frames_to_process
-            del frame_indices
-            del processed_frames_dict
+            elapsed_time = time.time() - start_time
+            fps_processed = processed_count / elapsed_time if elapsed_time > 0 else 0
+
+            print(f"[BATCH] Procesamiento completado en {elapsed_time:.2f}s ({fps_processed:.2f} fps)")
             
             import gc
             gc.collect()
@@ -1596,32 +1782,36 @@ class ProcessMgr:
             print(f"[BATCH] Error en run_batch_inmem: {e}")
             import traceback
             traceback.print_exc()
-            total_frames_to_process = end_frame - start_frame
             
-            yield (0, "Iniciando procesamiento de video...")
+            # Si hay error, intentar procesar sin batch
+            yield (0, f"Error: {e}. Reintentando...")
+            
+            # Reiniciar variables para el fallback
+            current_frame = start_frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+            processed_count = 0
             
             while current_frame < end_frame:
                 ret, frame = cap.read()
                 if not ret:
                     break
-
+                
                 try:
                     processed_frame = self.process_frame(frame, enable_temporal_smoothing=True)
                     if processed_frame is not None:
                         out.write(processed_frame)
-                        processed_frames += 1
+                        processed_count += 1
                     else:
                         out.write(frame)
                 except Exception as e:
-                    print(f"[ERROR] Frame {frame_count}: error - {e}")
+                    print(f"[ERROR] Frame {current_frame}: error - {e}")
                     out.write(frame)
-
-                frame_count += 1
+                
                 current_frame += 1
-
-                if frame_count % 2 == 0 or frame_count == total_frames_to_process:
-                    progress_percent = (frame_count / total_frames_to_process) * 100 if total_frames_to_process > 0 else 0
-                    msg = f"Procesando frame {frame_count}/{total_frames_to_process} ({progress_percent:.1f}%)"
+                
+                if current_frame % 10 == 0 or current_frame == end_frame:
+                    progress_percent = (current_frame / total_frames_to_process) * 100 if total_frames_to_process > 0 else 0
+                    msg = f"Procesando frame {current_frame}/{total_frames_to_process} ({progress_percent:.1f}%)"
                     yield (progress_percent, msg)
                     
                     if is_valid_progress_callback(self.progress_callback):
@@ -1652,12 +1842,6 @@ class ProcessMgr:
                     except: pass
 
             yield (100, "Video completado con éxito")
-
-        except Exception as e:
-            print(f"Video processing error: {e}")
-            import traceback
-            traceback.print_exc()
-            yield (100, f"Error: {str(e)}")
 
     def Release(self):
         try:

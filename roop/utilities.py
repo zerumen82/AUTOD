@@ -280,6 +280,8 @@ def has_extension(filepath: str, extensions: List[str]) -> bool:
 
 def is_image(image_path: str) -> bool:
     if image_path and os.path.isfile(image_path):
+        if image_path.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff")):
+            return True
         mimetype, _ = mimetypes.guess_type(image_path)
         return bool(mimetype and mimetype.startswith("image/"))
     return False
@@ -287,6 +289,8 @@ def is_image(image_path: str) -> bool:
 
 def is_video(video_path: str) -> bool:
     if video_path and os.path.isfile(video_path):
+        if video_path.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".mpeg", ".mpg")):
+            return True
         mimetype, _ = mimetypes.guess_type(video_path)
         return bool(mimetype and mimetype.startswith("video/"))
     return False

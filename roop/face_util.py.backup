@@ -48,11 +48,11 @@ DETECTION_SIZE = (1024, 1024)  # Aumentado de 640 a 1024 para mejor calidad
 MAX_DETECTION_ATTEMPTS = 3
 INIT_TIMEOUT = 60
 # Dynamic padding: less for close-ups (they're already zoomed), more for wide shots
-face_detection_padding = 0.15  # Tighter crop for better UI recognition
+face_detection_padding = 0.25  # Increased from 0.15 to capture more face context
 
 # Caches optimizados para velocidad
-CACHE_RESULTS = {}
-CACHE_DETECTIONS = {}
+CACHE_RESULTADOS = {}
+CACHE_DETECCIONES = {}
 MAX_FACES_TO_DETECT = 100
 MAX_CACHE_SIZE = 100
 
@@ -245,32 +245,6 @@ def get_cache_key(image_path: str, options: tuple, target_face_detection: bool) 
     return f"{image_path}_{options}_{target_face_detection}"
 
 
-def detect_faces_robust(img_rgb, analyser, thresh_override=None):
-    """Detecta caras con reintentos y diferentes tamaños si es necesario"""
-    try:
-        current_thresh = thresh_override if thresh_override is not None else 0.5
-        
-        # Intento 1: Tamaño estándar (1024x1024)
-        analyser.prepare(ctx_id=0 if analyser == FACE_ANALYSER else -1, det_size=(1024, 1024), det_thresh=current_thresh)
-        faces = analyser.get(img_rgb)
-        if faces:
-            return faces
-        
-        # Intento 2: Más pequeño (640x640) - para caras muy grandes
-        analyser.prepare(ctx_id=0 if analyser == FACE_ANALYSER else -1, det_size=(640, 640), det_thresh=current_thresh)
-        faces = analyser.get(img_rgb)
-        if faces:
-            return faces
-
-        # Intento 3: Más grande (1280x1280) - para caras muy pequeñas
-        analyser.prepare(ctx_id=0 if analyser == FACE_ANALYSER else -1, det_size=(1280, 1280), det_thresh=current_thresh)
-        faces = analyser.get(img_rgb)
-        return faces
-    except Exception as e:
-        print(f"[ERROR] detect_faces_robust: {e}")
-        return []
-
-
 def extract_face_images(
     image_path,
     options: tuple = (False, 0),
@@ -283,7 +257,7 @@ def extract_face_images(
     INCLUYE FALLBACK AUTOMATICO A CPU SI CUDA NO DETECTA CARAS.
     PARA SOURCE: Usa toda la imagen directamente (el usuario proporciono la foto!)
     """
-    global FACE_ANALYSER, FACE_ANALYSER_CPU, CACHE_RESULTS, CACHE_DETECTIONS, USE_CPU_FALLBACK
+    global FACE_ANALYSER, FACE_ANALYSER_CPU, CACHE_RESULTS, CACHE_DETECCIONES, USE_CPU_FALLBACK
     
     is_video, frame_index = options
     image_id = f"{image_path}_{frame_index}" if is_video else str(image_path)
@@ -326,59 +300,18 @@ def extract_face_images(
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
         # ============ SOURCE FACES: USAR TODA LA IMAGEN ============
-        if is_source_face:
-            h, w = img_rgb.shape[:2]
-            print(f"[SOURCE_DETECT] Usando imagen completa ({w}x{h}) para cara de origen")
+
+        else:
+            target_thresh = 0.25  # Permisivo para encontrar caras giradas
             
-            # Intentar obtener embedding de la imagen completa
-            face_data_full = None
-            try:
-                # Usar el analizador normal para intentar encontrar la cara principal
-                faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.25)
-                if faces:
-                    # Ordenar por tamaño y coger la más grande
-                    faces.sort(key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
-                    face_data_full = faces[0]
-                    print(f"[SOURCE_DETECT] Embedding obtenido de la cara detectada en la imagen")
-            except Exception as e:
-                print(f"[SOURCE_DETECT] No se pudo obtener embedding por detección: {e}")
-
-            if face_data_full:
-                # Usar los datos detectados pero con bbox de toda la imagen si se desea, 
-                # o simplemente usar la cara detectada (que es más seguro para el swapper)
-                face_obj = Face(
-                    bbox=face_data_full.bbox.astype(int).tolist(),
-                    score=face_data_full.score,
-                    det_score=face_data_full.det_score,
-                    kps=face_data_full.kps.tolist() if face_data_full.kps is not None else None,
-                    embedding=face_data_full.embedding,
-                    normed_embedding=face_data_full.embedding / np.linalg.norm(face_data_full.embedding) if face_data_full.embedding is not None else None
-                )
-                res = [[face_obj, img_rgb.copy()]]
-                CACHE_RESULTS[cache_key] = res
-                return res
-            else:
-                # Forzar cara con la imagen completa (bbox 0,0,w,h)
-                face_obj = Face(
-                    bbox=[0, 0, w, h],
-                    score=1.0,
-                    det_score=1.0,
-                    embedding=None # Inswapper puede fallar sin embedding, pero es mejor que nada
-                )
-                res = [[face_obj, img_rgb.copy()]]
-                CACHE_RESULTS[cache_key] = res
-                return res
-
-        # ============ TARGET FACES: DETECCIÓN NORMAL ============
-        target_thresh = 0.25 # Permisivo para encontrar caras giradas en video
-        
-        # Preprocesamiento opcional
-        img_preprocessed = preprocess_image_for_detection(cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
-        img_to_detect = cv2.cvtColor(img_preprocessed, cv2.COLOR_BGR2RGB)
-        
-        faces = detect_faces_robust(img_to_detect, FACE_ANALYSER, target_thresh)
-        if not faces and FACE_ANALYSER_CPU is not None:
-            faces = detect_faces_robust(img_to_detect, FACE_ANALYSER_CPU, target_thresh)
+            FACE_ANALYSISER.prepare(ctx_id=0, det_size=(1024, 1024), det_thresh=target_thresh)
+            img_preprocessed = preprocess_image_for_detection(cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+            img_to_detect = cv2.cvtColor(img_preprocessed, cv2.COLOR_BGR2RGB)
+            
+            faces = detect_faces_robust(img_to_detect, FACE_ANALYSISER, target_thresh)
+            if not faces and FACE_ANALYSISER_CPU is not None:
+                FACE_ANALYSISER_CPU.prepare(ctx_id=-1, det_size=(1024, 1024), det_thresh=target_thresh)
+                faces = detect_faces_robust(img_to_detect, FACE_ANALYSISER_CPU, target_thresh)
             
         if not faces:
             CACHE_RESULTS[cache_key] = []
@@ -388,11 +321,10 @@ def extract_face_images(
         results = []
         for face_idx, face_data in enumerate(faces):
             try:
-                # 1. Filtro de confianza base
-                if hasattr(face_data, 'det_score') and face_data.det_score < target_thresh:
+                min_score = 0.25
+                if hasattr(face_data, 'det_score') and face_data.det_score < min_score:
                     continue
                 
-                # 2. Dimensiones mínimas
                 x1, y1, x2, y2 = face_data.bbox.astype(int)
                 face_w = x2 - x1
                 face_h = y2 - y1
@@ -449,8 +381,20 @@ def extract_face_images(
             results.sort(key=lambda x: (x[0].bbox[2] - x[0].bbox[0]) * (x[0].bbox[3] - x[0].bbox[1]), reverse=True)
         
         CACHE_RESULTS[cache_key] = results
+        
+        # Restaurar analyser a umbral por defecto
+        try:
+            FACE_ANALYSISER.prepare(ctx_id=0, det_size=(1024, 1024), det_thresh=0.5)
+        except:
+            pass
+        
         return results
     
     except Exception as e:
+        # Restaurar analyser a umbral por defecto
+        try:
+            FACE_ANALYSISER.prepare(ctx_id=0, det_size=(1024, 1024), det_thresh=0.5)
+        except:
+            pass
         CACHE_RESULTS[cache_key] = []
         return []

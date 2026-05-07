@@ -38,6 +38,7 @@ class FluxEditComfyClient:
 
         clip_map = {
             "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
+            "flux-2-klein-base-4b-Q4_K_S.gguf": ("qwen3-4b-abl-q4_0.gguf", "flux2"),
             "flux1-schnell-Q4_K_S.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
             "flux1-dev-Q4_K.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
         }
@@ -46,7 +47,7 @@ class FluxEditComfyClient:
 
         if flux_version == "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf":
             clip_name = "clip_l.safetensors"
-            clip_name2 = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+            clip_name2 = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
             clip_type = "flux"
             self._dual_clip = True
             self._clip_name2 = clip_name2
@@ -171,8 +172,8 @@ class FluxEditComfyClient:
                         print(f"[FluxClient] ⏳ {int(elapsed)}s esperando...", flush=True)
                         last_progress = int(elapsed)
 
-            if elapsed > 180:
-                return None, f"Timeout 180s - ComfyUI no completó la generación"
+            if elapsed > 600:
+                return None, f"Timeout 600s - ComfyUI no completó la generación"
             time.sleep(1)
 
 _client = None

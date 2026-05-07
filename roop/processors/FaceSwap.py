@@ -15,7 +15,19 @@ class FaceSwap:
 
     def Initialize(self, options: dict) -> None:
         devnm = options.get('devicename', 'cpu')
-        model_path = options.get('model', 'inswapper_128.onnx')
+        model_path = options.get('model', None)
+
+        # Prioritizar el modelo estándar de 128 para máxima compatibilidad
+        if model_path is None:
+            model_128 = os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_128.onnx'))
+            model_256 = os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_256.onnx'))
+            
+            if os.path.exists(model_128):
+                model_path = model_128
+            elif os.path.exists(model_256):
+                model_path = model_256
+            else:
+                model_path = model_128  # Default path even if not exists (for later error)
 
         if not os.path.isabs(model_path):
             model_path = os.path.abspath(os.path.join(os.getcwd(), 'models', model_path))
@@ -23,12 +35,45 @@ class FaceSwap:
         if self.model is None or self.model_path != model_path or self.devicename != devnm:
             self.model_path = model_path
             self.devicename = devnm
+            
+            # Forzar providers correctos para CUDA si está disponible
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'cuda' in devnm else ['CPUExecutionProvider']
+            
             try:
-                self.model = insightface.model_zoo.get_model(model_path, providers=providers)
-                print(f"[FaceSwap] Modelo cargado: {model_path}")
+                # Verificamos si el modelo es compatible con INSwapper antes de cargarlo
+                import onnxruntime as ort
+                temp_sess = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+                input_names = [i.name for i in temp_sess.get_inputs()]
+                input_shapes = [i.shape for i in temp_sess.get_inputs()]
+                
+                is_standard_inswapper = False
+                if 'source' in input_names:
+                    source_idx = input_names.index('source')
+                    # Standard inswapper takes [1, 512] for source
+                    if len(input_shapes[source_idx]) == 2 and input_shapes[source_idx][1] == 512:
+                        is_standard_inswapper = True
+                
+                if not is_standard_inswapper and 'inswapper_128' in model_path:
+                     # Si es el 128 lo forzamos
+                     is_standard_inswapper = True
+
+                print(f"[FaceSwap] Cargando modelo: {os.path.basename(model_path)}")
+                
+                from insightface.model_zoo.inswapper import INSwapper
+                self.model = INSwapper(model_file=model_path, session=None)
+                # Re-preparar sesión con providers correctos
+                self.model.session = ort.InferenceSession(model_path, providers=providers)
+                
+                print(f"[FaceSwap] Modelo listo: {os.path.basename(model_path)} (Standard={is_standard_inswapper})")
+                
             except Exception as e:
-                print(f"[FaceSwap] Error carga: {e}")
+                print(f"[FaceSwap] Error inicializando modelo: {e}")
+                # Fallback genérico de insightface
+                try:
+                    self.model = insightface.model_zoo.get_model(model_path, providers=providers)
+                except:
+                    self.model = None
+
 
     def Run(self, source_face: Face, target_face: Face, temp_frame: Frame, paste_back: bool = True) -> Any:
         if self.model is None:
@@ -50,17 +95,21 @@ class FaceSwap:
                                 nrm = nrm / norm
                             setattr(face, attr, nrm)
             try:
-                res_data = self.model.get(temp_frame, target_face, source_face, paste_back=False)
+                import inspect
+                sig = inspect.signature(self.model.get)
+                if 'paste_back' in sig.parameters:
+                    res_data = self.model.get(temp_frame, target_face, source_face, paste_back=False)
+                else:
+                    res_data = self.model.get(temp_frame, target_face, source_face)
             except Exception as e_inner:
-                print(f"[FaceSwap] model.get() falló con paste_back=False: {e_inner}")
-                print(f"[FaceSwap] Intentando paste_back=True como fallback...")
+                print(f"[FaceSwap] model.get() falló: {e_inner}")
                 try:
-                    result = self.model.get(temp_frame, target_face, source_face, paste_back=True)
-                    if result is not None:
-                        return result
+                    # Fallback to standard call without keyword args if it failed
+                    res_data = self.model.get(temp_frame, target_face, source_face)
                 except Exception as e2:
-                    print(f"[FaceSwap] model.get() también falló con paste_back=True: {e2}")
-                return None
+                    print(f"[FaceSwap] model.get() fallback total falló: {e2}")
+                    return None
+
             if res_data is None:
                 return None
             if isinstance(res_data, tuple):
@@ -81,21 +130,56 @@ class FaceSwap:
 
     def paste_back_robust(self, target_img, source_face_img, M):
         try:
+            from roop.quality_enhancements import create_soft_mask, detect_foreground_occlusion, blend_with_poisson
+            
             h, w = target_img.shape[:2]
             M_inv = cv2.invertAffineTransform(M)
+            
+            # Warping de la cara con alta calidad
             warped_face = cv2.warpAffine(source_face_img, M_inv, (w, h), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE)
-            mask_128 = np.zeros((128, 128), dtype=np.float32)
-            cv2.ellipse(mask_128, (64, 64), (54, 72), 0, 0, 360, 1.0, -1)
-            mask_128 = cv2.GaussianBlur(mask_128, (7, 7), 0)
-            face_mask = cv2.warpAffine(mask_128, M_inv, (w, h), flags=cv2.INTER_LINEAR)
-            face_mask = np.clip(face_mask * 2.0, 0, 1)
-            if face_mask.ndim == 2: face_mask = np.expand_dims(face_mask, axis=2)
-            blend = getattr(roop.globals, 'blend_ratio', 0.98)
-            alpha = face_mask * blend
-            result = target_img.astype(np.float32) * (1.0 - alpha) + warped_face.astype(np.float32) * alpha
-            return np.clip(result, 0, 255).astype(np.uint8)
+            
+            # 1. Detectar oclusiones (flequillo, pelo) para la imagen
+            # Primero obtenemos la región de la cara en el target para comparar
+            target_face_region = cv2.warpAffine(target_img, M, (128, 128))
+            occlusion_mask = detect_foreground_occlusion(source_face_img, target_face_region)
+            
+            # 2. Reconstruir el BBOX aproximado en el frame para la máscara suave
+            # (Usamos los puntos transformados por M_inv)
+            corners = np.array([[0,0], [128,0], [128,128], [0,128]], dtype=np.float32).reshape(-1,1,2)
+            transformed_corners = cv2.perspectiveTransform(np.array([corners]), np.vstack([M_inv, [0,0,1]])) # Fake 3x3 for perspectiveTransform
+            # Simplificación: usar bbox de 128x128 transformado
+            pts = np.array([[0,0], [128,0], [128,128], [0,128]], dtype=np.float32)
+            ones = np.ones(shape=(len(pts), 1))
+            pts_ones = np.concatenate([pts, ones], axis=1)
+            transformed_pts = pts_ones.dot(M_inv.T)
+            x1, y1 = np.min(transformed_pts, axis=0)
+            x2, y2 = np.max(transformed_pts, axis=0)
+            bbox = (x1, y1, x2, y2)
+            
+            # 3. Crear máscara suave con protección de flequillo
+            feather = 30
+            face_mask = create_soft_mask(bbox, (h, w), feather=feather, occlusion_mask=occlusion_mask)
+            
+            # 4. Blending
+            blend_ratio = getattr(roop.globals, 'blend_ratio', 1.0)
+            
+            # Si el usuario quiere Poisson (más lento pero mejor para fotos fijas)
+            if getattr(roop.globals, 'use_poisson_blending', True):
+                mask_uint8 = (face_mask * 255).astype(np.uint8)
+                center = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+                # Asegurar que el centro esté dentro de los límites
+                center = (max(0, min(w-1, center[0])), max(0, min(h-1, center[1])))
+                result = blend_with_poisson(warped_face, target_img, mask_uint8, center)
+            else:
+                # Blending estándar ponderado
+                if face_mask.ndim == 2: face_mask = np.expand_dims(face_mask, axis=2)
+                alpha = face_mask * blend_ratio
+                result = target_img.astype(np.float32) * (1.0 - alpha) + warped_face.astype(np.float32) * alpha
+                result = np.clip(result, 0, 255).astype(np.uint8)
+                
+            return result
         except Exception as e:
-            print(f"[ERROR] paste_back_robust: {e}")
+            print(f"[ERROR] paste_back_robust (mejorado): {e}")
             return target_img
 
 
@@ -186,16 +270,16 @@ def create_mouth_preservation_mask(target_img, mouth_region, blend_ratio=0.95):
             cy = (ut[1] + lb[1]) // 2
             mw = abs(mr[0] - ml[0])
             mh = abs(lb[1] - ut[1])
-            axes_x = max(int(mw * 0.8), 20)
-            axes_y = max(int(mh * 1.5), 15)
+            axes_x = max(int(mw * 0.75), 15)
+            axes_y = max(int(mh * 1.2), 10)
         elif method == 'landmarks_106':
             ml = mouth_region.get('mouth_left', (0, 0))
             mr = mouth_region.get('mouth_right', (0, 0))
             cx = (ml[0] + mr[0]) // 2
             cy = ml[1]
             mw = abs(mr[0] - ml[0])
-            axes_x = max(int(mw * 0.8), 20)
-            axes_y = max(int(axes_x * 0.8), 15)
+            axes_x = max(int(mw * 0.75), 15)
+            axes_y = max(int(axes_x * 0.35), 10)
         else:
             cx, cy = w // 2, h // 2
             axes_x = max(int(w * 0.15), 20)

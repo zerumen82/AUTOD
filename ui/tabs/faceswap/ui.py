@@ -125,6 +125,7 @@ def build_faceswap_ui():
                         bt_target_prev = gr.Button("⬅", size="sm")
                         bt_target_next = gr.Button("➡", size="sm")
                     with gr.Row():
+                        delete_mode = gr.Checkbox(label="🚫 Modo Borrado (Clic para quitar)", value=False)
                         bt_remove_selected_target_face = gr.Button("🗑 Quitar", size="sm", variant="secondary")
                         bt_clear_all_target = gr.Button("🧹 Todas", size="sm", variant="stop")
 
@@ -211,5 +212,6 @@ def build_faceswap_ui():
         "bt_start": bt_start, "bt_stop": bt_stop, "bt_open_output": bt_open_output,
         "metrics_display": metrics_display, "input_page_info": input_page_info, "target_page_info": target_page_info,
         "bt_input_prev": bt_input_prev, "bt_input_next": bt_input_next, "bt_target_prev": bt_target_prev, "bt_target_next": bt_target_next,
-        "bt_remove_selected_input_face": bt_remove_selected_input_face, "bt_remove_selected_target_face": bt_remove_selected_target_face, "bt_clear_all_target": bt_clear_all_target
+        "bt_remove_selected_input_face": bt_remove_selected_input_face, "bt_remove_selected_target_face": bt_remove_selected_target_face, "bt_clear_all_target": bt_clear_all_target,
+        "delete_mode": delete_mode
     }

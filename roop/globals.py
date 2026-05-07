@@ -44,7 +44,8 @@ distance_threshold = 0.30  # MÁS ESTRICTO: solo matches muy cercanos al origen
 # Thresholds optimizados para MÁXIMA FIDELIDAD
 similarity_threshold_selected = 0.2  # ESTRICTO para máxima semejanza al origen
 similarity_threshold_auto = 0.15     # ESTRICTO para matching automático
-similarity_threshold_fallback = 0.1  # FALLBACK estricto
+similarity_threshold_fallback = 0.1 # FALLBACK estricto
+min_similarity_threshold = 0.25  # MÍNIMO para hacer swap (skip frame si es menor)
 default_det_size = True  # Usar tamaño de detector por defecto - más rápido
 
 # Threshold más estricto para MÁXIMA FIDELIDAD al origen
@@ -53,27 +54,27 @@ face_match_bbox_iou_threshold = 0.50   # Muy estricto para mejor coincidencia
 show_face_area = False  # Variable para mostrar área de cara en preview
 use_enhancer = False  # Desactivado por defecto para velocidad real-time (CodeFormer ~1.2 FPS, muy lento)
 blend_mode = 'seamless'  # Mejor integración visual que Poisson
-use_color_correction = True  # Ajusta color de la cara swappeada a la del target
-use_color_matching = True  # Matching de histograma LAB para tono de piel natural
+use_color_correction = True  # REACTIVADO para preservar cara origen (source face)
+use_color_matching = True  # REACTIVADO para tono de piel del origen
 
 # CONFIGURACIÓN ÓPTIMA PARA MÁXIMO PARECIDO SIN PERDER CALIDAD
 # Balance entre parecido al origen y calidad de imagen
 
 # Factor de blending del enhancer (0-1)
 # 0 = sin enhancer, 1 = enhancer completo
-# MÁXIMA CALIDAD: 0.8 (80% enhancer, 20% cara swap) para nitidez extrema
-enhancer_blend_factor = 0.8
+# 0.2 para mejor equilibrio, favoreciendo la cara original
+enhancer_blend_factor = 0.2
 
 # Ajuste de brillo (0-1)
-# ÓPTIMO PARA FIDELIDAD: 0.25 (ajuste moderado para coherencia visual)
-brightness_strength = 0.25
+# 0.15 para no lavar demasiado la cara original
+brightness_strength = 0.15
 
 # Matching de color (0-1)
-# ÓPTIMO PARA FIDELIDAD: 0.30 (ajuste moderado para tono de piel natural)
-color_match_strength = 0.30
-# CodeFormer es el MEJOR para face swap - LMD 5.38 (mejor identidad)
-# RestoreFormer++ es mejor para restauración - FID 38.41 (mejor calidad visual)
-default_enhancer = 'CodeFormer'  # CodeFormer activado por defecto para máxima identidad
+# 0.10 para preservar mejor el origen (source face)
+color_match_strength = 0.10
+# GFPGAN preserva mejor la identidad en face swap
+# CodeFormer suaviza demasiado perdiendo rasgos faciales
+default_enhancer = 'GFPGAN'  # GFPGAN para mejor preservación de identidad
 
 # BATCH PROCESSING - Procesamiento en paralelo para videos
 # Número de frames a procesar simultáneamente
@@ -187,6 +188,13 @@ def apply_config_from_file():
             blend_ratio = getattr(CFG, 'face_swap_blend_ratio', 1.0)
             distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.35)
             face_swap_mode = getattr(CFG, 'face_swap_mode', 'selected_faces')
+            
+            # Optimización de Hardware (VRAM)
+            low_vram = getattr(CFG, 'low_vram', True)
+            enable_fp16 = getattr(CFG, 'enable_fp16', True)
+            batch_processing_size = getattr(CFG, 'batch_processing_size', 4)
+            max_batch_threads = getattr(CFG, 'max_batch_threads', 4)
+            cuda_malloc_async = getattr(CFG, 'cuda_malloc_async', True)
 
             print("CONFIGURACION DESDE config.yaml APLICADA:")
             print(f"   - Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")

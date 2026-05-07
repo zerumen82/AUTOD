@@ -31,7 +31,7 @@ def build_animate_ui():
 
                 with gr.Accordion("⚙️ Opciones (Automático)", open=False):
                     model_choice = gr.Dropdown(
-                        choices=[("Wan 2.2 (Calidad)", "wan_video")],
+                        choices=[("Wan 2.2 I2V 14B (sin censura, 8GB)", "wan_video"), ("LTX Video 0.9.5 (sin censura, 8GB)", "ltx_video"), ("SVD Turbo (sin censura, 8GB)", "svd_turbo")],
                         value="wan_video", label="Motor"
                     )
                     face_stabilize = gr.Checkbox(label="💎 Anti-Melting (Cara)", value=True)

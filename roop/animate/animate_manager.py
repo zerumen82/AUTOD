@@ -99,10 +99,18 @@ class AnimateManager:
             self.face_analyzer = FaceAnalysis(allowed_modules=['detection', 'recognition'])
             import torch
             ctx = 0 if torch.cuda.is_available() else -1
-            self.face_analyzer.prepare(ctx_id=ctx, det_size=(320, 320))
+            self.face_analyzer.prepare(ctx_id=ctx, det_size=(1024, 1024))
             self.face_swapper = FaceSwap()
+            # Check for higher resolution model first (256x256 > 128x128)
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            model_256 = os.path.join(base_dir, 'models', 'inswapper_256.onnx')
+            model_128 = os.path.join(base_dir, 'models', 'inswapper_128.onnx')
+            if os.path.exists(model_256):
+                model_path = model_256
+            else:
+                model_path = model_128
             self.face_swapper.Initialize({'devicename': 'cuda' if torch.cuda.is_available() else 'cpu',
-                                          'model': 'inswapper_128.onnx'})
+                                          'model': model_path})
             return True
         except Exception as e:
             print(f"[AnimateManager] Face init: {e}")

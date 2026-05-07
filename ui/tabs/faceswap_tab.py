@@ -17,11 +17,11 @@ def faceswap_tab():
     
     # 2. Configurar parámetros de calidad por defecto (High Fidelity)
     roop.globals.blend_ratio = 1.0
-    roop.globals.distance_threshold = 0.30
+    roop.globals.distance_threshold = 0.25  # Más estricto para mayor parecido
     roop.globals.face_swap_mode = 'selected_faces'
     roop.globals.selected_enhancer = 'CodeFormer'
     roop.globals.use_enhancer = True
-    roop.globals.enhancer_blend_factor = 0.85
+    roop.globals.enhancer_blend_factor = 0.80  # Mayor calidad de restauración
     
     # 3. Construir la UI
     ui_components = faceswap_ui.build_faceswap_ui()

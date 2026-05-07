@@ -1,5 +1,8 @@
 import os
 import subprocess
+import sys
+import builtins
+from datetime import datetime
 
 ui_restart_server = False
 
@@ -13,6 +16,47 @@ ui_target_thumbs = []
 ui_camera_frame = None
 ui_use_enhancer = None
 ui_blend_mode = None
+
+# Console buffer for export
+console_buffer = []
+console_buffer_max_size = 10000  # Maximum number of lines to keep
+
+# Store original print
+_original_print = builtins.print
+
+def custom_print(*args, **kwargs):
+    """Custom print that captures output to buffer"""
+    # Call original print
+    _original_print(*args, **kwargs)
+    
+    # Capture to buffer
+    try:
+        message = " ".join(str(arg) for arg in args)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        console_buffer.append(f"[{timestamp}] {message}")
+        
+        # Limit buffer size
+        if len(console_buffer) > console_buffer_max_size:
+            console_buffer.pop(0)
+    except:
+        pass
+
+def start_capturing_prints():
+    """Start capturing print output"""
+    builtins.print = custom_print
+
+def stop_capturing_prints():
+    """Stop capturing and restore original print"""
+    builtins.print = _original_print
+
+def get_console_text():
+    """Get all captured console text"""
+    return "\n".join(console_buffer)
+
+def clear_console_buffer():
+    """Clear the console buffer"""
+    global console_buffer
+    console_buffer.clear()
 
 def open_output_folder():
     """Abre la carpeta de salida en el explorador de archivos."""

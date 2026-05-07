@@ -1,22 +1,36 @@
+# Configuración General
 clear_output: true
-fal_token: ''
-force_cpu: false
-huggingface_token: ''
-last_source_folder: D:\.autodeep_temp\0fdfb2d1523f068c8635956f82bb3df84022435287569ced07029975d5c85cbb
-last_target_folder: C:\Users\INdaHouse\Desktop\AutoDeep_Destino
 max_threads: 4
 memory_limit: 0
-output_image_format: png
-output_path: ''
-output_show_video: true
-output_template: '{file}_{time}'
-output_video_codec: libx264
-output_video_format: mp4
 provider: cuda
-replicate_token: ''
+force_cpu: false
 selected_theme: Default
-server_name: ''
+
+# Optimización de Hardware (RTX 3060 Ti - 8GB VRAM)
+low_vram: true
+enable_fp16: true
+batch_processing_size: 4
+max_batch_threads: 4
+cuda_malloc_async: true
+
+# Configuración de Salida
+output_image_format: png
+output_video_format: mp4
+output_video_codec: libx264
+video_quality: 14
+output_template: '{file}_{time}'
+output_show_video: true
+output_path: 'output'
+
+# Carpetas y Tokens
+last_source_folder: ''
+last_target_folder: ''
+huggingface_token: ''
+replicate_token: ''
+fal_token: ''
+
+# Servidor UI
+server_name: '127.0.0.1'
 server_port: 7861
 server_share: false
 use_os_temp_folder: false
-video_quality: 14

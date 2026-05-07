@@ -1,0 +1,38 @@
+INSTRUCTIONS FOR HIGHER QUALITY FACE SWAP
+==============================================
+
+Current model: inswapper_128.onnx (128x128 resolution)
+Recommended model: inswapper_256.onnx (256x256 resolution)
+
+The current 128x128 model produces lower quality face swaps.
+The 256x256 model provides significantly better quality and resemblance.
+
+HOW TO DOWNLOAD:
+----------------
+
+Option 1: Direct download from HuggingFace
+   URL: https://huggingface.co/facefusion/models-3.0.0/resolve/main/inswapper_256.onnx
+
+Option 2: Download from GitHub (facefusion)
+   URL: https://github.com/facefusion/facefusion-assets/releases
+   
+Option 3: Use insightface.model_zoo (Python)
+   >>> import insightface
+   >>> insightface.model_zoo.get_model('inswapper_256.onnx')
+
+WHERE TO SAVE:
+--------------
+Save the file to: D:\PROJECTS\AUTOAUTO\models\inswapper_256.onnx
+
+The code has been updated to automatically check for inswapper_256.onnx first,
+and fallback to inswapper_128.onnx if not found.
+
+QUALITY IMPROVEMENTS APPLIED:
+==============================
+1. Enhancer blend factor: 0.15 -> 0.65 (better CodeFormer strength)
+2. Face detection threshold: 0.3 -> 0.2 (accept more faces)
+3. Minimum face size: 50px -> 40px (more permissive)
+4. Face detection size: 640x640 -> 1024x1024 (better embeddings)
+5. Code updated to prefer inswapper_256.onnx over 128
+
+After downloading inswapper_256.onnx, restart the application.

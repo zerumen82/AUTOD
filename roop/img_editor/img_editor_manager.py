@@ -14,6 +14,7 @@ class ImgEditorManager:
         self.flux_dev_abl_client = None
         self.omnigen2_client = None
         self.face_preserver = None
+        self.clip_masker = None
         self.prompt_analyzer = None
         self.prompt_rewriter = None
         self._last_context = "normal"
@@ -39,6 +40,12 @@ class ImgEditorManager:
             from roop.img_editor.prompt_rewriter import get_prompt_rewriter
             self.prompt_rewriter = get_prompt_rewriter()
         return self.prompt_rewriter
+
+    def _get_clipseg_masker(self):
+        if self.clip_masker is None:
+            from roop.img_editor.clipseg_masker import get_clipseg_masker
+            self.clip_masker = get_clipseg_masker()
+        return self.clip_masker
 
     def auto_detect_params(self, prompt: str, engine: str) -> Dict:
         analyzer = self._get_prompt_analyzer()
@@ -134,6 +141,21 @@ class ImgEditorManager:
 
         print(f"[ImgEditor] Engine={engine} | Steps={params['num_inference_steps']} | Denoise={params['denoise']} | Mode={params['mode']}")
 
+        # Generación automática de máscara (Prompt-to-Mask) si es necesario
+        final_mask = mask_image
+        if final_mask is None and params["mode"] == "inpaint":
+            try:
+                # Extraer objeto principal del prompt para la máscara
+                # Ej: "vestido rojo" -> "vestido"
+                mask_target = mask_prompt if mask_prompt else prompt
+                masker = self._get_clipseg_masker()
+                auto_mask = masker.generate_mask(img, mask_target)
+                if auto_mask:
+                    final_mask = auto_mask
+                    print(f"[ImgEditor] Máscara automática generada para: {mask_target}")
+            except Exception as e:
+                print(f"[ImgEditor] Error en máscara automática: {e}")
+
         try:
             result = None
             msg = ""
@@ -151,7 +173,7 @@ class ImgEditorManager:
                     num_inference_steps=params["num_inference_steps"],
                     guidance_scale=params["guidance_scale"],
                     seed=seed, denoise=params["denoise"],
-                    mask_image=mask_image if mask_mode == "manual" else None
+                    mask_image=final_mask if mask_mode in ["manual", "global"] else None
                 )
                 if result_obj: result = result_obj.image
 
@@ -168,7 +190,24 @@ class ImgEditorManager:
                     num_inference_steps=params["num_inference_steps"],
                     guidance_scale=params["guidance_scale"],
                     seed=seed, denoise=params["denoise"],
-                    mask_image=mask_image if mask_mode == "manual" else None
+                    mask_image=final_mask if mask_mode in ["manual", "global"] else None
+                )
+                if result_obj: result = result_obj.image
+
+            elif engine == "klein_base":
+                from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
+                if self.flux_klein_client is None:
+                    self.flux_klein_client = get_flux_edit_comfy_client()
+                client = self.flux_klein_client
+                success, msg = client.load(flux_version="flux-2-klein-base-4b-Q4_K_S.gguf")
+                if not success:
+                    return None, msg
+                result_obj, msg = client.generate(
+                    image=img, prompt=prompt_enhanced,
+                    num_inference_steps=params["num_inference_steps"],
+                    guidance_scale=params["guidance_scale"],
+                    seed=seed, denoise=params["denoise"],
+                    mask_image=final_mask if mask_mode in ["manual", "global"] else None
                 )
                 if result_obj: result = result_obj.image
 
@@ -185,7 +224,7 @@ class ImgEditorManager:
                     num_inference_steps=params["num_inference_steps"],
                     guidance_scale=params["guidance_scale"],
                     seed=seed, denoise=params["denoise"],
-                    mask_image=mask_image if mask_mode == "manual" else None
+                    mask_image=final_mask if mask_mode in ["manual", "global"] else None
                 )
                 if result_obj: result = result_obj.image
 
@@ -207,10 +246,10 @@ class ImgEditorManager:
 
             else:
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
-                if self.flux_dev_client is None:
-                    self.flux_dev_client = get_flux_edit_comfy_client()
-                client = self.flux_dev_client
-                success, msg = client.load(flux_version="flux1-dev-Q4_K.gguf")
+                if self.flux_klein_client is None:
+                    self.flux_klein_client = get_flux_edit_comfy_client()
+                client = self.flux_klein_client
+                success, msg = client.load(flux_version="flux-2-klein-base-4b-Q4_K_S.gguf")
                 if not success:
                     return None, msg
                 result_obj, msg = client.generate(

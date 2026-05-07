@@ -79,115 +79,107 @@ def match_color_histogram(source: np.ndarray, target: np.ndarray, blend_factor: 
         return source
 
 
-def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, int], feather: int = 20) -> np.ndarray:
+def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray) -> np.ndarray:
     """
-    Crea una máscara suave ELÍPTICA con cobertura central y bordes difuminados.
-    OPTIMIZADA v2: Mejor cobertura de frente para evitar efecto "flequillo"
+    Detecta elementos en primer plano (pelo, flequillo, micrófonos) que no deben ser swapeados.
+    Crea una máscara de protección basada en la diferencia de textura y luminancia.
+    """
+    try:
+        if face_img.shape != target_region.shape:
+            target_region = cv2.resize(target_region, (face_img.shape[1], face_img.shape[0]))
+            
+        # 1. Diferencia de color y estructura
+        diff = cv2.absdiff(cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY), 
+                          cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY))
+        
+        # 2. Detectar zonas muy oscuras en el target (típicamente pelo/flequillo sobre la frente)
+        target_gray = cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY)
+        _, dark_mask = cv2.threshold(target_gray, 40, 255, cv2.THRESH_BINARY_INV)
+        
+        # 3. Detectar bordes fuertes en el target que no están en el face_img (oclusiones)
+        edges_target = cv2.Canny(target_region, 50, 150)
+        edges_face = cv2.Canny(face_img, 50, 150)
+        occlusion_edges = cv2.subtract(edges_target, edges_face)
+        
+        # Combinar para crear máscara de protección
+        protection_mask = cv2.dilate(occlusion_edges, np.ones((3,3), np.uint8), iterations=1)
+        protection_mask = cv2.bitwise_or(protection_mask, dark_mask)
+        
+        # Suavizar protección
+        protection_mask = cv2.GaussianBlur(protection_mask, (7, 7), 0)
+        return protection_mask.astype(np.float32) / 255.0
+    except:
+        return np.zeros(face_img.shape[:2], dtype=np.float32)
 
-    Args:
-        bbox: Bounding box de la cara (x1, y1, x2, y2)
-        frame_shape: Forma del frame (height, width)
-        feather: Píxeles de difuminado en los bordes
 
-    Returns:
-        Máscara suave (valores 0-1)
+def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, int], feather: int = 30, occlusion_mask: np.ndarray = None) -> np.ndarray:
+    """
+    Crea una máscara suave ELÍPTICA con protección de oclusiones (flequillo/pelo).
     """
     x1, y1, x2, y2 = map(int, bbox)
     h, w = frame_shape[:2]
-
-    # Crear máscara base
+    
     mask = np.zeros((h, w), dtype=np.float32)
-
-    # Calcular centro y radios de la elipse
+    
     center_x = (x1 + x2) // 2
     center_y = (y1 + y2) // 2
     width = x2 - x1
     height = y2 - y1
-
-    # OPTIMIZADO v2: Elipse más amplia para cubrir COMPLETAMENTE frente y evitar efecto "flequillo"
-    # Aumentado radius_y a 0.52 (104% de la altura) para cubrir frente y parte del pelo
-    # Aumentado radius_x a 0.48 (96% del ancho) para mejor cobertura lateral
+    
+    # Elipse base
     radius_x = int(width * 0.48)
-    radius_y = int(height * 0.52)  # Más alto para cubrir frente y pelo superior
-
-    # Ajustar centro hacia arriba para mejor cobertura de frente (aumentado de 5% a 8%)
-    adjusted_center_y = center_y - int(height * 0.08)
-
-    # Dibujar elipse COMPLETA en la máscara
+    radius_y = int(height * 0.52)
+    adjusted_center_y = center_y - int(height * 0.05)
+    
     cv2.ellipse(mask, (center_x, adjusted_center_y), (radius_x, radius_y), 0, 0, 360, 1.0, -1)
-
-    # Aplicar difuminado SOLO en los bordes para transición suave
+    
+    # Aplicar protección contra oclusiones (Evita el "efecto flequillo")
+    if occlusion_mask is not None:
+        occ_h, occ_w = occlusion_mask.shape[:2]
+        # Asegurar que la máscara de oclusión encaje en el bbox
+        full_occ_mask = np.zeros_like(mask)
+        full_occ_mask[y1:y1+occ_h, x1:x1+occ_w] = occlusion_mask[:y2-y1, :x2-x1]
+        
+        # Restar oclusión de la máscara de swap (donde hay pelo, no hay swap)
+        mask = cv2.subtract(mask, full_occ_mask)
+    
+    # Difuminado de bordes
     if feather > 0:
-        # Kernel moderado para suavizar solo los bordes
-        kernel_size = max(feather * 2 + 1, 21)  # Kernel de 21px
-        if kernel_size % 2 == 0:
-            kernel_size += 1
-        sigma = max(feather / 2, 8)  # Sigma moderado
-        mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), sigma)
-
-    return mask
-
-
-def enhance_face_details(face_img: np.ndarray, strength: float = 0.3) -> np.ndarray:
-    """
-    Mejora los detalles de la cara usando unsharp masking.
+        kernel_size = max(feather * 2 + 1, 31)
+        if kernel_size % 2 == 0: kernel_size += 1
+        mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), feather / 1.5)
     
-    Args:
-        face_img: Imagen de la cara
-        strength: Intensidad del realce (0.0 - 1.0)
-    
-    Returns:
-        Cara con detalles mejorados
-    """
-    # Aplicar desenfoque gaussiano
-    blurred = cv2.GaussianBlur(face_img, (0, 0), 3)
-    
-    # Unsharp mask
-    sharpened = cv2.addWeighted(face_img, 1.0 + strength, blurred, -strength, 0)
-    
-    return np.clip(sharpened, 0, 255).astype(np.uint8)
+    return np.clip(mask, 0, 1.0)
 
 
 def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray, center: Tuple[int, int]) -> np.ndarray:
     """
-    Realiza blending usando Poisson blending para resultados más naturales.
-    
-    Args:
-        source: Imagen fuente
-        target: Imagen destino
-        mask: Máscara binaria
-        center: Centro para el blending
-    
-    Returns:
-        Imagen con blending aplicado
+    Realiza blending usando Poisson blending mejorado para evitar halos negros.
     """
     try:
-        # Asegurar que la máscara sea uint8
         if mask.dtype != np.uint8:
             mask = (mask * 255).astype(np.uint8)
         
-        # CRÍTICO: Poisson blending requiere que la máscara no toque los bordes de la imagen fuente
-        # Forzar bordes negros en la máscara
-        mask[0, :] = 0
-        mask[-1, :] = 0
-        mask[:, 0] = 0
-        mask[:, -1] = 0
+        # IMPORTANTE: Encoger ligeramente la máscara para Poisson para evitar que toque bordes
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.erode(mask, kernel, iterations=1)
         
-        # Poisson blending (seamless clone)
+        # Bordes negros obligatorios para evitar crash de seamlessClone
+        mask[0, :] = 0; mask[-1, :] = 0; mask[:, 0] = 0; mask[:, -1] = 0
+        
+        # NORMAL_CLONE es a veces más estable contra reflejos negros que MIXED_CLONE
         result = cv2.seamlessClone(
             source.astype(np.uint8),
             target.astype(np.uint8),
             mask,
             center,
-            cv2.MIXED_CLONE  # MIXED_CLONE preserva mejor los detalles
+            cv2.NORMAL_CLONE 
         )
         return result
     except Exception as e:
-        print(f"[WARN] Poisson blending failed: {e}, using weighted blend")
-        # Fallback a weighted blend
+        print(f"[WARN] Poisson failed, using multi-band fallback")
         mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) / 255.0
-        result = (source * mask_3ch + target * (1 - mask_3ch)).astype(np.uint8)
-        return result
+        return (source * mask_3ch + target * (1.0 - mask_3ch)).astype(np.uint8)
 
 
 def adjust_face_brightness(face: np.ndarray, target_region: np.ndarray, strength: float = 0.2) -> np.ndarray:
@@ -251,39 +243,27 @@ def apply_quality_enhancements(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Aplica todas las mejoras de calidad a una cara intercambiada.
-    
-    Args:
-        swapped_face: Cara ya intercambiada
-        target_region: Región original del frame donde va la cara
-        bbox: Bounding box de la cara
-        frame: Frame completo
-        options: Opciones de configuración
-    
-    Returns:
-        (cara_mejorada, máscara_suave)
     """
     if options is None:
         options = {}
     
     # 1. Ajustar colores para mejor integración
-    color_match_strength = options.get('color_match_strength', 0.3)  # Reducido de 0.8 a 0.3
+    color_match_strength = options.get('color_match_strength', 0.3)
     if color_match_strength > 0:
         swapped_face = match_color_histogram(swapped_face, target_region)
     
     # 2. Ajustar brillo
-    brightness_match_strength = options.get('brightness_match_strength', 0.2)  # Reducido de 0.7 a 0.2
+    brightness_match_strength = options.get('brightness_match_strength', 0.2)
     if brightness_match_strength > 0:
         swapped_face = adjust_face_brightness(swapped_face, target_region, brightness_match_strength)
     
-    # 3. Mejorar detalles (opcional, puede introducir artefactos)
-    enhance_details = options.get('enhance_details', False)
-    if enhance_details:
-        detail_strength = options.get('detail_strength', 0.2)
-        swapped_face = enhance_face_details(swapped_face, detail_strength)
+    # 3. NUEVO: Detectar oclusiones (pelo, flequillo, objetos)
+    # Esto evita que el swap cubra el pelo real o cree reflejos negros
+    occlusion_mask = detect_foreground_occlusion(swapped_face, target_region)
     
-    # 4. Crear máscara suave para blending
-    feather_amount = options.get('feather_amount', 15)
-    soft_mask = create_soft_mask(bbox, frame.shape, feather=feather_amount)
+    # 4. Crear máscara suave para blending (ahora con protección de oclusiones)
+    feather_amount = options.get('feather_amount', 30)
+    soft_mask = create_soft_mask(bbox, frame.shape, feather=feather_amount, occlusion_mask=occlusion_mask)
     
     return swapped_face, soft_mask
 

@@ -3,6 +3,7 @@ import os
 import gradio as gr
 import roop.globals
 import ui.globals
+from datetime import datetime
 
 available_themes = ["Default", "gradio/glass", "gradio/monochrome", "gradio/seafoam", "gradio/soft", "gstaff/xkcd", "freddyaboulton/dracula_revamped", "ysharma/steampunk"]
 image_formats = ['jpg', 'png', 'webp']
@@ -82,8 +83,11 @@ def settings_tab():
                                     interactive=True))
                 button_apply_restart = gr.Button("Restart Server", variant='primary')
                 button_clean_temp = gr.Button("Clean temp folder")
+                button_export_log = gr.Button("📋 Export Console Log", variant='secondary')
                 output_path_box = gr.Textbox(label="Ruta de Salida", value=roop.globals.CFG.output_path)
                 button_apply_settings = gr.Button("Apply Settings")
+                export_status = gr.Textbox(label="Estado de Exportación", interactive=False, visible=True)
+                export_file = gr.File(label="Descargar Log")
 
     chk_det_size.select(fn=on_option_changed)
 
@@ -98,6 +102,7 @@ def settings_tab():
     button_clean_temp.click(fn=clean_temp)
     button_apply_settings.click(apply_settings, inputs=[themes, input_server_name, input_server_port, output_template, output_path_box])
     button_apply_restart.click(restart)
+    button_export_log.click(fn=export_console_log, outputs=[export_file, export_status])
 
 
 def on_option_changed(evt: gr.SelectData):
@@ -164,3 +169,47 @@ def apply_settings(themes, input_server_name, input_server_port, output_template
 
 def restart():
     ui.globals.ui_restart_server = True
+
+def export_console_log():
+    """Export console log to markdown file"""
+    try:
+        console_text = ui.globals.get_console_text()
+        
+        if not console_text:
+            return None, "No hay contenido en la consola para exportar"
+        
+        # Create markdown content
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        markdown_content = f"""# AutoAuto Console Log
+
+**Fecha:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**Version:** AutoAuto
+
+## Log de Consola
+
+```
+{console_text}
+```
+
+## Estadisticas
+
+- **Lineas totales:** {len(console_text.splitlines())}
+- **Tamaño:** {len(console_text)} caracteres
+"""
+        
+        # Save to file
+        output_dir = getattr(roop.globals, 'output_path', 'output')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        filename = f"console_log_{timestamp}.md"
+        filepath = os.path.join(output_dir, filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(markdown_content)
+        
+        print(f"[EXPORT] Log exportado a: {filepath}")
+        return filepath, f"Log exportado exitosamente a: {filename}"
+        
+    except Exception as e:
+        print(f"[EXPORT_ERROR] {e}")
+        return None, f"Error al exportar: {str(e)}"

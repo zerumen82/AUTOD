@@ -278,6 +278,10 @@ def create_ui():
 
 
 def main():
+    # Start capturing prints for console export
+    from ui.globals import start_capturing_prints
+    start_capturing_prints()
+    
     available_port = find_available_port()
     demo = create_ui()
     demo.queue()  # Habilitado - necesario para el funcionamiento de los botones

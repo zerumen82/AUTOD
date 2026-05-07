@@ -125,105 +125,70 @@ class FacePreserver:
         method: str = "swap"
     ) -> Image.Image:
         """
-        Preserva los rostros del original en la imagen generada.
-        
-        Args:
-            original: Imagen original
-            generated: Imagen generada por FLUX
-            method: Metodo de preservacion
-                - "compare": Compara y usa el mejor rostro
-                - "swap": Face swap automatico (requiere faceswap)
-                - "blend": Combina rostros
-                
-        Returns:
-            Imagen con rostros preservados
+        Preserva los rostros del original en la imagen generada usando Face Swap quirúrgico.
         """
         if not self._initialized:
             return generated
         
         try:
-            # Detectar rostros en ambas imagenes
-            orig_faces = self.detect_faces(original)
-            gen_faces = self.detect_faces(generated)
+            # Convertir PIL a numpy (BGR para OpenCV/InsightFace)
+            orig_cv2 = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
+            gen_cv2 = cv2.cvtColor(np.array(generated), cv2.COLOR_RGB2BGR)
             
-            if len(orig_faces) == 0:
-                # No hay rostros que preservar
+            # 1. Obtener todas las caras del original y la generada
+            # Usamos el analizador de roop.face_util que ya está optimizado
+            import roop.face_util as face_util
+            orig_faces_data = face_util.extract_face_images(orig_cv2, target_face_detection=True)
+            gen_faces_data = face_util.extract_face_images(gen_cv2, target_face_detection=True)
+            
+            if not orig_faces_data or not gen_faces_data:
+                print(f"[FacePreserver] No se detectaron caras en {'original' if not orig_faces_data else 'generada'}")
                 return generated
             
-            if len(gen_faces) == 0:
-                # No hay rostros en la generada, intentar face swap
-                return self._face_swap(original, generated)
+            # 2. Emparejar caras por similitud de embedding o posición
+            from roop.swapper import get_face_swapper
+            swapper = get_face_swapper()
+            if swapper is None:
+                print("[FacePreserver] Error: No se pudo cargar el swapper")
+                return generated
+
+            result_cv2 = gen_cv2.copy()
+            swapped_count = 0
             
-            # Hay rostros en ambas, intentar preservar el mas similar
-            return self._preserve_best_face(original, generated)
+            for gen_face, _ in gen_faces_data:
+                # Buscar la cara más similar en el original
+                best_match = None
+                max_sim = -1
+                
+                for orig_face, _ in orig_faces_data:
+                    sim = self.compare_faces(orig_face.embedding, gen_face.embedding)
+                    if sim > max_sim:
+                        max_sim = sim
+                        best_match = orig_face
+                
+                # Si encontramos un match razonable (>0.4), hacemos el swap quirúrgico
+                if best_match is not None and max_sim > 0.4:
+                    try:
+                        # Realizar el swap directamente en el frame generado
+                        result_cv2 = swapper.get(result_cv2, gen_face, best_match, paste_back=True)
+                        swapped_count += 1
+                    except Exception as e:
+                        print(f"[FacePreserver] Error en swap de cara: {e}")
+            
+            print(f"[FacePreserver] Se restauraron {swapped_count} identidad(es) facial(es)")
+            
+            # Convertir de vuelta a PIL
+            return Image.fromarray(cv2.cvtColor(result_cv2, cv2.COLOR_BGR2RGB))
             
         except Exception as e:
-            print(f"[FacePreserver] Error preservando rostros: {e}")
+            print(f"[FacePreserver] Error crítico preservando rostros: {e}")
+            import traceback
+            traceback.print_exc()
             return generated
-    
+
     def _face_swap(self, original: Image.Image, generated: Image.Image) -> Image.Image:
-        """
-        Face swap basico - intentar pegar rostros del original.
-        
-        Args:
-            original: Imagen original con rostros
-            generated: Imagen generada sin rostros
-            
-        Returns:
-            Imagen con rostros pegados
-        """
-        try:
-            from PIL import ImageDraw
-            
-            orig_faces = self.detect_faces(original)
-            if len(orig_faces) == 0:
-                return generated
-            
-            # Usar el rostro mas grande del original
-            best_face = max(orig_faces, key=lambda f: (f["bbox"][2] - f["bbox"][0]) * (f["bbox"][3] - f["bbox"][1]))
-            
-            # Crear mascara para el rostro
-            bbox = best_face["bbox"]
-            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-            
-            # Extraer rostro del original
-            face_img = original.crop((x1, y1, x2, y2))
-            face_img = face_img.resize((128, 128), Image.LANCZOS)
-            
-            # Intentar usar face swap si esta disponible
-            try:
-                import roop.faceswap as faceswap_module
-                if hasattr(faceswap_module, 'swap_face'):
-                    # Usar el rostro del original como referencia
-                    result = faceswap_module.swap_face(generated, face_img)
-                    if result is not None:
-                        return result
-            except ImportError:
-                pass
-            
-            # Fallback: simplemente pegar el rostro en el centro de la imagen generada
-            result = generated.copy()
-            face_resized = face_img.resize((x2 - x1, y2 - y1), Image.LANCZOS)
-            
-            # Pegar con blend
-            from PIL import Image as PILImage
-            
-            # Region central donde pegar
-            center_x = generated.width // 2 - (x2 - x1) // 2
-            center_y = generated.height // 2 - (y2 - y1) // 2
-            
-            # Crear region para pegar
-            region = result.crop((center_x, center_y, center_x + (x2 - x1), center_y + (y2 - y1)))
-            
-            # Blend: 50% original, 50% rostro
-            blended = PILImage.blend(region, face_resized, 0.5)
-            result.paste(blended, (center_x, center_y))
-            
-            return result
-            
-        except Exception as e:
-            print(f"[FacePreserver] Error en face swap: {e}")
-            return generated
+        # Este método ahora es redundante pero lo mantenemos por compatibilidad básica
+        return self.preserve_faces(original, generated, method="swap")
     
     def _preserve_best_face(self, original: Image.Image, generated: Image.Image) -> Image.Image:
         """

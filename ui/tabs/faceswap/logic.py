@@ -117,9 +117,12 @@ def process_target_file_async(file_path):
         return list_entry, preview_img, total_frames
     except: return None, None, 0
 
-def extract_face_images(file_path, face_detection_params=(False, 0), target_face_detection=True, is_source_face=False):
+def extract_face_images(file_path, face_detection_params=(False, 0), target_face_detection=True, is_source_face=False, ui_padding=None):
     """
     Extrae imágenes de caras de un archivo usando el módulo face_util.
+    
+    Args:
+        ui_padding: Factor de padding para UI (menos padding = cara más grande en galería)
     """
     try:
         # Aseguramos que target_face_detection sea True para obtener TODAS las caras
@@ -127,7 +130,8 @@ def extract_face_images(file_path, face_detection_params=(False, 0), target_face
             file_path, 
             face_detection_params, 
             target_face_detection=target_face_detection, 
-            is_source_face=is_source_face
+            is_source_face=is_source_face,
+            ui_padding=ui_padding
         )
     except Exception as e:
         print(f"Error extrayendo caras: {e}")
@@ -148,15 +152,15 @@ def find_best_matching_face(detected_faces, reference_embedding):
     return best_idx
 
 def translate_swap_mode(mode_text):
-    if mode_text == "First found": return "all"
-    if mode_text == "Selected faces": return "selected"
+    if mode_text == "First found": return "selected_faces"
+    if mode_text == "Selected faces": return "selected_faces"
     if mode_text == "Selected faces frame": return "selected_faces_frame"
     if mode_text == "All faces": return "all"
-    return "selected"
+    return "selected_faces"
 
 def get_mode_text(mode):
     if mode == "all": return "All faces"
-    if mode == "selected": return "Selected faces"
+    if mode in ["selected", "selected_faces"]: return "Selected faces"
     if mode == "selected_faces_frame": return "Selected faces frame"
     return "Selected faces"
 
@@ -239,7 +243,7 @@ def start_swap(enhancer, detection, keep_frames, wait_after_extraction, skip_aud
     roop.globals.keep_frames = keep_frames
 
     # Verificar caras de destino para modos que las requieren
-    if face_swap_mode == 'selected_faces' and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0):
+    if face_swap_mode in ['selected_faces', 'selected'] and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0):
         error_msg = "[ERROR] ERROR: No hay caras de destino seleccionadas. Haz clic en una cara detectada para añadirla a 'Caras de Destino'."
         print(f"[DIAGNÓSTICO] {error_msg}")
         gr.Error(error_msg)

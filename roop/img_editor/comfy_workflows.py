@@ -106,7 +106,7 @@ def build_img2img_workflow(
         raise ValueError("No hay checkpoints disponibles en ComfyUI")
     
     # Negative prompt optimizado para contenido adulto
-    final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed, child, underage, minor"
+    final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed"
     if negative_prompt:
         final_negative_prompt += f", {negative_prompt}"
     
@@ -230,10 +230,10 @@ def build_inpaint_workflow(
         raise ValueError("No hay checkpoints disponibles en ComfyUI")
 
     # Negative prompt optimizado para contenido adulto
-    final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed, child, underage, minor"
+final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed"
     if negative_prompt:
         final_negative_prompt += f", {negative_prompt}"
-
+    
     # No modificar el prompt del usuario
     final_prompt = prompt if prompt else "high quality, detailed, realistic"
 
@@ -852,7 +852,7 @@ def build_editor_workflow(
         print("[Editor] WARN: IP-Adapter no disponible, ejecuta tools/download_editor_models.py")
     
     # Negative prompt optimizado
-    final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed, child, underage, minor, watermark, text, signature"
+    final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed, watermark, text, signature"
     if negative_prompt:
         final_negative_prompt += f", {negative_prompt}"
     

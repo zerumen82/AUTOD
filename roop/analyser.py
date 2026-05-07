@@ -30,8 +30,8 @@ def get_face_analyser():
                 root=os.path.dirname(os.path.dirname(__file__))
             )
             ctx_id = 0 if use_cuda else -1
-            FACE_ANALYSER.prepare(ctx_id=ctx_id, det_size=(320, 320))
-            print(f"[SUCCESS] [OK] FaceAnalysis inicializado con {providers[0]} (det_size=320x320)")
+            FACE_ANALYSER.prepare(ctx_id=ctx_id, det_size=(1024, 1024), det_thresh=0.5)
+            print(f"[SUCCESS] [OK] FaceAnalysis inicializado con {providers[0]} (det_size=1024x1024, thresh=0.5)")
             
         except Exception as e:
             print(f"[ERROR] Falló inicialización: {e}")
@@ -42,15 +42,16 @@ def get_face_analyser():
                 providers=['CPUExecutionProvider'],
                 root=os.path.dirname(os.path.dirname(__file__))
             )
-            FACE_ANALYSER.prepare(ctx_id=-1, det_size=(320, 320))
-            print(f"[INFO] FaceAnalysis usando CPU por fallback (det_size=320x320)")
+            FACE_ANALYSER.prepare(ctx_id=-1, det_size=(1024, 1024), det_thresh=0.5)
+            print(f"[INFO] FaceAnalysis usando CPU por fallback (det_size=1024x1024, thresh=0.5)")
     
     return FACE_ANALYSER  
 
 def get_face_single(img_data):  
-    face = get_face_analyser().get(img_data)  
+    faces = get_face_analyser().get(img_data)  
     try:  
-        return sorted(face, key=lambda x: x.bbox[0])[0]  
+        # Ordenar por tamaño (área del bbox) descendente para obtener la cara más grande (primer plano)
+        return sorted(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)[0]  
     except IndexError:  
         return None  
       

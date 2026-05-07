@@ -277,6 +277,26 @@ if __name__ == "__main__":
     if root_dir not in sys.path: sys.path.insert(0, root_dir)
     
     print("\n[STEP 2] Cargando motores de Inteligencia Artificial...")
+    
+    # Verificar ONNX Runtime (no depende de torch)
+    print("  - Verificando ONNX Runtime...")
+    try:
+        import importlib
+        import onnxruntime
+        importlib.reload(onnxruntime)
+        
+        providers = onnxruntime.get_available_providers()
+        print(f"    Proveedores disponibles: {providers}")
+        
+        has_cuda = 'CUDAExecutionProvider' in providers
+        has_tensorrt = 'TensorrtExecutionProvider' in providers
+        
+        provider_status = 'TensorRT+CUDA+CPU' if has_tensorrt else ('CUDA+CPU' if has_cuda else 'CPU only')
+        print(f"  - ONNX Runtime: {provider_status}")
+    except Exception as e:
+        print(f"  - [WARNING] Error verificando ONNX Runtime: {e}")
+    
+    # Verificar PyTorch (opcional)
     try:
         import torch
         print(f"  - PyTorch version: {torch.__version__}")
@@ -286,37 +306,16 @@ if __name__ == "__main__":
         
         if cuda_ok:
             print(f"  - GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
-        
-        # Verificar ONNX Runtime - FORZAR actualización de providers
-        print("  - Verificando ONNX Runtime...")
-        import importlib
-        import onnxruntime
-        importlib.reload(onnxruntime)
-        
-        providers = onnxruntime.get_available_providers()
-        print(f"    Providers disponibles: {providers}")
-        
-        has_cuda = 'CUDAExecutionProvider' in providers
-        has_tensorrt = 'TensorrtExecutionProvider' in providers
-        
-        if cuda_ok and not has_cuda:
-            print("    [WARNING] PyTorch tiene CUDA pero ONNX Runtime no!")
-            print("    [WARNING] Posible conflicto de versiones de onnxruntime")
-            print("    [INFO] Intentando forzar providers manualmente...")
-            try:
-                onnxruntime.set_default_session_options(onnxruntime.SessionOptions())
-            except:
-                pass
-        
-        provider_status = 'TensorRT+CUDA+CPU' if has_tensorrt else ('CUDA+CPU' if has_cuda else 'CPU only')
-        print(f"  - ONNX Runtime: {provider_status}")
-        
-        print("\n[STEP 3] Lanzando interfaz Gradio...")
+    except Exception as e:
+        print(f"  - PyTorch: NO DISPONIBLE ({e})")
+        print(f"  - [INFO] Continuando sin PyTorch (usando ONNX Runtime)...")
+    
+    print("\n[STEP 3] Lanzando interfaz Gradio...")
+    try:
         # Importamos roop.core al final para que vea todos los parches anteriores
         import roop.core
         roop.core.run()
-        
-    except Exception:
+    except Exception as e:
         print("\n" + "!"*60)
         print(" [ERROR CRITICO EN EL MOTOR]")
         print("!"*60)

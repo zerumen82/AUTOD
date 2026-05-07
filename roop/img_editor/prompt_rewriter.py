@@ -11,43 +11,49 @@ import os
 from typing import Optional, Dict, List, Tuple
 
 
-QWEEN_MODEL_PATH = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders\qwen3-4b-abl-q4_0.gguf"
+MOONDREAM_TEXT_PATH = r"D:\PROJECTS\AUTOAUTO\models\moondream\moondream2-text-model-f16.gguf"
 
 class PromptRewriter:
-    """Reescribe prompts usando Qwen3 4B local"""
-    
+    """Reescribe prompts usando Moondream2 text model local"""
+
     def __init__(self):
-        self._qwen = None
-        self._init_qwen()
-        
-    def _init_qwen(self):
-        if self._qwen is not None:
+        self._llm = None
+        self._init_llm()
+
+    def _init_llm(self):
+        if self._llm is not None:
             return
         try:
+            import os as _os
+            _os.environ['PATH'] = (
+                r'D:\PROJECTS\AUTOAUTO\venv\lib\site-packages\llama_cpp\lib'
+                + _os.pathsep + r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin'
+                + _os.pathsep + _os.environ.get('PATH', '')
+            )
             from llama_cpp import Llama
-            if not os.path.exists(QWEEN_MODEL_PATH):
-                print(f"[PromptRewriter] Qwen no encontrado: {QWEEN_MODEL_PATH}")
+            if not _os.path.exists(MOONDREAM_TEXT_PATH):
+                print(f"[PromptRewriter] Modelo no encontrado: {MOONDREAM_TEXT_PATH}")
                 return
-            print(f"[PromptRewriter] Cargando Qwen3 4B...")
-            self._qwen = Llama(
-                model_path=QWEEN_MODEL_PATH,
-                n_gpu_layers=-1,
+            print(f"[PromptRewriter] Cargando Moondream2 text model...")
+            self._llm = Llama(
+                model_path=MOONDREAM_TEXT_PATH,
+                n_gpu_layers=0,
                 n_ctx=2048,
                 verbose=False
             )
-            print(f"[PromptRewriter] ✅ Qwen3 4B local listo")
+            print(f"[PromptRewriter] ✅ Moondream2 text model listo")
         except Exception as e:
-            print(f"[PromptRewriter] Qwen no disponible: {e}")
-    
+            print(f"[PromptRewriter] LLM local no disponible: {e}")
+
     def rewrite(self, prompt: str, analysis: Dict[str, bool] = None) -> Tuple[str, str]:
-        if self._qwen is not None:
+        if self._llm is not None:
             try:
-                return self._rewrite_with_qwen(prompt, self._qwen), "medium"
+                return self._rewrite_with_llm(prompt, self._llm), "medium"
             except Exception as e:
-                print(f"[PromptRewriter] Error con Qwen: {e}")
+                print(f"[PromptRewriter] Error con LLM: {e}")
         return (self._rewrite_with_templates(prompt, analysis), "medium")
 
-    def _rewrite_with_qwen(self, prompt: str, llm) -> str:
+    def _rewrite_with_llm(self, prompt: str, llm) -> str:
         system = "Eres un experto en prompts de IA. Mejora el prompt manteniendo el significado original. Sé descriptivo con iluminación, composición y detalles. Responde SOLO con el prompt mejorado, máximo 100 palabras."
         full = f"{system}\n\nPrompt original: \"{prompt}\"\n\nPrompt mejorado:"
         response = llm.create_completion(
@@ -58,7 +64,7 @@ class PromptRewriter:
         result = result.strip('"').strip()
         if len(result) < 10:
             result = prompt
-        print(f"[PromptRewriter] ✅ Reescrito con Qwen3: {result[:50]}...")
+        print(f"[PromptRewriter] ✅ Reescrito con LLM local: {result[:50]}...")
         return result
 
     def _rewrite_with_templates(self, prompt: str, analysis: Dict[str, bool] = None) -> Tuple[str, str]:
