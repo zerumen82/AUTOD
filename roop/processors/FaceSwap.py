@@ -17,17 +17,18 @@ class FaceSwap:
         devnm = options.get('devicename', 'cpu')
         model_path = options.get('model', None)
 
-        # Prioritizar el modelo estándar de 128 para máxima compatibilidad
+        # Forzar uso de inswapper_128 (embedding-based) en lugar de 256 (image-based)
+        # El pipeline actual solo prepara embeddings, no imágenes source escaladas
         if model_path is None:
             model_128 = os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_128.onnx'))
             model_256 = os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_256.onnx'))
             
+            # USAR SOLO 128: funciona con embeddings [1,512]
+            # El 256 requiere preparar imagen source de 256x256, lo cual no está implementado
             if os.path.exists(model_128):
                 model_path = model_128
-            elif os.path.exists(model_256):
-                model_path = model_256
             else:
-                model_path = model_128  # Default path even if not exists (for later error)
+                model_path = model_256  # Fallback (puede fallar)
 
         if not os.path.isabs(model_path):
             model_path = os.path.abspath(os.path.join(os.getcwd(), 'models', model_path))
@@ -81,19 +82,70 @@ class FaceSwap:
         try:
             if not isinstance(temp_frame, np.ndarray):
                 temp_frame = np.array(temp_frame)
-            for attr in ['kps', 'embedding', 'normed_embedding', 'bbox']:
+            for attr in ['kps', 'bbox']:
                 for face in (target_face, source_face):
                     val = getattr(face, attr, None)
                     if isinstance(val, list):
                         setattr(face, attr, np.array(val, dtype=np.float32))
-                    elif val is None and attr == 'normed_embedding':
-                        emb = getattr(face, 'embedding', None)
-                        if emb is not None:
-                            nrm = np.array(emb, dtype=np.float32)
-                            norm = np.linalg.norm(nrm)
-                            if norm > 0:
-                                nrm = nrm / norm
-                            setattr(face, attr, nrm)
+            
+            # Preparar embedding de source: asegurar forma [512] 
+            source_emb = getattr(source_face, 'embedding', None)
+            if source_emb is not None:
+                if isinstance(source_emb, list):
+                    source_emb = np.array(source_emb, dtype=np.float32)
+                source_emb_flat = source_emb.flatten() if source_emb.ndim > 1 else source_emb
+                if source_emb_flat.shape[0] > 512:
+                    source_emb_flat = source_emb_flat[:512]
+                elif source_emb_flat.shape[0] < 512:
+                    print(f"[FaceSwap] ⚠️ Embedding source tiene {source_emb_flat.shape[0]} elementos, se esperaba 512")
+                source_face.embedding = source_emb_flat
+                nrm = np.array(source_emb_flat, dtype=np.float32)
+                norm = np.linalg.norm(nrm)
+                if norm > 0:
+                    nrm = nrm / norm
+                source_face.normed_embedding = nrm
+            
+            # Preparar embedding de target (normalized)
+            target_emb = getattr(target_face, 'embedding', None)
+            if target_emb is not None:
+                if isinstance(target_emb, list):
+                    target_emb = np.array(target_emb, dtype=np.float32)
+                target_emb_flat = target_emb.flatten() if target_emb.ndim > 1 else target_emb
+                nrm_t = np.array(target_emb_flat, dtype=np.float32)
+                norm_t = np.linalg.norm(nrm_t)
+                if norm_t > 0:
+                    nrm_t = nrm_t / norm_t
+                target_face.normed_embedding = nrm_t
+            
+            # Detectar tipo de modelo por shape de input 'source'
+            source_input = None
+            for inp in self.model.session.get_inputs():
+                if inp.name == 'source':
+                    source_input = inp
+                    break
+            
+            if source_input is not None and len(source_input.shape) == 4:
+                # Modelo 256 espera imagen source [1,3,256,256]
+                # Como el pipeline actual está optimizado para 128 (embeddings),
+                # intentamos recargar inswapper_128 para evitar errores de shape.
+                print("[FaceSwap] ℹ️ Modelo 256 detectado. Recargando inswapper_128 para compatibilidad con embeddings...")
+                model_128 = os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_128.onnx'))
+                if os.path.exists(model_128):
+                    from insightface.model_zoo.inswapper import INSwapper
+                    import onnxruntime as ort
+                    self.model = INSwapper(model_file=model_128, session=None)
+                    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'cuda' in devnm else ['CPUExecutionProvider']
+                    self.model.session = ort.InferenceSession(model_128, providers=providers)
+                    print("[FaceSwap] ✅ Modelo cambiado a inswapper_128")
+                else:
+                    if not hasattr(source_face, 'face_img') or source_face.face_img is None:
+                        print("[FaceSwap] ❌ inswapper_128 no encontrado y no hay imagen source para modelo 256.")
+                        return None
+                    else:
+                        print("[FaceSwap] ⚠️ Usando modelo 256 (experimental, puede fallar si el shape no coincide)")
+
+            
+            # Llamar al modelo
             try:
                 import inspect
                 sig = inspect.signature(self.model.get)
@@ -104,7 +156,6 @@ class FaceSwap:
             except Exception as e_inner:
                 print(f"[FaceSwap] model.get() falló: {e_inner}")
                 try:
-                    # Fallback to standard call without keyword args if it failed
                     res_data = self.model.get(temp_frame, target_face, source_face)
                 except Exception as e2:
                     print(f"[FaceSwap] model.get() fallback total falló: {e2}")
@@ -132,7 +183,18 @@ class FaceSwap:
         try:
             from roop.quality_enhancements import create_soft_mask, detect_foreground_occlusion, blend_with_poisson
             
+            if source_face_img is None or target_img is None:
+                return target_img
+
+            M = np.asarray(M, dtype=np.float32)
+            if M.shape == (3, 3):
+                M = M[:2, :]
+            if M.shape != (2, 3):
+                print(f"[WARN] paste_back_robust: matriz affine invalida {M.shape}, usando frame original")
+                return target_img
+
             h, w = target_img.shape[:2]
+            face_h, face_w = source_face_img.shape[:2]
             M_inv = cv2.invertAffineTransform(M)
             
             # Warping de la cara con alta calidad
@@ -140,20 +202,23 @@ class FaceSwap:
             
             # 1. Detectar oclusiones (flequillo, pelo) para la imagen
             # Primero obtenemos la región de la cara en el target para comparar
-            target_face_region = cv2.warpAffine(target_img, M, (128, 128))
+            target_face_region = cv2.warpAffine(target_img, M, (face_w, face_h))
             occlusion_mask = detect_foreground_occlusion(source_face_img, target_face_region)
             
             # 2. Reconstruir el BBOX aproximado en el frame para la máscara suave
-            # (Usamos los puntos transformados por M_inv)
-            corners = np.array([[0,0], [128,0], [128,128], [0,128]], dtype=np.float32).reshape(-1,1,2)
-            transformed_corners = cv2.perspectiveTransform(np.array([corners]), np.vstack([M_inv, [0,0,1]])) # Fake 3x3 for perspectiveTransform
-            # Simplificación: usar bbox de 128x128 transformado
-            pts = np.array([[0,0], [128,0], [128,128], [0,128]], dtype=np.float32)
+            # usando el tamaño real del modelo: 128x128 o 256x256.
+            pts = np.array([[0, 0], [face_w, 0], [face_w, face_h], [0, face_h]], dtype=np.float32)
             ones = np.ones(shape=(len(pts), 1))
             pts_ones = np.concatenate([pts, ones], axis=1)
             transformed_pts = pts_ones.dot(M_inv.T)
             x1, y1 = np.min(transformed_pts, axis=0)
             x2, y2 = np.max(transformed_pts, axis=0)
+            x1 = max(0, min(w - 1, int(np.floor(x1))))
+            y1 = max(0, min(h - 1, int(np.floor(y1))))
+            x2 = max(0, min(w, int(np.ceil(x2))))
+            y2 = max(0, min(h, int(np.ceil(y2))))
+            if x2 <= x1 or y2 <= y1:
+                return target_img
             bbox = (x1, y1, x2, y2)
             
             # 3. Crear máscara suave con protección de flequillo
@@ -251,7 +316,7 @@ def detect_mouth_open(target_face, landmarks_106, target_image):
     return False, None, 0.0
 
 
-def create_mouth_preservation_mask(target_img, mouth_region, blend_ratio=0.95):
+def create_mouth_preservation_mask(target_img, mouth_region, blend_ratio=0.45):
     """Crea máscara elíptica para preservar la boca original."""
     try:
         h, w = target_img.shape[:2]
@@ -288,7 +353,7 @@ def create_mouth_preservation_mask(target_img, mouth_region, blend_ratio=0.95):
         ellipse_mask = np.zeros((h, w), dtype=np.float32)
         cv2.ellipse(ellipse_mask, (cx, cy), (axes_x, axes_y), 0, 0, 360, 1.0, -1)
         ellipse_mask = cv2.GaussianBlur(ellipse_mask, (15, 15), 0)
-        preserve_strength = min(0.95, max(0.50, blend_ratio))
+        preserve_strength = min(0.5, max(0.20, blend_ratio))
         mask = np.clip(ellipse_mask * preserve_strength, 0, 1)
         return mask
 

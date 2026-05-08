@@ -83,7 +83,8 @@ def on_face_selection_click(evt: gr.SelectData):
         return gr.update()
 
     total_faces = len(state.SELECTION_FACES_DATA) if state.SELECTION_FACES_DATA else 0
-    face_index = _resolve_gallery_index(evt.index, total_faces, columns=8)
+    # Arreglado: La galería de selección tiene 4 columnas en ui.py
+    face_index = _resolve_gallery_index(evt.index, total_faces, columns=4)
     
     if face_index is None or state.SELECTION_FACES_DATA is None:
         return gr.update()
@@ -95,7 +96,7 @@ def on_face_selection_click(evt: gr.SelectData):
         ui.globals.ui_target_thumbs.append(util.convert_to_gradio(face_data[1], is_rgb=True))
         
         # GUARDAR REFERENCIA PARA PROCESAMIENTO
-        if state.list_files_process:
+        if state.list_files_process and state.selected_preview_index < len(state.list_files_process):
             filename = os.path.basename(state.list_files_process[state.selected_preview_index].filename)
             video_key = f"selected_face_ref_{filename}"
             
@@ -131,6 +132,10 @@ def wire_events(ui_comp):
         rel_index = _resolve_gallery_index(evt.index, total_items, columns=3)
         if rel_index is not None:
             selected_input_face_idx = state.current_input_page * state.FACES_PER_PAGE + rel_index
+            # NUEVO: Marcar esta cara como la identidad origen seleccionada
+            import roop.globals as roop_globals
+            roop_globals.source_face_index = selected_input_face_idx
+            print(f"[SOURCE_SELECT] Cara origen seleccionada: índice #{selected_input_face_idx}")
 
     def on_input_face_delete(evt=None):
         global is_deleting_input_face, selected_input_face_idx
@@ -170,6 +175,8 @@ def wire_events(ui_comp):
             logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), 
             *logic.update_pagination_buttons(total_faces, "input")
         )
+
+    ui_comp["input_faces"].select(fn=on_input_face_select)
 
     def on_target_face_delete(evt=None):
         global is_deleting_target_face, selected_target_face_idx
@@ -401,9 +408,12 @@ def wire_events(ui_comp):
                     print(f"[SOURCE_LOAD] Face too small: {face_img.shape}")
                     continue
                 from roop.types import FaceSet
+                face_obj.face_img = face_img
+                face_obj.face_img_ref = face_img
                 roop.globals.INPUT_FACESETS.append(FaceSet(faces=[face_obj], name=os.path.basename(f_path)))
                 ui.globals.ui_input_thumbs.append(util.convert_to_gradio(face_img, is_rgb=True))
-                print(f"[SOURCE_LOAD] Added face: {face_obj.bbox}")
+                embedding_info = f"embedding={'YES' if hasattr(face_obj, 'embedding') and face_obj.embedding is not None else 'NONE'}"
+                print(f"[SOURCE_LOAD] Added face: {face_obj.bbox} ({embedding_info})")
         
         total_faces = len(ui.globals.ui_input_thumbs)
         return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total_faces, "input"))
@@ -418,7 +428,7 @@ def wire_events(ui_comp):
             roop.globals.selected_face_references.clear()
         
         if not files: 
-            return gr.update(maximum=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False), gr.update()
+            return gr.update(maximum=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False)
         
         threading.Thread(target=_warmup_face_analyser_async, daemon=True).start()
         state.list_files_process = []
@@ -432,9 +442,8 @@ def wire_events(ui_comp):
                 if i == 0: first_preview = preview_img
         
         state.selected_preview_index = 0
-        is_video_present = any(util.is_video(entry.filename) for entry in state.list_files_process)
-        roop.globals.face_swap_mode = 'selected_faces_frame' if is_video_present else 'selected_faces'
-        mode_text = logic.get_mode_text(roop.globals.face_swap_mode)
+        # Forzar modo 'selected' por defecto (la lógica interna de ProcessMgr hará el resto)
+        roop.globals.face_swap_mode = 'selected'
         
         first_entry = state.list_files_process[0]
         roop.globals.target_path = first_entry.filename
@@ -449,11 +458,10 @@ def wire_events(ui_comp):
             [], 
             logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), 
             logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), 
-            *logic.update_pagination_buttons(total_target_faces, "target"), 
-            gr.update(value=mode_text)
+            *logic.update_pagination_buttons(total_target_faces, "target")
         )
 
-    ui_comp["bt_destfiles"].change(fn=on_dest_changed, inputs=[ui_comp["bt_destfiles"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["selected_face_detection"]])
+    ui_comp["bt_destfiles"].change(fn=on_dest_changed, inputs=[ui_comp["bt_destfiles"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
 
     # NAVEGACIÓN
     def jump_frame(current_f, delta):
@@ -502,6 +510,8 @@ def wire_events(ui_comp):
     def clear_all_target_faces():
         roop.globals.TARGET_FACES.clear()
         ui.globals.ui_target_thumbs.clear()
+        if hasattr(roop.globals, 'selected_face_references'):
+            roop.globals.selected_face_references.clear()
         state.current_target_page = 0
         total_faces = 0
         return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total_faces, "target"))
@@ -525,6 +535,16 @@ def wire_events(ui_comp):
     def remove_selected_target_face():
         global selected_target_face_idx
         if selected_target_face_idx is not None and 0 <= selected_target_face_idx < len(roop.globals.TARGET_FACES):
+            # Obtener el nombre del archivo para limpiar también la referencia global
+            if state.list_files_process and state.selected_preview_index < len(state.list_files_process):
+                filename = os.path.basename(state.list_files_process[state.selected_preview_index].filename)
+                if hasattr(roop.globals, 'selected_face_references'):
+                    video_key = f"selected_face_ref_{filename}"
+                    if video_key in roop.globals.selected_face_references:
+                        del roop.globals.selected_face_references[video_key]
+                    if filename in roop.globals.selected_face_references:
+                        del roop.globals.selected_face_references[filename]
+
             roop.globals.TARGET_FACES.pop(selected_target_face_idx)
             ui.globals.ui_target_thumbs.pop(selected_target_face_idx)
             total_faces = len(ui.globals.ui_target_thumbs)
@@ -540,11 +560,15 @@ def wire_events(ui_comp):
     def update_enhancer(enhancer_value):
         roop.globals.selected_enhancer = enhancer_value
         roop.globals.use_enhancer = enhancer_value != "None"
-
+    
+    def update_enhancer_blend(enhancer_blend_value):
+        roop.globals.enhancer_blend_factor = enhancer_blend_value
+    
     ui_comp["enhancer"].change(fn=update_enhancer, inputs=[ui_comp["enhancer"]])
+    ui_comp["enhancer_blend"].change(fn=update_enhancer_blend, inputs=[ui_comp["enhancer_blend"]])
 
     # PROCESAMIENTO
-    ui_comp["bt_start"].click(fn=on_start_process, inputs=[ui_comp["selected_face_detection"], ui_comp["fake_preview"], ui_comp["autorotate"], ui_comp["smoothing"], ui_comp["face_distance"], ui_comp["blend_ratio"], ui_comp["enhancer"]], outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]])
+    ui_comp["bt_start"].click(fn=on_start_process, inputs=[ui_comp["fake_preview"], ui_comp["autorotate"], ui_comp["smoothing"], ui_comp["face_distance"], ui_comp["blend_ratio"], ui_comp["enhancer_blend"], ui_comp["enhancer"]], outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]])
     ui_comp["bt_stop"].click(fn=on_stop_process, outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]])
     if "bt_open_output" in ui_comp: ui_comp["bt_open_output"].click(fn=lambda: ui.globals.open_output_folder())
 
@@ -558,9 +582,11 @@ def on_target_page_change(delta):
     state.current_target_page = max(0, min(max(0, (total-1)//state.FACES_PER_PAGE), state.current_target_page + delta))
     return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total, "target"))
 
-async def on_start_process(detection_mode, fake_preview, auto_rot, temp_smooth, dist, blend, enhancer):
+async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer):
     from ui.tabs.faceswap.logic import start_swap
-    gen = start_swap(enhancer=enhancer, detection=detection_mode, keep_frames=False, wait_after_extraction=False, skip_audio=False, face_distance=dist, blend_ratio=blend, blend_mode="blend", selected_mask_engine="None", processing_method="Inswapper 128", no_face_action="skip", vr_mode=False, use_single_source_all=False, autorotate=auto_rot, temporal_smoothing=temp_smooth, num_swap_steps=1, imagemask=None)
+    # Configurar enhancer_blend_factor en globals antes del procesamiento
+    roop.globals.enhancer_blend_factor = enhancer_blend
+    gen = start_swap(enhancer=enhancer, keep_frames=False, wait_after_extraction=False, skip_audio=False, face_distance=dist, blend_ratio=blend, blend_mode="blend", selected_mask_engine="None", processing_method="Inswapper 128", no_face_action="skip", vr_mode=False, use_single_source_all=False, autorotate=auto_rot, temporal_smoothing=temp_smooth, num_swap_steps=1, imagemask=None)
     for value in gen:
         yield value
 

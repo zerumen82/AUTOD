@@ -257,6 +257,8 @@ def batch_process_regular(
     from roop.ProcessMgr import ProcessMgr
     from roop.ProcessOptions import ProcessOptions
     
+    print(f"[DIAG] batch_process_regular() called. INPUT_FACESETS has {len(getattr(roop.globals, 'INPUT_FACESETS', []))} facesets")
+    
     total_files = len(list_files_process)
     if total_files == 0:
         yield (100, "No hay archivos para procesar")
@@ -337,9 +339,13 @@ def batch_process_regular(
                     fps=fps,
                     skip_audio=getattr(roop.globals, 'skip_audio', False)
                 ):
-                    # Calcular progreso total combinando archivo y frame
+                    # El porcentaje principal es global del lote; el mensaje conserva
+                    # el avance local del video para evitar lecturas ambiguas en la UI.
                     combined_progress = progress_percent + (video_progress / total_files)
-                    yield (combined_progress, video_msg)
+                    progress_scope = f"Archivo {processed_files + 1}/{total_files}"
+                    if total_files > 1:
+                        progress_scope += f" | video {video_progress:.1f}%"
+                    yield (combined_progress, f"{progress_scope} | {video_msg}")
             else:
                 # Procesar imagen - usar imdecode para soportar WebP
                 from roop.capturer import get_image_frame

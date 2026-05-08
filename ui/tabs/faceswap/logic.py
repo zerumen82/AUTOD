@@ -152,16 +152,11 @@ def find_best_matching_face(detected_faces, reference_embedding):
     return best_idx
 
 def translate_swap_mode(mode_text):
-    if mode_text == "First found": return "selected_faces"
-    if mode_text == "Selected faces": return "selected_faces"
-    if mode_text == "Selected faces frame": return "selected_faces_frame"
     if mode_text == "All faces": return "all"
-    return "selected_faces"
+    return "selected"
 
 def get_mode_text(mode):
     if mode == "all": return "All faces"
-    if mode in ["selected", "selected_faces"]: return "Selected faces"
-    if mode == "selected_faces_frame": return "Selected faces frame"
     return "Selected faces"
 
 def start_swap_process(files, detection, enhancer, face_distance, blend_ratio):
@@ -200,11 +195,14 @@ def update_pagination_buttons(total_faces, gallery_type):
     return gr.update(interactive=prev_enabled), gr.update(interactive=next_enabled)
 
 
-def start_swap(enhancer, detection, keep_frames, wait_after_extraction, skip_audio, face_distance, blend_ratio, blend_mode, selected_mask_engine, processing_method, no_face_action, vr_mode, use_single_source_all, autorotate, temporal_smoothing, num_swap_steps, imagemask):
+def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_distance, blend_ratio, blend_mode, selected_mask_engine, processing_method, no_face_action, vr_mode, use_single_source_all, autorotate, temporal_smoothing, num_swap_steps, imagemask=None):
+
     """Inicia el procesamiento de face swap - Versión modular"""
     # LIMPIEZA DE TEMPORALES AL INICIO
     cleanup_temp_files()
-    
+
+    print(f"[DIAG] start_swap() called. INPUT_FACESETS has {len(getattr(roop.globals, 'INPUT_FACESETS', []))} facesets")
+
     from roop.core import batch_process_regular
     import time
     import shutil
@@ -234,20 +232,20 @@ def start_swap(enhancer, detection, keep_frames, wait_after_extraction, skip_aud
         return
     
     # Configurar parámetros
-    face_swap_mode = translate_swap_mode(detection)
-    roop.globals.face_swap_mode = face_swap_mode
+    roop.globals.face_swap_mode = 'selected'
     roop.globals.selected_enhancer = enhancer if enhancer else "None"
     roop.globals.distance_threshold = face_distance
     roop.globals.blend_ratio = blend_ratio
     roop.globals.blend_mode = blend_mode
     roop.globals.keep_frames = keep_frames
 
-    # Verificar caras de destino para modos que las requieren
-    if face_swap_mode in ['selected_faces', 'selected'] and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0):
-        error_msg = "[ERROR] ERROR: No hay caras de destino seleccionadas. Haz clic en una cara detectada para añadirla a 'Caras de Destino'."
+    # Verificar caras de destino para fotos (en video el fallback es automático)
+    is_video_present = any(util.is_video(entry.filename) for entry in state.list_files_process)
+    if not is_video_present and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0):
+        error_msg = "[ERROR] ERROR: No hay caras de destino seleccionadas. En fotos, debes elegir al menos una cara para cambiar."
         print(f"[DIAGNÓSTICO] {error_msg}")
         gr.Error(error_msg)
-        yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin caras destino"))
+        yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin selección"))
         return
     roop.globals.skip_audio = skip_audio
     roop.globals.temporal_smoothing = temporal_smoothing
@@ -288,8 +286,23 @@ def start_swap(enhancer, detection, keep_frames, wait_after_extraction, skip_aud
     start_t = time.time()
     total_files = len(state.list_files_process)
     
+    print(f"[DIAG] About to call batch_process_regular. INPUT_FACESETS has {len(getattr(roop.globals, 'INPUT_FACESETS', []))} facesets")
+    
     # Preparar mask_engine
     mask_engine = selected_mask_engine if selected_mask_engine != "None" else None
+    
+    # DIAGNÓSTICO DETALLADO DE TARGET_FACES
+    target_faces_list = getattr(roop.globals, 'TARGET_FACES', [])
+    selected_refs = getattr(roop.globals, 'selected_face_references', {})
+    
+    print(f"[DIAGNÓSTICO BATCH] Iniciando FaceSwap...")
+    print(f" - Modo traducido: {face_swap_mode}")
+    print(f" - Caras de destino (TARGET_FACES): {len(target_faces_list)}")
+    print(f" - Referencias guardadas (selected_face_references): {len(selected_refs)}")
+    
+    if face_swap_mode == 'selected':
+        for i, ref_key in enumerate(selected_refs.keys()):
+            print(f"   [Ref {i+1}] Clave: {ref_key}")
     
     # Yield estado inicial (botones)
     yield (
@@ -307,7 +320,7 @@ def start_swap(enhancer, detection, keep_frames, wait_after_extraction, skip_aud
             {"layers": []},
             roop.globals.num_swap_steps,
             None,
-            0,
+            getattr(state, "SELECTED_FACE_INDEX", 0),
             temporal_smoothing,
         ):
             elapsed = time.time() - start_t
@@ -319,7 +332,7 @@ def start_swap(enhancer, detection, keep_frames, wait_after_extraction, skip_aud
                 remaining = (total_files - files_done) / rate if rate > 0 else 0
                 time_remaining = time.strftime("%H:%M:%S", time.gmtime(remaining))
             
-            print(f"[UI] Progreso: {progress_percent:.1f}% - {progress_message}")
+            print(f"[UI] Progreso global: {progress_percent:.1f}% - {progress_message}")
             
             yield (
                 gr.update(variant="secondary", interactive=False),

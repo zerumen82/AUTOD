@@ -116,8 +116,12 @@ def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, in
     """
     Crea una máscara suave ELÍPTICA con protección de oclusiones (flequillo/pelo).
     """
-    x1, y1, x2, y2 = map(int, bbox)
     h, w = frame_shape[:2]
+    x1, y1, x2, y2 = map(int, bbox)
+    x1 = max(0, min(w - 1, x1))
+    y1 = max(0, min(h - 1, y1))
+    x2 = max(0, min(w, x2))
+    y2 = max(0, min(h, y2))
     
     mask = np.zeros((h, w), dtype=np.float32)
     
@@ -135,13 +139,15 @@ def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, in
     
     # Aplicar protección contra oclusiones (Evita el "efecto flequillo")
     if occlusion_mask is not None:
-        occ_h, occ_w = occlusion_mask.shape[:2]
-        # Asegurar que la máscara de oclusión encaje en el bbox
-        full_occ_mask = np.zeros_like(mask)
-        full_occ_mask[y1:y1+occ_h, x1:x1+occ_w] = occlusion_mask[:y2-y1, :x2-x1]
-        
-        # Restar oclusión de la máscara de swap (donde hay pelo, no hay swap)
-        mask = cv2.subtract(mask, full_occ_mask)
+        bbox_w = max(0, x2 - x1)
+        bbox_h = max(0, y2 - y1)
+        if bbox_w > 0 and bbox_h > 0:
+            full_occ_mask = np.zeros_like(mask)
+            occ_resized = cv2.resize(occlusion_mask, (bbox_w, bbox_h), interpolation=cv2.INTER_LINEAR)
+            full_occ_mask[y1:y2, x1:x2] = occ_resized
+            
+            # Restar oclusión de la máscara de swap (donde hay pelo, no hay swap)
+            mask = cv2.subtract(mask, full_occ_mask)
     
     # Difuminado de bordes
     if feather > 0:
@@ -159,26 +165,53 @@ def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray,
     try:
         if mask.dtype != np.uint8:
             mask = (mask * 255).astype(np.uint8)
+        original_mask = mask.copy()
         
         # IMPORTANTE: Encoger ligeramente la máscara para Poisson para evitar que toque bordes
         kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.erode(mask, kernel, iterations=1)
+        poisson_mask = cv2.erode(mask, kernel, iterations=1)
+        if cv2.countNonZero(poisson_mask) < 10:
+            poisson_mask = original_mask.copy()
         
+        # Recortar la zona activa. seamlessClone falla si se le pasa un frame completo
+        # centrado en una cara, porque el source no cabe dentro del destino.
+        x, y, bw, bh = cv2.boundingRect(poisson_mask)
+        if bw <= 1 or bh <= 1:
+            raise ValueError("Poisson mask is empty")
+
+        pad = 8
+        src_h, src_w = source.shape[:2]
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(src_w, x + bw + pad)
+        y2 = min(src_h, y + bh + pad)
+
+        source_crop = source[y1:y2, x1:x2]
+        mask_crop = poisson_mask[y1:y2, x1:x2]
+
+        if source_crop.size == 0 or mask_crop.size == 0:
+            raise ValueError("Poisson crop is empty")
+
         # Bordes negros obligatorios para evitar crash de seamlessClone
-        mask[0, :] = 0; mask[-1, :] = 0; mask[:, 0] = 0; mask[:, -1] = 0
+        mask_crop[0, :] = 0
+        mask_crop[-1, :] = 0
+        mask_crop[:, 0] = 0
+        mask_crop[:, -1] = 0
+
+        crop_center = (x1 + source_crop.shape[1] // 2, y1 + source_crop.shape[0] // 2)
         
         # NORMAL_CLONE es a veces más estable contra reflejos negros que MIXED_CLONE
         result = cv2.seamlessClone(
-            source.astype(np.uint8),
+            source_crop.astype(np.uint8),
             target.astype(np.uint8),
-            mask,
-            center,
+            mask_crop,
+            crop_center,
             cv2.NORMAL_CLONE 
         )
         return result
     except Exception as e:
-        print(f"[WARN] Poisson failed, using multi-band fallback")
-        mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) / 255.0
+        print(f"[WARN] Poisson failed ({e}), using alpha fallback")
+        mask_3ch = cv2.cvtColor(original_mask if 'original_mask' in locals() else mask, cv2.COLOR_GRAY2BGR) / 255.0
         return (source * mask_3ch + target * (1.0 - mask_3ch)).astype(np.uint8)
 
 

@@ -172,6 +172,7 @@ class ProcessMgr:
 
         self.selected_assignment_ttl = getattr(roop.globals, 'selected_assignment_ttl', 60)
         self.selected_top_k = getattr(roop.globals, 'selected_top_k', 3)
+        self._auto_source_face_cache = {}
         
         # NUEVO: Suavizado temporal para boca - evita flickering en preservación de boca
         self._mouth_open_history = {}  # Historial de apertura de boca por video
@@ -205,6 +206,7 @@ class ProcessMgr:
             print("[WARNING] No hay caras destino seleccionadas")
 
         self.global_source_for_all_id = None
+        self._auto_source_face_cache.clear()
 
     def _cache_source_embeddings(self):
         self.source_embeddings_cache.clear()
@@ -329,14 +331,11 @@ class ProcessMgr:
                 target_faces_detected = get_all_faces_smart(frame, min_score=None, for_target=True)
 
                 valid_faces = target_faces_detected
-                
+
                 if not valid_faces:
                     return frame
 
                 face_swap_mode = getattr(self.options, 'face_swap_mode', 'selected')
-                
-                # DEBUG: Verificar qué modo se está recibiendo
-                print(f"[DEBUG] process_frame: face_swap_mode='{face_swap_mode}' (tipo: {type(face_swap_mode).__name__})")
                 
                 # Establecer clave de video para suavizado temporal de boca
                 video_path = getattr(self.options, 'current_video_path', None)
@@ -345,131 +344,84 @@ class ProcessMgr:
                 if video_path:
                     self._current_video_key = f"video_{os.path.basename(video_path)}"
                 else:
-                    self._current_video_key = f"frame_{call_num}"
+                    self._current_video_key = f"frame_{self.frame_count}"
 
                 faces_to_process = []
 
-                if face_swap_mode == 'selected_faces_frame':
-                    video_path = getattr(self.options, 'current_video_path', None)
-                    if video_path is None and file_path:
-                        video_path = file_path
+                # DETERMINAR SI ES VÍDEO REAL O IMAGEN
+                is_real_video = getattr(self.options, 'current_video_path', None) is not None
+                
+                faces_to_process = []
+                
+                if is_real_video:
+                    # ES UN VÍDEO: Siempre procesar una cara (Tracking)
+                    video_path = self.options.current_video_path
+                    video_basename = os.path.basename(video_path)
                     
-                    if video_path:
-                        video_basename = os.path.basename(video_path)
-                        video_key = f"selected_face_ref_{video_basename}"
-                        
-                        # NUEVO: Inicializar si es el primer frame de este video
-                        assigned_attr = f'_target_face_assigned_{video_basename}'
-                        if not hasattr(self, assigned_attr):
-                            print(f"[SELECTED_FACES_FRAME] Inicializando tracking para {video_basename}")
-                            self._setup_selected_faces_frame_for_video(video_path, valid_faces)
-                        
-                        # Verificar si hay referencia guardada en selected_face_references
-                        has_ref = False
-                        if hasattr(roop.globals, 'selected_face_references'):
-                            if video_key in roop.globals.selected_face_references:
-                                has_ref = True
-                            else:
-                                for k in roop.globals.selected_face_references.keys():
-                                    if k == video_basename or k.endswith(f"_{video_basename}"):
-                                        has_ref = True
-                                        break
-                        
-                        # Intentar encontrar la cara objetivo (solo si hay selección o tracking activo)
-                        target_face = self._find_target_face_for_selected_mode(video_path, valid_faces)
-                        
-                        if target_face:
-                            target_key = self._get_face_key(target_face)
-                            if target_key in self._frame_processed_faces:
-                                print(f"[DEBUG] Cara ya procesada en este frame, saltando")
-                                return frame
+                    # Asegurar que tenemos una cara de referencia (si no hay, _setup_selected_faces_frame_for_video elegirá la más grande)
+                    if not hasattr(self, f'_reference_face_selected_{video_basename}'):
+                        self._setup_selected_faces_frame_for_video(video_path, valid_faces)
+                    
+                    target_face = self._find_target_face_for_selected_mode(video_path, valid_faces)
+                    if target_face:
+                        target_key = self._get_face_key(target_face)
+                        if target_key not in self._frame_processed_faces:
                             self._frame_processed_faces[target_key] = True
                             faces_to_process = [target_face]
-                        else:
-                            # No se encontró la cara objetivo (requiere selección manual)
-                            if not has_ref:
-                                print(f"[SELECTED_FACES_FRAME] ⚠️ No hay cara seleccionada por el usuario para {video_basename} - OMITIENDO")
-                            faces_to_process = []
-                    else:
-                        # Sin video_path, no procesar
-                        faces_to_process = []
+                else:
+                    # ES UNA FOTO: Solo procesar si hay una selección manual
+                    filename = os.path.basename(file_path) if file_path else "unknown"
+                    video_key = f"selected_face_ref_{filename}"
+                    face_ref_data = None
 
-                elif face_swap_mode == 'all':
-                    faces_to_process = valid_faces
+                    if hasattr(roop.globals, 'selected_face_references'):
+                        keys_to_try = [video_key, filename]
+                        for k in roop.globals.selected_face_references.keys():
+                            if filename in k or k in filename:
+                                keys_to_try.append(k)
 
-                elif face_swap_mode in ['selected', 'selected_faces']:
-                    # Modo "Selected Faces": Procesa UNA cara por imagen automáticamente
-                    # Target = user-selected face per image (de selected_face_references)
-                    # Source = ALEATORIO del faceset de origen
+                        for k in keys_to_try:
+                            if k in roop.globals.selected_face_references:
+                                face_ref_data = roop.globals.selected_face_references[k]
+                                break
                     
-                    if file_path:
-                        filename = os.path.basename(file_path)
-                        video_key = f"selected_face_ref_{filename}"
-                        face_found = False
-                        face_ref_data = None
-                        
-                        if hasattr(roop.globals, 'selected_face_references'):
-                            # Intentar varias combinaciones de claves
-                            keys_to_try = [video_key, filename]
-                            for k in roop.globals.selected_face_references.keys():
-                                if filename in k or k in filename:
-                                    keys_to_try.append(k)
-                            
-                            for k in keys_to_try:
-                                if k in roop.globals.selected_face_references:
-                                    face_ref_data = roop.globals.selected_face_references[k]
-                                    break
-                            
-                        if face_ref_data:
-                                target_face_ref = face_ref_data.get('face_obj')
+                    if face_ref_data:
+                        target_face_ref = face_ref_data.get('face_obj')
+                        if target_face_ref:
+                            best_match = None
+                            best_iou = 0.0
+                            best_emb_match = None
+                            best_score = 0.0
+
+                            # 1. Intentar por IoU
+                            if hasattr(target_face_ref, 'bbox') and target_face_ref.bbox is not None:
+                                for face in valid_faces:
+                                    iou = self._bbox_iou(target_face_ref.bbox, face.bbox)
+                                    if iou > best_iou:
+                                        best_iou = iou
+                                        best_match = face
                                 
-                                # Inicializar variables de búsqueda SIEMPRE para evitar "referenced before assignment"
-                                best_match = None
-                                best_iou = 0.0
-                                best_emb_match = None
-                                best_score = 0.0
-                                
-                                if target_face_ref is not None and hasattr(target_face_ref, 'bbox') and target_face_ref.bbox is not None:
-                                    for face in valid_faces:
-                                        if not hasattr(face, 'bbox'):
-                                            continue
-                                        iou = self._bbox_iou(target_face_ref.bbox, face.bbox)
-                                        if iou > best_iou:
-                                            best_iou = iou
-                                            best_match = face
-                                    
-                                    if best_match and best_iou > 0.1:  # Umbral BAJADO para más matches
-                                        faces_to_process = [best_match]
-                                        face_found = True
-                                        print(f"[SELECTED_FACES] Cara encontrada por IoU ({best_iou:.2f})")
-                                    # Si no hay match por bbox, intentar por embedding
-                                    elif hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None:
-                                        for face in valid_faces:
-                                            if hasattr(face, 'embedding') and face.embedding is not None:
-                                                score = self._calculate_similarity(target_face_ref.embedding, face.embedding)
-                                                if score > best_score:
-                                                    best_score = score
-                                                    best_emb_match = face
-                                        # Usar MEJOR match disponible (umbral BAJADO a 0.05)
-                                        if best_emb_match and best_score > 0.05:
-                                            faces_to_process = [best_emb_match]
-                                            face_found = True
-                                            print(f"[SELECTED_FACES] Cara encontrada por Embedding ({best_score:.2f})")
-                                        # Fallback: usar el mejor match por embedding aunque sea muy bajo
-                                        elif not face_found and best_emb_match is not None:
-                                            faces_to_process = [best_emb_match]
-                                            face_found = True
-                                            print(f"[SELECTED_FACES] Fallback por embedding ({best_score:.2f})")
-                                
-                                # Fallback por IoU solo si no se encontró nada más
-                                if not face_found and best_match and best_iou > 0.1:
+                                if best_match and best_iou > 0.15:
                                     faces_to_process = [best_match]
-                                    face_found = True
-                                    print(f"[SELECTED_FACES] Fallback por IoU ({best_iou:.2f})")
+                                    print(f"[AUTO] Foto: Match por IoU ({best_iou:.2f}) para {filename}")
+                            
+                            # 2. Si IoU no es suficiente, intentar por Embedding
+                            if not faces_to_process and hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None:
+                                for face in valid_faces:
+                                    if hasattr(face, 'embedding') and face.embedding is not None:
+                                        score = self._calculate_similarity(target_face_ref.embedding, face.embedding)
+                                        if score > best_score:
+                                            best_score = score
+                                            best_emb_match = face
+                                
+                                if best_emb_match and best_score > 0.15:
+                                    faces_to_process = [best_emb_match]
+                                    print(f"[AUTO] Foto: Match por Embedding ({best_score:.2f}) para {filename}")
                     else:
-                        # Sin file_path, no procesar
+                        # SIN SELECCIÓN EN FOTO: No hacer nada (como pidió el usuario)
+                        print(f"[AUTO] Foto {filename}: Sin selección, omitiendo swap.")
                         faces_to_process = []
-                    
+
                 else:
                     faces_to_process = valid_faces
                   
@@ -477,6 +429,8 @@ class ProcessMgr:
                 result_frame = frame.copy()
                 
                 faces_to_process_limited = faces_to_process[:1] if face_swap_mode in ['selected_faces_frame', 'selected_faces', 'selected'] else faces_to_process
+                
+
                 
                 for i, target_face in enumerate(faces_to_process_limited):
                     try:
@@ -490,10 +444,10 @@ class ProcessMgr:
                         
                         video_path = getattr(self.options, 'current_video_path', None)
                         source_face = self._select_source_face(target_face, all_faces, face_swap_mode, video_path)
-                        
+
                         if source_face is None:
                             continue
-                        
+
                         result_frame = self._process_face_swap_v21(
                             source_face, target_face, result_frame, frame, enable_temporal_smoothing
                         )
@@ -513,80 +467,177 @@ class ProcessMgr:
             print(f"Frame processing error: {e}")
             return frame
 
-    def _select_source_face(self, target_face, candidate_faces, face_swap_mode, video_path=None):
+    def _score_source_face_quality(self, face):
+        """Score a source face for inswapper_128. Requires a valid embedding."""
+        try:
+            if not hasattr(face, 'embedding') or face.embedding is None:
+                return float('-inf')
+
+            emb = np.array(face.embedding, dtype=np.float32).flatten()
+            if emb.size == 0 or np.linalg.norm(emb) <= 0:
+                return float('-inf')
+
+            score = 0.0
+
+            det_score = getattr(face, 'det_score', None)
+            if det_score is not None:
+                score += max(0.0, min(1.0, float(det_score))) * 2.0
+
+            face_score = getattr(face, 'score', None)
+            if face_score is not None:
+                score += max(0.0, min(1.0, float(face_score))) * 0.5
+
+            if hasattr(face, 'bbox') and face.bbox is not None:
+                x1, y1, x2, y2 = [float(v) for v in face.bbox]
+                face_w = max(0.0, x2 - x1)
+                face_h = max(0.0, y2 - y1)
+                face_area = face_w * face_h
+
+                if face_w < 30 or face_h < 30:
+                    score -= 2.0
+                else:
+                    score += min(2.0, np.log1p(face_area) / 7.0)
+
+                aspect = face_w / face_h if face_h > 0 else 0.0
+                if 0.65 <= aspect <= 1.45:
+                    score += 0.4
+                else:
+                    score -= 0.5
+
+                ref_img = getattr(face, 'face_img_ref', None)
+                if ref_img is None:
+                    ref_img = getattr(face, 'face_img', None)
+                if isinstance(ref_img, np.ndarray) and ref_img.size > 0:
+                    img_h, img_w = ref_img.shape[:2]
+                    img_area = max(1, img_w * img_h)
+                    area_ratio = face_area / img_area
+                    is_full_image_bbox = (
+                        x1 <= 2 and y1 <= 2 and
+                        x2 >= img_w - 2 and y2 >= img_h - 2 and
+                        area_ratio > 0.85
+                    )
+                    if is_full_image_bbox:
+                        score -= 3.0
+                    elif 0.03 <= area_ratio <= 0.75:
+                        score += 0.6
+
+            kps = getattr(face, 'kps', None)
+            if kps is not None and len(kps) >= 5:
+                score += 0.5
+
+            normed_embedding = getattr(face, 'normed_embedding', None)
+            if normed_embedding is not None:
+                score += 0.3
+
+            return score
+        except Exception:
+            return float('-inf')
+
+    def _select_best_source_face(self, candidate_faces, mode_label):
+        cache_key = (mode_label, tuple(id(face) for face in candidate_faces))
+        if cache_key in self._auto_source_face_cache:
+            return self._auto_source_face_cache[cache_key]
+
+        best_idx = None
+        best_face = None
+        best_score = float('-inf')
+
+        for idx, face in enumerate(candidate_faces):
+            score = self._score_source_face_quality(face)
+            if score > best_score:
+                best_idx = idx
+                best_face = face
+                best_score = score
+
+        if best_face is None or best_score == float('-inf'):
+            print(f"[SELECT_SOURCE] Modo {mode_label}: ninguna cara origen valida con embedding")
+            return None
+
+        print(f"[SELECT_SOURCE] Modo {mode_label}: mejor cara origen #{best_idx + 1} (quality={best_score:.2f})")
+        self._auto_source_face_cache[cache_key] = best_face
+        return best_face
+
+    def _cosine_similarity(self, emb1, emb2):
+        """Calcula similitud coseno entre dos embeddings"""
+        try:
+            if emb1 is None or emb2 is None:
+                return -1.0
+            emb1 = np.array(emb1).flatten()
+            emb2 = np.array(emb2).flatten()
+            dot = np.dot(emb1, emb2)
+            norm1 = np.linalg.norm(emb1)
+            norm2 = np.linalg.norm(emb2)
+            if norm1 == 0 or norm2 == 0:
+                return -1.0
+            return dot / (norm1 * norm2)
+        except Exception:
+            return -1.0
+
+    def _select_source_face_by_similarity(self, target_face, candidate_faces):
+        """
+        Selecciona la cara origen que mejor coincide con el target usando embedding similarity.
+        Para modo 'selected_faces_frame': hace matching real entre target y source.
+        """
         try:
             if not candidate_faces:
                 return None
             
+            target_emb = getattr(target_face, 'embedding', None)
+            if target_emb is None:
+                print("[SELECT_SOURCE] Target sin embedding, usando quality fallback")
+                return self._select_best_source_face(candidate_faces, 'similarity_fallback')
+            
+            best_face = None
+            best_sim = -1.0
+            best_idx = -1
+            
+            for idx, src_face in enumerate(candidate_faces):
+                src_emb = getattr(src_face, 'embedding', None)
+                if src_emb is None:
+                    continue
+                sim = self._cosine_similarity(target_emb, src_emb)
+                if sim > best_sim:
+                    best_sim = sim
+                    best_face = src_face
+                    best_idx = idx
+            
+            if best_face is None or best_sim < 0.3:
+                print(f"[SELECT_SOURCE] No source con buen match (best_sim={best_sim:.4f}), usando quality")
+                return self._select_best_source_face(candidate_faces, 'poor_match_fallback')
+            
+            print(f"[SELECT_SOURCE] Modo selected_faces_frame: mejor match cara origen #{best_idx + 1} (similarity={best_sim:.4f})")
+            return best_face
+            
+        except Exception as e:
+            print(f"[ERROR] _select_source_face_by_similarity: {e}")
+            return None
+
+    def _select_source_face(self, target_face, candidate_faces, face_swap_mode, video_path=None):
+        try:
+            if not candidate_faces:
+                return None
+                
+            # NUEVO: Si el usuario seleccionó una cara origen específica, usar ESA
+            source_idx = getattr(roop.globals, 'source_face_index', 0)
+            if source_idx is not None and 0 <= source_idx < len(self.input_facesets):
+                # source_face_index apunta a INPUT_FACESETS, obtener la cara de ese FaceSet
+                selected_faceset = self.input_facesets[source_idx]
+                if hasattr(selected_faceset, 'faces') and selected_faceset.faces:
+                    source_face = selected_faceset.faces[0]  # Cada FaceSet tiene 1 cara
+                    print(f"[SELECT_SOURCE] Usando cara origen seleccionada por usuario: FaceSet #{source_idx + 1}")
+                    return source_face
+                
             # Modo "Selected Faces Frame" (Tracking de video):
             if face_swap_mode == 'selected_faces_frame':
-                # Usar la cara de referencia guardada para este video (tracking)
-                if video_path:
-                    video_basename = os.path.basename(video_path)
-                    video_key = f"selected_face_ref_{video_basename}"
-                    if hasattr(roop.globals, 'selected_face_references') and video_key in roop.globals.selected_face_references:
-                        face_ref_data = roop.globals.selected_face_references[video_key]
-                        ref_embedding = face_ref_data.get('embedding')
-                        
-                        # Buscar la cara en candidate_faces que coincida con la referencia (con fallback)
-                        if ref_embedding is not None:
-                            best_match = None
-                            best_score = -1
-                            for face in candidate_faces:
-                                if hasattr(face, 'embedding') and face.embedding is not None:
-                                    score = self._calculate_similarity(ref_embedding, face.embedding)
-                                    if score > best_score:
-                                        best_score = score
-                                        best_match = face
-                            if best_match and best_score > 0.0:
-                                print(f"[SELECT_SOURCE] Modo selected_faces_frame: cara de referencia (score={best_score:.2f})")
-                                return best_match
-                
-                # Fallback: primera cara disponible
-                source_face = candidate_faces[0]
-                print(f"[SELECT_SOURCE] Modo selected_faces_frame: primera cara (fallback)")
-                return source_face
+                # La referencia del video decide QUE cara destino seguir; la identidad
+                # origen se elige automaticamente entre las fuentes cargadas.
+                # NUEVO: Usar similitud de embedding para matching correcto
+                return self._select_source_face_by_similarity(target_face, candidate_faces)
             
             if face_swap_mode in ['selected', 'selected_faces']:
-                if not candidate_faces:
-                    return None
-                # Buscar la cara MÁS SIMILAR por embedding (máxima similitud con cara origen)
-                # BAJAMOS umbrales: queremos que se parezca LO MÁS POSIBLE a la cara origen
-                if hasattr(target_face, 'embedding') and target_face.embedding is not None:
-                    best_match = None
-                    best_score = -1
-                    best_size = 0
-                    for face in candidate_faces:
-                        if hasattr(face, 'embedding') and face.embedding is not None:
-                            score = self._calculate_similarity(target_face.embedding, face.embedding)
-                            face_size = 0
-                            if hasattr(face, 'bbox') and face.bbox is not None:
-                                x1, y1, x2, y2 = face.bbox
-                                face_size = (x2 - x1) * (y2 - y1)
-                            if score > best_score:
-                                best_score = score
-                                best_match = face
-                                best_size = face_size
-                            elif face_size > best_size:
-                                best_size = face_size
-                                if not hasattr(self, '_largest_candidate'):
-                                    self._largest_candidate = face
-                    
-                    # SIEMPRE usar best_match (aunque score sea bajo) - el usuario quiere swap sí o sí
-                    if best_match:
-                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: cara por embedding (score={best_score:.2f})")
-                        return best_match
-                    else:
-                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: sin embedding, usando primera cara")
-                        return candidate_faces[0]
-                # Fallback: primera cara disponible
-                source_face = candidate_faces[0]
-                print(f"[SELECT_SOURCE] Modo {face_swap_mode}: primera cara (fallback sin embedding)")
-                return source_face
+                return self._select_best_source_face(candidate_faces, face_swap_mode)
              
-            # Modo "All": cara más grande
-            best_face = max(candidate_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-            return best_face
+            return self._select_best_source_face(candidate_faces, face_swap_mode)
             
         except Exception as e:
             print(f"[ERROR] _select_source_face: {e}")
@@ -850,8 +901,9 @@ class ProcessMgr:
         # Calculate expected position variance
         if len(position_history) >= 5:
             recent_dists = []
-            for i in range(-5, -1):
-                if abs(i) <= len(position_history):
+            # Calcular distancias entre posiciones consecutivas (últimas 4)
+            for i in range(len(position_history)-1, len(position_history)-5, -1):
+                if i > 0:
                     d = np.sqrt((position_history[i][0] - position_history[i-1][0])**2 + 
                                 (position_history[i][1] - position_history[i-1][1])**2)
                     recent_dists.append(d)
@@ -973,24 +1025,25 @@ class ProcessMgr:
                         if original_embedding is not None and hasattr(face, 'embedding') and face.embedding is not None:
                             emb_score = self._calculate_similarity(original_embedding, face.embedding)
                             
-                            # Dynamic threshold based on scene
+                            # Dynamic threshold based on scene (Relaxed)
                             if scene_state.get('is_close_up'):
-                                emb_thresh = 0.12  # More lenient for close-ups
+                                emb_thresh = 0.12
                             elif scene_state.get('camera_moving'):
-                                emb_thresh = 0.20  # Moderate for moving camera
+                                emb_thresh = 0.15
                             else:
-                                emb_thresh = 0.25
-                                
+                                emb_thresh = 0.18
+
                             if emb_score >= emb_thresh:
-                                score += emb_score * 0.35  # 35% weight on embedding
+                                score += emb_score * 0.40  # 40% weight on embedding
                             else:
                                 # Check motion consistency - if motion is good, still consider it
                                 motion_consistency = self._calculate_motion_consistency(face, position_history)
-                                if motion_consistency > 0.7:
-                                    score += emb_score * 0.20 + motion_consistency * 0.15
-                                    print(f"[TRACK] Low emb ({emb_score:.2f}) but good motion ({motion_consistency:.2f})")
+                                if emb_score >= 0.10 and motion_consistency > 0.80:
+                                    score += emb_score * 0.25 + motion_consistency * 0.15
+                                    # print(f"[TRACK] Low emb ({emb_score:.2f}) but good motion")
                                 else:
-                                    score -= 0.3  # Penalize bad embedding + bad motion
+                                    score -= 0.1  # Reduced penalty
+
                         else:
                             # No embedding - rely more on distance and motion
                             score += 0.25
@@ -1086,8 +1139,8 @@ class ProcessMgr:
                     
                     print(f"[TRACK] Frame {frame_count}: Lost (score={best_score:.2f}), attempts {lost_count}/15")
                     
-                    # If not too many failures, keep last valid face position as an anchor
-                    if lost_count < 15:
+                    # Mantener un ancla muy brevemente; mas tiempo produce swaps/máscaras desplazadas.
+                    if lost_count < 3:
                         if assigned_face:
                             return assigned_face
                     
@@ -1199,9 +1252,11 @@ class ProcessMgr:
         call_num = ProcessMgr._swap_call_count
         try:
             if not hasattr(source_face, 'embedding') or source_face.embedding is None:
+                print(f"[SWAP_SKIP] Frame {call_num}: cara origen sin embedding; no se puede usar inswapper_128")
                 return original_frame
 
             if not hasattr(target_face, 'bbox') or target_face.bbox is None:
+                print(f"[SWAP_SKIP] Frame {call_num}: cara destino sin bbox")
                 return original_frame
 
 # ============================================
@@ -1296,8 +1351,8 @@ class ProcessMgr:
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
 
-            # Aumentado de 0.4 a 0.8 para que se vea MEJOR la cara de origen (más nítida)
-            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.8)
+            # Usa el valor de la UI/globals, con default 0.3 para que el swap sea visible
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.3)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
@@ -1393,8 +1448,8 @@ class ProcessMgr:
 
             if mouth_open and mouth_region is not None:
                 try:
-                    # Determinar si es video (selected_faces_frame) o imagen
-                    is_video_mode = getattr(roop.globals, 'face_swap_mode', '') == 'selected_faces_frame'
+                    # Determinar si es video real o imagen
+                    is_video_mode = getattr(self.options, 'current_video_path', None) is not None
                     
                     # Obtener clave única para este video/archivo
                     if is_video_mode:
@@ -1402,12 +1457,10 @@ class ProcessMgr:
                     else:
                         video_key = None  # No usar tracking para imágenes
 
-                    # Calcular blend ratio DINÁMICO basado en apertura de boca
-                    # Mejorado para MÁXIMA similitud al origen:
-                    #  0% boca abierta → 0.95 (100% valor por defecto)
-                    # 100% boca abierta → 0.90 (solo baja 5%)
-                    dynamic_blend = 0.95 - (mouth_open_ratio * 0.03)
-                    dynamic_blend = min(0.95, max(0.70, dynamic_blend))
+                    # Preservar solo una parte de la boca original. Valores más bajos
+                    # hacen el swap más visible. 0.5 = 50% preservación.
+                    dynamic_blend = 0.5 - (mouth_open_ratio * 0.3)
+                    dynamic_blend = min(0.5, max(0.2, dynamic_blend))
 
                     # SUAVIZADO TEMPORAL: Solo para videos (tracking)
                     if video_key and video_key in self._mouth_blend_smooth:
@@ -1502,6 +1555,37 @@ class ProcessMgr:
                     # Fallback extremo: colocar cara directamente
                     if swapped_face.shape == original_face_region.shape:
                         result_frame[y1:y2, x1:x2] = swapped_face
+
+            if not (mouth_open and mouth_region is not None):
+                # Aplicar tambien la cara mejorada cuando no hay preservacion de boca.
+                try:
+                    final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=15)
+                    final_mask_3ch = np.stack([final_soft_mask] * 3, axis=-1)
+                    mask_poisson = (final_soft_mask[y1:y2, x1:x2] > 0.5).astype(np.uint8) * 255
+                    center_poisson = (x1 + swapped_face.shape[1] // 2, y1 + swapped_face.shape[0] // 2)
+
+                    try:
+                        result_frame = cv2.seamlessClone(
+                            swapped_face.astype(np.uint8),
+                            result_frame.astype(np.uint8),
+                            mask_poisson,
+                            center_poisson,
+                            cv2.MIXED_CLONE
+                        )
+                        print(f"[BLENDING] Poisson blending aplicado (sin halos)")
+                    except Exception as e_poisson:
+                        print(f"[BLENDING] Poisson falló: {e_poisson}, usando alpha blending")
+                        mask_region = final_mask_3ch[y1:y2, x1:x2]
+                        blended_face = (
+                            swapped_face.astype(np.float32) * mask_region +
+                            original_face_region.astype(np.float32) * (1 - mask_region)
+                        ).astype(np.uint8)
+                        result_frame[y1:y2, x1:x2] = blended_face
+
+                except Exception as e:
+                    print(f"[BLENDING] Error: {e}")
+                    if swapped_face.shape == original_face_region.shape:
+                        result_frame[y1:y2, x1:x2] = swapped_face
             
             # ============================================
             # SUAVIZADO TEMPORAL FINAL (anti-parpadeo visual)
@@ -1509,8 +1593,8 @@ class ProcessMgr:
             if enable_temporal_smoothing and video_key:
                 prev_frame = getattr(self, '_prev_frame_result', {}).get(video_key)
                 if prev_frame is not None:
-                    # Suavizado: 85% actual, 15% anterior para eliminar parpadeo sin desenfoque
-                    blend_alpha = 0.85
+                    # Suavizado: 60% actual, 40% anterior para mantener el swap visible
+                    blend_alpha = 0.60
                     result_frame = cv2.addWeighted(
                         result_frame.astype(np.float32),
                         blend_alpha,

@@ -172,10 +172,6 @@ def build_faceswap_ui():
                         bt_use_selected_face = gr.Button("✅ AÑADIR")
 
             with gr.Row():
-                selected_face_detection = gr.Dropdown(
-                    choices=["Selected faces", "Selected faces frame"],
-                    value="Selected faces frame", label="🎭 Modo de Intercambio"
-                )
                 fake_preview = gr.Checkbox(label="Previsualizar Swap (Realtime)", value=False)
 
             with gr.Accordion("⚙️ Ajustes Expertos (Fidelidad)", open=False):
@@ -186,9 +182,11 @@ def build_faceswap_ui():
                     face_distance = gr.Slider(0.01, 1.0, value=0.20, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
                     blend_ratio = gr.Slider(0.0, 1.0, value=0.95, step=0.01, label="🎨 Mezcla de Piel (1.0 = Máxima Calidad)")
                 with gr.Row():
+                    enhancer_blend = gr.Slider(0.0, 1.0, value=0.3, step=0.01, label="✨ Fuerza del Enhancer (0.3 = Swap Visible)")
+                with gr.Row():
                     enhancer = gr.Dropdown(
                         choices=["None", "CodeFormer", "GFPGAN", "Restoreformer++"],
-                        value="CodeFormer", label="✨ Enhancer de Calidad (CodeFormer = Máxima Fidelidad)"
+                        value="GFPGAN", label="✨ Enhancer de Calidad (GFPGAN = Mejor para Face Swap)"
                     )
 
             with gr.Row():
@@ -207,8 +205,8 @@ def build_faceswap_ui():
         "bt_prev_file": bt_prev_file, "bt_next_file": bt_next_file, "bt_use_face_from_preview": bt_use_face_from_preview,
         "dynamic_face_selection": dynamic_face_selection,
         "face_selection": face_selection, "face_selector_slider": face_selector_slider, "bt_use_selected_face": bt_use_selected_face,
-        "selected_face_detection": selected_face_detection, "fake_preview": fake_preview, 
-        "autorotate": autorotate, "smoothing": smoothing, "face_distance": face_distance, "blend_ratio": blend_ratio, "enhancer": enhancer,
+        "fake_preview": fake_preview, 
+        "autorotate": autorotate, "smoothing": smoothing, "face_distance": face_distance, "blend_ratio": blend_ratio, "enhancer_blend": enhancer_blend, "enhancer": enhancer,
         "bt_start": bt_start, "bt_stop": bt_stop, "bt_open_output": bt_open_output,
         "metrics_display": metrics_display, "input_page_info": input_page_info, "target_page_info": target_page_info,
         "bt_input_prev": bt_input_prev, "bt_input_next": bt_input_next, "bt_target_prev": bt_target_prev, "bt_target_next": bt_target_next,
