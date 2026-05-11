@@ -294,7 +294,8 @@ def main():
             server_port=available_port,
             share=False,
             show_error=True,
-            quiet=True
+            quiet=True,
+            max_threads=100
         )
     except OSError as e:
         if "Cannot find empty port" in str(e):
@@ -307,6 +308,7 @@ def main():
                 server_port=available_port,
                 share=False,
                 show_error=True,
+                max_threads=100
                 quiet=True
             )
         else:

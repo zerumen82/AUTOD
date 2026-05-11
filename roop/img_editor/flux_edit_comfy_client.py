@@ -172,8 +172,8 @@ class FluxEditComfyClient:
                         print(f"[FluxClient] ⏳ {int(elapsed)}s esperando...", flush=True)
                         last_progress = int(elapsed)
 
-            if elapsed > 600:
-                return None, f"Timeout 600s - ComfyUI no completó la generación"
+            if elapsed > 1800:
+                return None, f"Timeout 30min - ComfyUI no completó la generación"
             time.sleep(1)
 
 _client = None
