@@ -53,18 +53,18 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         
-        # Escalar denoise para img2img: proteger imagen original
-        # Cambios sutiles (0-0.3): 0.15-0.25
-        # Cambios medios (0.3-0.6): 0.25-0.35  
-        # Cambios radicales (0.6-1): 0.35-0.45
+        # Escalar denoise para img2img: permitir cambios radicales
+        # Cambios sutiles (0-0.3): 0.25-0.40
+        # Cambios medios (0.3-0.6): 0.40-0.60  
+        # Cambios radicales (0.6-1): 0.60-0.80
         if magnitude < 0.3:
-            denoise = 0.15 + (magnitude * 0.333)
+            denoise = 0.25 + (magnitude * 0.5)
         elif magnitude < 0.6:
-            denoise = 0.25 + ((magnitude - 0.3) * 0.333)
+            denoise = 0.40 + ((magnitude - 0.3) * 0.667)
         else:
-            denoise = 0.35 + ((magnitude - 0.6) * 0.25)
+            denoise = 0.60 + ((magnitude - 0.6) * 0.5)
             
-        denoise = min(denoise, 0.45)
+        denoise = min(denoise, 0.80)
         
         # Escalar pasos - reducir para mayor velocidad
         steps = int(8 + (magnitude * 8))  # 8-16 steps
@@ -208,20 +208,23 @@ class ImgEditorManager:
         # Crear prompt más claro y directo para FLUX
         prompt_lower = prompt.lower()
         
-        # Traducir palabras clave al inglés para mejor comprensión de FLUX
+        # Traducir TODO al inglés para mejor comprensión de FLUX
         prompt_english = prompt
         replacements = [
             ("desnudo", "naked"), ("desnuda", "naked"), ("desnudos", "naked"), ("desnudas", "naked"),
             ("cuerpo", "body"), ("ropa", "clothes"), ("traje", "suit"), ("camisa", "shirt"),
-            ("pantalón", "pants"), ("sonreír", "smiling"), ("ojos", "eyes")
+            ("pantalón", "pants"), ("sonreír", "smiling"), ("ojos", "eyes"),
+            ("deben ir", "go naked"), ("debe ir", "go naked"), ("van", "go"), ("van a", "will go"),
+            ("ir", "go"), ("ponle", "put on"), ("cambia", "change"), ("quítale", "remove"),
+            ("todos", "all"), ("todas", "all"), ("personas", "people"), ("gente", "people"),
         ]
         for es, en in replacements:
             prompt_english = prompt_english.replace(es, en)
         
         # Crear prompt final más directo
         if any(w in prompt_lower for w in ["desnudo", "desnuda", "desnudos", "desnudas", "nude", "naked"]):
-            # Para desnudos, crear prompt más explícito
-            prompt_enhanced = f"Photo of people, {prompt_english}, wearing less clothing, partially undressed"
+            # Para desnudos, crear prompt más explícito en inglés
+            prompt_enhanced = f"Group of people, {prompt_english}, wearing less clothing, partially exposed"
         else:
             # Para otros cambios
             if img_description:
