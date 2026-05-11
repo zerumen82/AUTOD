@@ -67,11 +67,11 @@ class ImgEditorManager:
         # Limitar denoise máximo para mantener imagen original
         denoise = min(denoise, 0.60)
         
-        # Escalar pasos entre 15 y 30 (más pasos para cambios difíciles)
-        steps = int(15 + (magnitude * 15))
+        # Escalar pasos - reducir para mayor velocidad
+        steps = int(8 + (magnitude * 8))  # 8-16 steps
         
-        # Escalar guidance entre 3.5 y 6.0
-        guidance = 3.5 + (magnitude * 2.5)
+        # Escalar guidance - reducir para mayor velocidad
+        guidance = 3.0 + (magnitude * 2.0)
 
         # Ajustes según motor
         if engine == "flux_schnell":
