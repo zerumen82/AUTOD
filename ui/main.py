@@ -308,7 +308,7 @@ def main():
                 server_port=available_port,
                 share=False,
                 show_error=True,
-                max_threads=100
+                max_threads=100,
                 quiet=True
             )
         else:
