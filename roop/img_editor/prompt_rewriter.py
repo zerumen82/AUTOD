@@ -70,15 +70,12 @@ class PromptRewriter:
 
     def _rewrite_with_llm(self, prompt: str, llm) -> Dict:
         system = (
-            "Eres el núcleo de inteligencia de un editor de imágenes. Tu misión es transformar una instrucción de usuario en parámetros técnicos.\n"
-            "Debes responder EXCLUSIVAMENTE en formato JSON con estos campos:\n"
-            "1. 'reasoning': Breve explicación de por qué el cambio es sutil, medio o radical.\n"
-            "2. 'prompt': Traducción al inglés técnico, muy descriptiva y cinematográfica (ej: 'hyper-realistic photo of a person wearing...').\n"
-            "3. 'magnitude': Valor de 0.0 a 1.0 (0.1=sonrisa/ojos, 0.5=objetos/clima, 0.9=ropa completa/desnudo/cuerpo).\n"
-            "4. 'mask_target': El objeto físico exacto en inglés que debe ser enmascarado para este cambio (ej: 'shirt', 'eyes', 'background', 'whole body').\n"
-            "\nIMPORTANTE: No uses frases genéricas como 'traducción detallada'. Escribe prompts reales."
+            "You are an image editor AI. Convert user instruction to technical parameters.\n"
+            "Respond ONLY with valid JSON like: {\"reasoning\": \"short explanation\", \"prompt\": \"english description\", \"magnitude\": 0.5, \"mask_target\": \"object\"}\n"
+            "magnitude: 0.1=small change, 0.5=medium, 0.9=radical (nudity, full clothing)\n"
+            "mask_target: exact object to mask (face, shirt, background, etc)"
         )
-        full = f"{system}\n\nInstrucción del usuario: \"{prompt}\"\n\nJSON:"
+        full = f"{system}\n\nUser: \"{prompt}\"\nJSON:"
         
         response = llm.create_completion(
             full, max_tokens=500, temperature=0.1,
@@ -113,6 +110,13 @@ class PromptRewriter:
 
             # Validar que sea un diccionario, no una lista
             if not isinstance(data, dict):
+                # Si es una lista, intentar interpretar los valores
+                if isinstance(data, list) and len(data) >= 1:
+                    # Primera posición podría ser magnitude
+                    mag = data[0] if isinstance(data[0], (int, float)) else 0.5
+                    mag = max(0.0, min(1.0, float(mag)))  # Clampear entre 0 y 1
+                    print(f"[PromptRewriter] LLM devolvió lista, interpretando magnitude={mag}")
+                    return {"prompt": prompt, "magnitude": mag, "mask_target": "subject", "reasoning": "Parsed from list"}
                 print(f"[PromptRewriter] Warning: LLM devolvió tipo {type(data).__name__}, esperado dict. Respuesta: {text[:100]}")
                 return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "reasoning": "Invalid response format"}
             
