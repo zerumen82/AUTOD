@@ -528,6 +528,12 @@ def wire_events(ui_comp):
     ui_comp["bt_target_next"].click(fn=lambda: on_target_page_change(1), outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
 
     # BORRADO Y OTROS
+    def clear_all_target_faces():
+        roop.globals.TARGET_FACES.clear()
+        ui.globals.ui_target_thumbs.clear()
+        total = 0
+        return ([], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
+    
     ui_comp["bt_clear_all_target"].click(fn=clear_all_target_faces, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
     ui_comp["bt_remove_selected_input_face"].click(fn=remove_selected_input_face, outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
     ui_comp["bt_remove_selected_target_face"].click(fn=remove_selected_target_face, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
