@@ -53,19 +53,18 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         
-        # Escalar denoise para img2img: priorizar preservación de imagen original
-        # Si mag < 0.3 -> denoise entre 0.20 y 0.30 (cambios muy sutiles)
-        # Si mag 0.3-0.6 -> denoise entre 0.30 y 0.45 (cambios medios)
-        # Si mag > 0.6 -> denoise entre 0.45 y 0.60 (cambios radicales)
+        # Escalar denoise para img2img: proteger imagen original
+        # Cambios sutiles (0-0.3): 0.15-0.25
+        # Cambios medios (0.3-0.6): 0.25-0.35  
+        # Cambios radicales (0.6-1): 0.35-0.45
         if magnitude < 0.3:
-            denoise = 0.20 + (magnitude * 0.333)
+            denoise = 0.15 + (magnitude * 0.333)
         elif magnitude < 0.6:
-            denoise = 0.30 + ((magnitude - 0.3) * 0.5)
+            denoise = 0.25 + ((magnitude - 0.3) * 0.333)
         else:
-            denoise = 0.45 + ((magnitude - 0.6) * 0.375)  # max 0.60
+            denoise = 0.35 + ((magnitude - 0.6) * 0.25)
             
-        # Limitar denoise máximo para mantener imagen original
-        denoise = min(denoise, 0.60)
+        denoise = min(denoise, 0.45)
         
         # Escalar pasos - reducir para mayor velocidad
         steps = int(8 + (magnitude * 8))  # 8-16 steps
@@ -233,9 +232,14 @@ class ImgEditorManager:
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
         if guidance_scale: params["guidance_scale"] = guidance_scale
 
-        # 3. Máscara Automática basada en el 'mask_target' del LLM
+        # 3. Máscara Automática - SOLO para cambios sutiles/medios, NO para nudidad
         final_mask = mask_image
-        if final_mask is None and analysis.get("magnitude", 0.5) < 0.5:
+        mask_target = analysis.get("mask_target", "subject")
+        
+        # NO usar máscara para body/nude edits - usar edición global
+        if mask_target in ["body", "subject"]:
+            print(f"[ImgEditor] Edición global (sin máscara) para cambio de cuerpo")
+        elif final_mask is None and analysis.get("magnitude", 0.5) < 0.5:
             try:
                 mask_target = analysis.get("mask_target", "subject")
                 if self._is_usable_mask_target(mask_target):
