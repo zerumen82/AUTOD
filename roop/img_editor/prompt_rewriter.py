@@ -40,7 +40,7 @@ class PromptRewriter:
         self._llm = None
         self._init_llm()
 
-    def _init_llm(self):
+def _init_llm(self):
         if self._llm is not None:
             return
         try:
@@ -87,11 +87,18 @@ class PromptRewriter:
                 verbose=False
             )
             print("[PromptRewriter] Rewriter listo en CPU")
+        except ImportError:
+            print("[PromptRewriter] llama-cpp-python no disponible, usando modo heurístico")
+            self._llm = "heuristic"  # Flag para modo heurístico
         except Exception as e:
-            print(f"[PromptRewriter] LLM local no disponible: {e}")
+            print(f"[PromptRewriter] LLM no disponible: {e}, usando modo heurístico")
+            self._llm = "heuristic"
 
     def rewrite(self, prompt: str) -> Dict:
         """Devuelve un diccionario con el análisis completo del LLM"""
+        if self._llm == "heuristic":
+            return self._rewrite_heuristic(prompt)
+        
         if self._llm is not None:
             try:
                 return self._rewrite_with_llm(prompt, self._llm)
@@ -104,6 +111,63 @@ class PromptRewriter:
             "magnitude": 0.5,
             "mask_target": prompt,
             "reasoning": "Fallback mode"
+        }
+    
+    def _rewrite_heuristic(self, prompt: str) -> Dict:
+        """Análisis basado en palabras clave cuando no hay LLM disponible"""
+        p_lower = prompt.lower()
+        
+        # Detectar magnitud basada en palabras clave
+        radical_words = ["desnudo", "desnuda", "nude", "naked", "ropa completa", 
+                        "full clothing", "cuerpo completo", "cambiar todo", 
+                        "transformar", "convertir en", "make completely"]
+        medium_words = ["cambiar", "change", "modificar", "pose", "expresión",
+                       "outfit", "vestimenta", "ropa", "shirt", "pants", "traje"]
+        subtle_words = ["sonreír", "smile", "ojos", "eyes", "mirada", "expresión",
+                      "ligero", "slight", "color", "tinte", "peinado", "hair"]
+        
+        if any(w in p_lower for w in radical_words):
+            magnitude = 0.85
+            reasoning = "Cambio radical detectado (desnudo/ropa completa)"
+        elif any(w in p_lower for w in medium_words):
+            magnitude = 0.5
+            reasoning = "Cambio medio detectado (ropa/pose)"
+        else:
+            magnitude = 0.25
+            reasoning = "Cambio sutil detectado"
+        
+        # Detectar mask_target
+        if any(w in p_lower for w in ["cara", "face", "rostro", "ojos", "eyes", "boca", "mouth", "sonrisa", "smile"]):
+            mask_target = "face"
+        elif any(w in p_lower for w in ["ropa", "shirt", "camisa", "pantalón", "pants", "traje", "outfit", "vestimenta"]):
+            mask_target = "clothes"
+        elif any(w in p_lower for w in ["fondo", "background", "escenario", "paisaje"]):
+            mask_target = "background"
+        elif any(w in p_lower for w in ["pelo", "hair", "cabello", "peinado"]):
+            mask_target = "hair"
+        elif any(w in p_lower for w in ["cuerpo", "body"]):
+            mask_target = "body"
+        else:
+            mask_target = "subject"
+        
+        # Traducir prompt al inglés básico
+        translations = {
+            "desnudo": "naked", "desnuda": "naked", "sonreír": "smiling",
+            "ropa": "clothing", "traje": "suit", "camisa": "shirt",
+            "pantalón": "pants", "fondo": "background", "pelo": "hair",
+            "ojos": "eyes", "cara": "face", "cuerpo": "body"
+        }
+        eng_prompt = prompt
+        for es, en in translations.items():
+            eng_prompt = eng_prompt.replace(es, en)
+        
+        print(f"[PromptRewriter] Heuristic: mag={magnitude}, mask={mask_target}")
+        
+        return {
+            "prompt": eng_prompt,
+            "magnitude": magnitude,
+            "mask_target": mask_target,
+            "reasoning": reasoning
         }
 
     def _rewrite_with_llm(self, prompt: str, llm) -> Dict:
