@@ -4,8 +4,14 @@
 Prompt Rewriter - Inteligencia Semántica Pura (Sin Hardcoding)
 """
 
-import os, json, re
+import os, sys, json, re
 from typing import Optional, Dict, List, Tuple
+
+# Añadir CUDA al PATH si es Windows
+if sys.platform == "win32":
+    cuda_path = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin"
+    if cuda_path not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = cuda_path + os.pathsep + os.environ.get("PATH", "")
 
 MOONDREAM_TEXT_PATH = r"D:\PROJECTS\AUTOAUTO\models\moondream\moondream2-text-model-f16.gguf"
 QWEN_LLM_PATH = r"D:\PROJECTS\AUTOAUTO\models\llm\qwen2.5-0.5b-instruct-q4_k_m.gguf"
@@ -115,9 +121,9 @@ class PromptRewriter:
         p_lower = prompt.lower()
         
         # Detectar magnitud basada en palabras clave
-        radical_words = ["desnudo", "desnuda", "nude", "naked", "ropa completa", 
+        radical_words = ["desnudo", "desnuda", "desnudos", "desnudas", "nude", "naked", "ropa completa", 
                         "full clothing", "cuerpo completo", "cambiar todo", 
-                        "transformar", "convertir en", "make completely"]
+                        "transformar", "convertir en", "make completely", "todo el cuerpo"]
         medium_words = ["cambiar", "change", "modificar", "pose", "expresión",
                        "outfit", "vestimenta", "ropa", "shirt", "pants", "traje"]
         subtle_words = ["sonreír", "smile", "ojos", "eyes", "mirada", "expresión",
@@ -168,33 +174,32 @@ class PromptRewriter:
         }
 
     def _rewrite_with_llm(self, prompt: str, llm) -> Dict:
-        # Prompt más simple y directo que cualquier modelo puede seguir
+        # Prompt más específico para evitar confusiones
         system = (
-            "You analyze image edit requests. Output JSON with:\n"
-            "- magnitude: 0.1 to 0.9 (0.1=small, 0.9=radical like nudity)\n"
-            "- mask_target: object to change (face, shirt, clothes, background, etc)\n"
-            "- prompt: what to generate in English\n"
-            "Output only JSON, no other text. Example: {\"magnitude\":0.5,\"mask_target\":\"shirt\",\"prompt\":\"person wearing red shirt\"}"
+            "Image edit analyzer. Detect what to change.\n"
+            "IMPORTANT: If request mentions NUDITY, DESSOUS, NAKED, DESNUDO - output: mask_target=body\n"
+            "If request mentions CLOTHES, SHIRT, PANTS, ROPA - output: mask_target=clothes\n"
+            "If request mentions FACE, EYES, SMILE - output: mask_target=face\n"
+            "magnitude: 0.1=eyes/smile, 0.5=clothes/pose, 0.9=nude/full_body\n"
+            "Output JSON with: magnitude, mask_target, prompt"
         )
-        full = f"{system}\n\nEdit request: {prompt}\nOutput:"
+        full = f"{system}\n\nRequest: {prompt}\nJSON:"
         
         response = llm.create_completion(
-            full, max_tokens=500, temperature=0.1,
+            full, max_tokens=150, temperature=0.1,
             echo=False
         )
         
         try:
             text = response['choices'][0]['text'].strip()
-            print(f"[PromptRewriter] Raw LLM Response: {text}")
+            print(f"[PromptRewriter] Raw LLM Response: {text[:150]}...")
             
-            # Búsqueda robusta del objeto JSON
-            match = re.search(r'\{.*\}', text, re.DOTALL)
+            # SOLO obtener el PRIMER JSON object (evitar repeticiones)
+            match = re.search(r'\{[^}]+\}', text)
             if match:
                 text = match.group(0)
             else:
-                # Si el LLM se olvidó las llaves, intentamos forzarlas si parece un dict
-                if ":" in text and ("," in text or "\n" in text):
-                    text = "{" + text + "}"
+                raise ValueError("No JSON found in response")
             
             # Limpieza de comillas simples (común en respuestas de LLMs pequeños)
             # Solo si no hay comillas dobles que sugieran que ya es JSON válido
@@ -222,10 +227,21 @@ class PromptRewriter:
                 return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "reasoning": "Invalid response format"}
             
             # Limpieza y validación básica
+            mask_target = data.get("mask_target", "subject")
+            
+            # Normalizar mask_target
+            mask_map = {
+                "nude": "body", "naked": "body", "dessous": "body",
+                "full_body": "body", "person": "subject",
+                "outfit": "clothes", "vestimenta": "clothes"
+            }
+            if mask_target.lower() in mask_map:
+                mask_target = mask_map[mask_target.lower()]
+            
             result = {
                 "prompt": data.get("prompt", prompt),
                 "magnitude": float(data.get("magnitude", 0.5)),
-                "mask_target": data.get("mask_target", "subject"),
+                "mask_target": mask_target,
                 "reasoning": data.get("reasoning", "Semantic analysis completed")
             }
             
