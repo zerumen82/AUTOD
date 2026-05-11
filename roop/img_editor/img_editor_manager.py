@@ -69,8 +69,8 @@ class ImgEditorManager:
         # Escalar pasos - reducir para mayor velocidad
         steps = int(8 + (magnitude * 8))  # 8-16 steps
         
-        # Escalar guidance - reducir para mayor velocidad
-        guidance = 3.0 + (magnitude * 2.0)
+        # Escalar guidance - aumentar un poco para mejor seguimiento del prompt
+        guidance = 4.0 + (magnitude * 2.5)
 
         # Ajustes según motor
         if engine == "flux_schnell":
@@ -205,24 +205,42 @@ class ImgEditorManager:
             # Si el LLM generó algo útil, combinar con el prompt del usuario
             rewritten = f"{prompt} {rewritten}"
         
-        # El pedido del usuario primero, luego descripción breve de la imagen
-        if img_description:
-            # Usar solo los primeros 100 chars de la descripción
-            prompt_enhanced = f"{prompt}. {img_description[:100]}..."
+        # Crear prompt más claro y directo para FLUX
+        prompt_lower = prompt.lower()
+        
+        # Traducir palabras clave al inglés para mejor comprensión de FLUX
+        prompt_english = prompt
+        replacements = [
+            ("desnudo", "naked"), ("desnuda", "naked"), ("desnudos", "naked"), ("desnudas", "naked"),
+            ("cuerpo", "body"), ("ropa", "clothes"), ("traje", "suit"), ("camisa", "shirt"),
+            ("pantalón", "pants"), ("sonreír", "smiling"), ("ojos", "eyes")
+        ]
+        for es, en in replacements:
+            prompt_english = prompt_english.replace(es, en)
+        
+        # Crear prompt final más directo
+        if any(w in prompt_lower for w in ["desnudo", "desnuda", "desnudos", "desnudas", "nude", "naked"]):
+            # Para desnudos, crear prompt más explícito
+            prompt_enhanced = f"Photo of people, {prompt_english}, wearing less clothing, partially undressed"
         else:
-            prompt_enhanced = prompt
+            # Para otros cambios
+            if img_description:
+                prompt_enhanced = f"{prompt_english}. {img_description[:80]}..."
+            else:
+                prompt_enhanced = prompt_english
             
         print(f"[ImgEditor] Prompt enviado: {prompt_enhanced[:180]}", flush=True)
         
-        # Post-procesamiento: corregir mask_target basado en palabras clave del prompt
+        # Post-procesamiento: corregir mask_target y parámetros
         mask_target = analysis.get("mask_target", "subject").lower()
-        prompt_lower = prompt.lower()
         
-        # Sobrescribir mask_target si el prompt contiene palabras clave específicas
+        # Sobrescribir mask_target y aumentar parámetros si hay palabras clave específicas
         if any(w in prompt_lower for w in ["desnudo", "desnuda", "desnudos", "desnudas", "nude", "naked", "cuerpo", "body"]):
             mask_target = "body"
-            analysis["magnitude"] = max(analysis.get("magnitude", 0.5), 0.7)  # Aumentar magnitud
-            print(f"[ImgEditor] Corregido mask_target -> body (detecto desnudo)")
+            analysis["magnitude"] = max(analysis.get("magnitude", 0.5), 0.7)
+            # Aumentar guidance para este tipo de cambios
+            params["guidance_scale"] = max(params.get("guidance_scale", 4.5), 6.0)
+            print(f"[ImgEditor] Corregido -> body, guidance aumentado a 6.0")
         elif any(w in prompt_lower for w in ["ropa", "clothes", "shirt", "camisa", "traje", "pantalón"]):
             mask_target = "clothes"
         
