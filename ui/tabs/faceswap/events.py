@@ -534,6 +534,26 @@ def wire_events(ui_comp):
         total = 0
         return ([], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
     
+    def remove_selected_input_face(evt=None):
+        if state.selected_input_face_index is not None:
+            idx = state.selected_input_face_index
+            if 0 <= idx < len(roop.globals.INPUT_FACES):
+                roop.globals.INPUT_FACES.pop(idx)
+                ui.globals.ui_input_thumbs.pop(idx)
+                state.selected_input_face_index = None
+        total = len(ui.globals.ui_input_thumbs)
+        return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total, "input"))
+    
+    def remove_selected_target_face(evt=None):
+        if state.selected_target_face_index is not None:
+            idx = state.selected_target_face_index
+            if 0 <= idx < len(roop.globals.TARGET_FACES):
+                roop.globals.TARGET_FACES.pop(idx)
+                ui.globals.ui_target_thumbs.pop(idx)
+                state.selected_target_face_index = None
+        total = len(ui.globals.ui_target_thumbs)
+        return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total, "target"))
+    
     ui_comp["bt_clear_all_target"].click(fn=clear_all_target_faces, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
     ui_comp["bt_remove_selected_input_face"].click(fn=remove_selected_input_face, outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
     ui_comp["bt_remove_selected_target_face"].click(fn=remove_selected_target_face, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])

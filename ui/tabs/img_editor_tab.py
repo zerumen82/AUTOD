@@ -6,17 +6,24 @@ import tempfile
 from PIL import Image
 from roop.img_editor.img_editor_manager import get_img_editor_manager
 
-def create_maskable_image_input(label="Imagen de Entrada", height=480):
-    return gr.Image(label=label, type="pil", height=height)
+
+def open_output_folder():
+    path = os.path.abspath("output/img_editor")
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+    try:
+        os.startfile(path)
+    except Exception as e:
+        print(f"[UI] No se pudo abrir la carpeta: {e}")
+
 
 _is_generating = False
+
 
 def on_generate(img_data, p_text, engine_val, f_preserve):
     global _is_generating
     
-    # Prevenir ciclos múltiples
     if _is_generating:
-        print("[ImgEditor] Generación ya en progreso, ignorando...")
         return None, "⚠️ Ya hay una transformación en proceso", None
     
     p_text = (p_text or "").strip()
@@ -33,16 +40,6 @@ def on_generate(img_data, p_text, engine_val, f_preserve):
     if img is None:
         return None, "Imagen inválida", None
 
-    # Verificar si el prompt parece una descripción automática (evitar ciclos)
-    auto_descriptions = [
-        "the image features", "there is a", "this is a photo of",
-        "a group of people", "a person sitting", "a photo showing"
-    ]
-    p_text_lower = p_text.lower()
-    if any(p_text_lower.startswith(desc) for desc in auto_descriptions):
-        print(f"[ImgEditor] Warn: Prompt parece descripción automática: {p_text[:50]}...")
-        # Permitir si el usuario explicitly confirmó
-    
     try:
         _is_generating = True
         manager = get_img_editor_manager()
@@ -60,6 +57,7 @@ def on_generate(img_data, p_text, engine_val, f_preserve):
     finally:
         _is_generating = False
 
+
 def analyze_click(img):
     if not img: return "Sube una imagen primero"
     if isinstance(img, dict): img = img.get("background")
@@ -72,19 +70,48 @@ def analyze_click(img):
     except:
         return "Análisis no disponible"
 
-def open_output_folder():
-    path = os.path.abspath("output/img_editor")
-    if not os.path.exists(path):
-        os.makedirs(path, exist_ok=True)
-    try:
-        os.startfile(path)
-    except Exception as e:
-        print(f"[UI] No se pudo abrir la carpeta: {e}")
 
 def create_img_editor_tab():
-    with gr.Column():
-        gr.Markdown("## ✨ IMAGE EDITOR AI")
-        gr.Markdown("_Transforma tus imágenes con lenguaje natural._")
+    gr.HTML("""
+        <style>
+            .img-editor-container {
+                background: #020617;
+                padding: 30px;
+                border-radius: 20px;
+                border: 1px solid #1e293b;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            }
+            .img-editor-header { text-align: center; margin-bottom: 25px; }
+            .img-editor-header h2 {
+                background: linear-gradient(90deg, #22d3ee, #a855f7);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                font-size: 32px;
+                font-weight: 800;
+            }
+            .btn-transform-main {
+                background: linear-gradient(135deg, #06b6d4 0%, #a855f7 100%) !important;
+                color: white !important;
+                font-weight: 900 !important;
+                height: 64px !important;
+                border-radius: 14px !important;
+                font-size: 18px !important;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                border: none !important;
+            }
+            .prompt-box-img {
+                background: #0f172a !important;
+                border: 2px solid #22d3ee !important;
+                border-radius: 12px !important;
+            }
+        </style>
+    """)
+    
+    with gr.Column(elem_classes=["img-editor-container"]):
+        with gr.Group(elem_classes=["img-editor-header"]):
+            gr.Markdown("## ✨ IMAGE EDITOR AI")
+            gr.Markdown("_Transforma tus imágenes con lenguaje natural._")
 
         with gr.Row():
             # COLUMNA DE ENTRADA
@@ -93,26 +120,27 @@ def create_img_editor_tab():
                 
                 prompt = gr.Textbox(
                     label="¿Qué quieres cambiar?",
-                    placeholder="Ej: Ponle un traje de payaso...",
-                    lines=3
+                    placeholder="Ej: Ponle un traje de payaso, cambia el fondo por una playa...",
+                    lines=3,
+                    elem_classes=["prompt-box-img"]
                 )
 
                 with gr.Row():
-                    gen_btn = gr.Button("✨ TRANSFORMAR", variant="primary", scale=3)
-                    btn_analyze = gr.Button("🔍 ANALIZAR", scale=1)
+                    gen_btn = gr.Button("✨ TRANSFORMAR", variant="primary", elem_classes=["btn-transform-main"], scale=3)
+                    btn_analyze = gr.Button("🔍 ANALIZAR", size="sm", scale=1)
 
-                with gr.Accordion("⚙️ Opciones", open=False):
+                with gr.Accordion("⚙️ Opciones Avanzadas", open=False):
                     engine = gr.Dropdown(
                         choices=[
-                            ("FLUX.1 Dev", "flux_dev_abliterated"), 
+                            ("FLUX.1 Dev Abliterated", "flux_dev_abliterated"), 
                             ("FLUX.2 Klein", "klein_base"), 
-                            ("OmniGen", "omnigen2")
+                            ("OmniGen 2", "omnigen2")
                         ],
-                        value="flux_dev_abliterated", label="Motor"
+                        value="flux_dev_abliterated", label="Motor de Generación"
                     )
-                    f_preserve = gr.Checkbox(label="Preservar Rostro", value=True)
+                    f_preserve = gr.Checkbox(label="💎 Preservar Rostro", value=True)
 
-                status = gr.Textbox(label="ESTADO", interactive=False)
+                status = gr.HTML("<div style='text-align:center; color:#64748b; padding:10px;'>Listo</div>")
 
             # COLUMNA DE SALIDA
             with gr.Column(scale=1):
@@ -123,7 +151,7 @@ def create_img_editor_tab():
                         mask_preview = gr.Image(label="Máscara generada", height=400)
                 
                 with gr.Row():
-                    bt_open_folder = gr.Button("📂 CARPETA")
+                    bt_open_folder = gr.Button("📂 ABRIR SALIDA")
                     bt_open_folder.click(fn=open_output_folder)
 
     gen_btn.click(
