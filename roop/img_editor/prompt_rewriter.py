@@ -110,6 +110,11 @@ class PromptRewriter:
                 text = re.sub(r'^[^{]*', '', text)
                 text = re.sub(r'[^}]*$', '', text)
                 data = json.loads(text)
+
+            # Validar que sea un diccionario, no una lista
+            if not isinstance(data, dict):
+                print(f"[PromptRewriter] Warning: LLM devolvió tipo {type(data).__name__}, esperado dict. Respuesta: {text[:100]}")
+                return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "reasoning": "Invalid response format"}
             
             # Limpieza y validación básica
             result = {
