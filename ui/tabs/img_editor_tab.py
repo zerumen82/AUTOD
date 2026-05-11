@@ -34,11 +34,20 @@ def on_generate(img_data, p_text, engine_val, f_preserve):
 
     if isinstance(img_data, dict):
         img = img_data.get("background")
+    elif isinstance(img_data, str):
+        # Es una ruta de archivo
+        from PIL import Image
+        img = Image.open(img_data).convert("RGB")
     else:
         img = img_data
 
     if img is None:
         return None, "Imagen inválida", None
+    
+    # Asegurar que es PIL Image
+    from PIL import Image as PILImage
+    if not isinstance(img, PILImage.Image):
+        return None, "Formato de imagen no soportado", None
 
     try:
         _is_generating = True
@@ -60,7 +69,11 @@ def on_generate(img_data, p_text, engine_val, f_preserve):
 
 def analyze_click(img, user_prompt):
     if not img: return "<div style='color:#f87171;'>Sube una imagen primero</div>", ""
-    if isinstance(img, dict): img = img.get("background")
+    if isinstance(img, dict): 
+        img = img.get("background")
+    elif isinstance(img, str):
+        from PIL import Image
+        img = Image.open(img).convert("RGB")
     try:
         from scripts.moondream_analyzer import analyze_image_with_moondream
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
