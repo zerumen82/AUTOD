@@ -53,16 +53,19 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         
-        # Escalar denoise: 
-        # Si mag < 0.5 -> denoise entre 0.35 y 0.55
-        # Si mag > 0.5 -> denoise entre 0.60 y 0.90 (zona radical)
-        if magnitude > 0.7:
-            denoise = 0.75 + (magnitude - 0.7) * 0.5 # Escala hacia 0.90
+        # Escalar denoise para img2img: mantener más de la imagen original
+        # Si mag < 0.3 -> denoise entre 0.25 y 0.40 (cambios sutiles)
+        # Si mag 0.3-0.6 -> denoise entre 0.40 y 0.55 (cambios medios)
+        # Si mag > 0.6 -> denoise entre 0.55 y 0.70 (cambios radicales pero preservando imagen)
+        if magnitude < 0.3:
+            denoise = 0.25 + (magnitude * 0.5)
+        elif magnitude < 0.6:
+            denoise = 0.40 + ((magnitude - 0.3) * 0.5)
         else:
-            denoise = 0.35 + (magnitude * 0.4)
+            denoise = 0.55 + ((magnitude - 0.6) * 0.375)  # max 0.70
             
-        # Limitar denoise máximo para no perder coherencia total
-        denoise = min(denoise, 0.92)
+        # Limitar denoise máximo para mantener imagen original
+        denoise = min(denoise, 0.70)
         
         # Escalar pasos entre 15 y 30 (más pasos para cambios difíciles)
         steps = int(15 + (magnitude * 15))
