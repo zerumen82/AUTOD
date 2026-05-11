@@ -178,21 +178,20 @@ class ImgEditorManager:
         except Exception as e:
             print(f"[ImgEditor] Warning: No se pudo analizar imagen: {e}")
 
-        # 2. Análisis Semántico del prompt y combinación con análisis de imagen
+        # 2. Análisis Semántico del prompt del usuario (primero, para obtener magnitud/mask correctos)
         analysis = {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject"}
         if use_rewriter:
             try:
-                # Combinar análisis de imagen con prompt del usuario de forma más clara
-                if img_description:
-                    # Crear prompt más específico para img2img
-                    combined_prompt = f"Photo shows: {img_description[:200]}. Edit: {prompt}"
-                else:
-                    combined_prompt = prompt
-                print(f"[ImgEditor] Análisis combinado: '{combined_prompt[:100]}...'")
+                # Primero analizar solo el prompt del usuario
+                print(f"[ImgEditor] Analizando prompt: '{prompt}'")
                 rewriter = self._get_rewriter()
-                analysis = rewriter.rewrite(combined_prompt)
-                print(f"[ImgEditor] LLM reasoning: {analysis.get('reasoning', 'N/A')}")
-                print(f"[ImgEditor] LLM prompt: {analysis.get('prompt', 'N/A')}")
+                analysis = rewriter.rewrite(prompt)
+                print(f"[ImgEditor] LLM análisis - Mag: {analysis.get('magnitude')}, Mask: {analysis.get('mask_target')}")
+                
+                # Luego agregar la descripción de imagen al prompt final
+                if img_description:
+                    analysis["prompt"] = f"{img_description[:150]}... {prompt}"
+                    print(f"[ImgEditor] Prompt final: {analysis['prompt'][:100]}...")
             except Exception as e:
                 print(f"[ImgEditor] Falló análisis semántico: {e}")
 
