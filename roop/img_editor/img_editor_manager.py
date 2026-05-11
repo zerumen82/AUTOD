@@ -116,8 +116,8 @@ class ImgEditorManager:
             return user_prompt
 
         # Crear prompt más claro para FLUX img2img
-        # Incluir referencia a la imagen original
-        return f"Edit this photo: {user_prompt}. {rewritten}"
+        # Incluir referencia a la imagen original y descripción clara
+        return f"Photo of {rewritten}"
 
     def _is_usable_mask_target(self, mask_target: str) -> bool:
         target = (mask_target or "").strip().lower()
@@ -182,18 +182,34 @@ class ImgEditorManager:
         analysis = {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject"}
         if use_rewriter:
             try:
-                # Combinar análisis de imagen con prompt del usuario
-                combined_prompt = f"Imagen: {img_description}. Cambio solicitado: {prompt}" if img_description else prompt
-                print(f"[ImgEditor] Análisis combinado: '{combined_prompt[:80]}...'")
+                # Combinar análisis de imagen con prompt del usuario de forma más clara
+                if img_description:
+                    # Crear prompt más específico para img2img
+                    combined_prompt = f"Photo shows: {img_description[:200]}. Edit: {prompt}"
+                else:
+                    combined_prompt = prompt
+                print(f"[ImgEditor] Análisis combinado: '{combined_prompt[:100]}...'")
                 rewriter = self._get_rewriter()
                 analysis = rewriter.rewrite(combined_prompt)
                 print(f"[ImgEditor] LLM reasoning: {analysis.get('reasoning', 'N/A')}")
+                print(f"[ImgEditor] LLM prompt: {analysis.get('prompt', 'N/A')}")
             except Exception as e:
                 print(f"[ImgEditor] Falló análisis semántico: {e}")
 
         # 2. Resolución de Parámetros basada en el Análisis
         params = self.auto_detect_params(analysis, engine)
-        prompt_enhanced = self._compose_generation_prompt(prompt, analysis)
+        
+        # Crear prompt final combinando imagen original + usuario + análisis LLM
+        rewritten = analysis.get("prompt", "").strip()
+        if not rewritten or "traduccion" in rewritten.lower():
+            rewritten = prompt
+        
+        # Prompt más claro para img2img: preservar contexto + edición
+        if img_description:
+            prompt_enhanced = f"{img_description}, {prompt}"
+        else:
+            prompt_enhanced = prompt
+            
         print(f"[ImgEditor] Prompt enviado: {prompt_enhanced[:180]}", flush=True)
         
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
