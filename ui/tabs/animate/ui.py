@@ -136,7 +136,6 @@ def build_animate_ui():
                 with gr.Row():
                     bt_open_folder = gr.Button("📂 ABRIR SALIDA")
                     bt_open_folder.click(fn=open_animations_folder)
-                    gr.Button("🔄 REINTENTAR").click(fn=None, _js="window.location.reload()")
 
     return {
         "input_img": input_img,
