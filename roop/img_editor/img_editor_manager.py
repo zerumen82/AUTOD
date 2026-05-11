@@ -115,7 +115,9 @@ class ImgEditorManager:
         if any(fragment in rewritten_lw for fragment in bad_fragments):
             return user_prompt
 
-        return f"{user_prompt}. {rewritten}"
+        # Crear prompt más claro para FLUX img2img
+        # Incluir referencia a la imagen original
+        return f"Edit this photo: {user_prompt}. {rewritten}"
 
     def _is_usable_mask_target(self, mask_target: str) -> bool:
         target = (mask_target or "").strip().lower()
@@ -162,13 +164,29 @@ class ImgEditorManager:
 
         prompt = (prompt or "").strip()
 
-        # 1. Análisis Semántico Total (Delegación al LLM)
+        # 1. Análisis de la imagen original (describe qué hay para preservar contexto)
+        img_description = ""
+        try:
+            from scripts.moondream_analyzer import analyze_image_with_moondream
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                img.save(tmp.name)
+                res = analyze_image_with_moondream(tmp.name)
+                img_description = res.get('positive', '')
+            if img_description:
+                print(f"[ImgEditor] Imagen analizada: {img_description[:100]}...")
+        except Exception as e:
+            print(f"[ImgEditor] Warning: No se pudo analizar imagen: {e}")
+
+        # 2. Análisis Semántico del prompt y combinación con análisis de imagen
         analysis = {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject"}
         if use_rewriter:
             try:
-                print(f"[ImgEditor] Solicitando análisis semántico para: '{prompt[:50]}...'")
+                # Combinar análisis de imagen con prompt del usuario
+                combined_prompt = f"Imagen: {img_description}. Cambio solicitado: {prompt}" if img_description else prompt
+                print(f"[ImgEditor] Análisis combinado: '{combined_prompt[:80]}...'")
                 rewriter = self._get_rewriter()
-                analysis = rewriter.rewrite(prompt)
+                analysis = rewriter.rewrite(combined_prompt)
                 print(f"[ImgEditor] LLM reasoning: {analysis.get('reasoning', 'N/A')}")
             except Exception as e:
                 print(f"[ImgEditor] Falló análisis semántico: {e}")
