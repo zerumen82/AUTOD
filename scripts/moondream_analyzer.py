@@ -45,7 +45,8 @@ except ImportError:
 class MoonDreamImageAnalyzer:
     def __init__(self):
         self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Forzar CPU para evitar conflictos con Flux en GPUs de 8GB
+        self.device = "cpu" 
         self._load_model()
 
     def _load_model(self):
@@ -55,17 +56,13 @@ class MoonDreamImageAnalyzer:
 
         # Nombres de archivos posibles
         text_names = ["moondream2-text-model-f16.gguf", "moondream2-text-model.gguf", "moondream2.gguf"]
-        mmproj_names = ["moondream2-mmproj-f16.gguf", "moondream2-mmproj.gguf", "moondream2-mmproj.gguf"]
+        mmproj_names = ["moondream2-mmproj-f16.gguf", "moondream2-mmproj.gguf"]
 
         text_model_path = None
         mmproj_path = None
 
         print(f"[ANALYZER] Buscando modelos en: {MODELS_DIR}")
         
-        if not MODELS_DIR.exists():
-            print(f"[WARN] La carpeta {MODELS_DIR} no existe. Creándola...")
-            MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
         for name in text_names:
             p = MODELS_DIR / name
             if p.exists():
@@ -79,37 +76,36 @@ class MoonDreamImageAnalyzer:
                 break
 
         if not text_model_path:
+            # Reintentar en carpeta models raíz
+            for name in text_names:
+                p = ROOT_DIR / "models" / name
+                if p.exists():
+                    text_model_path = p
+                    break
+
+        if not text_model_path:
             print(f"[ERROR] No se encontró el modelo de texto en {MODELS_DIR}")
-            print(f"Asegúrate de que el archivo 'moondream2-text-model-f16.gguf' esté ahí.")
             return
 
         try:
-            print(f"[ANALYZER] Cargando: {text_model_path.name} ({text_model_path.stat().st_size / 1024**2:.1f} MB)")
+            print(f"[ANALYZER] Cargando modelo en CPU (Modo Seguro): {text_model_path.name}")
             
-            # Usar '/' para evitar problemas de escape en Windows
-            model_str = str(text_model_path.absolute()).replace("\\", "/")
-            mm_str = str(mmproj_path.absolute()).replace("\\", "/") if mmproj_path else None
+            model_str = str(text_model_path.absolute())
+            mm_str = str(mmproj_path.absolute()) if mmproj_path else None
             
-            # En v0.3.x se usa clip_model_path para el proyector visual
+            # Cargamos en CPU para máxima estabilidad concurrente con Flux
             self.model = Llama(
                 model_path=model_str,
                 clip_model_path=mm_str,
-                n_gpu_layers=-1 if self.device == "cuda" else 0,
-                n_ctx=2048,
+                n_gpu_layers=0,
+                n_ctx=1024, # Reducir contexto para velocidad
                 verbose=False
             )
             
-            # Si no se cargó vía chat_format, intentamos el método interno de la v0.3.x
             if mm_str:
-                print(f"[ANALYZER] Vinculando proyector: {mmproj_path.name}")
-                try:
-                    # En algunas versiones de 0.3.x se usa un atributo interno o se cargó ya
-                    # Si no hay error aquí, el modelo está listo
-                    pass 
-                except:
-                    pass
+                print(f"[ANALYZER] Proyector visual cargado: {mmproj_path.name}")
 
-            print(f"[ANALYZER] Moondream listo en {self.device.upper()}")
+            print(f"[ANALYZER] Moondream (CPU) LISTO")
         except Exception as e:
             print(f"[ERROR] Error al cargar Moondream: {e}")
             self.model = None
@@ -117,39 +113,37 @@ class MoonDreamImageAnalyzer:
     def analyze(self, image_path: str, nsfw_level: str = 'explicit') -> dict:
         if not self.model:
             return self._fallback_basic(image_path, nsfw_level)
+        
+        print(f"[ANALYZER] Analizando imagen: {os.path.basename(image_path)}...")
         try:
-            # Para Moondream en v0.3.x, usamos el formato directo de prompt
-            # <IMAGE> seguido de la pregunta es el estándar de moondream
-            prompt = "<IMAGE>\nDescribe this image in detail. Be specific about people, poses, and clothing."
+            # Prompt optimizado para Moondream
+            prompt = "<IMAGE>\nDescribe the main subject and their clothing in one descriptive paragraph."
             
-            # Usamos create_completion en lugar de chat para mayor control
             response = self.model.create_completion(
                 prompt=prompt,
-                max_tokens=300,
-                stop=["<|endoftext|>", "</s>"]
+                max_tokens=200,
+                temperature=0.2,
+                stop=["<|endoftext|>", "</s>", "\n\n"]
             )
             
             description = response['choices'][0]['text'].strip()
-            if not description or description.startswith("[s]"):
-                # Fallback si el prompt anterior falla
+            if not description or len(description) < 5:
+                # Fallback
                 response = self.model.create_completion(
-                    prompt=f"Question: Describe this image.\nAnswer:",
-                    max_tokens=300
+                    prompt=f"Question: What is in this image?\nAnswer:",
+                    max_tokens=150
                 )
                 description = response['choices'][0]['text'].strip()
             
-            nsfw_tags = {
-                'explicit': ['fully nude', 'naked', 'genitals', '18+'],
-                'moderate': ['nude', 'topless'],
-            }.get(nsfw_level, [])
-
+            print(f"[ANALYZER] Descripción generada: {description[:100]}...")
+            
             return {
-                'positive': ", ".join([description] + nsfw_tags),
-                'negative': "clothed, dressed, blurry, low quality",
+                'positive': description,
+                'negative': "blurry, low quality",
                 'analysis': {'description': description}
             }
         except Exception as e:
-            print(f"[ERROR] Durante análisis: {e}")
+            print(f"[ERROR] Durante análisis LLM: {e}")
             return self._fallback_basic(image_path, nsfw_level)
 
     def _fallback_basic(self, image_path: str, nsfw_level: str):

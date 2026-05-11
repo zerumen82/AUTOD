@@ -77,45 +77,143 @@ def _warmup_face_analyser_async():
         print(f"[FaceWarmup] Warmup falló: {e}")
 
 
-def on_face_selection_click(evt: gr.SelectData):
-    """Maneja el clic en galería, sincroniza el slider y añade la cara directamente."""
+def on_face_selection_click(evt: gr.SelectData, frame_num):
+    """Maneja el clic en galería, sincroniza el slider, añade la cara y actualiza el feedback visual."""
     if not evt or evt.index is None:
-        return gr.update()
+        return gr.update(), gr.update()
 
     total_faces = len(state.SELECTION_FACES_DATA) if state.SELECTION_FACES_DATA else 0
     # Arreglado: La galería de selección tiene 4 columnas en ui.py
     face_index = _resolve_gallery_index(evt.index, total_faces, columns=4)
     
     if face_index is None or state.SELECTION_FACES_DATA is None:
-        return gr.update()
+        return gr.update(), gr.update()
+
+    # Guardar índice para preview del enhancer
+    state.TEMP_SELECTED_FACE_INDEX = face_index
 
     try:
         face_data = state.SELECTION_FACES_DATA[face_index]
         face_obj = face_data[0]
-        roop.globals.TARGET_FACES.append(face_obj)
-        ui.globals.ui_target_thumbs.append(util.convert_to_gradio(face_data[1], is_rgb=True))
         
-        # GUARDAR REFERENCIA PARA PROCESAMIENTO
-        if state.list_files_process and state.selected_preview_index < len(state.list_files_process):
-            filename = os.path.basename(state.list_files_process[state.selected_preview_index].filename)
-            video_key = f"selected_face_ref_{filename}"
+        # Verificar duplicados
+        is_duplicate = False
+        for existing in roop.globals.TARGET_FACES:
+            if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
+                if np.dot(existing.embedding, face_obj.embedding) > 0.98:
+                    is_duplicate = True; break
+            elif existing.bbox == face_obj.bbox:
+                is_duplicate = True; break
+
+        if not is_duplicate:
+            roop.globals.TARGET_FACES.append(face_obj)
+            ui.globals.ui_target_thumbs.append(util.convert_to_gradio(face_data[1], is_rgb=True))
             
-            if not hasattr(roop.globals, 'selected_face_references'):
-                roop.globals.selected_face_references = {}
+            if state.list_files_process and state.selected_preview_index < len(state.list_files_process):
+                filename = os.path.basename(state.list_files_process[state.selected_preview_index].filename)
+                video_key = f"selected_face_ref_{filename}"
+                if not hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references = {}
+                roop.globals.selected_face_references[video_key] = {'face_obj': face_obj, 'embedding': face_obj.embedding, 'bbox': face_obj.bbox}
             
-            ref_entry = {
-                'face_obj': face_obj,
-                'embedding': face_obj.embedding if hasattr(face_obj, 'embedding') else None,
-                'bbox': face_obj.bbox if hasattr(face_obj, 'bbox') else None
-            }
-            roop.globals.selected_face_references[video_key] = ref_entry
-            roop.globals.selected_face_references[filename] = ref_entry
+            gr.Info("✅ Cara añadida")
+        else:
+            gr.Info("ℹ️ Ya está en Destino")
+
+        # Actualizar feedback visual con caja verde
+        entry = state.list_files_process[state.selected_preview_index]
+        from roop.capturer import get_video_frame, get_image_frame
+        frame = get_video_frame(entry.filename, int(frame_num or 1)) if util.is_video(entry.filename) else get_image_frame(entry.filename)
+        boxed_frame = logic.draw_face_boxes(frame, state.SELECTION_FACES_DATA, selected_idx=face_index)
+        boxed_frame_gradio = util.convert_to_gradio(boxed_frame)
         
-        print(f"[FaceSelection] Cara añadida. Total TARGET: {len(roop.globals.TARGET_FACES)}")
     except Exception as e:
         print(f"[FaceSelection] Error: {e}")
+        boxed_frame_gradio = gr.update()
 
-    return gr.update(maximum=max(1, total_faces), value=face_index + 1)
+    return gr.update(maximum=max(1, total_faces), value=face_index + 1), boxed_frame_gradio
+
+
+def on_preview_click(evt: gr.SelectData, frame_num):
+    """Maneja el clic directo en la imagen de previsualización para seleccionar caras."""
+    if not state.list_files_process:
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+
+    entry = state.list_files_process[state.selected_preview_index]
+    frame_idx = max(1, int(frame_num or 1))
+
+    # 1. AUTO-DETECCIÓN: Si no hay caras o cambiamos de frame, detectamos primero
+    is_new_frame = getattr(state, 'CURRENT_DETECTED_FRAME', -1) != frame_idx
+    if not state.SELECTION_FACES_DATA or is_new_frame:
+        print(f"[FaceSelection] Auto-detectando caras para frame {frame_idx} (Nuevo={is_new_frame})...")
+        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
+        state.ALL_DETECTED_FACES_DATA = detected_faces
+        state.SELECTION_FACES_DATA = detected_faces
+        state.CURRENT_DETECTED_FRAME = frame_idx
+
+    if not state.SELECTION_FACES_DATA:
+        gr.Warning("⚠️ No se detectaron caras. Intenta buscar caras primero.")
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+
+    # 2. Buscar cara que coincida con las coordenadas del clic [x, y]
+    click_x, click_y = evt.index[0], evt.index[1]
+    best_face_idx = -1
+    min_dist = float('inf')
+
+    for idx, face_data in enumerate(state.SELECTION_FACES_DATA):
+        face_obj = face_data[0]
+        x1, y1, x2, y2 = face_obj.bbox
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        margin = 30
+        if (x1 - margin) <= click_x <= (x2 + margin) and (y1 - margin) <= click_y <= (y2 + margin):
+            dist = np.sqrt((click_x - cx)**2 + (click_y - cy)**2)
+            if dist < min_dist:
+                min_dist = dist
+                best_face_idx = idx
+
+    if best_face_idx != -1:
+        face_data = state.SELECTION_FACES_DATA[best_face_idx]
+        face_obj = face_data[0]
+        
+        # Sincronizar índice para preview del enhancer
+        state.TEMP_SELECTED_FACE_INDEX = best_face_idx
+
+        # Verificar duplicados
+        is_duplicate = False
+        for existing in roop.globals.TARGET_FACES:
+            if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
+                if np.dot(existing.embedding, face_obj.embedding) > 0.98:
+                    is_duplicate = True; break
+            elif existing.bbox == face_obj.bbox:
+                is_duplicate = True; break
+
+        if not is_duplicate:
+            roop.globals.TARGET_FACES.append(face_obj)
+            ui.globals.ui_target_thumbs.append(util.convert_to_gradio(face_data[1], is_rgb=True))
+            
+            filename = os.path.basename(entry.filename)
+            video_key = f"selected_face_ref_{filename}"
+            if not hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references = {}
+            roop.globals.selected_face_references[video_key] = {'face_obj': face_obj, 'embedding': face_obj.embedding, 'bbox': face_obj.bbox}
+            
+            gr.Info(f"✅ Cara añadida a Destino ({filename})")
+        else:
+            gr.Info("ℹ️ Esta cara ya está en la lista de Destino")
+
+        total_faces = len(ui.globals.ui_target_thumbs)
+        
+        # Feedback visual con caja verde
+        from roop.capturer import get_video_frame, get_image_frame
+        frame = get_video_frame(entry.filename, frame_idx) if util.is_video(entry.filename) else get_image_frame(entry.filename)
+        boxed_frame = logic.draw_face_boxes(frame, state.SELECTION_FACES_DATA, selected_idx=best_face_idx)
+        
+        return (
+            logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"),
+            logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"),
+            *logic.update_pagination_buttons(total_faces, "target"),
+            util.convert_to_gradio(boxed_frame)
+        )
+
+    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
 
 # Variables de estado locales para borrado
@@ -125,6 +223,37 @@ selected_target_face_idx = None
 def wire_events(ui_comp):
     """Conecta los componentes con la lógica"""
     
+    # --- FILTRADO ---
+    def on_filter_change(gender, size):
+        if not hasattr(state, 'ALL_DETECTED_FACES_DATA'): return gr.update()
+        filtered = logic.get_filtered_faces(state.ALL_DETECTED_FACES_DATA, gender, size)
+        state.SELECTION_FACES_DATA = filtered
+        thumbs = [_normalize_face_thumb(util.convert_to_gradio(img, is_rgb=True), 300) for _, img in filtered]
+        return gr.Gallery(value=thumbs, columns=min(4, len(thumbs)) if thumbs else 1)
+
+    ui_comp["gender_filter"].change(on_filter_change, [ui_comp["gender_filter"], ui_comp["size_filter"]], [ui_comp["face_selection"]])
+    ui_comp["size_filter"].change(on_filter_change, [ui_comp["gender_filter"], ui_comp["size_filter"]], [ui_comp["face_selection"]])
+
+    # --- ENHANCER PREVIEW ---
+    def on_enhancer_preview_click(frame_num, enhancer, blend):
+        if not state.list_files_process: return gr.update(), gr.update()
+        
+        face_idx = getattr(state, 'TEMP_SELECTED_FACE_INDEX', None)
+        if face_idx is None: 
+            return gr.update(), gr.Markdown("### ⚠️ Selecciona una cara primero en la galería superior")
+        
+        entry = state.list_files_process[state.selected_preview_index]
+        preview_img, msg = logic.get_enhancer_preview(entry.filename, int(frame_num or 1), face_idx, enhancer, blend)
+        if preview_img:
+            return gr.update(value=preview_img, visible=True), gr.update(value=msg)
+        return gr.update(visible=False), gr.update(value=msg)
+
+    ui_comp["bt_enhancer_preview"].click(
+        on_enhancer_preview_click, 
+        [ui_comp["preview_frame_num"], ui_comp["enhancer"], ui_comp["enhancer_blend"]],
+        [ui_comp["preview_result"], ui_comp["face_detection_title"]]
+    )
+
     # Tracking de clics en galerías finales (para borrar)
     def on_input_face_select(evt: gr.SelectData):
         global selected_input_face_idx
@@ -239,150 +368,49 @@ def wire_events(ui_comp):
     )
     ui_comp["target_faces"].delete(fn=on_target_face_delete, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
 
-    def on_preview_click(evt: gr.SelectData, frame_num):
-        """Maneja el clic directo en la imagen de previsualización para seleccionar caras."""
-        if not state.list_files_process:
-            return gr.update(), gr.update(), gr.update(), gr.update()
-
-        filename = state.list_files_process[state.selected_preview_index].filename
-        frame_idx = max(1, int(frame_num or 1))
-
-        # 1. AUTO-DETECCIÓN: Si no hay caras o son de otro frame, detectamos primero
-        if not state.SELECTION_FACES_DATA:
-            print(f"[FaceSelection] Auto-detectando caras para frame {frame_idx}...")
-            # Llamamos a la lógica de detección internamente
-            detected_faces = logic.extract_face_images(filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
-            valid_faces = []
-            for face_data in detected_faces:
-                face_obj, face_img = face_data[0], face_data[1]
-                valid_faces.append((face_obj, face_img))
-            state.SELECTION_FACES_DATA = valid_faces
-
-        if not state.SELECTION_FACES_DATA:
-            gr.Warning("⚠️ No se detectaron caras en este punto. Intenta buscar caras primero.")
-            return gr.update(), gr.update(), gr.update(), gr.update()
-
-        # 2. Buscar cara que coincida con las coordenadas del clic [x, y]
-        click_x, click_y = evt.index[0], evt.index[1]
-        best_face_idx = -1
-        min_dist = float('inf')
-
-        for idx, face_data in enumerate(state.SELECTION_FACES_DATA):
-            face_obj = face_data[0]
-            x1, y1, x2, y2 = face_obj.bbox
-            
-            # Centro de la cara
-            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-            
-            # Margen de error para el clic
-            margin = 30 
-            if (x1 - margin) <= click_x <= (x2 + margin) and (y1 - margin) <= click_y <= (y2 + margin):
-                # Calcular distancia al centro para elegir la más cercana si hay solapamiento
-                dist = np.sqrt((click_x - cx)**2 + (click_y - cy)**2)
-                if dist < min_dist:
-                    min_dist = dist
-                    best_face_idx = idx
-
-        if best_face_idx != -1:
-            # 3. Añadir la cara
-            face_data = state.SELECTION_FACES_DATA[best_face_idx]
-            face_obj = face_data[0]
-
-            # Verificar si ya existe para evitar duplicados visuales en la galería
-            # (Comparando embeddings si están disponibles, o bbox)
-            is_duplicate = False
-            for existing_face in roop.globals.TARGET_FACES:
-                if hasattr(existing_face, 'embedding') and hasattr(face_obj, 'embedding') and existing_face.embedding is not None and face_obj.embedding is not None:
-                    similarity = np.dot(existing_face.embedding, face_obj.embedding) / (np.linalg.norm(existing_face.embedding) * np.linalg.norm(face_obj.embedding))
-                    if similarity > 0.98:
-                        is_duplicate = True
-                        break
-                elif existing_face.bbox == face_obj.bbox:
-                    is_duplicate = True
-                    break
-
-            if not is_duplicate:
-                roop.globals.TARGET_FACES.append(face_obj)
-                ui.globals.ui_target_thumbs.append(util.convert_to_gradio(face_data[1], is_rgb=True))
-
-                # Guardar referencia para tracking (importante para videos)
-                v_name = os.path.basename(filename)
-                if not hasattr(roop.globals, 'selected_face_references'):
-                    roop.globals.selected_face_references = {}
-                roop.globals.selected_face_references[f"selected_face_ref_{v_name}"] = {
-                    'face_obj': face_obj, 
-                    'embedding': face_obj.embedding if hasattr(face_obj, 'embedding') else None,
-                    'bbox': face_obj.bbox
-                }
-
-                gr.Info(f"✅ Cara añadida a Destino ({v_name})")
-            else:
-                gr.Info("ℹ️ Esta cara ya está en la lista de Destino")
-
-            total_faces = len(ui.globals.ui_target_thumbs)
-            return (
-                logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"),
-                logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"),
-                *logic.update_pagination_buttons(total_faces, "target")
-            )
-
-        return gr.update(), gr.update(), gr.update(), gr.update()
-
     ui_comp["previewimage"].select(
         fn=on_preview_click,
         inputs=[ui_comp["preview_frame_num"]],
-        outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]
+        outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["previewimage"]]
     )
 
     def detect_faces_in_frame(frame_num):
-
         if not state.list_files_process: 
-            return gr.update(visible=False), gr.Markdown(value="### ❌ No hay archivo seleccionado"), gr.update(value=[], selected_index=None), gr.update(maximum=1, value=1), gr.update(value="🔍 BUSCAR CARAS EN ESTE FRAME")
+            return gr.update(visible=False), gr.Markdown("### ❌ No hay archivo"), gr.update(value=[]), gr.update(), gr.update()
         
-        analyser = face_util.get_face_analyser()
-        if analyser is None: 
-            return gr.update(visible=False), gr.Markdown(value="### ❌ Error: No hay analizador de caras"), gr.update(value=[], selected_index=None), gr.update(maximum=1, value=1), gr.update(value="🔍 BUSCAR CARAS EN ESTE FRAME")
-        
-        filename = state.list_files_process[state.selected_preview_index].filename
-        roop.globals.target_path = filename
+        entry = state.list_files_process[state.selected_preview_index]
         frame_idx = max(1, int(frame_num or 1))
         
-        detected_faces = logic.extract_face_images(filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
-        valid_faces, thumbs = [], []
+        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
+        state.ALL_DETECTED_FACES_DATA = detected_faces # Guardar todo para filtros
+        state.SELECTION_FACES_DATA = detected_faces
         
-        for idx, face_data in enumerate(detected_faces):
-            face_obj, face_img = face_data[0], face_data[1]
-            thumb = util.convert_to_gradio(face_img, is_rgb=True)
-            thumb = _normalize_face_thumb(thumb, size=300)
-            if thumb is None: continue
-            valid_faces.append((face_obj, face_img))
-            thumbs.append(thumb)
-            
-        state.SELECTION_FACES_DATA = valid_faces
+        thumbs = [_normalize_face_thumb(util.convert_to_gradio(f[1], is_rgb=True), 300) for f in detected_faces]
         
-        if not thumbs: 
-            gr.Warning("⚠️ No se detectaron caras en este frame. Intenta con otra imagen.")
-            return gr.update(visible=False), gr.Markdown(value="### ❌ No se detectaron caras"), gr.update(value=[], selected_index=None), gr.update(maximum=1, value=1), gr.update(value="🔍 BUSCAR CARAS EN ESTE FRAME")
+        # Feedback visual con cajas
+        from roop.capturer import get_video_frame, get_image_frame
+        frame = get_video_frame(entry.filename, frame_idx) if util.is_video(entry.filename) else get_image_frame(entry.filename)
+        boxed_frame = logic.draw_face_boxes(frame, detected_faces)
         
         detect_stamp = int(time.time() * 1000)
-        title_text = f"### ✅ {len(thumbs)} cara(s) detectada(s) en este frame"
         return (
             gr.update(visible=True), 
-            gr.Markdown(value=title_text), 
-            gr.Gallery(value=thumbs, selected_index=None, interactive=True, allow_preview=False, preview=False, columns=min(8, len(thumbs)), height=250, object_fit="contain", key=f"face_selection_{detect_stamp}"), 
-            gr.update(maximum=len(thumbs), value=1), 
-            gr.update(value=f"🔍 BUSCAR OTRA ({len(thumbs)} caras)")
+            gr.Markdown(f"### ✅ {len(thumbs)} cara(s) detectada(s)"), 
+            gr.Gallery(value=thumbs, columns=4, key=f"fs_{detect_stamp}"), 
+            util.convert_to_gradio(boxed_frame),
+            gr.update(value=f"🔍 BUSCAR OTRA ({len(thumbs)})")
         )
 
     ui_comp["bt_use_face_from_preview"].click(
         fn=detect_faces_in_frame, 
         inputs=[ui_comp["preview_frame_num"]], 
-        outputs=[ui_comp["dynamic_face_selection"], ui_comp["face_detection_title"], ui_comp["face_selection"], ui_comp["face_selector_slider"], ui_comp["bt_use_face_from_preview"]]
+        outputs=[ui_comp["dynamic_face_selection"], ui_comp["face_detection_title"], ui_comp["face_selection"], ui_comp["previewimage"], ui_comp["bt_use_face_from_preview"]]
     )
     
     ui_comp["face_selection"].select(
         fn=on_face_selection_click, 
-        outputs=[ui_comp["face_selector_slider"]], 
+        inputs=[ui_comp["preview_frame_num"]],
+        outputs=[ui_comp["face_selector_slider"], ui_comp["previewimage"]], 
         queue=False
     ).then(
         fn=lambda: (gr.update(visible=True), logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(len(ui.globals.ui_target_thumbs), "target")), 
@@ -400,20 +428,14 @@ def wire_events(ui_comp):
         MIN_SRC_SIZE = 40 
         for f in files:
             f_path = f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
-            print(f"[SOURCE_LOAD] Loading: {f_path}")
             faces_data = logic.extract_face_images(f_path, is_source_face=True)
-            print(f"[SOURCE_LOAD] Found {len(faces_data)} faces in {f_path}")
             for face_obj, face_img in faces_data:
-                if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE:
-                    print(f"[SOURCE_LOAD] Face too small: {face_img.shape}")
-                    continue
+                if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE: continue
                 from roop.types import FaceSet
                 face_obj.face_img = face_img
                 face_obj.face_img_ref = face_img
                 roop.globals.INPUT_FACESETS.append(FaceSet(faces=[face_obj], name=os.path.basename(f_path)))
                 ui.globals.ui_input_thumbs.append(util.convert_to_gradio(face_img, is_rgb=True))
-                embedding_info = f"embedding={'YES' if hasattr(face_obj, 'embedding') and face_obj.embedding is not None else 'NONE'}"
-                print(f"[SOURCE_LOAD] Added face: {face_obj.bbox} ({embedding_info})")
         
         total_faces = len(ui.globals.ui_input_thumbs)
         return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total_faces, "input"))
@@ -424,16 +446,13 @@ def wire_events(ui_comp):
         state.current_target_page = 0
         roop.globals.TARGET_FACES.clear()
         ui.globals.ui_target_thumbs.clear()
-        if hasattr(roop.globals, 'selected_face_references'):
-            roop.globals.selected_face_references.clear()
+        if hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references.clear()
         
         if not files: 
             return gr.update(maximum=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False)
         
-        threading.Thread(target=_warmup_face_analyser_async, daemon=True).start()
         state.list_files_process = []
         first_preview = None
-        
         for i, f in enumerate(files):
             f_path = f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
             entry, preview_img, _ = logic.process_target_file_async(f_path)
@@ -442,12 +461,9 @@ def wire_events(ui_comp):
                 if i == 0: first_preview = preview_img
         
         state.selected_preview_index = 0
-        # Forzar modo 'selected' por defecto (la lógica interna de ProcessMgr hará el resto)
         roop.globals.face_swap_mode = 'selected'
-        
         first_entry = state.list_files_process[0]
         roop.globals.target_path = first_entry.filename
-        total_target_faces = len(ui.globals.ui_target_thumbs)
         
         return (
             gr.update(maximum=first_entry.endframe, value=1), 
@@ -458,12 +474,17 @@ def wire_events(ui_comp):
             [], 
             logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), 
             logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), 
-            *logic.update_pagination_buttons(total_target_faces, "target")
+            *logic.update_pagination_buttons(0, "target")
         )
 
-    ui_comp["bt_destfiles"].change(fn=on_dest_changed, inputs=[ui_comp["bt_destfiles"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
+    # NAVEGACIÓN Y INDICADORES
+    def update_file_indicator():
+        if not state.list_files_process: return "📂 **Archivo:** Ninguno"
+        entry = state.list_files_process[state.selected_preview_index]
+        return f"📂 **Archivo ({state.selected_preview_index+1}/{len(state.list_files_process)}):** {os.path.basename(entry.filename)}"
 
-    # NAVEGACIÓN
+    ui_comp["bt_destfiles"].change(on_dest_changed, [ui_comp["bt_destfiles"]], [ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]).then(update_file_indicator, None, ui_comp["file_indicator"])
+
     def jump_frame(current_f, delta):
         if not state.list_files_process: return gr.update(), None
         entry = state.list_files_process[state.selected_preview_index]
@@ -497,8 +518,8 @@ def wire_events(ui_comp):
         frame = get_video_frame(entry.filename, 1) if util.is_video(entry.filename) else get_image_frame(entry.filename)
         return gr.update(maximum=entry.endframe, value=1), util.convert_to_gradio(frame), gr.update(interactive=state.selected_preview_index>0), gr.update(interactive=state.selected_preview_index<len(state.list_files_process)-1)
 
-    ui_comp["bt_prev_file"].click(fn=lambda: navigate_file("prev"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]])
-    ui_comp["bt_next_file"].click(fn=lambda: navigate_file("next"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]])
+    ui_comp["bt_prev_file"].click(fn=lambda: navigate_file("prev"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]]).then(update_file_indicator, None, ui_comp["file_indicator"])
+    ui_comp["bt_next_file"].click(fn=lambda: navigate_file("next"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]]).then(update_file_indicator, None, ui_comp["file_indicator"])
 
     # PAGINACIÓN
     ui_comp["bt_input_prev"].click(fn=lambda: on_input_page_change(-1), outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
@@ -506,66 +527,14 @@ def wire_events(ui_comp):
     ui_comp["bt_target_prev"].click(fn=lambda: on_target_page_change(-1), outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
     ui_comp["bt_target_next"].click(fn=lambda: on_target_page_change(1), outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
 
-    # BORRADO MASIVO
-    def clear_all_target_faces():
-        roop.globals.TARGET_FACES.clear()
-        ui.globals.ui_target_thumbs.clear()
-        if hasattr(roop.globals, 'selected_face_references'):
-            roop.globals.selected_face_references.clear()
-        state.current_target_page = 0
-        total_faces = 0
-        return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total_faces, "target"))
-
+    # BORRADO Y OTROS
     ui_comp["bt_clear_all_target"].click(fn=clear_all_target_faces, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
-
-    def remove_selected_input_face():
-        global selected_input_face_idx
-        if selected_input_face_idx is not None and 0 <= selected_input_face_idx < len(roop.globals.INPUT_FACESETS):
-            roop.globals.INPUT_FACESETS.pop(selected_input_face_idx)
-            ui.globals.ui_input_thumbs.pop(selected_input_face_idx)
-            total_faces = len(ui.globals.ui_input_thumbs)
-            max_pages = max(0, (total_faces - 1) // state.FACES_PER_PAGE)
-            if state.current_input_page > max_pages: state.current_input_page = max_pages
-            selected_input_face_idx = None
-        total_faces = len(ui.globals.ui_input_thumbs)
-        return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total_faces, "input"))
-
     ui_comp["bt_remove_selected_input_face"].click(fn=remove_selected_input_face, outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
-
-    def remove_selected_target_face():
-        global selected_target_face_idx
-        if selected_target_face_idx is not None and 0 <= selected_target_face_idx < len(roop.globals.TARGET_FACES):
-            # Obtener el nombre del archivo para limpiar también la referencia global
-            if state.list_files_process and state.selected_preview_index < len(state.list_files_process):
-                filename = os.path.basename(state.list_files_process[state.selected_preview_index].filename)
-                if hasattr(roop.globals, 'selected_face_references'):
-                    video_key = f"selected_face_ref_{filename}"
-                    if video_key in roop.globals.selected_face_references:
-                        del roop.globals.selected_face_references[video_key]
-                    if filename in roop.globals.selected_face_references:
-                        del roop.globals.selected_face_references[filename]
-
-            roop.globals.TARGET_FACES.pop(selected_target_face_idx)
-            ui.globals.ui_target_thumbs.pop(selected_target_face_idx)
-            total_faces = len(ui.globals.ui_target_thumbs)
-            max_pages = max(0, (total_faces - 1) // state.FACES_PER_PAGE)
-            if state.current_target_page > max_pages: state.current_target_page = max_pages
-            selected_target_face_idx = None
-        total_faces = len(ui.globals.ui_target_thumbs)
-        return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total_faces, "target"))
-
     ui_comp["bt_remove_selected_target_face"].click(fn=remove_selected_target_face, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
 
     # AJUSTES EXPERTOS
-    def update_enhancer(enhancer_value):
-        roop.globals.selected_enhancer = enhancer_value
-        roop.globals.use_enhancer = enhancer_value != "None"
-    
-    def update_enhancer_blend(enhancer_blend_value):
-        roop.globals.enhancer_blend_factor = enhancer_blend_value
-    
-    ui_comp["enhancer"].change(fn=update_enhancer, inputs=[ui_comp["enhancer"]])
-    ui_comp["enhancer_blend"].change(fn=update_enhancer_blend, inputs=[ui_comp["enhancer_blend"]])
+    ui_comp["enhancer"].change(fn=lambda v: setattr(roop.globals, 'selected_enhancer', v) or setattr(roop.globals, 'use_enhancer', v != "None"), inputs=[ui_comp["enhancer"]])
+    ui_comp["enhancer_blend"].change(fn=lambda v: setattr(roop.globals, 'enhancer_blend_factor', v), inputs=[ui_comp["enhancer_blend"]])
 
     # PROCESAMIENTO
     ui_comp["bt_start"].click(fn=on_start_process, inputs=[ui_comp["fake_preview"], ui_comp["autorotate"], ui_comp["smoothing"], ui_comp["face_distance"], ui_comp["blend_ratio"], ui_comp["enhancer_blend"], ui_comp["enhancer"]], outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]])

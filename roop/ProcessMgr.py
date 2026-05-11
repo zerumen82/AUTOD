@@ -388,41 +388,50 @@ class ProcessMgr:
                     if face_ref_data:
                         target_face_ref = face_ref_data.get('face_obj')
                         if target_face_ref:
-                            best_match = None
-                            best_iou = 0.0
-                            best_emb_match = None
-                            best_score = 0.0
-
-                            # 1. Intentar por IoU
-                            if hasattr(target_face_ref, 'bbox') and target_face_ref.bbox is not None:
-                                for face in valid_faces:
-                                    iou = self._bbox_iou(target_face_ref.bbox, face.bbox)
-                                    if iou > best_iou:
-                                        best_iou = iou
-                                        best_match = face
-                                
-                                if best_match and best_iou > 0.15:
-                                    faces_to_process = [best_match]
-                                    print(f"[AUTO] Foto: Match por IoU ({best_iou:.2f}) para {filename}")
+                            # Diagnóstico: mostrar información de la cara seleccionada
+                            print(f"[MATCH] Buscando cara seleccionada en {filename}")
+                            print(f"  - Cara ref bbox: {target_face_ref.bbox if hasattr(target_face_ref, 'bbox') else 'N/A'}")
+                            print(f"  - Cara ref embedding: {'Sí' if hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None else 'No'}")
+                            print(f"  - Caras detectadas en imagen: {len(valid_faces)}")
                             
-                            # 2. Si IoU no es suficiente, intentar por Embedding
-                            if not faces_to_process and hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None:
-                                for face in valid_faces:
-                                    if hasattr(face, 'embedding') and face.embedding is not None:
-                                        score = self._calculate_similarity(target_face_ref.embedding, face.embedding)
-                                        if score > best_score:
-                                            best_score = score
-                                            best_emb_match = face
+                            best_match = None
+                            best_combined_score = 0.0
+
+                            for idx, face in enumerate(valid_faces):
+                                score_iou = 0.0
+                                score_emb = 0.0
                                 
-                                if best_emb_match and best_score > 0.15:
-                                    faces_to_process = [best_emb_match]
-                                    print(f"[AUTO] Foto: Match por Embedding ({best_score:.2f}) para {filename}")
+                                # Calcular IoU si hay bbox
+                                if hasattr(target_face_ref, 'bbox') and target_face_ref.bbox is not None and hasattr(face, 'bbox') and face.bbox is not None:
+                                    score_iou = self._bbox_iou(target_face_ref.bbox, face.bbox)
+                                
+                                # Calcular similitud de embedding
+                                if hasattr(target_face_ref, 'embedding') and target_face_ref.embedding is not None and hasattr(face, 'embedding') and face.embedding is not None:
+                                    score_emb = self._calculate_similarity(target_face_ref.embedding, face.embedding)
+                                
+                                # Puntuación combinada: 40% IoU, 60% Embedding
+                                combined = (score_iou * 0.4) + (score_emb * 0.6)
+                                
+                                print(f"  - Cara {idx}: IoU={score_iou:.3f}, Emb={score_emb:.3f}, Combined={combined:.3f}")
+                                
+                                if combined > best_combined_score:
+                                    best_combined_score = combined
+                                    best_match = face
+                            
+                            # Umbral más alto para evitar falsos positivos (0.5 combinado)
+                            if best_match and best_combined_score > 0.5:
+                                faces_to_process = [best_match]
+                                print(f"[AUTO] Foto: Match encontrado (score={best_combined_score:.2f}) para {filename}")
+                            else:
+                                print(f"[AUTO] Foto: No se encontró match confiable (mejor score={best_combined_score:.2f}) para {filename}")
+                                faces_to_process = []
                     else:
                         # SIN SELECCIÓN EN FOTO: No hacer nada (como pidió el usuario)
                         print(f"[AUTO] Foto {filename}: Sin selección, omitiendo swap.")
                         faces_to_process = []
-
-                else:
+ 
+                # Si no se asignó ninguna cara específica, usar todas las válidas
+                if not faces_to_process:
                     faces_to_process = valid_faces
                   
                 processed_faces = 0
@@ -616,6 +625,14 @@ class ProcessMgr:
         try:
             if not candidate_faces:
                 return None
+            
+            # SIEMPRE usar similitud para encontrar la mejor cara origen
+            # entre todas las disponibles (725 facesets)
+            return self._select_source_face_by_similarity(target_face, candidate_faces)
+            
+        except Exception as e:
+            print(f"[ERROR] _select_source_face: {e}")
+            return None
                 
             # NUEVO: Si el usuario seleccionó una cara origen específica, usar ESA
             source_idx = getattr(roop.globals, 'source_face_index', 0)
@@ -960,6 +977,7 @@ class ProcessMgr:
             # Get original embedding
             original_embedding = getattr(self, original_embedding_attr, None)
             if original_embedding is None:
+                # 1. Intentar obtener referencia específica del video
                 if hasattr(roop.globals, 'selected_face_references') and video_key in roop.globals.selected_face_references:
                     face_ref_data = roop.globals.selected_face_references[video_key]
                     user_embedding = face_ref_data.get('embedding')
@@ -969,6 +987,31 @@ class ProcessMgr:
                         if norm > 0:
                             original_embedding = emb / norm
                             setattr(self, original_embedding_attr, original_embedding)
+                
+                # 2. SMART PROPAGATION FALLBACK: Si no hay específica, buscar en el lote global de target_faces
+                if original_embedding is None and self.target_faces:
+                    print(f"[TRACK] No hay referencia para {video_basename}, aplicando Propagación Inteligente...")
+                    best_global_match = None
+                    max_global_sim = -1
+                    
+                    # Comparar las caras detectadas en este frame con TODAS las caras seleccionadas en el lote
+                    for face in valid_faces:
+                        if not hasattr(face, 'embedding') or face.embedding is None: continue
+                        
+                        for target_face in self.target_faces:
+                            if not hasattr(target_face, 'embedding') or target_face.embedding is None: continue
+                            
+                            sim = self._calculate_similarity(target_face.embedding, face.embedding)
+                            if sim > max_global_sim:
+                                max_global_sim = sim
+                                best_global_match = target_face
+                    
+                    if best_global_match and max_global_sim > 0.45: # Umbral conservador para propagación automática
+                        print(f"[TRACK] Propagación exitosa para {video_basename} (sim={max_global_sim:.2f})")
+                        emb = np.array(best_global_match.embedding, dtype=np.float32)
+                        norm = np.linalg.norm(emb)
+                        original_embedding = emb / norm
+                        setattr(self, original_embedding_attr, original_embedding)
             
             # INTELLIGENT TRACKING SECTION
             if hasattr(self, assigned_attr):

@@ -10,6 +10,8 @@ import gradio as gr
 import atexit
 import socket
 
+from ui.tabs.img_editor_tab import create_img_editor_tab
+
 # Puerto base dinamico
 GRADIO_BASE_PORT = int(os.environ.get('GRADIO_SERVER_PORT', '7861'))
 COMFYUI_PORT = os.environ.get('COMFYUI_PORT', '8188')
@@ -220,7 +222,6 @@ def create_ui():
             # Tab 3: Image Editor
             with gr.Tab("🎨 Image Editor"):
                 try:
-                    from ui.tabs.img_editor_tab import create_img_editor_tab
                     create_img_editor_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")

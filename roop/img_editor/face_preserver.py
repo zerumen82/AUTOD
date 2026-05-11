@@ -9,6 +9,7 @@ durante el proceso de edicion con FLUX.
 from typing import Optional, List, Tuple
 from PIL import Image
 import numpy as np
+import cv2
 
 
 class FacePreserver:
@@ -85,25 +86,6 @@ class FacePreserver:
                     pass
             print(f"[FacePreserver] Error detectando rostros: {e}")
             return []
-        
-        try:
-            np_image = np.array(image)
-            faces = self.analyzer.get(np_image)
-            
-            results = []
-            for face in faces:
-                results.append({
-                    "bbox": face.bbox.tolist(),
-                    "kps": face.kps.tolist(),
-                    "embedding": face.embedding,
-                    "det_score": face.det_score,
-                })
-            
-            return results
-            
-        except Exception as e:
-            print(f"[FacePreserver] Error detectando rostros: {e}")
-            return []
     
     def count_faces(self, image: Image.Image) -> int:
         """
@@ -155,13 +137,15 @@ class FacePreserver:
             result_cv2 = gen_cv2.copy()
             swapped_count = 0
             
-            for gen_face, _ in gen_faces_data:
+            for i, (gen_face, _) in enumerate(gen_faces_data):
                 # Buscar la cara más similar en el original
                 best_match = None
                 max_sim = -1
                 
-                for orig_face, _ in orig_faces_data:
+                print(f"[FacePreserver] Analizando cara generada #{i+1}...")
+                for j, (orig_face, _) in enumerate(orig_faces_data):
                     sim = self.compare_faces(orig_face.embedding, gen_face.embedding)
+                    print(f"  - Similitud con cara original #{j+1}: {sim:.4f}")
                     if sim > max_sim:
                         max_sim = sim
                         best_match = orig_face
@@ -169,11 +153,14 @@ class FacePreserver:
                 # Si encontramos un match razonable (>0.4), hacemos el swap quirúrgico
                 if best_match is not None and max_sim > 0.4:
                     try:
+                        print(f"  [MATCH] Restaurando identidad con sim={max_sim:.4f}")
                         # Realizar el swap directamente en el frame generado
                         result_cv2 = swapper.get(result_cv2, gen_face, best_match, paste_back=True)
                         swapped_count += 1
                     except Exception as e:
-                        print(f"[FacePreserver] Error en swap de cara: {e}")
+                        print(f"  [ERROR] Fallo en swapper.get: {e}")
+                else:
+                    print(f"  [SKIP] Similitud insuficiente ({max_sim:.4f} <= 0.4)")
             
             print(f"[FacePreserver] Se restauraron {swapped_count} identidad(es) facial(es)")
             

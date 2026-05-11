@@ -33,27 +33,152 @@ class AnimatePhoto:
         except:
             return False
 
+    def _find_model(self, subdir, patterns, extensions=(".gguf", ".safetensors")):
+        base = os.path.join(MODELS_DIR, subdir)
+        if not os.path.exists(base):
+            return None
+
+        pattern_lw = [p.lower() for p in patterns]
+        for root, _, files in os.walk(base):
+            for filename in files:
+                name_lw = filename.lower()
+                if not name_lw.endswith(extensions):
+                    continue
+                rel = os.path.relpath(os.path.join(root, filename), base)
+                rel_lw = rel.lower()
+                if all(p in rel_lw for p in pattern_lw):
+                    return rel
+        return None
+
+    def _normalize_wan_frames(self, frames):
+        frames = max(17, int(frames or 81))
+        remainder = (frames - 1) % 4
+        if remainder:
+            frames += 4 - remainder
+        return frames
+
     def build_wan_workflow(self, image_path, prompt, frames=81, fps=16, steps=25):
         seed = int(time.time()) % 1000000
+        prompt = (prompt or "").strip() or "natural gentle movement, subtle realistic motion"
+        frames = self._normalize_wan_frames(frames)
+        negative_prompt = (
+            "low quality, blurry, distorted, bad anatomy, static, frozen, "
+            "still image, no movement, low resolution, watermark, text"
+        )
+
+        wan_model = (
+            self._find_model("diffusion_models", ["wan2.2"])
+            or self._find_model("diffusion_models", ["wan2_2"])
+            or self._find_model("diffusion_models", ["wan2.1"])
+            or self._find_model("diffusion_models", ["wan2_1"])
+            or self._find_model("diffusion_models", ["wan"])
+        )
+        vae_name = (
+            self._find_model("vae", ["wan2", "vae"])
+            or self._find_model("vae", ["wan", "vae"])
+            or "Wan2.2_VAE.safetensors"
+        )
+        t5_name = (
+            self._find_model("text_encoders", ["umt5"])
+            or self._find_model("text_encoders", ["t5"])
+            or "umt5-xxl-enc-bf16.safetensors"
+        )
+
+        if not wan_model:
+            raise RuntimeError("No se encontró modelo Wan en models/diffusion_models")
+
         return {
             "1": {"class_type": "LoadImage", "inputs": {"image": image_path}},
-            "2": {"class_type": "VAELoader", "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
-            "3": {
-                "class_type": "WanVideoImageToVideo",
+            "2": {
+                "class_type": "WanVideoModelLoader",
                 "inputs": {
-                    "seed": seed, "steps": steps, "cfg": 5.0, "frames": frames,
-                    "height": 480, "width": 832,
-                    "image": ["1", 0], "vae": ["2", 0],
-                    "positive": ["5", 0], "negative": ["5", 0]
+                    "model": wan_model,
+                    "base_precision": "bf16",
+                    "quantization": "disabled",
+                    "load_device": "offload_device"
                 }
             },
-            "4": {"class_type": "WanVideoDecode", "inputs": {"vae": ["2", 0], "samples": ["3", 0]}},
-            "5": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["6", 0]}},
-            "6": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan"}},
-            "7": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "model_type": "wan"}},
-            "8": {"class_type": "VideoCombine", "inputs": {
-                "frame_rate": fps, "images": ["4", 0], "filename_prefix": "WanAnim", "format": "video/mp4"
-            }},
+            "3": {
+                "class_type": "WanVideoVAELoader",
+                "inputs": {"model_name": vae_name, "precision": "bf16"}
+            },
+            "4": {
+                "class_type": "LoadWanVideoT5TextEncoder",
+                "inputs": {
+                    "model_name": t5_name,
+                    "precision": "bf16",
+                    "load_device": "offload_device",
+                    "quantization": "disabled"
+                }
+            },
+            "5": {
+                "class_type": "WanVideoTextEncode",
+                "inputs": {
+                    "positive_prompt": prompt,
+                    "negative_prompt": negative_prompt,
+                    "t5": ["4", 0],
+                    "force_offload": True,
+                    "model_to_offload": ["2", 0]
+                }
+            },
+            "6": {
+                "class_type": "WanVideoImageToVideoEncode",
+                "inputs": {
+                    "width": 832,
+                    "height": 480,
+                    "num_frames": frames,
+                    "noise_aug_strength": 0.0,
+                    "start_latent_strength": 1.0,
+                    "end_latent_strength": 1.0,
+                    "force_offload": True,
+                    "vae": ["3", 0],
+                    "start_image": ["1", 0],
+                    "fun_or_fl2v_model": True
+                }
+            },
+            "7": {
+                "class_type": "WanVideoSampler",
+                "inputs": {
+                    "model": ["2", 0],
+                    "image_embeds": ["6", 0],
+                    "text_embeds": ["5", 0],
+                    "steps": steps,
+                    "cfg": 5.0,
+                    "shift": 5.0,
+                    "seed": seed,
+                    "scheduler": "unipc",
+                    "riflex_freq_index": 0,
+                    "force_offload": True
+                }
+            },
+            "8": {
+                "class_type": "WanVideoDecode",
+                "inputs": {
+                    "vae": ["3", 0],
+                    "samples": ["7", 0],
+                    "enable_vae_tiling": False,
+                    "tile_x": 272,
+                    "tile_y": 272,
+                    "tile_stride_x": 144,
+                    "tile_stride_y": 128
+                }
+            },
+            "9": {
+                "class_type": "CreateVideo",
+                "inputs": {
+                    "images": ["8", 0],
+                    "fps": fps
+                }
+            },
+            "10": {
+                "class_type": "SaveVideo",
+                "inputs": {
+                    "video": ["9", 0],
+                    "filename_prefix": "WanAnim",
+                    "format": "mp4",
+                    "codec": "auto"
+                }
+            },
         }
 
     def animate_image(self, image_pil=None, prompt="", output_path="output.mp4",
@@ -73,6 +198,9 @@ class AnimatePhoto:
             image_pil = image_pil.resize((nw, nh), Image.LANCZOS)
 
         fname = self.upload_image(image_pil)
+        if model != "wan_video":
+            print(f"[AnimatePhoto] Motor {model} no implementado aquí; usando WanVideo para respetar prompt.")
+
         wf = self.build_wan_workflow(fname, prompt, frames, fps)
 
         r = requests.post(f"{self.base}/prompt", json={"prompt": wf})
@@ -90,10 +218,18 @@ class AnimatePhoto:
                 hist = r.json()[pid]
                 if "outputs" in hist:
                     for node_id, node_out in hist["outputs"].items():
-                        files = node_out.get("gifs", []) or node_out.get("videos", [])
+                        files = node_out.get("gifs", []) or node_out.get("videos", []) or node_out.get("images", [])
                         for f in files:
-                            if isinstance(f, dict) and f.get("filename", "").startswith("WanAnim"):
-                                r2 = requests.get(f"{self.base}/view", params={"filename": f["filename"], "subfolder": f.get("subfolder", ""), "type": f.get("type", "output")})
+                            filename = f.get("filename", "") if isinstance(f, dict) else ""
+                            if isinstance(f, dict) and (filename.startswith("WanAnim") or filename.lower().endswith(".mp4")):
+                                r2 = requests.get(
+                                    f"{self.base}/view",
+                                    params={
+                                        "filename": filename,
+                                        "subfolder": f.get("subfolder", ""),
+                                        "type": f.get("type", "output")
+                                    }
+                                )
                                 if r2.status_code == 200:
                                     with open(output_path, "wb") as fw:
                                         fw.write(r2.content)

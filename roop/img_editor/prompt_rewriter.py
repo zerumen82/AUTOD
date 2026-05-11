@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Prompt Rewriter - Reescritor de Prompts con Qwen3 4B local
-
-Convierte prompts simples en prompts detallados automáticamente.
-Ejemplo: "bailando" → "dynamic dancing pose, energetic movement, flowing hair, dramatic lighting"
+Prompt Rewriter - Inteligencia Semántica Pura (Sin Hardcoding)
 """
 
-import os
+import os, json, re
 from typing import Optional, Dict, List, Tuple
-
 
 MOONDREAM_TEXT_PATH = r"D:\PROJECTS\AUTOAUTO\models\moondream\moondream2-text-model-f16.gguf"
 
 class PromptRewriter:
-    """Reescribe prompts usando Moondream2 text model local"""
+    """Analiza la instrucción y extrae todos los parámetros de edición mediante razonamiento LLM"""
 
     def __init__(self):
         self._llm = None
@@ -24,165 +20,115 @@ class PromptRewriter:
         if self._llm is not None:
             return
         try:
-            import os as _os
-            _os.environ['PATH'] = (
-                r'D:\PROJECTS\AUTOAUTO\venv\lib\site-packages\llama_cpp\lib'
-                + _os.pathsep + r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin'
-                + _os.pathsep + _os.environ.get('PATH', '')
-            )
             from llama_cpp import Llama
-            if not _os.path.exists(MOONDREAM_TEXT_PATH):
-                print(f"[PromptRewriter] Modelo no encontrado: {MOONDREAM_TEXT_PATH}")
+            
+            # Rutas de búsqueda unificadas
+            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            possible_paths = [
+                MOONDREAM_TEXT_PATH,
+                os.path.join(root, "models", "moondream", "moondream2-text-model-f16.gguf"),
+                os.path.join(root, "models", "moondream2-text-model-f16.gguf"),
+                os.path.join(root, "models", "moondream2.gguf"),
+            ]
+            
+            model_path = None
+            for p in possible_paths:
+                if os.path.exists(p):
+                    model_path = p
+                    break
+            
+            if not model_path:
+                print("[PromptRewriter] ERROR: No se encontró el modelo moondream en ninguna ruta conocida.")
                 return
-            print(f"[PromptRewriter] Cargando Moondream2 text model...")
+
+            print(f"[PromptRewriter] Cargando rewriter semántico: {os.path.basename(model_path)}")
             self._llm = Llama(
-                model_path=MOONDREAM_TEXT_PATH,
-                n_gpu_layers=0,
-                n_ctx=2048,
+                model_path=model_path,
+                n_gpu_layers=0, # Siempre CPU para no molestar a Flux
+                n_ctx=1024,     # Contexto suficiente para prompts
                 verbose=False
             )
-            print(f"[PromptRewriter] ✅ Moondream2 text model listo")
+            print("[PromptRewriter] Rewriter listo en CPU")
         except Exception as e:
             print(f"[PromptRewriter] LLM local no disponible: {e}")
 
-    def rewrite(self, prompt: str, analysis: Dict[str, bool] = None) -> Tuple[str, str]:
+    def rewrite(self, prompt: str) -> Dict:
+        """Devuelve un diccionario con el análisis completo del LLM"""
         if self._llm is not None:
             try:
-                return self._rewrite_with_llm(prompt, self._llm), "medium"
+                return self._rewrite_with_llm(prompt, self._llm)
             except Exception as e:
                 print(f"[PromptRewriter] Error con LLM: {e}")
-        return (self._rewrite_with_templates(prompt, analysis), "medium")
+        
+        # Fallback de emergencia (mínimo hardcoding solo para no romper el sistema)
+        return {
+            "prompt": prompt,
+            "magnitude": 0.5,
+            "mask_target": prompt,
+            "reasoning": "Fallback mode"
+        }
 
-    def _rewrite_with_llm(self, prompt: str, llm) -> str:
-        system = "Eres un experto en prompts de IA. Mejora el prompt manteniendo el significado original. Sé descriptivo con iluminación, composición y detalles. Responde SOLO con el prompt mejorado, máximo 100 palabras."
-        full = f"{system}\n\nPrompt original: \"{prompt}\"\n\nPrompt mejorado:"
-        response = llm.create_completion(
-            full, max_tokens=200, temperature=0.4,
-            stop=["\"", "\n\n"], echo=False
+    def _rewrite_with_llm(self, prompt: str, llm) -> Dict:
+        system = (
+            "Eres el núcleo de inteligencia de un editor de imágenes. Tu misión es transformar una instrucción de usuario en parámetros técnicos.\n"
+            "Debes responder EXCLUSIVAMENTE en formato JSON con estos campos:\n"
+            "1. 'reasoning': Breve explicación de por qué el cambio es sutil, medio o radical.\n"
+            "2. 'prompt': Traducción al inglés técnico, muy descriptiva y cinematográfica (ej: 'hyper-realistic photo of a person wearing...').\n"
+            "3. 'magnitude': Valor de 0.0 a 1.0 (0.1=sonrisa/ojos, 0.5=objetos/clima, 0.9=ropa completa/desnudo/cuerpo).\n"
+            "4. 'mask_target': El objeto físico exacto en inglés que debe ser enmascarado para este cambio (ej: 'shirt', 'eyes', 'background', 'whole body').\n"
+            "\nIMPORTANTE: No uses frases genéricas como 'traducción detallada'. Escribe prompts reales."
         )
-        result = response['choices'][0]['text'].strip()
-        result = result.strip('"').strip()
-        if len(result) < 10:
-            result = prompt
-        print(f"[PromptRewriter] ✅ Reescrito con LLM local: {result[:50]}...")
-        return result
+        full = f"{system}\n\nInstrucción del usuario: \"{prompt}\"\n\nJSON:"
+        
+        response = llm.create_completion(
+            full, max_tokens=500, temperature=0.1,
+            echo=False
+        )
+        
+        try:
+            text = response['choices'][0]['text'].strip()
+            print(f"[PromptRewriter] Raw LLM Response: {text}")
+            
+            # Búsqueda robusta del objeto JSON
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                text = match.group(0)
+            else:
+                # Si el LLM se olvidó las llaves, intentamos forzarlas si parece un dict
+                if ":" in text and ("," in text or "\n" in text):
+                    text = "{" + text + "}"
+            
+            # Limpieza de comillas simples (común en respuestas de LLMs pequeños)
+            # Solo si no hay comillas dobles que sugieran que ya es JSON válido
+            if '"' not in text and "'" in text:
+                text = text.replace("'", '"')
+            
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                # Intento final: limpiar caracteres no imprimibles o basura al inicio/final
+                text = re.sub(r'^[^{]*', '', text)
+                text = re.sub(r'[^}]*$', '', text)
+                data = json.loads(text)
+            
+            # Limpieza y validación básica
+            result = {
+                "prompt": data.get("prompt", prompt),
+                "magnitude": float(data.get("magnitude", 0.5)),
+                "mask_target": data.get("mask_target", "subject"),
+                "reasoning": data.get("reasoning", "Semantic analysis completed")
+            }
+            
+            print(f"[PromptRewriter] Analysis: {result['reasoning']}")
+            print(f"[PromptRewriter] Mag: {result['magnitude']} | Mask: {result['mask_target']}")
+            
+            return result
+        except Exception as e:
+            print(f"[PromptRewriter] Error parsing LLM JSON: {e}")
+            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject"}
 
-    def _rewrite_with_templates(self, prompt: str, analysis: Dict[str, bool] = None) -> Tuple[str, str]:
-        """Reescribe usando templates predefinidos y estima intensidad - ESTILO IMAGINE"""
-
-        prompt_lower = prompt.lower()
-        enhancements = []
-
-        # Detectar tipo de prompt y aplicar template
-        if analysis:
-            if analysis.get('use_openpose'):
-                # Prompts de pose - estilo imagine
-                if any(kw in prompt_lower for kw in ['bailando', 'bailar', 'dance']):
-                    enhancements = [
-                        "dynamic dancing pose",
-                        "energetic movement",
-                        "flowing hair",
-                        "motion blur background",
-                        "dramatic cinematic lighting",
-                        "action shot",
-                        "wide angle lens"
-                    ]
-                elif any(kw in prompt_lower for kw in ['sentado', 'sit']):
-                    enhancements = [
-                        "sitting portraiture",
-                        "relaxed elegant pose",
-                        "natural posture",
-                        "soft cinematic lighting",
-                        "detailed face",
-                        "portrait photography",
-                        "shallow depth of field"
-                    ]
-                elif any(kw in prompt_lower for kw in ['de pie', 'standing']):
-                    enhancements = [
-                        "standing full body",
-                        "confident posture",
-                        "hero shot angle",
-                        "professional studio lighting",
-                        "cinematic composition",
-                        "dynamic pose"
-                    ]
-                elif any(kw in prompt_lower for kw in ['acostado', 'lying']):
-                    enhancements = [
-                        "lying down pose",
-                        "relaxed reclining",
-                        "sensual lighting",
-                        "soft shadows",
-                        "detailed skin texture"
-                    ]
-
-            elif analysis.get('use_tile'):
-                # Prompts de mejora de calidad - máxima calidad
-                enhancements = [
-                    "ultra detailed",
-                    "sharp focus",
-                    "8K HDR",
-                    "professional color grading",
-                    "crystal clear",
-                    "high resolution scan",
-                    "noise free"
-                ]
-
-            elif analysis.get('use_inpaint'):
-                # Prompts de cambio de ropa/cuerpo - estilo fashion/arte
-                if any(kw in prompt_lower for kw in ['desnuda', 'naked', 'nude', 'sin ropa']):
-                    enhancements = [
-                        "natural skin texture",
-                        "anatomical accuracy",
-                        "realistic body proportions",
-                        "professional lighting",
-                        "artistic nude photography",
-                        "film noir style"
-                    ]
-                elif any(kw in prompt_lower for kw in ['ropa', 'clothing', 'outfit', 'vestido']):
-                    enhancements = [
-                        "fashion photography",
-                        "designer outfit",
-                        "detailed fabric texture",
-                        "professional photoshoot",
-                        "runway style",
-                        "editorial photography"
-                    ]
-
-            elif analysis.get('use_face_edit'):
-                # Prompts de expresión facial - retrato de alta calidad
-                if any(kw in prompt_lower for kw in ['sonrisa', 'smile', 'feliz']):
-                    enhancements = [
-                        "beautiful genuine smile",
-                        "happy expression",
-                        "sparkling eyes",
-                        "warm golden hour lighting",
-                        "cinematic portrait",
-                        "detailed facial features"
-                    ]
-                elif any(kw in prompt_lower for kw in ['triste', 'sad']):
-                    enhancements = [
-                        "emotional depth",
-                        "melancholic mood",
-                        "dramatic chiaroscuro lighting",
-                        "cinematic portrait",
-                        "tear drops"
-                    ]
-
-        # Construir prompt final
-        if enhancements:
-            enhanced_prompt = f"{prompt}, {', '.join(enhancements)}"
-        else:
-            enhanced_prompt = f"{prompt}"
-
-        print(f"[PromptRewriter] ✅ Reescrito (limpio): {enhanced_prompt[:50]}...")
-        return enhanced_prompt
-
-
-# Instancia global
 _rewriter = None
-
 def get_prompt_rewriter() -> PromptRewriter:
-    """Obtiene instancia global del rewriter"""
     global _rewriter
     if _rewriter is None:
         _rewriter = PromptRewriter()

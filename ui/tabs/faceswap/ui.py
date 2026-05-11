@@ -137,6 +137,8 @@ def build_faceswap_ui():
 
         # COLUMNA DERECHA: Preview y Control
         with gr.Column(scale=3):
+            file_indicator = gr.Markdown("📂 **Archivo:** Ninguno seleccionado", elem_classes=["file-indicator"])
+            
             with gr.Row(variant="compact"):
                 with gr.Column(scale=2):
                     with gr.Row():
@@ -159,14 +161,26 @@ def build_faceswap_ui():
             # Panel de Selección Dinámica
             with gr.Row(visible=False, variant="panel", elem_classes=["dynamic-panel"]) as dynamic_face_selection:
                 with gr.Column():
-                    face_detection_title = gr.Markdown("### ✨ Busca caras en el frame")
-                    gr.Markdown("👆 Haz clic en una cara para añadirla a Destino.")
-                    face_selection = gr.Gallery(
-                        label="", columns=4,
-                        interactive=True, allow_preview=False, 
-                        preview=False, object_fit="contain",
-                        elem_classes=["small-face-gallery"]
-                    )
+                    with gr.Row():
+                        face_detection_title = gr.Markdown("### ✨ Busca caras en el frame")
+                        with gr.Row():
+                            gender_filter = gr.Dropdown(["Todos", "Hombres", "Mujeres"], value="Todos", label="Género", scale=1)
+                            size_filter = gr.Dropdown(["Todos", "Grandes", "Medianas", "Pequeñas"], value="Todos", label="Tamaño", scale=1)
+                    
+                    gr.Markdown("👆 Haz clic en una cara para añadirla a Destino o usa 👁️ para probar el enhancer.")
+                    
+                    with gr.Row():
+                        face_selection = gr.Gallery(
+                            label="", columns=4,
+                            interactive=True, allow_preview=False, 
+                            preview=False, object_fit="contain",
+                            elem_classes=["small-face-gallery"],
+                            scale=4
+                        )
+                        with gr.Column(scale=1):
+                            bt_enhancer_preview = gr.Button("👁️ PREVIEW\nENHANCER", variant="secondary", size="lg")
+                            preview_result = gr.Image(label="Comparativa (Antes | Después)", visible=False)
+
                     with gr.Row(visible=False): # Ocultamos el slider viejo
                         face_selector_slider = gr.Slider(minimum=1, maximum=1, value=1, step=1, label="Selecciona el número de cara")
                         bt_use_selected_face = gr.Button("✅ AÑADIR")
@@ -211,5 +225,7 @@ def build_faceswap_ui():
         "metrics_display": metrics_display, "input_page_info": input_page_info, "target_page_info": target_page_info,
         "bt_input_prev": bt_input_prev, "bt_input_next": bt_input_next, "bt_target_prev": bt_target_prev, "bt_target_next": bt_target_next,
         "bt_remove_selected_input_face": bt_remove_selected_input_face, "bt_remove_selected_target_face": bt_remove_selected_target_face, "bt_clear_all_target": bt_clear_all_target,
-        "delete_mode": delete_mode
+        "delete_mode": delete_mode,
+        "file_indicator": file_indicator, "gender_filter": gender_filter, "size_filter": size_filter,
+        "bt_enhancer_preview": bt_enhancer_preview, "preview_result": preview_result
     }

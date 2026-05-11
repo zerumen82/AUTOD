@@ -15,16 +15,23 @@ class AnimateManager:
         self.face_analyzer = None
 
     def _check_models(self, engine):
-        available = [m.lower() for m in os.listdir(MODELS_DIR) if m.endswith(".gguf") or m.endswith(".safetensors")]
+        available = []
+        if os.path.exists(MODELS_DIR):
+            for root, dirs, files in os.walk(MODELS_DIR):
+                available.extend(d.lower() for d in dirs)
+                available.extend(f.lower() for f in files if f.endswith((".gguf", ".safetensors")))
         if engine == "wan_video":
-            needed = ["wan2.2"]
+            needed = ["wan2.2", "wan2_2", "wan2.1", "wan2_1"]
         elif engine == "svd_turbo":
             needed = ["svd", "stablevideo"]
         elif engine == "ltx_video":
             needed = ["ltx"]
         else:
             needed = []
-        missing = [n for n in needed if not any(n in a for a in available)]
+        if engine == "wan_video":
+            missing = [] if any(n in a for n in needed for a in available) else ["wan2.2/wan2.1"]
+        else:
+            missing = [n for n in needed if not any(n in a for a in available)]
         return missing
 
     def resolve_params(self, engine, motion=127, frames=81, fps=16):
@@ -34,19 +41,25 @@ class AnimateManager:
         return base
 
     def rewrite_prompt(self, prompt):
-        prompt_lower = prompt.lower()
-        enhanced = prompt
-        if not any(kw in enhanced for kw in ["high quality", "masterpiece", "detailed"]):
-            enhanced = f"high quality, masterpiece, {enhanced}"
-        if any(kw in prompt_lower for kw in ["viento", "wind", "sopla", "blow"]):
-            enhanced += ", realistic wind effect, natural flowing movement"
-        if any(kw in prompt_lower for kw in ["luz", "light", "iluminacion", "sun"]):
-            enhanced += ", cinematic lighting, dynamic light"
-        if any(kw in prompt_lower for kw in ["sonria", "sonrisa", "smile", "ria"]):
-            enhanced += ", natural smile expression, subtle mouth movement"
-        if any(kw in prompt_lower for kw in ["parpadee", "parpadeo", "blink", "ojos"]):
-            enhanced += ", natural eye blink, subtle eye movement"
-        return enhanced
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return "natural motion, subtle realistic movement, cinematic image to video"
+
+        # Usamos el rewriter como apoyo, pero el prompt original siempre manda.
+        try:
+            from roop.img_editor.prompt_rewriter import get_prompt_rewriter
+            rewriter = get_prompt_rewriter()
+            analysis = rewriter.rewrite(prompt)
+            enhanced = analysis.get("prompt", prompt)
+            magnitude = analysis.get("magnitude", 0.5)
+            print(f"[AnimateManager] Semantic boost: {enhanced[:60]}... (Mag: {magnitude})")
+            enhanced = (enhanced or "").strip()
+            if enhanced and enhanced.lower() != prompt.lower():
+                return f"{prompt}. {enhanced}"
+            return prompt
+        except Exception as e:
+            print(f"[AnimateManager] Rewriter no disponible: {e}")
+            return f"{prompt}, high quality, cinematic, realistic motion"
 
     def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=81, fps=16,
                        face_stabilize=True, mask_image=None, mask_mode="global", mask_prompt="",

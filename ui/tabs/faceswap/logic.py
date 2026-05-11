@@ -120,22 +120,151 @@ def process_target_file_async(file_path):
 def extract_face_images(file_path, face_detection_params=(False, 0), target_face_detection=True, is_source_face=False, ui_padding=None):
     """
     Extrae imágenes de caras de un archivo usando el módulo face_util.
-    
-    Args:
-        ui_padding: Factor de padding para UI (menos padding = cara más grande en galería)
+    Ahora incluye metadatos de género y tamaño para filtrado.
     """
     try:
-        # Aseguramos que target_face_detection sea True para obtener TODAS las caras
-        return face_util.extract_face_images(
+        faces_data = face_util.extract_face_images(
             file_path, 
             face_detection_params, 
             target_face_detection=target_face_detection, 
             is_source_face=is_source_face,
             ui_padding=ui_padding
         )
+        
+        # Enriquecer con metadatos si no los tiene
+        enriched_data = []
+        for face_obj, face_img in faces_data:
+            if not hasattr(face_obj, 'gender') or face_obj.gender is None:
+                from roop.ProcessMgr import get_gender
+                face_obj.gender = get_gender(face_obj)
+            
+            # Calcular tamaño relativo
+            if hasattr(face_obj, 'bbox'):
+                w = face_obj.bbox[2] - face_obj.bbox[0]
+                h = face_obj.bbox[3] - face_obj.bbox[1]
+                face_obj.area = w * h
+            
+            enriched_data.append((face_obj, face_img))
+            
+        return enriched_data
     except Exception as e:
         print(f"Error extrayendo caras: {e}")
         return []
+
+def get_filtered_faces(faces_data, gender_filter="Todos", size_filter="Todos"):
+    """Filtra los datos de caras según los criterios de la UI"""
+    if not faces_data: return []
+    
+    filtered = []
+    for face_obj, face_img in faces_data:
+        # Filtro de género
+        if gender_filter != "Todos":
+            gender = getattr(face_obj, 'gender', None)
+            if gender_filter == "Hombres" and gender != "male": continue
+            if gender_filter == "Mujeres" and gender != "female": continue
+            
+        # Filtro de tamaño
+        if size_filter != "Todos":
+            area = getattr(face_obj, 'area', 0)
+            if size_filter == "Grandes" and area < 20000: continue
+            if size_filter == "Pequeñas" and area > 10000: continue
+            if size_filter == "Medianas" and (area <= 10000 or area >= 20000): continue
+            
+        filtered.append((face_obj, face_img))
+    return filtered
+
+def draw_face_boxes(frame, faces_data, selected_idx=None):
+    """Dibuja cajas alrededor de las caras detectadas para feedback visual"""
+    if frame is None: return None
+    
+    canvas = frame.copy()
+    for i, (face_obj, _) in enumerate(faces_data):
+        if not hasattr(face_obj, 'bbox'): continue
+        
+        x1, y1, x2, y2 = [int(v) for v in face_obj.bbox]
+        color = (59, 130, 246) # Azul
+        thickness = 2
+        
+        if i == selected_idx:
+            color = (16, 185, 129) # Verde para la seleccionada
+            thickness = 4
+            
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, thickness)
+        
+        # Etiqueta con ID o género
+        label = f"#{i+1}"
+        gender = getattr(face_obj, 'gender', None)
+        if gender: label += f" ({'M' if gender=='male' else 'F'})"
+        
+        cv2.putText(canvas, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        
+    return canvas
+
+def get_enhancer_preview(image_path, frame_num, face_idx, enhancer_name, blend_factor):
+    """Genera una vista previa rápida (crop) del enhancer aplicado"""
+    try:
+        from roop.capturer import get_video_frame, get_image_frame
+        from roop.ProcessMgr import ProcessMgr
+        from roop.ProcessOptions import ProcessOptions
+        
+        # 1. Obtener frame
+        if util.is_video(image_path):
+            frame = get_video_frame(image_path, frame_num)
+        else:
+            frame = get_image_frame(image_path)
+            
+        if frame is None: return None, "No se pudo leer el frame"
+        
+        # 2. Detectar caras
+        faces_data = extract_face_images(image_path, (True, frame_num) if util.is_video(image_path) else (False, 0))
+        if not faces_data or face_idx >= len(faces_data):
+            return None, "Cara no encontrada"
+            
+        target_face = faces_data[face_idx][0]
+        
+        # 3. Obtener cara origen
+        if not roop.globals.INPUT_FACESETS:
+            return None, "Carga una cara de origen primero"
+            
+        source_face = roop.globals.INPUT_FACESETS[0].faces[0] # Usar la primera por defecto para preview
+        
+        # 4. Configurar ProcessMgr para swap rápido
+        mgr = ProcessMgr()
+        # Mock options
+        roop.globals.selected_enhancer = enhancer_name
+        roop.globals.use_enhancer = enhancer_name != "None"
+        roop.globals.enhancer_blend_factor = blend_factor
+        
+        mgr.initialize(roop.globals.INPUT_FACESETS, [target_face], None)
+        
+        # 5. Procesar solo la cara
+        # Hacemos un crop generoso alrededor de la cara para el preview
+        x1, y1, x2, y2 = [int(v) for v in target_face.bbox]
+        h, w = frame.shape[:2]
+        pad = int(max(x2-x1, y2-y1) * 0.5)
+        cx1, cy1 = max(0, x1-pad), max(0, y1-pad)
+        cx2, cy2 = min(w, x2+pad), min(h, y2+pad)
+        
+        face_crop = frame[cy1:cy2, cx1:cx2].copy()
+        
+        # Ajustar bbox de target_face al crop
+        original_bbox = target_face.bbox
+        target_face.bbox = (x1-cx1, y1-cy1, x2-cx1, y2-cy1)
+        
+        processed_crop = mgr._process_face_swap_v21(source_face, target_face, face_crop.copy(), face_crop)
+        
+        # Restaurar bbox original
+        target_face.bbox = original_bbox
+        
+        if processed_crop is None: return None, "Error procesando preview"
+        
+        # 6. Crear imagen comparativa (Original | Procesado)
+        comparison = np.hstack((face_crop, processed_crop))
+        return util.convert_to_gradio(comparison), "Preview generado"
+        
+    except Exception as e:
+        print(f"[PREVIEW_ERROR] {e}")
+        return None, f"Error: {str(e)}"
 
 def find_best_matching_face(detected_faces, reference_embedding):
     if not reference_embedding or not detected_faces:
@@ -252,7 +381,7 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
     roop.globals.num_swap_steps = num_swap_steps
     roop.globals.autorotate_faces = autorotate
     
-    print(f"[OK] Iniciando swap en modo: {face_swap_mode}")
+    print(f"[OK] Iniciando swap en modo: {roop.globals.face_swap_mode}")
     print(f"[OK] Archivos destino: {len(state.list_files_process)}")
     print(f"[OK] Caras origen: {len(roop.globals.INPUT_FACESETS)}")
     
@@ -296,11 +425,11 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
     selected_refs = getattr(roop.globals, 'selected_face_references', {})
     
     print(f"[DIAGNÓSTICO BATCH] Iniciando FaceSwap...")
-    print(f" - Modo traducido: {face_swap_mode}")
+    print(f" - Modo traducido: {roop.globals.face_swap_mode}")
     print(f" - Caras de destino (TARGET_FACES): {len(target_faces_list)}")
     print(f" - Referencias guardadas (selected_face_references): {len(selected_refs)}")
     
-    if face_swap_mode == 'selected':
+    if roop.globals.face_swap_mode == 'selected':
         for i, ref_key in enumerate(selected_refs.keys()):
             print(f"   [Ref {i+1}] Clave: {ref_key}")
     
