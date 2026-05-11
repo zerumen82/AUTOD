@@ -40,7 +40,7 @@ class PromptRewriter:
         self._llm = None
         self._init_llm()
 
-def _init_llm(self):
+    def _init_llm(self):
         if self._llm is not None:
             return
         try:
@@ -48,7 +48,6 @@ def _init_llm(self):
             
             root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             
-            # Primero buscar modelo de lenguaje dedicado (mejor para esta tarea)
             llm_paths = [
                 QWEN_LLM_PATH,
                 os.path.join(root, "models", "llm", "qwen2.5-0.5b-instruct-q4_k_m.gguf"),
@@ -62,17 +61,15 @@ def _init_llm(self):
                     print(f"[PromptRewriter] Usando modelo de lenguaje dedicado: {os.path.basename(p)}")
                     break
             
-            # Si no hay modelo de lenguaje, usar moondream (menos preciso para esta tarea)
             if not model_path:
                 moondream_paths = [
                     MOONDREAM_TEXT_PATH,
                     os.path.join(root, "models", "moondream", "moondream2-text-model-f16.gguf"),
-                    os.path.join(root, "models", "moondream2-text-model-f16.gguf"),
                 ]
                 for p in moondream_paths:
                     if os.path.exists(p):
                         model_path = p
-                        print(f"[PromptRewriter] ADVERTENCIA: Usando moondream para rewriter (menos preciso). Considere baixar qwen2.5-0.5b para mejores resultados.")
+                        print(f"[PromptRewriter] ADVERTENCIA: Usando moondream (menos preciso)")
                         break
                 
             if not model_path:
@@ -89,7 +86,7 @@ def _init_llm(self):
             print("[PromptRewriter] Rewriter listo en CPU")
         except ImportError:
             print("[PromptRewriter] llama-cpp-python no disponible, usando modo heurístico")
-            self._llm = "heuristic"  # Flag para modo heurístico
+            self._llm = "heuristic"
         except Exception as e:
             print(f"[PromptRewriter] LLM no disponible: {e}, usando modo heurístico")
             self._llm = "heuristic"
