@@ -8,6 +8,30 @@ import os, json, re
 from typing import Optional, Dict, List, Tuple
 
 MOONDREAM_TEXT_PATH = r"D:\PROJECTS\AUTOAUTO\models\moondream\moondream2-text-model-f16.gguf"
+QWEN_LLM_PATH = r"D:\PROJECTS\AUTOAUTO\models\llm\qwen2.5-0.5b-instruct-q4_k_m.gguf"
+
+def ensure_llm_model():
+    """Baixa modelo de lenguaje si no existe"""
+    if os.path.exists(QWEN_LLM_PATH):
+        return True
+    
+    llm_dir = os.path.dirname(QWEN_LLM_PATH)
+    if not os.path.exists(llm_dir):
+        os.makedirs(llm_dir, exist_ok=True)
+    
+    print("[PromptRewriter] Intentando baixar qwen2.5-0.5b-instruct...")
+    try:
+        from huggingface_hub import hf_hub_download
+        model_path = hf_hub_download(
+            repo_id="Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+            filename="qwen2.5-0.5b-instruct-q4_k_m.gguf",
+            local_dir=llm_dir
+        )
+        print(f"[PromptRewriter] Modelo baixado: {model_path}")
+        return True
+    except Exception as e:
+        print(f"[PromptRewriter] No se pudo baixar modelo: {e}")
+        return False
 
 class PromptRewriter:
     """Analiza la instrucción y extrae todos los parámetros de edición mediante razonamiento LLM"""
@@ -22,30 +46,44 @@ class PromptRewriter:
         try:
             from llama_cpp import Llama
             
-            # Rutas de búsqueda unificadas
             root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            possible_paths = [
-                MOONDREAM_TEXT_PATH,
-                os.path.join(root, "models", "moondream", "moondream2-text-model-f16.gguf"),
-                os.path.join(root, "models", "moondream2-text-model-f16.gguf"),
-                os.path.join(root, "models", "moondream2.gguf"),
+            
+            # Primero buscar modelo de lenguaje dedicado (mejor para esta tarea)
+            llm_paths = [
+                QWEN_LLM_PATH,
+                os.path.join(root, "models", "llm", "qwen2.5-0.5b-instruct-q4_k_m.gguf"),
+                os.path.join(root, "models", "llm", "llama-3.2-1b-instruct-q4_k_m.gguf"),
             ]
             
             model_path = None
-            for p in possible_paths:
+            for p in llm_paths:
                 if os.path.exists(p):
                     model_path = p
+                    print(f"[PromptRewriter] Usando modelo de lenguaje dedicado: {os.path.basename(p)}")
                     break
             
+            # Si no hay modelo de lenguaje, usar moondream (menos preciso para esta tarea)
             if not model_path:
-                print("[PromptRewriter] ERROR: No se encontró el modelo moondream en ninguna ruta conocida.")
+                moondream_paths = [
+                    MOONDREAM_TEXT_PATH,
+                    os.path.join(root, "models", "moondream", "moondream2-text-model-f16.gguf"),
+                    os.path.join(root, "models", "moondream2-text-model-f16.gguf"),
+                ]
+                for p in moondream_paths:
+                    if os.path.exists(p):
+                        model_path = p
+                        print(f"[PromptRewriter] ADVERTENCIA: Usando moondream para rewriter (menos preciso). Considere baixar qwen2.5-0.5b para mejores resultados.")
+                        break
+                
+            if not model_path:
+                print("[PromptRewriter] ERROR: No se encontró ningún modelo LLM.")
                 return
 
-            print(f"[PromptRewriter] Cargando rewriter semántico: {os.path.basename(model_path)}")
+            print(f"[PromptRewriter] Cargando rewriter: {os.path.basename(model_path)}")
             self._llm = Llama(
                 model_path=model_path,
-                n_gpu_layers=0, # Siempre CPU para no molestar a Flux
-                n_ctx=1024,     # Contexto suficiente para prompts
+                n_gpu_layers=0,
+                n_ctx=2048,
                 verbose=False
             )
             print("[PromptRewriter] Rewriter listo en CPU")
@@ -69,13 +107,15 @@ class PromptRewriter:
         }
 
     def _rewrite_with_llm(self, prompt: str, llm) -> Dict:
+        # Prompt más simple y directo que cualquier modelo puede seguir
         system = (
-            "You are an image editor AI. Convert user instruction to technical parameters.\n"
-            "Respond ONLY with valid JSON like: {\"reasoning\": \"short explanation\", \"prompt\": \"english description\", \"magnitude\": 0.5, \"mask_target\": \"object\"}\n"
-            "magnitude: 0.1=small change, 0.5=medium, 0.9=radical (nudity, full clothing)\n"
-            "mask_target: exact object to mask (face, shirt, background, etc)"
+            "You analyze image edit requests. Output JSON with:\n"
+            "- magnitude: 0.1 to 0.9 (0.1=small, 0.9=radical like nudity)\n"
+            "- mask_target: object to change (face, shirt, clothes, background, etc)\n"
+            "- prompt: what to generate in English\n"
+            "Output only JSON, no other text. Example: {\"magnitude\":0.5,\"mask_target\":\"shirt\",\"prompt\":\"person wearing red shirt\"}"
         )
-        full = f"{system}\n\nUser: \"{prompt}\"\nJSON:"
+        full = f"{system}\n\nEdit request: {prompt}\nOutput:"
         
         response = llm.create_completion(
             full, max_tokens=500, temperature=0.1,
