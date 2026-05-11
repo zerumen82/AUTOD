@@ -198,18 +198,37 @@ class ImgEditorManager:
         # 2. Resolución de Parámetros basada en el Análisis
         params = self.auto_detect_params(analysis, engine)
         
-        # Crear prompt final combinando imagen original + usuario + análisis LLM
+        # Crear prompt final: primero el pedido del usuario, luego contexto
         rewritten = analysis.get("prompt", "").strip()
-        if not rewritten or "traduccion" in rewritten.lower():
+        if not rewritten or "traduccion" in rewritten.lower() or len(rewritten) < 10:
             rewritten = prompt
+        else:
+            # Si el LLM generó algo útil, combinar con el prompt del usuario
+            rewritten = f"{prompt} {rewritten}"
         
-        # Prompt más claro para img2img: preservar contexto + edición
+        # El pedido del usuario primero, luego descripción breve de la imagen
         if img_description:
-            prompt_enhanced = f"{img_description}, {prompt}"
+            # Usar solo los primeros 100 chars de la descripción
+            prompt_enhanced = f"{prompt}. {img_description[:100]}..."
         else:
             prompt_enhanced = prompt
             
         print(f"[ImgEditor] Prompt enviado: {prompt_enhanced[:180]}", flush=True)
+        
+        # Post-procesamiento: corregir mask_target basado en palabras clave del prompt
+        mask_target = analysis.get("mask_target", "subject").lower()
+        prompt_lower = prompt.lower()
+        
+        # Sobrescribir mask_target si el prompt contiene palabras clave específicas
+        if any(w in prompt_lower for w in ["desnudo", "desnuda", "desnudos", "desnudas", "nude", "naked", "cuerpo", "body"]):
+            mask_target = "body"
+            analysis["magnitude"] = max(analysis.get("magnitude", 0.5), 0.7)  # Aumentar magnitud
+            print(f"[ImgEditor] Corregido mask_target -> body (detecto desnudo)")
+        elif any(w in prompt_lower for w in ["ropa", "clothes", "shirt", "camisa", "traje", "pantalón"]):
+            mask_target = "clothes"
+        
+        print(f"[ImgEditor] Mask target final: {mask_target}", flush=True)
+        analysis["mask_target"] = mask_target
         
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
         if guidance_scale: params["guidance_scale"] = guidance_scale
