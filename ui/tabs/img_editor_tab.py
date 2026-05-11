@@ -58,8 +58,8 @@ def on_generate(img_data, p_text, engine_val, f_preserve):
         _is_generating = False
 
 
-def analyze_click(img):
-    if not img: return "<div style='color:#f87171;'>Sube una imagen primero</div>"
+def analyze_click(img, user_prompt):
+    if not img: return "<div style='color:#f87171;'>Sube una imagen primero</div>", ""
     if isinstance(img, dict): img = img.get("background")
     try:
         from scripts.moondream_analyzer import analyze_image_with_moondream
@@ -67,9 +67,14 @@ def analyze_click(img):
             img.save(tmp.name)
             res = analyze_image_with_moondream(tmp.name)
         desc = res.get('positive', 'No se pudo analizar')
-        return f"<div style='color:#22d3ee; font-size:12px;'>{desc[:200]}...</div>"
+        
+        # Combinar descripción con prompt del usuario
+        combined = f"{desc[:150]}... {user_prompt}" if user_prompt else desc[:200]
+        
+        status_html = f"<div style='color:#22d3ee; font-size:12px;'><b>Imagen:</b> {desc[:150]}...</div>"
+        return status_html, combined
     except:
-        return "<div style='color:#f87171;'>Análisis no disponible</div>"
+        return "<div style='color:#f87171;'>Análisis no disponible</div>", user_prompt
 
 
 def create_img_editor_tab():
@@ -161,7 +166,7 @@ def create_img_editor_tab():
         [output_img, status, mask_preview]
     )
 
-    btn_analyze.click(analyze_click, [input_img], [status])
+    btn_analyze.click(analyze_click, [input_img, prompt], [status, prompt])
 
     return {
         "input_img": input_img, "prompt": prompt, "gen_btn": gen_btn,
