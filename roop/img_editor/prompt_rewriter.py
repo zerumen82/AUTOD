@@ -153,21 +153,10 @@ class PromptRewriter:
         else:
             mask_target = "subject"
         
-        # Traducir prompt al inglés básico
-        translations = {
-            "desnudo": "naked", "desnuda": "naked", "sonreír": "smiling",
-            "ropa": "clothing", "traje": "suit", "camisa": "shirt",
-            "pantalón": "pants", "fondo": "background", "pelo": "hair",
-            "ojos": "eyes", "cara": "face", "cuerpo": "body"
-        }
-        eng_prompt = prompt
-        for es, en in translations.items():
-            eng_prompt = eng_prompt.replace(es, en)
-        
         print(f"[PromptRewriter] Heuristic: mag={magnitude}, mask={mask_target}")
         
         return {
-            "prompt": eng_prompt,
+            "prompt": prompt,  # Sin traducir - el LLM debe manejarlo
             "magnitude": magnitude,
             "mask_target": mask_target,
             "reasoning": reasoning
@@ -176,12 +165,18 @@ class PromptRewriter:
     def _rewrite_with_llm(self, prompt: str, llm) -> Dict:
         # Prompt más específico para evitar confusiones
         system = (
-            "Image edit analyzer. Detect what to change.\n"
+            "You are an image editing assistant. Analyze the user's request and output JSON.\n"
+            "Output format: {\"magnitude\":0.0-1.0, \"mask_target\":target, \"prompt\":english_text}\n"
+            "Rules:\n"
+            "- magnitude: 0.1 (subtle) to 1.0 (radical change)\n"
+            "- mask_target: body, face, clothes, hair, background, subject\n"
+            "- prompt: ALWAYS output in ENGLISH, translate from Spanish if needed\n"
+            "CRITICAL: You MUST translate Spanish words like 'desnudo'->'naked', 'ropa'->'clothes', 'cara'->'face'\n"
             "IMPORTANT: If request mentions NUDITY, DESSOUS, NAKED, DESNUDO - output: mask_target=body\n"
             "If request mentions CLOTHES, SHIRT, PANTS, ROPA - output: mask_target=clothes\n"
             "If request mentions FACE, EYES, SMILE - output: mask_target=face\n"
             "magnitude: 0.1=eyes/smile, 0.5=clothes/pose, 0.9=nude/full_body\n"
-            "Output JSON with: magnitude, mask_target, prompt"
+            "Output ONLY JSON: {\"magnitude\":0.5,\"mask_target\":\"subject\",\"prompt\":\"english text\"}"
         )
         full = f"{system}\n\nRequest: {prompt}\nJSON:"
         

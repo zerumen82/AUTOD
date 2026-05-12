@@ -53,18 +53,21 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         
-        # Escalar denoise para img2img: permitir cambios radicales
-        # Cambios sutiles (0-0.3): 0.25-0.40
-        # Cambios medios (0.3-0.6): 0.40-0.60  
-        # Cambios radicales (0.6-1): 0.60-0.80
+        # Escalar denoise: subir más para garantizar que FLUX siga el prompt
+        # Cambios sutiles (0-0.3): 0.35-0.50
+        # Cambios medios (0.3-0.6): 0.50-0.60  
+        # Cambios radicales (0.6-1): 0.60-0.70
         if magnitude < 0.3:
-            denoise = 0.25 + (magnitude * 0.5)
+            denoise = 0.35 + (magnitude * 0.5)
         elif magnitude < 0.6:
-            denoise = 0.40 + ((magnitude - 0.3) * 0.667)
+            denoise = 0.50 + ((magnitude - 0.3) * 0.333)
         else:
-            denoise = 0.60 + ((magnitude - 0.6) * 0.5)
+            denoise = 0.60 + ((magnitude - 0.6) * 0.25)
             
-        denoise = min(denoise, 0.80)
+        denoise = min(denoise, 0.70)
+        
+        # REDUCIR STEPS para mayor velocidad (era 8-16, ahora 6-12)
+        steps = int(6 + (magnitude * 6))
         
         # Escalar pasos - reducir para mayor velocidad
         steps = int(8 + (magnitude * 8))  # 8-16 steps
@@ -197,40 +200,14 @@ class ImgEditorManager:
         # 2. Resolución de Parámetros basada en el Análisis
         params = self.auto_detect_params(analysis, engine)
         
-        # Crear prompt final: primero el pedido del usuario, luego contexto
-        rewritten = analysis.get("prompt", "").strip()
-        if not rewritten or "traduccion" in rewritten.lower() or len(rewritten) < 10:
-            rewritten = prompt
-        else:
-            # Si el LLM generó algo útil, combinar con el prompt del usuario
-            rewritten = f"{prompt} {rewritten}"
+        # Usar el prompt del LLM directamente
+        prompt_english = analysis.get("prompt", "").strip()
+        if not prompt_english or len(prompt_english) < 3:
+            prompt_english = prompt
         
-        # Crear prompt más claro y directo para FLUX
-        prompt_lower = prompt.lower()
-        
-        # Traducir TODO al inglés para mejor comprensión de FLUX
-        prompt_english = prompt
-        replacements = [
-            ("desnudo", "naked"), ("desnuda", "naked"), ("desnudos", "naked"), ("desnudas", "naked"),
-            ("cuerpo", "body"), ("ropa", "clothes"), ("traje", "suit"), ("camisa", "shirt"),
-            ("pantalón", "pants"), ("sonreír", "smiling"), ("ojos", "eyes"),
-            ("deben ir", "go naked"), ("debe ir", "go naked"), ("van", "go"), ("van a", "will go"),
-            ("ir", "go"), ("ponle", "put on"), ("cambia", "change"), ("quítale", "remove"),
-            ("todos", "all"), ("todas", "all"), ("personas", "people"), ("gente", "people"),
-        ]
-        for es, en in replacements:
-            prompt_english = prompt_english.replace(es, en)
-        
-        # Crear prompt final más directo
-        if any(w in prompt_lower for w in ["desnudo", "desnuda", "desnudos", "desnudas", "nude", "naked"]):
-            # Para desnudos, crear prompt más explícito en inglés
-            prompt_enhanced = f"Group of people, {prompt_english}, wearing less clothing, partially exposed"
-        else:
-            # Para otros cambios
-            if img_description:
-                prompt_enhanced = f"{prompt_english}. {img_description[:80]}..."
-            else:
-                prompt_enhanced = prompt_english
+        # Usar el prompt del LLM sin añadir nada
+        prompt_enhanced = prompt_english
+        prompt_lower = prompt.lower()  # Para detección de keywords
             
         print(f"[ImgEditor] Prompt enviado: {prompt_enhanced[:180]}", flush=True)
         
@@ -344,6 +321,9 @@ class ImgEditorManager:
                 if not success:
                     return None, msg, final_mask
                 print(f"[ImgEditor] Enviando a ComfyUI (Flux Dev Abliterated)...")
+                
+                # UNA SOLA PASADA optimizada: denoise moderado + guidance alto
+                print(f"[ImgEditor] Generación única: denoise={params['denoise']:.2f}, guidance={params['guidance_scale']:.1f}")
                 result_obj, msg = client.generate(
                     image=img, prompt=prompt_enhanced,
                     num_inference_steps=params["num_inference_steps"],
@@ -389,13 +369,16 @@ class ImgEditorManager:
                 if result_obj: result = result_obj.image
 
             if result is not None and self._should_preserve_faces(face_preserve, analysis, prompt):
-                try:
-                    fp = self._get_face_preserver()
-                    if fp:
-                        result = fp.preserve_faces(img, result, method="blend")
-                        print(f"[ImgEditor] Face preservation aplicada")
-                except Exception as e:
-                    print(f"[ImgEditor] Face preservation falló: {e}")
+                if params.get("denoise", 0.5) < 0.55:
+                    try:
+                        fp = self._get_face_preserver()
+                        if fp:
+                            result = fp.preserve_faces(img, result, method="blend")
+                            print(f"[ImgEditor] Face preservation aplicada")
+                    except Exception as e:
+                        print(f"[ImgEditor] Face preservation falló: {e}")
+                else:
+                    print("[ImgEditor] Face preservation omitida (denoise alto, imagen muy modificada)")
             elif result is not None and face_preserve:
                 print("[ImgEditor] Face preservation omitida porque el prompt edita rasgos faciales")
 

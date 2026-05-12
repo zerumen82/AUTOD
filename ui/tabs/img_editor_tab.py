@@ -2,19 +2,26 @@
 # -*- coding: utf-8 -*-
 import gradio as gr
 import os
+import sys
 import tempfile
 from PIL import Image
 from roop.img_editor.img_editor_manager import get_img_editor_manager
 
 
 def open_output_folder():
+    import subprocess
     path = os.path.abspath("output/img_editor")
     if not os.path.exists(path):
         os.makedirs(path, exist_ok=True)
+    # Abrir carpeta en explorador
     try:
-        os.startfile(path)
-    except Exception as e:
-        print(f"[UI] No se pudo abrir la carpeta: {e}")
+        if sys.platform == "win32":
+            os.startfile(path)
+        else:
+            subprocess.Popen(["explorer", path])
+    except:
+        pass
+    return None
 
 
 _is_generating = False
@@ -60,7 +67,15 @@ def on_generate(img_data, p_text, engine_val, f_preserve):
         )
 
         if res_img:
-            return res_img, f"✅ {msg}", mask_img
+            # GUARDAR AUTOMÁTICAMENTE en output/img_editor
+            output_dir = os.path.abspath("output/img_editor")
+            os.makedirs(output_dir, exist_ok=True)
+            import time
+            ts = int(time.time())
+            out_path = os.path.join(output_dir, f"edit_{ts}.png")
+            res_img.save(out_path)
+            print(f"[ImgEditor] Imagen guardada: {out_path}")
+            return res_img, f"✅ {msg} - Guardado en output/img_editor", mask_img
         else:
             return None, f"❌ {msg}", mask_img
     finally:
