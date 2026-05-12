@@ -367,6 +367,9 @@ def extract_face_images(
                     print(f"[SOURCE_DETECT] ⚠️ Cara detectada pero SIN EMBEDDING. Intentando recuperar...")
                     # Extraer el crop de la cara
                     x1, y1, x2, y2 = face_data_full.bbox.astype(int)
+                    # Clamping
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
                     face_crop = img_rgb[y1:y2, x1:x2].copy()
                     
                     if face_crop.size > 0:
@@ -383,7 +386,7 @@ def extract_face_images(
                         
                         # Re-analizar el crop
                         try:
-                            faces_crop = analyser.get(face_crop)
+                            faces_crop = FACE_ANALYSER.get(face_crop)
                             if faces_crop and getattr(faces_crop[0], 'embedding', None) is not None:
                                 face_data_full = faces_crop[0]
                                 # Ajustar bbox si se añadió padding
@@ -406,15 +409,9 @@ def extract_face_images(
                                             face_data_full.bbox[1] -= pad
                                             face_data_full.bbox[3] -= pad
                                         print(f"[SOURCE_DETECT] ✅ Embedding recuperado con CPU")
-                                    else:
-                                        print(f"[SOURCE_DETECT] ❌ CPU tampoco pudo generar embedding")
-                                else:
-                                    print(f"[SOURCE_DETECT] ❌ No se pudo obtener embedding del crop")
                         except Exception as e:
                             print(f"[SOURCE_DETECT] ❌ Error re-analizando crop: {e}")
-                    else:
-                        print(f"[SOURCE_DETECT] ❌ Crop vacío, no se puede re-analizar")
-                
+
                 normed_emb = None
                 if hasattr(face_data_full, 'embedding') and face_data_full.embedding is not None:
                     emb = np.array(face_data_full.embedding)
@@ -423,20 +420,52 @@ def extract_face_images(
 
                 face_obj = Face(
                     bbox=face_data_full.bbox.astype(int).tolist(),
-                    score=face_data_full.score,
-                    det_score=face_data_full.det_score,
-                    kps=face_data_full.kps.tolist() if face_data_full.kps is not None else None,
-                    embedding=face_data_full.embedding,
+                    score=getattr(face_data_full, 'score', 0.5),
+                    det_score=getattr(face_data_full, 'det_score', 0.5),
+                    kps=face_data_full.kps.tolist() if getattr(face_data_full, 'kps', None) is not None else None,
+                    embedding=getattr(face_data_full, 'embedding', None),
+                    normed_embedding=normed_emb
+                )
+                face_obj.source_image = str(image_path)
+                res = [[face_obj, img_rgb.copy()]]
+                CACHE_RESULTS[cache_key] = res
+                return res
+            else:
+                print(f"[SOURCE_DETECT] ❌ No se detectó ninguna cara. Usando imagen completa como último recurso...")
+                # Crear un objeto cara ficticio que use toda la imagen
+                # Esto es útil para fotos que ya vienen recortadas a la cara
+                h, w = img_rgb.shape[:2]
+                
+                # Intentar obtener un embedding forzando un crop central un poco más pequeño
+                # A veces el detector falla en los bordes pero el recognizer funciona si le damos la cara centrada
+                center_crop = img_rgb[h//10:9*h//10, w//10:9*w//10]
+                fake_embedding = None
+                if center_crop.size > 0:
+                    try:
+                        faces_center = FACE_ANALYSER.get(center_crop)
+                        if faces_center and getattr(faces_center[0], 'embedding', None) is not None:
+                            fake_embedding = faces_center[0].embedding
+                            print(f"[SOURCE_DETECT] ✅ Embedding obtenido de crop central")
+                    except:
+                        pass
+                
+                normed_emb = None
+                if fake_embedding is not None:
+                    emb = np.array(fake_embedding)
+                    n = np.linalg.norm(emb)
+                    if n > 0: normed_emb = emb / n
+
+                face_obj = Face(
+                    bbox=[0, 0, w, h],
+                    score=0.5,
+                    det_score=0.5,
+                    kps=None,
+                    embedding=fake_embedding,
                     normed_embedding=normed_emb
                 )
                 res = [[face_obj, img_rgb.copy()]]
                 CACHE_RESULTS[cache_key] = res
                 return res
-            else:
-                print(f"[SOURCE_DETECT] ❌ FALLO CRÍTICO: No se detectó ninguna cara en la imagen de origen.")
-                # No podemos hacer swap sin embedding, así que mejor no devolver nada o devolver un objeto nulo
-                # que al menos sea procesado como "sin cara" en lugar de causar errores silenciosos.
-                return []
 
         # ============ TARGET FACES: DETECCIÓN NORMAL ============
         target_thresh = 0.25 # Permisivo para encontrar caras giradas en video

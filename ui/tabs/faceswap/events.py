@@ -96,20 +96,38 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
         face_data = state.SELECTION_FACES_DATA[face_index]
         face_obj = face_data[0]
         
-        # Verificar duplicados (solo si es el mismo archivo y frame para evitar falsos positivos)
+        # Verificar duplicados (solo si es exactamente la misma cara en el mismo archivo/frame)
         is_duplicate = False
         current_file = os.path.basename(state.list_files_process[state.selected_preview_index].filename) if state.list_files_process else ""
+        current_frame = int(frame_num or 1)
         
         for existing in roop.globals.TARGET_FACES:
-            # Comparación por embedding (muy estricta: 0.999)
+            # Para ser duplicado, debe venir de la misma fuente O tener un embedding virtualmente idéntico
+            existing_source = getattr(existing, 'source_image', '')
+            
+            # Comparación por embedding (muy estricta: 0.9999)
+            # Solo bloqueamos por embedding si sospechamos que es el mismo archivo (o muy muy parecido)
             if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
-                similarity = np.dot(existing.embedding, face_obj.embedding)
-                if similarity > 0.999:
+                # Usar dot product sobre embeddings normalizados (si están disponibles)
+                emb1 = getattr(existing, 'normed_embedding', None)
+                emb2 = getattr(face_obj, 'normed_embedding', None)
+                
+                if emb1 is not None and emb2 is not None:
+                    similarity = np.dot(emb1, emb2)
+                else:
+                    # Fallback a dot product normal (asumiendo que están normalizados)
+                    similarity = np.dot(existing.embedding, face_obj.embedding)
+                
+                # Si son idénticos y vienen del mismo archivo -> DUPLICADO
+                if similarity > 0.9999 and existing_source == str(image_path):
+                    is_duplicate = True; break
+                
+                # Si son idénticos (0.99999) incluso si no sabemos el origen -> PROBABLE DUPLICADO
+                if similarity > 0.99999:
                     is_duplicate = True; break
             
-            # Comparación por BBox (solo tiene sentido si es el mismo archivo/frame)
-            if existing.bbox == face_obj.bbox:
-                # Intentar verificar si vienen del mismo archivo
+            # Comparación por BBox (solo si es el mismo archivo)
+            if existing.bbox == face_obj.bbox and existing_source == str(image_path):
                 is_duplicate = True; break
 
         if not is_duplicate:
@@ -184,20 +202,38 @@ def on_preview_click(evt: gr.SelectData, frame_num):
         # Sincronizar índice para preview del enhancer
         state.TEMP_SELECTED_FACE_INDEX = best_face_idx
 
-        # Verificar duplicados (solo si es el mismo archivo y frame para evitar falsos positivos)
+        # Verificar duplicados (solo si es exactamente la misma cara en el mismo archivo/frame)
         is_duplicate = False
         current_file = os.path.basename(state.list_files_process[state.selected_preview_index].filename) if state.list_files_process else ""
+        current_frame = int(frame_num or 1)
         
         for existing in roop.globals.TARGET_FACES:
-            # Comparación por embedding (muy estricta: 0.999)
+            # Para ser duplicado, debe venir de la misma fuente O tener un embedding virtualmente idéntico
+            existing_source = getattr(existing, 'source_image', '')
+            
+            # Comparación por embedding (muy estricta: 0.9999)
+            # Solo bloqueamos por embedding si sospechamos que es el mismo archivo (o muy muy parecido)
             if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
-                similarity = np.dot(existing.embedding, face_obj.embedding)
-                if similarity > 0.999:
+                # Usar dot product sobre embeddings normalizados (si están disponibles)
+                emb1 = getattr(existing, 'normed_embedding', None)
+                emb2 = getattr(face_obj, 'normed_embedding', None)
+                
+                if emb1 is not None and emb2 is not None:
+                    similarity = np.dot(emb1, emb2)
+                else:
+                    # Fallback a dot product normal (asumiendo que están normalizados)
+                    similarity = np.dot(existing.embedding, face_obj.embedding)
+                
+                # Si son idénticos y vienen del mismo archivo -> DUPLICADO
+                if similarity > 0.9999 and existing_source == str(image_path):
+                    is_duplicate = True; break
+                
+                # Si son idénticos (0.99999) incluso si no sabemos el origen -> PROBABLE DUPLICADO
+                if similarity > 0.99999:
                     is_duplicate = True; break
             
-            # Comparación por BBox (solo tiene sentido si es el mismo archivo/frame)
-            if existing.bbox == face_obj.bbox:
-                # Intentar verificar si vienen del mismo archivo
+            # Comparación por BBox (solo si es el mismo archivo)
+            if existing.bbox == face_obj.bbox and existing_source == str(image_path):
                 is_duplicate = True; break
 
         if not is_duplicate:
