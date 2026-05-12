@@ -96,13 +96,20 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
         face_data = state.SELECTION_FACES_DATA[face_index]
         face_obj = face_data[0]
         
-        # Verificar duplicados
+        # Verificar duplicados (solo si es el mismo archivo y frame para evitar falsos positivos)
         is_duplicate = False
+        current_file = os.path.basename(state.list_files_process[state.selected_preview_index].filename) if state.list_files_process else ""
+        
         for existing in roop.globals.TARGET_FACES:
+            # Comparación por embedding (muy estricta: 0.999)
             if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
-                if np.dot(existing.embedding, face_obj.embedding) > 0.98:
+                similarity = np.dot(existing.embedding, face_obj.embedding)
+                if similarity > 0.999:
                     is_duplicate = True; break
-            elif existing.bbox == face_obj.bbox:
+            
+            # Comparación por BBox (solo tiene sentido si es el mismo archivo/frame)
+            if existing.bbox == face_obj.bbox:
+                # Intentar verificar si vienen del mismo archivo
                 is_duplicate = True; break
 
         if not is_duplicate:
@@ -145,7 +152,7 @@ def on_preview_click(evt: gr.SelectData, frame_num):
     is_new_frame = getattr(state, 'CURRENT_DETECTED_FRAME', -1) != frame_idx
     if not state.SELECTION_FACES_DATA or is_new_frame:
         print(f"[FaceSelection] Auto-detectando caras para frame {frame_idx} (Nuevo={is_new_frame})...")
-        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
+        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=1.5)
         state.ALL_DETECTED_FACES_DATA = detected_faces
         state.SELECTION_FACES_DATA = detected_faces
         state.CURRENT_DETECTED_FRAME = frame_idx
@@ -177,13 +184,20 @@ def on_preview_click(evt: gr.SelectData, frame_num):
         # Sincronizar índice para preview del enhancer
         state.TEMP_SELECTED_FACE_INDEX = best_face_idx
 
-        # Verificar duplicados
+        # Verificar duplicados (solo si es el mismo archivo y frame para evitar falsos positivos)
         is_duplicate = False
+        current_file = os.path.basename(state.list_files_process[state.selected_preview_index].filename) if state.list_files_process else ""
+        
         for existing in roop.globals.TARGET_FACES:
+            # Comparación por embedding (muy estricta: 0.999)
             if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
-                if np.dot(existing.embedding, face_obj.embedding) > 0.98:
+                similarity = np.dot(existing.embedding, face_obj.embedding)
+                if similarity > 0.999:
                     is_duplicate = True; break
-            elif existing.bbox == face_obj.bbox:
+            
+            # Comparación por BBox (solo tiene sentido si es el mismo archivo/frame)
+            if existing.bbox == face_obj.bbox:
+                # Intentar verificar si vienen del mismo archivo
                 is_duplicate = True; break
 
         if not is_duplicate:
@@ -381,7 +395,7 @@ def wire_events(ui_comp):
         entry = state.list_files_process[state.selected_preview_index]
         frame_idx = max(1, int(frame_num or 1))
         
-        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
+        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=1.5)
         state.ALL_DETECTED_FACES_DATA = detected_faces # Guardar todo para filtros
         state.SELECTION_FACES_DATA = detected_faces
         
