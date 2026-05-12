@@ -5,9 +5,13 @@ import numpy as np
 import cv2
 import roop.globals
 
-COMFY_URL = "http://127.0.0.1:8188"
-MODELS_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models"
+from roop.comfy_workflows import get_comfyui_url
 
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def get_models_dir():
+    return os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "diffusion_models")
 
 class AnimateManager:
     def __init__(self):
@@ -16,8 +20,9 @@ class AnimateManager:
 
     def _check_models(self, engine):
         available = []
-        if os.path.exists(MODELS_DIR):
-            for root, dirs, files in os.walk(MODELS_DIR):
+        models_dir = get_models_dir()
+        if os.path.exists(models_dir):
+            for root, dirs, files in os.walk(models_dir):
                 available.extend(d.lower() for d in dirs)
                 available.extend(f.lower() for f in files if f.endswith((".gguf", ".safetensors")))
         if engine == "wan_video":
@@ -40,23 +45,21 @@ class AnimateManager:
             base.update({"steps": 8, "cfg": 2.5})
         return base
 
-    def rewrite_prompt(self, prompt):
+    def rewrite_prompt(self, prompt, image_context=""):
         prompt = (prompt or "").strip()
-        if not prompt:
+        if not prompt and not image_context:
             return "natural motion, subtle realistic movement, cinematic image to video"
 
         # Usamos el rewriter como apoyo, pero el prompt original siempre manda.
         try:
             from roop.img_editor.prompt_rewriter import get_prompt_rewriter
             rewriter = get_prompt_rewriter()
-            analysis = rewriter.rewrite(prompt)
+            # Pasar image_context si existe para fusión inteligente
+            analysis = rewriter.rewrite(prompt, image_context=image_context)
             enhanced = analysis.get("prompt", prompt)
             magnitude = analysis.get("magnitude", 0.5)
             print(f"[AnimateManager] Semantic boost: {enhanced[:60]}... (Mag: {magnitude})")
-            enhanced = (enhanced or "").strip()
-            if enhanced and enhanced.lower() != prompt.lower():
-                return f"{prompt}. {enhanced}"
-            return prompt
+            return enhanced if enhanced else prompt
         except Exception as e:
             print(f"[AnimateManager] Rewriter no disponible: {e}")
             return f"{prompt}, high quality, cinematic, realistic motion"
@@ -70,13 +73,26 @@ class AnimateManager:
 
         print(f"[AnimateManager] Engine={engine} Frames={frames} FPS={fps}")
 
+        # Intentar obtener descripción de imagen para contexto
+        img_description = ""
+        try:
+            from scripts.moondream_analyzer import analyze_image_with_moondream
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                image.save(tmp.name)
+                res = analyze_image_with_moondream(tmp.name)
+                img_description = res.get('positive', '')
+            if img_description:
+                print(f"[AnimateManager] Imagen analizada: {img_description[:100]}...")
+        except: pass
+
         missing = self._check_models(engine)
         if missing:
             return None, f"Modelos faltantes: {', '.join(missing)}"
 
         p = self.resolve_params(engine, motion_bucket, frames, fps)
-        final_prompt = self.rewrite_prompt(prompt)
+        final_prompt = self.rewrite_prompt(prompt, image_context=img_description)
         print(f"[AnimateManager] Prompt: {final_prompt[:80]}...")
+
 
         temp_dir = tempfile.gettempdir()
         img_path = os.path.join(temp_dir, f"anim_in_{int(t0)}.png")

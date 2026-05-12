@@ -8,6 +8,32 @@ def build_faceswap_ui():
     
     gr.HTML("""
         <style>
+            .faceswap-container {
+                background: #020617;
+                padding: 30px;
+                border-radius: 20px;
+                border: 1px solid #1e293b;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            }
+            .faceswap-header { text-align: center; margin-bottom: 25px; }
+            .faceswap-header h2 {
+                background: linear-gradient(90deg, #3b82f6, #10b981);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                font-size: 32px;
+                font-weight: 800;
+            }
+            .btn-faceswap-main {
+                background: linear-gradient(135deg, #3b82f6 0%, #10b981 100%) !important;
+                color: white !important;
+                font-weight: 900 !important;
+                height: 64px !important;
+                border-radius: 14px !important;
+                font-size: 18px !important;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                border: none !important;
+            }
             .origin-gallery { border: 2px solid #3b82f6 !important; border-radius: 12px; background: rgba(59, 130, 246, 0.03); }
             .target-gallery { border: 2px solid #10b981 !important; border-radius: 12px; background: rgba(16, 185, 129, 0.03); }
             .face-counter {
@@ -83,132 +109,132 @@ def build_faceswap_ui():
                 line-height: 1.2 !important;
             }
             .frame-btn { min-width: 45px !important; font-weight: bold !important; }
-            .grok-start-btn { 
-                background: linear-gradient(90deg, #3b82f6, #8b5cf6) !important; 
-                color: white !important; 
-                font-size: 18px !important;
-                height: 60px !important;
-            }
         </style>
     """)
 
-    with gr.Row():
-        # COLUMNA IZQUIERDA: Selección de Caras
-        with gr.Column(scale=2):
-            with gr.Row():
-                # Origen
-                with gr.Column():
-                    gr.HTML('<div class="face-counter">👤 CARAS DE ORIGEN</div>')
-                    input_faces = gr.Gallery(
-                        label="Origen", columns=3, height=400,
-                        elem_classes=["origin-gallery"], interactive=True,
-                        allow_preview=False, preview=False,
-                        visible=True, object_fit="cover"
-                    )
-                    input_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
-                    with gr.Row():
-                        bt_input_prev = gr.Button("⬅", size="sm")
-                        bt_input_next = gr.Button("➡", size="sm")
-                    bt_remove_selected_input_face = gr.Button("🗑 Quitar seleccionada", size="sm", variant="secondary")
+    with gr.Column(elem_classes=["faceswap-container"]):
+        with gr.Group(elem_classes=["faceswap-header"]):
+            gr.Markdown("## 🎭 FACESWAP AI")
+            gr.Markdown("_Intercambio de rostros de alta fidelidad con preservación de identidad._")
 
-                # Destino
-                with gr.Column():
-                    gr.HTML('<div class="face-counter">🎯 CARAS DE DESTINO</div>')
-                    target_faces = gr.Gallery(
-                        label="Destino", columns=3, height=400,
-                        elem_classes=["target-gallery"], interactive=True,
-                        allow_preview=False, preview=False,
-                        visible=True, object_fit="cover"
-                    )
-                    target_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
-                    with gr.Row():
-                        bt_target_prev = gr.Button("⬅", size="sm")
-                        bt_target_next = gr.Button("➡", size="sm")
-                    with gr.Row():
-                        delete_mode = gr.Checkbox(label="🚫 Modo Borrado (Clic para quitar)", value=False)
-                        bt_remove_selected_target_face = gr.Button("🗑 Quitar", size="sm", variant="secondary")
-                        bt_clear_all_target = gr.Button("🧹 Todas", size="sm", variant="stop")
-
-            with gr.Row(variant="panel"):
-                with gr.Column():
-                    bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", file_types=["image", ".fsz"], height=100)
-                with gr.Column():
-                    bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=100)
-
-        # COLUMNA DERECHA: Preview y Control
-        with gr.Column(scale=3):
-            file_indicator = gr.Markdown("📂 **Archivo:** Ninguno seleccionado", elem_classes=["file-indicator"])
-            
-            with gr.Row(variant="compact"):
-                with gr.Column(scale=2):
-                    with gr.Row():
-                        bt_jump_back_100 = gr.Button("-100", size="sm", elem_classes=["frame-btn"])
-                        bt_jump_back_10 = gr.Button("-10", size="sm", elem_classes=["frame-btn"])
-                        bt_prev_frame = gr.Button("◀", size="sm", elem_classes=["frame-btn"])
-                        bt_next_frame = gr.Button("▶", size="sm", elem_classes=["frame-btn"])
-                        bt_jump_fwd_10 = gr.Button("+10", size="sm", elem_classes=["frame-btn"])
-                        bt_jump_fwd_100 = gr.Button("+100", size="sm", elem_classes=["frame-btn"])
-                with gr.Column(scale=3):
-                    preview_frame_num = gr.Slider(1, 1, value=1, label="🎬 Timeline del Video", step=1.0)
-            
-            previewimage = gr.Image(label="Vista Previa", height=480, type="filepath")
-            
-            with gr.Row():
-                bt_prev_file = gr.Button("📂 Anterior", size="sm")
-                bt_use_face_from_preview = gr.Button("🔍 BUSCAR CARAS EN ESTE FRAME", variant="primary", scale=2)
-                bt_next_file = gr.Button("Siguiente 📂", size="sm")
-
-            # Panel de Selección Dinámica
-            with gr.Row(visible=False, variant="panel", elem_classes=["dynamic-panel"]) as dynamic_face_selection:
-                with gr.Column():
-                    with gr.Row():
-                        face_detection_title = gr.Markdown("### ✨ Busca caras en el frame")
-                        with gr.Row():
-                            gender_filter = gr.Dropdown(["Todos", "Hombres", "Mujeres"], value="Todos", label="Género", scale=1)
-                            size_filter = gr.Dropdown(["Todos", "Grandes", "Medianas", "Pequeñas"], value="Todos", label="Tamaño", scale=1)
-                    
-                    gr.Markdown("👆 Haz clic en una cara para añadirla a Destino o usa 👁️ para probar el enhancer.")
-                    
-                    with gr.Row():
-                        face_selection = gr.Gallery(
-                            label="", columns=4,
-                            interactive=True, allow_preview=False, 
-                            preview=False, object_fit="contain",
-                            elem_classes=["small-face-gallery"],
-                            scale=4
+        with gr.Row():
+            # COLUMNA IZQUIERDA: Selección de Caras
+            with gr.Column(scale=2):
+                with gr.Row():
+                    # Origen
+                    with gr.Column():
+                        gr.HTML('<div class="face-counter">👤 CARAS DE ORIGEN</div>')
+                        input_faces = gr.Gallery(
+                            label="Origen", columns=3, height=400,
+                            elem_classes=["origin-gallery"], interactive=True,
+                            allow_preview=False, preview=False,
+                            visible=True, object_fit="cover"
                         )
-                        with gr.Column(scale=1):
-                            bt_enhancer_preview = gr.Button("👁️ PREVIEW\nENHANCER", variant="secondary", size="lg")
-                            preview_result = gr.Image(label="Comparativa (Antes | Después)", visible=False)
+                        input_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
+                        with gr.Row():
+                            bt_input_prev = gr.Button("⬅", size="sm")
+                            bt_input_next = gr.Button("➡", size="sm")
+                        bt_remove_selected_input_face = gr.Button("🗑 Quitar seleccionada", size="sm", variant="secondary")
 
-                    with gr.Row(visible=False): # Ocultamos el slider viejo
-                        face_selector_slider = gr.Slider(minimum=1, maximum=1, value=1, step=1, label="Selecciona el número de cara")
-                        bt_use_selected_face = gr.Button("✅ AÑADIR")
+                    # Destino
+                    with gr.Column():
+                        gr.HTML('<div class="face-counter">🎯 CARAS DE DESTINO</div>')
+                        target_faces = gr.Gallery(
+                            label="Destino", columns=3, height=400,
+                            elem_classes=["target-gallery"], interactive=True,
+                            allow_preview=False, preview=False,
+                            visible=True, object_fit="cover"
+                        )
+                        target_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
+                        with gr.Row():
+                            bt_target_prev = gr.Button("⬅", size="sm")
+                            bt_target_next = gr.Button("➡", size="sm")
+                        with gr.Row():
+                            delete_mode = gr.Checkbox(label="🚫 Modo Borrado (Clic para quitar)", value=False)
+                            bt_remove_selected_target_face = gr.Button("🗑 Quitar", size="sm", variant="secondary")
+                            bt_clear_all_target = gr.Button("🧹 Todas", size="sm", variant="stop")
 
-            with gr.Row():
-                fake_preview = gr.Checkbox(label="Previsualizar Swap (Realtime)", value=False)
+                with gr.Row(variant="panel"):
+                    with gr.Column():
+                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", file_types=["image", ".fsz"], height=100)
+                    with gr.Column():
+                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=100)
 
-            with gr.Accordion("⚙️ Ajustes Expertos (Fidelidad)", open=False):
+            # COLUMNA DERECHA: Preview y Control
+            with gr.Column(scale=3):
+                file_indicator = gr.Markdown("📂 **Archivo:** Ninguno seleccionado", elem_classes=["file-indicator"])
+                
+                with gr.Row(variant="compact"):
+                    with gr.Column(scale=2):
+                        with gr.Row():
+                            bt_jump_back_100 = gr.Button("-100", size="sm", elem_classes=["frame-btn"])
+                            bt_jump_back_10 = gr.Button("-10", size="sm", elem_classes=["frame-btn"])
+                            bt_prev_frame = gr.Button("◀", size="sm", elem_classes=["frame-btn"])
+                            bt_next_frame = gr.Button("▶", size="sm", elem_classes=["frame-btn"])
+                            bt_jump_fwd_10 = gr.Button("+10", size="sm", elem_classes=["frame-btn"])
+                            bt_jump_fwd_100 = gr.Button("+100", size="sm", elem_classes=["frame-btn"])
+                    with gr.Column(scale=3):
+                        preview_frame_num = gr.Slider(1, 1, value=1, label="🎬 Timeline del Video", step=1.0)
+                
+                previewimage = gr.Image(label="Vista Previa", height=480, type="filepath")
+                
                 with gr.Row():
-                    autorotate = gr.Checkbox(label="🔄 Auto-Rotar (Mejora Perfiles/Inclinadas)", value=True)
-                    smoothing = gr.Checkbox(label="🛡️ Suavizado Temporal (Anti-Parpadeo)", value=True)
-                with gr.Row():
-                    face_distance = gr.Slider(0.01, 1.0, value=0.20, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
-                    blend_ratio = gr.Slider(0.0, 1.0, value=0.95, step=0.01, label="🎨 Mezcla de Piel (1.0 = Máxima Calidad)")
-                with gr.Row():
-                    enhancer_blend = gr.Slider(0.0, 1.0, value=0.3, step=0.01, label="✨ Fuerza del Enhancer (0.3 = Swap Visible)")
-                with gr.Row():
-                    enhancer = gr.Dropdown(
-                        choices=["None", "CodeFormer", "GFPGAN", "Restoreformer++"],
-                        value="GFPGAN", label="✨ Enhancer de Calidad (GFPGAN = Mejor para Face Swap)"
-                    )
+                    bt_prev_file = gr.Button("📂 Anterior", size="sm")
+                    bt_use_face_from_preview = gr.Button("🔍 BUSCAR CARAS EN ESTE FRAME", variant="primary", scale=2)
+                    bt_next_file = gr.Button("Siguiente 📂", size="sm")
 
-            with gr.Row():
-                bt_start = gr.Button("🚀 INICIAR PROCESAMIENTO", variant="primary", elem_classes=["grok-start-btn"], scale=2)
-                bt_stop = gr.Button("⏹️", variant="stop", interactive=False)
-                bt_open_output = gr.Button("📂", variant="secondary")
-            
-            metrics_display = gr.HTML(logic.get_metrics_html(0, 0, 0, "00:00", "--:--", "Listo"))
+                # Panel de Selección Dinámica
+                with gr.Row(visible=False, variant="panel", elem_classes=["dynamic-panel"]) as dynamic_face_selection:
+                    with gr.Column():
+                        with gr.Row():
+                            face_detection_title = gr.Markdown("### ✨ Busca caras en el frame")
+                            with gr.Row():
+                                gender_filter = gr.Dropdown(["Todos", "Hombres", "Mujeres"], value="Todos", label="Género", scale=1)
+                                size_filter = gr.Dropdown(["Todos", "Grandes", "Medianas", "Pequeñas"], value="Todos", label="Tamaño", scale=1)
+                        
+                        gr.Markdown("👆 Haz clic en una cara para añadirla a Destino o usa 👁️ para probar el enhancer.")
+                        
+                        with gr.Row():
+                            face_selection = gr.Gallery(
+                                label="", columns=4,
+                                interactive=True, allow_preview=False, 
+                                preview=False, object_fit="contain",
+                                elem_classes=["small-face-gallery"],
+                                scale=4
+                            )
+                            with gr.Column(scale=1):
+                                bt_enhancer_preview = gr.Button("👁️ PREVIEW\nENHANCER", variant="secondary", size="lg")
+                                preview_result = gr.Image(label="Comparativa (Antes | Después)", visible=False)
+
+                        with gr.Row(visible=False): # Ocultamos el slider viejo
+                            face_selector_slider = gr.Slider(minimum=1, maximum=1, value=1, step=1, label="Selecciona el número de cara")
+                            bt_use_selected_face = gr.Button("✅ AÑADIR")
+
+                with gr.Row():
+                    fake_preview = gr.Checkbox(label="Previsualizar Swap (Realtime)", value=False)
+
+                with gr.Accordion("⚙️ Ajustes Expertos (Fidelidad)", open=False):
+                    with gr.Row():
+                        autorotate = gr.Checkbox(label="🔄 Auto-Rotar (Mejora Perfiles/Inclinadas)", value=True)
+                        smoothing = gr.Checkbox(label="🛡️ Suavizado Temporal (Anti-Parpadeo)", value=True)
+                    with gr.Row():
+                        face_distance = gr.Slider(0.01, 1.0, value=0.20, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
+                        blend_ratio = gr.Slider(0.0, 1.0, value=0.95, step=0.01, label="🎨 Mezcla de Piel (1.0 = Máxima Calidad)")
+                    with gr.Row():
+                        enhancer_blend = gr.Slider(0.0, 1.0, value=0.3, step=0.01, label="✨ Fuerza del Enhancer (0.3 = Swap Visible)")
+                    with gr.Row():
+                        enhancer = gr.Dropdown(
+                            choices=["None", "CodeFormer", "GFPGAN", "Restoreformer++"],
+                            value="GFPGAN", label="✨ Enhancer de Calidad (GFPGAN = Mejor para Face Swap)"
+                        )
+
+                with gr.Row():
+                    bt_start = gr.Button("🚀 INICIAR PROCESAMIENTO", variant="primary", elem_classes=["btn-faceswap-main"], scale=2)
+                    bt_stop = gr.Button("⏹️", variant="stop", interactive=False)
+                    bt_open_output = gr.Button("📂", variant="secondary")
+                
+                metrics_display = gr.HTML(logic.get_metrics_html(0, 0, 0, "00:00", "--:--", "Listo"))
+
 
     return {
         "input_faces": input_faces, "target_faces": target_faces, "bt_srcfiles": bt_srcfiles, "bt_destfiles": bt_destfiles,

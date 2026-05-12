@@ -97,14 +97,14 @@ class PromptRewriter:
             print(f"[PromptRewriter] LLM no disponible: {e}, usando modo heurístico")
             self._llm = "heuristic"
 
-    def rewrite(self, prompt: str) -> Dict:
+    def rewrite(self, prompt: str, image_context: str = "") -> Dict:
         """Devuelve un diccionario con el análisis completo del LLM"""
         if self._llm == "heuristic":
             return self._rewrite_heuristic(prompt)
         
         if self._llm is not None:
             try:
-                return self._rewrite_with_llm(prompt, self._llm)
+                return self._rewrite_with_llm(prompt, self._llm, image_context=image_context)
             except Exception as e:
                 print(f"[PromptRewriter] Error con LLM: {e}")
         
@@ -162,32 +162,34 @@ class PromptRewriter:
             "reasoning": reasoning
         }
 
-    def _rewrite_with_llm(self, prompt: str, llm) -> Dict:
-        # Prompt más específico para evitar confusiones
-        system = (
-            "You are an image editing assistant. Analyze the user's request and output JSON.\n"
-            "Output format: {\"magnitude\":0.0-1.0, \"mask_target\":target, \"prompt\":english_text}\n"
-            "Rules:\n"
-            "- magnitude: 0.1 (subtle) to 1.0 (radical change)\n"
-            "- mask_target: body, face, clothes, hair, background, subject\n"
-            "- prompt: ALWAYS output in ENGLISH, translate from Spanish if needed\n"
-            "CRITICAL: You MUST translate Spanish words like 'desnudo'->'naked', 'ropa'->'clothes', 'cara'->'face'\n"
-            "IMPORTANT: If request mentions NUDITY, DESSOUS, NAKED, DESNUDO - output: mask_target=body\n"
-            "If request mentions CLOTHES, SHIRT, PANTS, ROPA - output: mask_target=clothes\n"
-            "If request mentions FACE, EYES, SMILE - output: mask_target=face\n"
-            "magnitude: 0.1=eyes/smile, 0.5=clothes/pose, 0.9=nude/full_body\n"
-            "Output ONLY JSON: {\"magnitude\":0.5,\"mask_target\":\"subject\",\"prompt\":\"english text\"}"
+    def _rewrite_with_llm(self, prompt: str, llm, image_context: str = "") -> Dict:
+        # Prompt de máxima presión para Qwen 0.5B
+        full_prompt = (
+            "Task: Rewrite the Request in English. MERGE it with Context.\n"
+            "Format: JSON only.\n\n"
+            "Example:\n"
+            "Context: a girl\n"
+            "Request: vestida de rojo\n"
+            "JSON: {\"magnitude\": 0.5, \"mask_target\": \"clothes\", \"prompt\": \"a girl wearing a red dress\"}\n\n"
+            "Example:\n"
+            "Context: a man\n"
+            "Request: desnudo\n"
+            "JSON: {\"magnitude\": 0.9, \"mask_target\": \"body\", \"prompt\": \"a naked man\"}\n\n"
+            "Now:\n"
+            f"Context: {image_context}\n"
+            f"Request: {prompt}\n"
+            "JSON:"
         )
-        full = f"{system}\n\nRequest: {prompt}\nJSON:"
-        
+
         response = llm.create_completion(
-            full, max_tokens=150, temperature=0.1,
-            echo=False
+            full_prompt, max_tokens=80, temperature=0.1,
+            echo=False, stop=["\n", "}"]
         )
         
         try:
             text = response['choices'][0]['text'].strip()
-            print(f"[PromptRewriter] Raw LLM Response: {text[:150]}...")
+            if not text.endswith("}"): text += "}"
+            print(f"[PromptRewriter] Raw LLM Response: {text}")
             
             # SOLO obtener el PRIMER JSON object (evitar repeticiones)
             match = re.search(r'\{[^}]+\}', text)

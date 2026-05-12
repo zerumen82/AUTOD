@@ -5,8 +5,13 @@ from typing import Optional, Tuple
 from PIL import Image
 from dataclasses import dataclass
 
-COMFY = "http://127.0.0.1:8188"
-MODELS_BASE = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+from roop.comfy_workflows import get_comfyui_url
+
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def get_models_base():
+    return os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
 
 @dataclass
 class GenResult:
@@ -20,21 +25,23 @@ class FluxEditComfyClient:
 
     def is_available(self):
         try:
-            r = requests.get(f"{COMFY}/system_stats", timeout=5)
+            r = requests.get(f"{get_comfyui_url()}/system_stats", timeout=5)
             return r.status_code == 200
         except:
             return False
 
     def _model_exists(self, subdir: str, name: str) -> bool:
-        path = os.path.join(MODELS_BASE, subdir, name)
+        path = os.path.join(get_models_base(), subdir, name)
         exists = os.path.exists(path)
         if not exists:
             print(f"[FluxClient] FALTA MODELO: {path}")
         return exists
 
     def load(self, flux_version="flux2-klein-4b-Q4_K_S.gguf") -> Tuple[bool, str]:
+        comfy_url = get_comfyui_url()
         if not self.is_available():
-            return False, "ComfyUI no responde en 127.0.0.1:8188. ¿Está iniciado?"
+            return False, f"ComfyUI no responde en {comfy_url}. ¿Está iniciado?"
+
 
         clip_map = {
             "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
@@ -106,7 +113,8 @@ class FluxEditComfyClient:
 
         iname = f"fast_{int(t0)}.png"
         buf = io.BytesIO(); image.save(buf, "PNG"); buf.seek(0)
-        r = requests.post(f"{COMFY}/upload/image", files={"image": (iname, buf, "image/png")})
+        comfy_url = get_comfyui_url()
+        r = requests.post(f"{comfy_url}/upload/image", files={"image": (iname, buf, "image/png")})
         if r.status_code != 200:
             return None, f"Error subiendo imagen: {r.status_code}"
 
@@ -114,7 +122,7 @@ class FluxEditComfyClient:
         if mask_image:
             mname = f"mask_{int(t0)}.png"
             mbuf = io.BytesIO(); mask_image.convert("L").resize((new_w, new_h)).save(mbuf, "PNG"); mbuf.seek(0)
-            requests.post(f"{COMFY}/upload/image", files={"image": (mname, mbuf, "image/png")})
+            requests.post(f"{comfy_url}/upload/image", files={"image": (mname, mbuf, "image/png")})
 
         wf = {
             "1": {"class_type": "LoadImage", "inputs": {"image": iname, "upload": "image"}},
@@ -143,7 +151,7 @@ class FluxEditComfyClient:
         else:
             wf["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["4", 0]}}
 
-        r = requests.post(f"{COMFY}/prompt", json={"prompt": wf})
+        r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf})
         if r.status_code != 200:
             err = r.json().get("error", {}).get("message", r.text[:200])
             return None, f"ComfyUI rechazó el prompt: {err}"
@@ -155,12 +163,12 @@ class FluxEditComfyClient:
         last_progress = 0
         while True:
             elapsed = time.time() - t0
-            r = requests.get(f"{COMFY}/history/{pid}")
+            r = requests.get(f"{comfy_url}/history/{pid}")
             if r.status_code == 200 and pid in r.json():
                 hist = r.json()[pid]
                 if "outputs" in hist and "10" in hist["outputs"] and hist["outputs"]["10"].get("images"):
                     img_data = hist["outputs"]["10"]["images"][0]
-                    res = requests.get(f"{COMFY}/view?filename={img_data['filename']}")
+                    res = requests.get(f"{comfy_url}/view?filename={img_data['filename']}")
                     if res.status_code == 200:
                         elapsed = time.time() - t0
                         return GenResult(image=Image.open(io.BytesIO(res.content)), time_taken=elapsed), f"OK ({elapsed:.0f}s)"
@@ -171,6 +179,7 @@ class FluxEditComfyClient:
                     if int(elapsed) > last_progress:
                         print(f"[FluxClient] ⏳ {int(elapsed)}s esperando...", flush=True)
                         last_progress = int(elapsed)
+
 
             if elapsed > 3600:
                 return None, f"Timeout 60min - ComfyUI no completó la generación"

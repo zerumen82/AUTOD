@@ -626,40 +626,37 @@ class ProcessMgr:
             if not candidate_faces:
                 return None
             
-            # SIEMPRE usar similitud para encontrar la mejor cara origen
-            # entre todas las disponibles (725 facesets)
-            return self._select_source_face_by_similarity(target_face, candidate_faces)
-            
-        except Exception as e:
-            print(f"[ERROR] _select_source_face: {e}")
-            return None
-                
-            # NUEVO: Si el usuario seleccionó una cara origen específica, usar ESA
-            source_idx = getattr(roop.globals, 'source_face_index', 0)
-            if source_idx is not None and 0 <= source_idx < len(self.input_facesets):
-                # source_face_index apunta a INPUT_FACESETS, obtener la cara de ese FaceSet
-                selected_faceset = self.input_facesets[source_idx]
-                if hasattr(selected_faceset, 'faces') and selected_faceset.faces:
-                    source_face = selected_faceset.faces[0]  # Cada FaceSet tiene 1 cara
-                    print(f"[SELECT_SOURCE] Usando cara origen seleccionada por usuario: FaceSet #{source_idx + 1}")
-                    return source_face
-                
-            # Modo "Selected Faces Frame" (Tracking de video):
+            # 1. PRIORIDAD: Si el usuario seleccionó una cara origen específica en la UI, usar ESA
+            # Esto es lo que se espera en modos 'selected' o 'selected_faces'
+            if face_swap_mode in ['selected', 'selected_faces']:
+                source_idx = getattr(roop.globals, 'source_face_index', 0)
+                if source_idx is not None and 0 <= source_idx < len(self.input_facesets):
+                    selected_faceset = self.input_facesets[source_idx]
+                    if hasattr(selected_faceset, 'faces') and selected_faceset.faces:
+                        source_face = selected_faceset.faces[0]
+                        print(f"[SELECT_SOURCE] Modo {face_swap_mode}: Usando cara origen #{source_idx + 1} seleccionada en UI")
+                        return source_face
+
+            # 2. Modo "Selected Faces Frame" (Tracking de video/escena):
+            # Aquí el matching por similitud es necesario para vincular la identidad detectada
+            # en el frame con una de las fuentes cargadas.
             if face_swap_mode == 'selected_faces_frame':
-                # La referencia del video decide QUE cara destino seguir; la identidad
-                # origen se elige automaticamente entre las fuentes cargadas.
-                # NUEVO: Usar similitud de embedding para matching correcto
                 return self._select_source_face_by_similarity(target_face, candidate_faces)
             
-            if face_swap_mode in ['selected', 'selected_faces']:
-                return self._select_best_source_face(candidate_faces, face_swap_mode)
-             
+            # 3. Múltiples fuentes en modo auto o similar: usar similitud
+            if len(candidate_faces) > 1:
+                return self._select_source_face_by_similarity(target_face, candidate_faces)
+            
+            # 4. Fallback: la única cara disponible o la de mejor calidad
             return self._select_best_source_face(candidate_faces, face_swap_mode)
             
         except Exception as e:
             print(f"[ERROR] _select_source_face: {e}")
-            # NO HACER FALLBACK - En caso de error, no hacer swap
-            return None
+            # En caso de fallo crítico, intentar al menos la mejor cara
+            try:
+                return self._select_best_source_face(candidate_faces, "error_fallback")
+            except:
+                return None
 
     def _setup_selected_faces_frame_for_video(self, video_path, valid_faces):
         """

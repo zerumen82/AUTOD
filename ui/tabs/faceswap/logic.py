@@ -47,6 +47,18 @@ def validate_image_file(file_path):
         return img is not None
     except: return False
 
+def get_project_temp_dir():
+    """Obtiene una carpeta temporal dentro del proyecto"""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    temp_dir = os.path.join(root, ".autodeep_temp")
+    if not os.path.exists(temp_dir):
+        try:
+            os.makedirs(temp_dir, exist_ok=True)
+        except:
+            import tempfile
+            return tempfile.gettempdir()
+    return temp_dir
+
 def cleanup_temp_files():
     """Limpieza completa de archivos temporales al inicio y final"""
     import tempfile
@@ -67,8 +79,8 @@ def cleanup_temp_files():
                 except: pass
     except: pass
     
-    # 2. Limpiar temp del proyecto (D:\.autodeep_temp)
-    project_temp = "D:\\.autodeep_temp"
+    # 2. Limpiar temp del proyecto
+    project_temp = get_project_temp_dir()
     try:
         if os.path.exists(project_temp):
             for item in os.listdir(project_temp):
@@ -81,6 +93,7 @@ def cleanup_temp_files():
                             os.remove(item_path)
                     except: pass
     except: pass
+
 
 def load_folder_history():
     try:

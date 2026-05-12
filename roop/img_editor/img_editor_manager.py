@@ -53,27 +53,23 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         
-        # Escalar denoise: subir más para garantizar que FLUX siga el prompt
-        # Cambios sutiles (0-0.3): 0.35-0.50
-        # Cambios medios (0.3-0.6): 0.50-0.60  
-        # Cambios radicales (0.6-1): 0.60-0.70
+        # Escalar denoise
         if magnitude < 0.3:
-            denoise = 0.35 + (magnitude * 0.5)
+            denoise = 0.30 + (magnitude * 0.5)
         elif magnitude < 0.6:
-            denoise = 0.50 + ((magnitude - 0.3) * 0.333)
+            denoise = 0.45 + ((magnitude - 0.3) * 0.5)
         else:
-            denoise = 0.60 + ((magnitude - 0.6) * 0.25)
+            denoise = 0.60 + ((magnitude - 0.6) * 0.5)
             
-        denoise = min(denoise, 0.70)
+        denoise = min(denoise, 0.80)
         
-        # REDUCIR STEPS para mayor velocidad (era 8-16, ahora 6-12)
-        steps = int(6 + (magnitude * 6))
-        
-        # Escalar pasos - reducir para mayor velocidad
-        steps = int(8 + (magnitude * 8))  # 8-16 steps
+        # REDUCIR STEPS drásticamente para velocidad en Flux Dev (era 6-12)
+        # 4 a 8 pasos es suficiente para la mayoría de ediciones img2img
+        steps = int(4 + (magnitude * 4))
         
         # Escalar guidance - aumentar un poco para mejor seguimiento del prompt
-        guidance = 4.0 + (magnitude * 2.5)
+        guidance = 3.5 + (magnitude * 3.5) # 3.5 to 7.0
+
 
         # Ajustes según motor
         if engine == "flux_schnell":
@@ -172,7 +168,10 @@ class ImgEditorManager:
             from scripts.moondream_analyzer import analyze_image_with_moondream
             import tempfile
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                img.save(tmp.name)
+                # Redimensionar para análisis ultra-rápido (Moondream no necesita 1024px)
+                img_small = img.copy()
+                img_small.thumbnail((384, 384))
+                img_small.save(tmp.name)
                 res = analyze_image_with_moondream(tmp.name)
                 img_description = res.get('positive', '')
             if img_description:
@@ -180,66 +179,69 @@ class ImgEditorManager:
         except Exception as e:
             print(f"[ImgEditor] Warning: No se pudo analizar imagen: {e}")
 
-        # 2. Análisis Semántico del prompt del usuario (primero, para obtener magnitud/mask correctos)
+        # 2. Análisis Semántico del prompt del usuario (fusionando con descripción de imagen)
         analysis = {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject"}
         if use_rewriter:
             try:
-                # Primero analizar solo el prompt del usuario
-                print(f"[ImgEditor] Analizando prompt: '{prompt}'")
+                print(f"[ImgEditor] Analizando prompt: '{prompt}' con contexto de imagen")
                 rewriter = self._get_rewriter()
-                analysis = rewriter.rewrite(prompt)
+                # Pasar img_description como contexto para que el LLM fusione inteligentemente
+                analysis = rewriter.rewrite(prompt, image_context=img_description)
                 print(f"[ImgEditor] LLM análisis - Mag: {analysis.get('magnitude')}, Mask: {analysis.get('mask_target')}")
-                
-                # Luego agregar la descripción de imagen al prompt final
-                if img_description:
-                    analysis["prompt"] = f"{img_description[:150]}... {prompt}"
-                    print(f"[ImgEditor] Prompt final: {analysis['prompt'][:100]}...")
+                print(f"[ImgEditor] Prompt fusionado: {analysis.get('prompt', '')[:100]}...")
             except Exception as e:
                 print(f"[ImgEditor] Falló análisis semántico: {e}")
 
         # 2. Resolución de Parámetros basada en el Análisis
         params = self.auto_detect_params(analysis, engine)
         
-        # Usar el prompt del LLM directamente
-        prompt_english = analysis.get("prompt", "").strip()
-        if not prompt_english or len(prompt_english) < 3:
-            prompt_english = prompt
-        
-        # Usar el prompt del LLM sin añadir nada
-        prompt_enhanced = prompt_english
-        prompt_lower = prompt.lower()  # Para detección de keywords
+        # Componer el prompt final (fusionando original y reescrito si es necesario)
+        prompt_enhanced = self._compose_generation_prompt(prompt, analysis)
+        prompt_lower = prompt.lower()
             
-        print(f"[ImgEditor] Prompt enviado: {prompt_enhanced[:180]}", flush=True)
-        
-        # Post-procesamiento: corregir mask_target y parámetros
+        # Post-procesamiento: corregir mask_target si el LLM falló pero el prompt es obvio
         mask_target = analysis.get("mask_target", "subject").lower()
         
-        # Sobrescribir mask_target y aumentar parámetros si hay palabras clave específicas
+        if any(w in prompt_lower for w in ["ropa", "clothes", "shirt", "camisa", "traje", "pantalón"]):
+            if mask_target == "subject": mask_target = "clothes"
+        
+        # Lógica especial para desnudez
         if any(w in prompt_lower for w in ["desnudo", "desnuda", "desnudos", "desnudas", "nude", "naked", "cuerpo", "body"]):
             mask_target = "body"
             analysis["magnitude"] = max(analysis.get("magnitude", 0.5), 0.7)
-            # Aumentar guidance para este tipo de cambios
             params["guidance_scale"] = max(params.get("guidance_scale", 4.5), 6.0)
+            if not any(w in prompt_enhanced.lower() for w in ["nude", "naked", "topless"]):
+                prompt_enhanced = f"naked {prompt_enhanced}"
             print(f"[ImgEditor] Corregido -> body, guidance aumentado a 6.0")
-        elif any(w in prompt_lower for w in ["ropa", "clothes", "shirt", "camisa", "traje", "pantalón"]):
-            mask_target = "clothes"
-        
+
         print(f"[ImgEditor] Mask target final: {mask_target}", flush=True)
+        print(f"[ImgEditor] Prompt final enviado: {prompt_enhanced[:180]}", flush=True)
         analysis["mask_target"] = mask_target
         
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
         if guidance_scale: params["guidance_scale"] = guidance_scale
 
-        # 3. Máscara Automática - SOLO para cambios sutiles/medios, NO para nudidad
+        # 3. Máscara Automática
         final_mask = mask_image
-        mask_target = analysis.get("mask_target", "subject")
         
-        # NO usar máscara para body/nude edits - usar edición global
-        if mask_target in ["body", "subject"]:
-            print(f"[ImgEditor] Edición global (sin máscara) para cambio de cuerpo")
-        elif final_mask is None and analysis.get("magnitude", 0.5) < 0.5:
+        # Lógica de enmascaramiento inteligente
+        is_nudity = any(w in prompt_lower for w in ["nude", "naked", "desnudo", "desnuda"])
+        
+        if is_nudity:
             try:
-                mask_target = analysis.get("mask_target", "subject")
+                print(f"[ImgEditor] Detectado prompt de desnudez. Intentando enmascarar ropa para preservar fondo.")
+                masker = self._get_clipseg_masker()
+                # Enmascarar ropa es más preciso que enmascarar 'body' para este propósito
+                auto_mask = masker.generate_mask(img, "clothing, clothes, outfit, dress, shirt, pants")
+                if auto_mask:
+                    final_mask = auto_mask
+                    print(f"[ImgEditor] Máscara de ropa generada para preservación de fondo")
+            except Exception as e:
+                print(f"[ImgEditor] Error en máscara de ropa: {e}")
+
+        # Si no hay máscara y es un cambio quirúrgico (face, hair, clothes)
+        if final_mask is None and mask_target not in ["body", "subject"]:
+            try:
                 if self._is_usable_mask_target(mask_target):
                     print(f"[ImgEditor] Intentando auto-máscara para: {mask_target}")
                     masker = self._get_clipseg_masker()
@@ -251,6 +253,9 @@ class ImgEditorManager:
                     print(f"[ImgEditor] Auto-máscara omitida por target genérico: {mask_target}")
             except Exception as e:
                 print(f"[ImgEditor] Error en máscara: {e}")
+
+        if final_mask is None and mask_target in ["body", "subject"]:
+             print(f"[ImgEditor] Edición global (sin máscara) para {mask_target}")
 
         try:
             result = None
@@ -369,7 +374,8 @@ class ImgEditorManager:
                 if result_obj: result = result_obj.image
 
             if result is not None and self._should_preserve_faces(face_preserve, analysis, prompt):
-                if params.get("denoise", 0.5) < 0.55:
+                # Permitir preservación si hay máscara (cambio localizado) o si el denoise es bajo
+                if final_mask is not None or params.get("denoise", 0.5) < 0.55:
                     try:
                         fp = self._get_face_preserver()
                         if fp:
@@ -378,7 +384,7 @@ class ImgEditorManager:
                     except Exception as e:
                         print(f"[ImgEditor] Face preservation falló: {e}")
                 else:
-                    print("[ImgEditor] Face preservation omitida (denoise alto, imagen muy modificada)")
+                    print("[ImgEditor] Face preservation omitida (denoise alto sin máscara)")
             elif result is not None and face_preserve:
                 print("[ImgEditor] Face preservation omitida porque el prompt edita rasgos faciales")
 
