@@ -13,14 +13,14 @@ def get_face_swapper():
     global FACE_SWAPPER  
     with THREAD_LOCK:  
         if FACE_SWAPPER is None:  
-            # Check for higher resolution model first (256x256 > 128x128)
+            # Prioridad 128 (usa embedding ArcFace, compatible con INSwapper.get)
             base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            model_256 = os.path.join(base_dir, 'models', 'inswapper_256.onnx')
             model_128 = os.path.join(base_dir, 'models', 'inswapper_128.onnx')
-            if os.path.exists(model_256):
-                model_path = model_256
+            model_256 = os.path.join(base_dir, 'models', 'inswapper_256.onnx')
+            if os.path.exists(model_128):
+                model_path = model_128
             else:
-                model_path = model_128  
+                model_path = model_256
             # Detector GPU antes de inicializar
             try:
                 import torch

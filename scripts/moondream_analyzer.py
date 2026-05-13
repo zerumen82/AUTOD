@@ -88,16 +88,29 @@ class MoonDreamImageAnalyzer:
             return
 
         try:
-            print(f"[ANALYZER] Cargando modelo en CPU (Modo Seguro): {text_model_path.name}")
+            # Detectar VRAM disponible para decidir cuántas capas subir a GPU
+            n_gpu_layers = 0
+            if torch.cuda.is_available():
+                try:
+                    total_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    if total_vram > 6:
+                        n_gpu_layers = 30 # Subir casi todo el modelo si hay >6GB
+                        print(f"[ANALYZER] GPU detectada ({total_vram:.1f}GB), activando aceleración (layers={n_gpu_layers})")
+                    else:
+                        n_gpu_layers = 8 # Aceleración parcial para 4-6GB
+                        print(f"[ANALYZER] GPU limitada ({total_vram:.1f}GB), aceleración parcial (layers={n_gpu_layers})")
+                except:
+                    n_gpu_layers = 15 # Fallback conservador
+            
+            print(f"[ANALYZER] Cargando modelo: {text_model_path.name}")
             
             model_str = str(text_model_path.absolute())
             mm_str = str(mmproj_path.absolute()) if mmproj_path else None
             
-            # Cargamos en CPU para máxima estabilidad concurrente con Flux
             self.model = Llama(
                 model_path=model_str,
                 clip_model_path=mm_str,
-                n_gpu_layers=0,
+                n_gpu_layers=n_gpu_layers,
                 n_ctx=1024, # Reducir contexto para velocidad
                 verbose=False
             )

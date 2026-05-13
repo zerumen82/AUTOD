@@ -176,10 +176,7 @@ def open_sd_webview():
 def create_ui():
     atexit.register(cleanup_comfyui)
     
-    with gr.Blocks(title="AutoAuto - AI Editor", css="""
-        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
-        .main-tabs { width: 100% !important; }
-    """) as demo:
+    with gr.Blocks(title="AutoAuto - AI Editor") as demo:
         # Header simple
         gr.Markdown("# AutoAuto")
         
@@ -285,9 +282,14 @@ def main():
     
     available_port = find_available_port()
     demo = create_ui()
-    demo.queue()  # Habilitado - necesario para el funcionamiento de los botones
+    # Habilitado - necesario para el funcionamiento de los botones
+    demo.queue()
     
     # Intentar lanzar en el puerto disponible
+    css = """
+        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+        .main-tabs { width: 100% !important; }
+    """
     try:
         demo.launch(
             server_name="127.0.0.1",
@@ -295,7 +297,7 @@ def main():
             share=False,
             show_error=True,
             quiet=True,
-            max_threads=100
+            css=css
         )
     except OSError as e:
         if "Cannot find empty port" in str(e):
@@ -308,8 +310,8 @@ def main():
                 server_port=available_port,
                 share=False,
                 show_error=True,
-                max_threads=100,
-                quiet=True
+                quiet=True,
+                css=css
             )
         else:
             raise

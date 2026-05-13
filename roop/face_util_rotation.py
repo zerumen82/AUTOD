@@ -207,12 +207,11 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
         else:
             threshold = min_score
         
-        # Para detección de destino (target): usar umbral muy bajo (0.05) para detectar más caras
-        # Para origen (source): usar umbral normal (min 0.15)
+        # Para detección de destino (target): usar umbral razonable (0.45) para evitar ruido (torso, ropa)
         if for_target:
-            effective_threshold = 0.05  # Muy permisivo para detectar primer planos y caras parciales
+            effective_threshold = 0.45  # Aumentado de 0.05 a 0.45 para evitar detectar torsos
         else:
-            effective_threshold = max(0.15, threshold * 0.5)
+            effective_threshold = max(0.40, threshold * 0.5)
         
         try:
             faces = analizador.get(frame_rgb)

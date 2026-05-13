@@ -48,7 +48,7 @@ DETECTION_SIZE = (1024, 1024)  # Aumentado de 640 a 1024 para mejor calidad
 MAX_DETECTION_ATTEMPTS = 3
 INIT_TIMEOUT = 60
 # Dynamic padding: less for close-ups (they're already zoomed), more for wide shots
-face_detection_padding = 0.15  # Tighter crop for better UI recognition
+face_detection_padding = 0.3  # 30% de margen para caras completas
 
 # Caches optimizados para velocidad
 CACHE_RESULTS = {}
@@ -121,7 +121,7 @@ EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="FaceAnalysis")
 
 
 class Face(dict):
-    def __init__(self, bbox=None, score=0.0, det_score=0.0, kps=None, embedding=None, normed_embedding=None, landmark_106=None, gender=None, age=None):
+    def __init__(self, bbox=None, score=0.0, det_score=0.0, kps=None, embedding=None, normed_embedding=None, landmark_106=None, gender=None, age=None, face_img=None):
         super().__init__()
         self['bbox'] = bbox
         self['score'] = score
@@ -132,6 +132,7 @@ class Face(dict):
         self['landmark_106'] = landmark_106
         self['gender'] = gender
         self['age'] = age
+        self['face_img'] = face_img
         self.bbox = bbox
         self.score = score
         self.det_score = det_score
@@ -141,6 +142,7 @@ class Face(dict):
         self.landmark_106 = landmark_106
         self.gender = gender
         self.age = age
+        self.face_img = face_img
         self.mask_offsets = (0, 0.1, 0, 0, 1, 20)
 
 
@@ -321,154 +323,153 @@ def extract_face_images(
             h, w = img_rgb.shape[:2]
             print(f"[SOURCE_DETECT] Cargando cara de origen: {os.path.basename(str(image_path))} ({w}x{h})")
             
-            # 1. Intentar detección normal (Permisiva)
-            faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.15)
+            # 1. Intentar detección normal (Más estricta para evitar ruido)
+            faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.35)
             
-            # 2. Si falla, intentar con PADDING (Ayuda con crops muy cerrados)
-            if not faces:
-                print(f"[SOURCE_DETECT] No se detectó cara directamente. Intentando con padding...")
-                pad_h, pad_w = h // 2, w // 2
-                img_padded = cv2.copyMakeBorder(img_rgb, pad_h, pad_h, pad_w, pad_w, cv2.BORDER_CONSTANT, value=[0, 0, 0])
-                faces_padded = detect_faces_robust(img_padded, FACE_ANALYSER, 0.10)
+            # 2. Si falla, intentar con PADDING pero solo si la imagen es razonable
+            if not faces and w > 100 and h > 100:
+                print(f"[SOURCE_DETECT] No se detectó cara directamente. Intentando con padding controlado...")
+                pad_h, pad_w = h // 3, w // 3
+                img_padded = cv2.copyMakeBorder(img_rgb, pad_h, pad_h, pad_w, pad_w, cv2.BORDER_CONSTANT, value=[127, 127, 127])
+                faces_padded = detect_faces_robust(img_padded, FACE_ANALYSER, 0.25)
                 if faces_padded:
-                    faces = faces_padded
-                    for f in faces:
-                        # Ajustar coordenadas al original
-                        f.bbox[0] -= pad_w
-                        f.bbox[2] -= pad_w
-                        f.bbox[1] -= pad_h
-                        f.bbox[3] -= pad_h
-                        if hasattr(f, 'kps') and f.kps is not None:
-                            f.kps[:, 0] -= pad_w
-                            f.kps[:, 1] -= pad_h
-                    print(f"[SOURCE_DETECT] ¡Cara detectada exitosamente usando padding!")
-
-            # 3. Si sigue fallando, intentar con RE-SCALADO
-            if not faces and (w < 200 or h < 200):
-                print(f"[SOURCE_DETECT] Imagen pequeña, intentando upscale para detección...")
-                img_up = cv2.resize(img_rgb, (w * 2, h * 2), interpolation=cv2.INTER_LANCZOS4)
-                faces_up = detect_faces_robust(img_up, FACE_ANALYSER, 0.10)
-                if faces_up:
-                    faces = faces_up
-                    for f in faces:
-                        f.bbox = (f.bbox / 2.0).astype(int)
-                        if hasattr(f, 'kps') and f.kps is not None:
-                            f.kps = f.kps / 2.0
-                    print(f"[SOURCE_DETECT] ¡Cara detectada exitosamente usando upscale!")
+                    # Validar que las caras detectadas tengan sentido
+                    for f in faces_padded:
+                        fw = f.bbox[2] - f.bbox[0]
+                        fh = f.bbox[3] - f.bbox[1]
+                        # Evitar ruido: la cara debe tener un tamaño mínimo proporcional al original
+                        if fw > w * 0.15 and fh > h * 0.15:
+                            f.bbox[0] -= pad_w
+                            f.bbox[2] -= pad_w
+                            f.bbox[1] -= pad_h
+                            f.bbox[3] -= pad_h
+                            if hasattr(f, 'kps') and f.kps is not None:
+                                f.kps[:, 0] -= pad_w
+                                f.kps[:, 1] -= pad_h
+                            faces.append(f)
+                    if faces:
+                        print(f"[SOURCE_DETECT] ¡Cara real detectada con padding!")
 
             if faces:
-                # Ordenar por tamaño y coger la más grande
-                faces.sort(key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
-                face_data_full = faces[0]
-                
-                # Asegurar que el embedding NO sea None
-                face_embedding = getattr(face_data_full, 'embedding', None)
-                if face_embedding is None:
-                    print(f"[SOURCE_DETECT] ⚠️ Cara detectada pero SIN EMBEDDING. Intentando recuperar...")
-                    # Extraer el crop de la cara
-                    x1, y1, x2, y2 = face_data_full.bbox.astype(int)
-                    # Clamping
-                    x1, y1 = max(0, x1), max(0, y1)
-                    x2, y2 = min(w, x2), min(h, y2)
-                    face_crop = img_rgb[y1:y2, x1:x2].copy()
+                # Filtrar resultados por calidad y forma
+                valid_source_faces = []
+                for f in faces:
+                    fw = f.bbox[2] - f.bbox[0]
+                    fh = f.bbox[3] - f.bbox[1]
+                    aspect = fw / fh if fh > 0 else 0
+                    # Filtros de ruido: tamaño mínimo absoluto y forma humana
+                    if not (fw > 20 and fh > 20 and 0.25 < aspect < 3.5):
+                        continue
                     
-                    if face_crop.size > 0:
-                        # Si el bbox es toda la imagen (crop ya recortado), añadir padding para dar contexto
-                        h_img, w_img = img_rgb.shape[:2]
-                        if x1 == 0 and y1 == 0 and (x2 - x1) >= w_img * 0.8 and (y2 - y1) >= h_img * 0.8:
-                            print(f"[SOURCE_DETECT] Crop ocupa casi toda la imagen, añadiendo padding...")
-                            pad = min(h_img, w_img) // 3
+                    # Validar que la cara sea COMPLETA (no media cara):
+                    # los 5 keypoints deben estar bien distribuidos dentro del bbox
+                    kps = getattr(f, 'kps', None)
+                    if kps is not None and len(kps) == 5:
+                        kps_x = kps[:, 0]
+                        kps_y = kps[:, 1]
+                        margin_x = fw * 0.08
+                        margin_y = fh * 0.08
+                        # Los kps deben estar dentro del bbox con margen
+                        if (np.min(kps_x) < f.bbox[0] + margin_x or
+                            np.max(kps_x) > f.bbox[2] - margin_x or
+                            np.min(kps_y) < f.bbox[1] + margin_y or
+                            np.max(kps_y) > f.bbox[3] - margin_y):
+                            continue  # media cara: kps tocan el borde del bbox
+                        # Ojos encima de nariz, nariz encima de boca
+                        eye_y = min(kps_y[0], kps_y[1])  # ojo más alto
+                        mouth_y = max(kps_y[3], kps_y[4])  # boca más baja
+                        if mouth_y - eye_y < fh * 0.15:
+                            continue  # demasiado verticalmente comprimido = media cara
+                    
+                    valid_source_faces.append(f)
+                
+                faces = valid_source_faces
+
+            if faces:
+                # Procesar todas las caras detectadas
+                results = []
+                for face_data_full in faces:
+                    # Asegurar que el embedding NO sea None
+                    face_embedding = getattr(face_data_full, 'embedding', None)
+                    
+                    if face_embedding is None:
+                        print(f"[SOURCE_DETECT] ⚠️ Cara detectada pero SIN EMBEDDING. Intentando recuperación agresiva...")
+                        # Extraer el crop de la cara
+                        x1, y1, x2, y2 = face_data_full.bbox.astype(int)
+                        # Clamping
+                        x1, y1 = max(0, x1), max(0, y1)
+                        x2, y2 = min(w, x2), min(h, y2)
+                        face_crop = img_rgb[y1:y2, x1:x2].copy()
+                        
+                        # Intento 1: Padding
+                        if face_crop.size > 0:
+                            h_c, w_c = face_crop.shape[:2]
+                            pad = max(h_c, w_c) // 2
                             face_padded = cv2.copyMakeBorder(face_crop, pad, pad, pad, pad, 
                                                               cv2.BORDER_CONSTANT, value=[128, 128, 128])
-                            face_crop = face_padded
-                        else:
-                            pad = 0
-                        
-                        # Re-analizar el crop
-                        try:
-                            faces_crop = FACE_ANALYSER.get(face_crop)
-                            if faces_crop and getattr(faces_crop[0], 'embedding', None) is not None:
-                                face_data_full = faces_crop[0]
-                                # Ajustar bbox si se añadió padding
-                                if pad > 0:
-                                    face_data_full.bbox[0] -= pad
-                                    face_data_full.bbox[2] -= pad
-                                    face_data_full.bbox[1] -= pad
-                                    face_data_full.bbox[3] -= pad
-                                print(f"[SOURCE_DETECT] ✅ Embedding recuperado (crop shape: {face_crop.shape})")
-                            else:
-                                # Intentar con CPU si está disponible
-                                if FACE_ANALYSER_CPU is not None:
-                                    print(f"[SOURCE_DETECT] Intentando con CPU fallback...")
-                                    faces_crop_cpu = FACE_ANALYSER_CPU.get(face_crop)
-                                    if faces_crop_cpu and getattr(faces_crop_cpu[0], 'embedding', None) is not None:
-                                        face_data_full = faces_crop_cpu[0]
-                                        if pad > 0:
-                                            face_data_full.bbox[0] -= pad
-                                            face_data_full.bbox[2] -= pad
-                                            face_data_full.bbox[1] -= pad
-                                            face_data_full.bbox[3] -= pad
-                                        print(f"[SOURCE_DETECT] ✅ Embedding recuperado con CPU")
-                        except Exception as e:
-                            print(f"[SOURCE_DETECT] ❌ Error re-analizando crop: {e}")
+                            try:
+                                faces_p = FACE_ANALYSER.get(face_padded)
+                                if faces_p and getattr(faces_p[0], 'embedding', None) is not None:
+                                    face_data_full = faces_p[0]
+                                    print(f"[SOURCE_DETECT] ✅ Embedding recuperado con padding")
+                                    face_embedding = face_data_full.embedding
+                            except: pass
 
-                normed_emb = None
-                if hasattr(face_data_full, 'embedding') and face_data_full.embedding is not None:
-                    emb = np.array(face_data_full.embedding)
+                        # Intento 2: Sharpening + Brightness
+                        if face_embedding is None and face_crop.size > 0:
+                            enhanced = preprocess_image_for_detection(face_crop)
+                            try:
+                                faces_e = FACE_ANALYSER.get(enhanced)
+                                if faces_e and getattr(faces_e[0], 'embedding', None) is not None:
+                                    face_data_full = faces_e[0]
+                                    print(f"[SOURCE_DETECT] ✅ Embedding recuperado con preprocesamiento")
+                                    face_embedding = face_data_full.embedding
+                            except: pass
+
+                    if face_embedding is None:
+                        # Si no hay embedding tras todo esto, omitimos esta cara
+                        print(f"[SOURCE_DETECT] ❌ Falló extracción de embedding para una cara. Omitiendo.")
+                        continue
+
+                    normed_emb = None
+                    emb = np.array(face_embedding)
                     n = np.linalg.norm(emb)
                     if n > 0: normed_emb = emb / n
 
-                face_obj = Face(
-                    bbox=face_data_full.bbox.astype(int).tolist(),
-                    score=getattr(face_data_full, 'score', 0.5),
-                    det_score=getattr(face_data_full, 'det_score', 0.5),
-                    kps=face_data_full.kps.tolist() if getattr(face_data_full, 'kps', None) is not None else None,
-                    embedding=getattr(face_data_full, 'embedding', None),
-                    normed_embedding=normed_emb
-                )
-                face_obj.source_image = str(image_path)
-                res = [[face_obj, img_rgb.copy()]]
-                CACHE_RESULTS[cache_key] = res
-                return res
+                    face_obj = Face(
+                        bbox=face_data_full.bbox.astype(int).tolist(),
+                        score=getattr(face_data_full, 'score', 0.5),
+                        det_score=getattr(face_data_full, 'det_score', 0.5),
+                        kps=face_data_full.kps.tolist() if getattr(face_data_full, 'kps', None) is not None else None,
+                        embedding=face_embedding,
+                        normed_embedding=normed_emb
+                    )
+                    face_obj.source_image = str(image_path)
+                    
+                    # Extraer el recorte real para la UI
+                    current_padding = ui_padding if ui_padding is not None else face_detection_padding
+                    x1, y1, x2, y2 = face_obj.bbox
+                    fw, fh = x2 - x1, y2 - y1
+                    px, py = int(fw * current_padding), int(fh * current_padding)
+                    x1p, y1p = max(0, x1 - px), max(0, y1 - py)
+                    x2p, y2p = min(w, x2 + px), min(h, y2 + py)
+                    face_img = img_rgb[y1p:y2p, x1p:x2p].copy()
+                    
+                    # Guardar el recorte en el objeto
+                    face_obj.face_img = face_img
+                    
+                    results.append([face_obj, face_img])
+                
+                CACHE_RESULTS[cache_key] = results
+                return results
             else:
-                print(f"[SOURCE_DETECT] ❌ No se detectó ninguna cara. Usando imagen completa como último recurso...")
-                # Crear un objeto cara ficticio que use toda la imagen
-                # Esto es útil para fotos que ya vienen recortadas a la cara
-                h, w = img_rgb.shape[:2]
-                
-                # Intentar obtener un embedding forzando un crop central un poco más pequeño
-                # A veces el detector falla en los bordes pero el recognizer funciona si le damos la cara centrada
-                center_crop = img_rgb[h//10:9*h//10, w//10:9*w//10]
-                fake_embedding = None
-                if center_crop.size > 0:
-                    try:
-                        faces_center = FACE_ANALYSER.get(center_crop)
-                        if faces_center and getattr(faces_center[0], 'embedding', None) is not None:
-                            fake_embedding = faces_center[0].embedding
-                            print(f"[SOURCE_DETECT] ✅ Embedding obtenido de crop central")
-                    except:
-                        pass
-                
-                normed_emb = None
-                if fake_embedding is not None:
-                    emb = np.array(fake_embedding)
-                    n = np.linalg.norm(emb)
-                    if n > 0: normed_emb = emb / n
+                print(f"[SOURCE_DETECT] ❌ No se detectó ninguna cara real en {os.path.basename(str(image_path))}")
+                CACHE_RESULTS[cache_key] = []
+                return []
 
-                face_obj = Face(
-                    bbox=[0, 0, w, h],
-                    score=0.5,
-                    det_score=0.5,
-                    kps=None,
-                    embedding=fake_embedding,
-                    normed_embedding=normed_emb
-                )
-                res = [[face_obj, img_rgb.copy()]]
-                CACHE_RESULTS[cache_key] = res
-                return res
 
         # ============ TARGET FACES: DETECCIÓN NORMAL ============
-        target_thresh = 0.25 # Permisivo para encontrar caras giradas en video
+        target_thresh = 0.45 # Aumentado de 0.25 a 0.45 para evitar detectar torsos
         
         # Preprocesamiento opcional
         img_preprocessed = preprocess_image_for_detection(cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))

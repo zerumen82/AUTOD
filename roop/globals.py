@@ -150,7 +150,7 @@ def apply_conservative_defaults():
                 execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
             print("[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:")
-            print(f"   [OK] Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")
+            print(f"   [OK] Blend ratio: {blend_ratio} ({blend_ratio*100:.0f}% cara origen, {(1-blend_ratio)*100:.0f}% cara target)")
             print(f"   [OK] Distance threshold: {distance_threshold} (similitud mínima para match facial)")
             print(f"   [OK] Face swap mode: {face_swap_mode}")
             print(f"   [OK] Execution providers: {execution_providers}")
@@ -160,7 +160,7 @@ def apply_conservative_defaults():
             face_swap_mode = "selected_faces"
             execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             print("[CONFIG] CONFIGURACION OPTIMIZADA POR DEFECTO:")
-            print(f"   [OK] Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")
+            print(f"   [OK] Blend ratio: {blend_ratio} ({blend_ratio*100:.0f}% cara origen, {(1-blend_ratio)*100:.0f}% cara target)")
             print(f"   [OK] Distance threshold: {distance_threshold} (similitud mínima para match facial)")
             print(f"   [OK] Face swap mode: {face_swap_mode}")
             print(f"   [OK] Execution providers: {execution_providers}")
@@ -171,7 +171,7 @@ def apply_conservative_defaults():
         execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
         print("[CONFIG] CONFIGURACION OPTIMIZADA ACTIVADA:")
-        print(f"   [OK] Blend ratio: {blend_ratio} ({(1-blend_ratio)*100:.0f}% cara original, {blend_ratio*100:.0f}% cara target)")
+        print(f"   [OK] Blend ratio: {blend_ratio} ({blend_ratio*100:.0f}% cara origen, {(1-blend_ratio)*100:.0f}% cara target)")
         print(f"   [OK] Distance threshold: {distance_threshold} (similitud mínima para match facial)")
         print(f"   [OK] Face swap mode: {face_swap_mode}")
         print(f"   [OK] Execution providers: {execution_providers}")

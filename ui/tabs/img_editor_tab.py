@@ -27,7 +27,7 @@ def open_output_folder():
 _is_generating = False
 
 
-def on_generate(img_data, p_text, engine_val, f_preserve):
+def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val):
     global _is_generating
     
     if _is_generating:
@@ -62,7 +62,7 @@ def on_generate(img_data, p_text, engine_val, f_preserve):
         
         res_img, msg, mask_img = manager.generate_intelligent(
             image=img, prompt=p_text,
-            face_preserve=f_preserve, use_rewriter=True,
+            face_preserve=f_preserve, use_rewriter=use_ai_val,
             engine=engine_val
         )
 
@@ -164,6 +164,7 @@ def create_img_editor_tab():
                     btn_analyze = gr.Button("🔍 ANALIZAR", size="sm", scale=1)
 
                 with gr.Accordion("⚙️ Opciones Avanzadas", open=False):
+                    use_ai = gr.Checkbox(label="🧠 Usa Inteligencia (IA)", value=True, info="Analiza la imagen y el prompt para mejores resultados (más lento)")
                     engine = gr.Dropdown(
                         choices=[
                             ("FLUX.1 Dev Abliterated", "flux_dev_abliterated"), 
@@ -190,9 +191,11 @@ def create_img_editor_tab():
 
     gen_btn.click(
         on_generate,
-        [input_img, prompt, engine, f_preserve],
-        [output_img, status, mask_preview]
+        [input_img, prompt, engine, f_preserve, use_ai],
+        [output_img, status, mask_preview],
+        concurrency_limit=None
     )
+
 
     btn_analyze.click(analyze_click, [input_img, prompt], [status, prompt])
 

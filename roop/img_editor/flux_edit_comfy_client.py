@@ -137,7 +137,7 @@ class FluxEditComfyClient:
                     "model": ["2", 0], "positive": ["6", 0], "negative": ["7", 0],
                     "latent_image": ["5", 0], "seed": seed or int(t0) % 1000000,
                     "steps": num_inference_steps, "cfg": guidance_scale,
-                    "sampler_name": "euler", "scheduler": "beta", "denoise": denoise
+                    "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": denoise
                 }
             },
             "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["4", 0]}},

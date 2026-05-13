@@ -19,7 +19,7 @@ def faceswap_tab():
     roop.globals.blend_ratio = 1.0
     roop.globals.distance_threshold = 0.25  # Más estricto para mayor parecido
     roop.globals.face_swap_mode = 'selected_faces'
-    roop.globals.selected_enhancer = 'GFPGAN'  # Mejor para face swap (preserva identidad)
+    roop.globals.selected_enhancer = 'CodeFormer'  # Mejor identidad con fidelidad 0.85
     roop.globals.use_enhancer = True
     # enhancer_blend_factor usa el valor por defecto de globals.py (0.3)
     

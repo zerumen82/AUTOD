@@ -462,7 +462,7 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
             {"layers": []},
             roop.globals.num_swap_steps,
             None,
-            getattr(state, "SELECTED_FACE_INDEX", 0),
+            getattr(roop.globals, "source_face_index", 0),
             temporal_smoothing,
         ):
             elapsed = time.time() - start_t

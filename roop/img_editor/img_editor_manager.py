@@ -17,6 +17,7 @@ class ImgEditorManager:
         self.clip_masker = None
         self.prompt_analyzer = None
         self.prompt_rewriter = None
+        self._analysis_cache = {}
         self._last_context = "normal"
 
     def _get_prompt_analyzer(self):
@@ -64,8 +65,8 @@ class ImgEditorManager:
         denoise = min(denoise, 0.80)
         
         # REDUCIR STEPS drásticamente para velocidad en Flux Dev (era 6-12)
-        # 4 a 8 pasos es suficiente para la mayoría de ediciones img2img
-        steps = int(4 + (magnitude * 4))
+        # 8 a 15 pasos para buena calidad sin ser excesivamente lento
+        steps = int(8 + (magnitude * 7))
         
         # Escalar guidance - aumentar un poco para mejor seguimiento del prompt
         guidance = 3.5 + (magnitude * 3.5) # 3.5 to 7.0
@@ -76,6 +77,9 @@ class ImgEditorManager:
             steps = min(steps, 6)
         elif "klein" in engine:
             steps = min(steps, 15)
+        elif "abliterated" in engine:
+            # Flux Dev Abliterated: mantener 10 steps
+            steps = min(steps, 10)
 
         # Determinar modo
         mode = "img2img"
@@ -165,17 +169,27 @@ class ImgEditorManager:
         # 1. Análisis de la imagen original (describe qué hay para preservar contexto)
         img_description = ""
         try:
-            from scripts.moondream_analyzer import analyze_image_with_moondream
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                # Redimensionar para análisis ultra-rápido (Moondream no necesita 1024px)
-                img_small = img.copy()
-                img_small.thumbnail((384, 384))
-                img_small.save(tmp.name)
-                res = analyze_image_with_moondream(tmp.name)
-                img_description = res.get('positive', '')
-            if img_description:
-                print(f"[ImgEditor] Imagen analizada: {img_description[:100]}...")
+            # Obtener ID único de la imagen o usar el nombre si es archivo
+            img_id = str(id(image))
+            if hasattr(image, 'name'): img_id = image.name
+            
+            if img_id in self._analysis_cache:
+                print("[ImgEditor] Usando análisis de imagen cacheado")
+                img_description = self._analysis_cache[img_id]
+            else:
+                from scripts.moondream_analyzer import analyze_image_with_moondream
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                    # Redimensionar para análisis ultra-rápido (Moondream no necesita 1024px)
+                    img_small = img.copy()
+                    img_small.thumbnail((384, 384))
+                    img_small.save(tmp.name)
+                    res = analyze_image_with_moondream(tmp.name)
+                    img_description = res.get('positive', '')
+                    self._analysis_cache[img_id] = img_description
+                    
+                if img_description:
+                    print(f"[ImgEditor] Imagen analizada: {img_description[:100]}...")
         except Exception as e:
             print(f"[ImgEditor] Warning: No se pudo analizar imagen: {e}")
 
@@ -374,17 +388,14 @@ class ImgEditorManager:
                 if result_obj: result = result_obj.image
 
             if result is not None and self._should_preserve_faces(face_preserve, analysis, prompt):
-                # Permitir preservación si hay máscara (cambio localizado) o si el denoise es bajo
-                if final_mask is not None or params.get("denoise", 0.5) < 0.55:
-                    try:
-                        fp = self._get_face_preserver()
-                        if fp:
-                            result = fp.preserve_faces(img, result, method="blend")
-                            print(f"[ImgEditor] Face preservation aplicada")
-                    except Exception as e:
-                        print(f"[ImgEditor] Face preservation falló: {e}")
-                else:
-                    print("[ImgEditor] Face preservation omitida (denoise alto sin máscara)")
+                print(f"[ImgEditor] Aplicando preservación de rostro (face_preserve={face_preserve})")
+                try:
+                    fp = self._get_face_preserver()
+                    if fp:
+                        result = fp.preserve_faces(img, result, method="swap")
+                        print(f"[ImgEditor] Face preservation aplicada")
+                except Exception as e:
+                    print(f"[ImgEditor] Face preservation falló: {e}")
             elif result is not None and face_preserve:
                 print("[ImgEditor] Face preservation omitida porque el prompt edita rasgos faciales")
 

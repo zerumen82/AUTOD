@@ -150,8 +150,8 @@ class FacePreserver:
                         max_sim = sim
                         best_match = orig_face
                 
-                # Si encontramos un match razonable (>0.4), hacemos el swap quirúrgico
-                if best_match is not None and max_sim > 0.4:
+                # Si encontramos un match razonable (>0.25), hacemos el swap quirúrgico
+                if best_match is not None and max_sim > 0.25:
                     try:
                         print(f"  [MATCH] Restaurando identidad con sim={max_sim:.4f}")
                         # Realizar el swap directamente en el frame generado

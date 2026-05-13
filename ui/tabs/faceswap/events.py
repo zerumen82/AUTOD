@@ -83,51 +83,40 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
         return gr.update(), gr.update()
 
     total_faces = len(state.SELECTION_FACES_DATA) if state.SELECTION_FACES_DATA else 0
-    # Arreglado: La galería de selección tiene 4 columnas en ui.py
     face_index = _resolve_gallery_index(evt.index, total_faces, columns=4)
     
     if face_index is None or state.SELECTION_FACES_DATA is None:
         return gr.update(), gr.update()
 
-    # Guardar índice para preview del enhancer
     state.TEMP_SELECTED_FACE_INDEX = face_index
 
     try:
         face_data = state.SELECTION_FACES_DATA[face_index]
         face_obj = face_data[0]
         
-        # Verificar duplicados (solo si es exactamente la misma cara en el mismo archivo/frame)
         is_duplicate = False
         current_file = os.path.basename(state.list_files_process[state.selected_preview_index].filename) if state.list_files_process else ""
         current_frame = int(frame_num or 1)
         
         for existing in roop.globals.TARGET_FACES:
-            # Para ser duplicado, debe venir de la misma fuente O tener un embedding virtualmente idéntico
             existing_source = getattr(existing, 'source_image', '')
             
-            # Comparación por embedding (muy estricta: 0.9999)
-            # Solo bloqueamos por embedding si sospechamos que es el mismo archivo (o muy muy parecido)
             if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
-                # Usar dot product sobre embeddings normalizados (si están disponibles)
                 emb1 = getattr(existing, 'normed_embedding', None)
                 emb2 = getattr(face_obj, 'normed_embedding', None)
                 
                 if emb1 is not None and emb2 is not None:
                     similarity = np.dot(emb1, emb2)
                 else:
-                    # Fallback a dot product normal (asumiendo que están normalizados)
                     similarity = np.dot(existing.embedding, face_obj.embedding)
                 
-                # Si son idénticos y vienen del mismo archivo -> DUPLICADO
-                if similarity > 0.9999 and existing_source == str(image_path):
+                if similarity > 0.9999 and existing_source == current_file:
                     is_duplicate = True; break
                 
-                # Si son idénticos (0.99999) incluso si no sabemos el origen -> PROBABLE DUPLICADO
                 if similarity > 0.99999:
                     is_duplicate = True; break
             
-            # Comparación por BBox (solo si es el mismo archivo)
-            if existing.bbox == face_obj.bbox and existing_source == str(image_path):
+            if existing.bbox == face_obj.bbox and existing_source == current_file:
                 is_duplicate = True; break
 
         if not is_duplicate:
@@ -170,7 +159,7 @@ def on_preview_click(evt: gr.SelectData, frame_num):
     is_new_frame = getattr(state, 'CURRENT_DETECTED_FRAME', -1) != frame_idx
     if not state.SELECTION_FACES_DATA or is_new_frame:
         print(f"[FaceSelection] Auto-detectando caras para frame {frame_idx} (Nuevo={is_new_frame})...")
-        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=1.5)
+        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
         state.ALL_DETECTED_FACES_DATA = detected_faces
         state.SELECTION_FACES_DATA = detected_faces
         state.CURRENT_DETECTED_FRAME = frame_idx
@@ -180,19 +169,45 @@ def on_preview_click(evt: gr.SelectData, frame_num):
         return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     # 2. Buscar cara que coincida con las coordenadas del clic [x, y]
+    # Gradio proporciona coordenadas relativas a la visualización, necesitamos mapearlas o usar distancias relativas
     click_x, click_y = evt.index[0], evt.index[1]
+    
+    # Obtener dimensiones reales de la imagen para normalizar distancias si es necesario
+    from roop.capturer import get_image_frame, get_video_frame
+    frame_orig = get_video_frame(entry.filename, frame_idx) if util.is_video(entry.filename) else get_image_frame(entry.filename)
+    if frame_orig is None:
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+    
+    h_orig, w_orig = frame_orig.shape[:2]
+    
     best_face_idx = -1
-    min_dist = float('inf')
+    min_dist_norm = float('inf')
 
     for idx, face_data in enumerate(state.SELECTION_FACES_DATA):
         face_obj = face_data[0]
         x1, y1, x2, y2 = face_obj.bbox
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        margin = 30
-        if (x1 - margin) <= click_x <= (x2 + margin) and (y1 - margin) <= click_y <= (y2 + margin):
-            dist = np.sqrt((click_x - cx)**2 + (click_y - cy)**2)
-            if dist < min_dist:
-                min_dist = dist
+        
+        # Distancia normalizada para ignorar diferencias de escala UI vs Original
+        dist_norm = np.sqrt(((click_x - cx)/w_orig)**2 + ((click_y - cy)/h_orig)**2)
+        
+        # Si el clic está dentro del bbox (con margen) o es el centro más cercano
+        margin = max(w_orig, h_orig) * 0.05
+        is_inside = (x1 - margin) <= click_x <= (x2 + margin) and (y1 - margin) <= click_y <= (y2 + margin)
+        
+        if is_inside and dist_norm < min_dist_norm:
+            min_dist_norm = dist_norm
+            best_face_idx = idx
+
+    # Fallback: si no está "dentro", coger el centro más cercano en un radio razonable
+    if best_face_idx == -1:
+        for idx, face_data in enumerate(state.SELECTION_FACES_DATA):
+            face_obj = face_data[0]
+            x1, y1, x2, y2 = face_obj.bbox
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            dist_norm = np.sqrt(((click_x - cx)/w_orig)**2 + ((click_y - cy)/h_orig)**2)
+            if dist_norm < 0.15 and dist_norm < min_dist_norm: # Radio del 15% de la imagen
+                min_dist_norm = dist_norm
                 best_face_idx = idx
 
     if best_face_idx != -1:
@@ -225,7 +240,7 @@ def on_preview_click(evt: gr.SelectData, frame_num):
                     similarity = np.dot(existing.embedding, face_obj.embedding)
                 
                 # Si son idénticos y vienen del mismo archivo -> DUPLICADO
-                if similarity > 0.9999 and existing_source == str(image_path):
+                if similarity > 0.9999 and existing_source == current_file:
                     is_duplicate = True; break
                 
                 # Si son idénticos (0.99999) incluso si no sabemos el origen -> PROBABLE DUPLICADO
@@ -233,7 +248,7 @@ def on_preview_click(evt: gr.SelectData, frame_num):
                     is_duplicate = True; break
             
             # Comparación por BBox (solo si es el mismo archivo)
-            if existing.bbox == face_obj.bbox and existing_source == str(image_path):
+            if existing.bbox == face_obj.bbox and existing_source == current_file:
                 is_duplicate = True; break
 
         if not is_duplicate:
@@ -431,7 +446,7 @@ def wire_events(ui_comp):
         entry = state.list_files_process[state.selected_preview_index]
         frame_idx = max(1, int(frame_num or 1))
         
-        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=1.5)
+        detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
         state.ALL_DETECTED_FACES_DATA = detected_faces # Guardar todo para filtros
         state.SELECTION_FACES_DATA = detected_faces
         

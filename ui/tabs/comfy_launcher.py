@@ -296,7 +296,8 @@ def start(
         python_exe = COMFYUI_PYTHON if os.path.exists(COMFYUI_PYTHON) else sys.executable
         
         # Usar --normalvram para mejor velocidad. GGUF ya optimiza la memoria.
-        cmd = [python_exe, "-u", exe, "--port", str(port), "--normalvram"]
+        # --disable-smart-memory previene descarga automática de modelos
+        cmd = [python_exe, "-u", exe, "--port", str(port), "--normalvram", "--disable-smart-memory"]
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
         print(f"[ComfyLauncher] Directorio: {COMFYUI_DIR}")
         print(f"[ComfyLauncher] Python: {python_exe}")
@@ -322,6 +323,10 @@ def start(
             env["COMFYUI_STARTUP_TIMEOUT"] = "300"
             # Fix CUDA allocator - usar backend alternativo
             env["PYTORCH_CUDA_ALLOC_CONF"] = "backend:cudaMallocAsync"
+            # Evitar offload de modelos entre generaciones
+            env["CUDA_MODULE_LOADING"] = "LAZY"
+            # Forzar modelos a quedarse en VRAM
+            env["COMFYUI_AUTO_CACHE"] = "false"
             
             comfy_process = subprocess.Popen(
                 cmd,

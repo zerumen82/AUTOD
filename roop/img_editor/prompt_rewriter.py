@@ -82,10 +82,20 @@ class PromptRewriter:
                 print("[PromptRewriter] ERROR: No se encontró ningún modelo LLM.")
                 return
 
-            print(f"[PromptRewriter] Cargando rewriter: {os.path.basename(model_path)}")
+            # Detectar si podemos usar GPU (aceleración GGUF)
+            n_gpu_layers = 0
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    if vram > 8: n_gpu_layers = 25 # Qwen 0.5B es muy pequeño
+                    elif vram > 4: n_gpu_layers = 12
+            except: pass
+
+            print(f"[PromptRewriter] Cargando rewriter: {os.path.basename(model_path)} (GPU layers={n_gpu_layers})")
             self._llm = Llama(
                 model_path=model_path,
-                n_gpu_layers=0,
+                n_gpu_layers=n_gpu_layers,
                 n_ctx=2048,
                 verbose=False
             )

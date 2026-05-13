@@ -1,5 +1,5 @@
 class Face(dict):
-    def __init__(self, bbox, kps, det_score, embedding=None, normed_embedding=None, landmark_106=None, gender=None, age=None):
+    def __init__(self, bbox, kps, det_score, embedding=None, normed_embedding=None, landmark_106=None, gender=None, age=None, face_img=None, **kwargs):
         super().__init__()
         self['bbox'] = bbox
         self['kps'] = kps
@@ -9,6 +9,7 @@ class Face(dict):
         self['landmark_106'] = landmark_106
         self['gender'] = gender
         self['age'] = age
+        self['face_img'] = face_img
         # For compatibility with code that accesses as attributes
         self.bbox = bbox
         self.kps = kps
@@ -18,6 +19,10 @@ class Face(dict):
         self.landmark_106 = landmark_106
         self.gender = gender
         self.age = age
+        self.face_img = face_img
+        for k, v in kwargs.items():
+            self[k] = v
+            setattr(self, k, v)
   
 class Frame:  
     def __init__(self, data):  

@@ -33,8 +33,10 @@ class Enhance_CodeFormer():
             self.model_codeformer = onnxruntime.InferenceSession(model_path, None, providers=roop.globals.execution_providers)
             self.model_inputs = self.model_codeformer.get_inputs()
             model_outputs = self.model_codeformer.get_outputs()
-            self.io_binding = self.model_codeformer.io_binding()           
-            self.io_binding.bind_cpu_input(self.model_inputs[1].name, np.array([0.5]))
+            self.io_binding = self.model_codeformer.io_binding()
+            # fidelity: 0=mucha generacion, 1=maxima fidelidad (identidad)
+            fidelity = getattr(roop.globals, 'codeformer_fidelity', 0.85)
+            self.io_binding.bind_cpu_input(self.model_inputs[1].name, np.array([fidelity]))
             self.io_binding.bind_output(model_outputs[0].name, self.devicename)
 
 
