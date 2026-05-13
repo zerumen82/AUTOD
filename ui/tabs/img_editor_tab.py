@@ -167,8 +167,8 @@ def create_img_editor_tab():
                     use_ai = gr.Checkbox(label="🧠 Usa Inteligencia (IA)", value=True, info="Analiza la imagen y el prompt para mejores resultados (más lento)")
                     engine = gr.Dropdown(
                         choices=[
-                            ("FLUX.1 Dev Abliterated", "flux_dev_abliterated"), 
-                            ("FLUX.2 Klein", "klein_base"), 
+                            ("FLUX.1 Dev Abliterated (recomendado)", "flux_dev_abliterated"), 
+                            ("FLUX.2 Klein (requiere CLIP adicional)", "klein_base"), 
                             ("OmniGen 2", "omnigen2")
                         ],
                         value="flux_dev_abliterated", label="Motor de Generación"

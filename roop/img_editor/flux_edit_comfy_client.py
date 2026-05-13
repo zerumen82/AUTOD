@@ -107,8 +107,8 @@ class FluxEditComfyClient:
         new_w, new_h = (w // 64) * 64, (h // 64) * 64
         if new_w != w or new_h != h:
             image = image.resize((new_w, new_h), Image.LANCZOS)
-        if new_w > 1024 or new_h > 1024:
-            image.thumbnail((1024, 1024), Image.LANCZOS)
+        if new_w > 768 or new_h > 768:
+            image.thumbnail((768, 768), Image.LANCZOS)
             new_w, new_h = image.size
 
         iname = f"fast_{int(t0)}.png"
