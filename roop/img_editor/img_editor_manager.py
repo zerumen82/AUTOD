@@ -78,10 +78,12 @@ class ImgEditorManager:
 
         # Ajustes según motor
         if engine == "longcat":
-            # Para LongCat, si la magnitud es alta, subir denoise para que obedezca
+            # Para LongCat, si la magnitud es alta, subir denoise y pasos para que obedezca
             if magnitude > 0.7:
                 denoise = max(denoise, 0.85)
-            steps = max(8, steps // 2) # LongCat es Turbo, menos pasos
+                steps = max(14, steps) # Más pasos para calidad en cambios radicales
+            else:
+                steps = max(8, steps // 2)
             guidance = 3.5
         elif engine == "longcat_full":
             steps = max(20, min(steps, 30))

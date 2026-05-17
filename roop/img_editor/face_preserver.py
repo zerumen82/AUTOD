@@ -150,8 +150,8 @@ class FacePreserver:
                         max_sim = sim
                         best_match = orig_face
                 
-                # Si encontramos un match razonable (>0.25), hacemos el swap quirúrgico
-                if best_match is not None and max_sim > 0.25:
+                # Si encontramos un match razonable (>0.30), hacemos el swap quirúrgico
+                if best_match is not None and max_sim > 0.30:
                     try:
                         print(f"  [MATCH] Restaurando identidad con sim={max_sim:.4f}")
                         # INSwapper.get() expects numpy arrays for bbox/kps, not lists
@@ -165,7 +165,7 @@ class FacePreserver:
                     except Exception as e:
                         print(f"  [ERROR] Fallo en swapper.get: {e}")
                 else:
-                    print(f"  [SKIP] Similitud insuficiente ({max_sim:.4f} <= 0.4)")
+                    print(f"  [SKIP] Similitud insuficiente ({max_sim:.4f} <= 0.30)")
             
             print(f"[FacePreserver] Se restauraron {swapped_count} identidad(es) facial(es)")
             

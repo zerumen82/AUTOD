@@ -469,7 +469,7 @@ def extract_face_images(
 
 
         # ============ TARGET FACES: DETECCIÓN NORMAL ============
-        target_thresh = 0.45 # Aumentado de 0.25 a 0.45 para evitar detectar torsos
+        target_thresh = 0.35 # Reducido de 0.45 para no perder caras pequeñas en grupos
         
         # Preprocesamiento opcional
         img_preprocessed = preprocess_image_for_detection(cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
