@@ -91,7 +91,7 @@ def validate_face_detection(face_data, min_face_size: int = 20, max_aspect_ratio
 
         # Validar score de detección (si existe)
         det_score = getattr(face_data, 'score', getattr(face_data, 'det_score', 0.0))
-        if det_score < 0.35: # Las caras reales suelen tener > 0.5
+        if det_score < 0.25: # Reducido de 0.35 para captar caras más difíciles
             return False
 
         # Validar keypoints si están disponibles - CRITICO para evitar brazos
@@ -106,7 +106,7 @@ def validate_face_detection(face_data, min_face_size: int = 20, max_aspect_ratio
                         valid_kps += 1
 
                 # Una cara real tiene casi todos sus puntos principales dentro del bbox
-                if valid_kps < 4:
+                if valid_kps < 3: # Reducido de 4 para ser más permisivo
                     return False
 
                 # Verificar estructura facial básica (Ojos arriba, Nariz centro, Boca abajo)
@@ -120,7 +120,8 @@ def validate_face_detection(face_data, min_face_size: int = 20, max_aspect_ratio
                 avg_mouth_y = (left_mouth_y + right_mouth_y) / 2
 
                 # Los ojos DEBEN estar arriba de la nariz y la boca DEBE estar abajo
-                if not (avg_eye_y < nose_y < avg_mouth_y):
+                # (Relajado: solo ojos arriba de boca para perfiles extremos)
+                if not (avg_eye_y < avg_mouth_y):
                     return False
                 
                 # Coherencia horizontal (Ojo izquierdo a la izquierda del derecho, etc.)
@@ -207,11 +208,11 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
         else:
             threshold = min_score
         
-        # Para detección de destino (target): usar umbral razonable (0.45) para evitar ruido (torso, ropa)
+        # Para detección de destino (target): usar umbral razonable para evitar ruido pero captar caras reales
         if for_target:
-            effective_threshold = 0.45  # Aumentado de 0.05 a 0.45 para evitar detectar torsos
+            effective_threshold = 0.35  # Reducido de 0.45 para ser más inclusivo con caras difíciles
         else:
-            effective_threshold = max(0.40, threshold * 0.5)
+            effective_threshold = max(0.35, threshold * 0.5)
         
         try:
             faces = analizador.get(frame_rgb)

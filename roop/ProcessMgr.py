@@ -404,8 +404,9 @@ class ProcessMgr:
                             best_combined_score = 0.0
 
                             for face in valid_faces:
-                                # VALIDACIÓN EXTRA: No procesar "caras" que no pasen el filtro estricto (ej. brazos)
+                                # VALIDACIÓN EXTRA: No procesar "caras" que no pasen el filtro
                                 if not validate_face_detection(face):
+                                    print(f"[PROCESS] Cara en {filename} no pasó validación de estructura")
                                     continue
                                     
                                 score_iou = self._bbox_iou(target_face_ref.bbox, face.bbox) if hasattr(target_face_ref, 'bbox') else 0
@@ -416,11 +417,13 @@ class ProcessMgr:
                                     best_combined_score = combined
                                     best_match = face
                             
-                            if best_match and best_combined_score > 0.35: # Umbral razonable
+                            if best_match and best_combined_score > 0.25: # Reducido de 0.35
                                 faces_to_process = [best_match]
                             else:
                                 if best_match:
-                                    print(f"[PROCESS] Cara descartada por bajo score combinado: {best_combined_score:.2f}")
+                                    print(f"[PROCESS] Cara en {filename} descartada por bajo score combinado: {best_combined_score:.2f}")
+                                else:
+                                    print(f"[PROCESS] No se encontró ningún match para la cara seleccionada en {filename}")
                                 faces_to_process = []
                     else:
                         # FALLBACK: si no hay selección explícita, buscar matching con TARGET_FACES
@@ -438,14 +441,14 @@ class ProcessMgr:
                                     if combined > best_combined_score:
                                         best_combined_score = combined
                                         best_match = face
-                            if best_match and best_combined_score > 0.35:
+                            if best_match and best_combined_score > 0.25: # Reducido de 0.35
                                 print(f"[AUTO] Match automático para {filename} (score={best_combined_score:.2f})")
                                 faces_to_process = [best_match]
                             else:
-                                print(f"[AUTO] Foto {filename}: Sin selección manual y sin matching, omitiendo swap.")
+                                print(f"[AUTO] Foto {filename}: Sin selección manual y sin matching (best={best_combined_score:.2f}), omitiendo swap.")
                                 faces_to_process = []
                         else:
-                            print(f"[AUTO] Foto {filename}: Sin selección manual, omitiendo swap.")
+                            print(f"[AUTO] Foto {filename}: Sin selección manual ni caras destino en lista, omitiendo swap.")
                             faces_to_process = []
  
                 if not faces_to_process and face_swap_mode != 'selected':
