@@ -417,7 +417,7 @@ class ProcessMgr:
                                     best_combined_score = combined
                                     best_match = face
                             
-                            if best_match and best_combined_score > 0.25: # Reducido de 0.35
+                            if best_match and best_combined_score > 0.15: # Reducido de 0.25
                                 faces_to_process = [best_match]
                             else:
                                 if best_match:
@@ -441,7 +441,7 @@ class ProcessMgr:
                                     if combined > best_combined_score:
                                         best_combined_score = combined
                                         best_match = face
-                            if best_match and best_combined_score > 0.25: # Reducido de 0.35
+                            if best_match and best_combined_score > 0.15: # Reducido de 0.25
                                 print(f"[AUTO] Match automático para {filename} (score={best_combined_score:.2f})")
                                 faces_to_process = [best_match]
                             else:
