@@ -210,6 +210,7 @@ class ProcessMgr:
 
     def _cache_source_embeddings(self):
         self.source_embeddings_cache.clear()
+        all_embs = []
         
         for faceset in self.input_facesets:
             if hasattr(faceset, "faces") and faceset.faces:
@@ -218,7 +219,18 @@ class ProcessMgr:
                         emb = np.array(face.embedding, dtype=np.float32)
                         norm = np.linalg.norm(emb)
                         if norm > 0:
-                            self.source_embeddings_cache[id(face)] = emb / norm
+                            unit_emb = emb / norm
+                            self.source_embeddings_cache[id(face)] = unit_emb
+                            all_embs.append(unit_emb)
+        
+        # NUEVO: Calcular Embedding Maestro si hay muchas muestras de la misma persona
+        self.master_source_embedding = None
+        if len(all_embs) > 0:
+            self.master_source_embedding = np.mean(all_embs, axis=0)
+            norm = np.linalg.norm(self.master_source_embedding)
+            if norm > 0:
+                self.master_source_embedding /= norm
+            print(f"[IDENTITY] Creado Master Embedding desde {len(all_embs)} muestras")
         
         print(f"v2.1: {len(self.source_embeddings_cache)} embeddings cacheados")
 
@@ -387,10 +399,15 @@ class ProcessMgr:
                     if face_ref_data:
                         target_face_ref = face_ref_data.get('face_obj')
                         if target_face_ref:
+                            from roop.face_util_rotation import validate_face_detection
                             best_match = None
                             best_combined_score = 0.0
 
                             for face in valid_faces:
+                                # VALIDACIÓN EXTRA: No procesar "caras" que no pasen el filtro estricto (ej. brazos)
+                                if not validate_face_detection(face):
+                                    continue
+                                    
                                 score_iou = self._bbox_iou(target_face_ref.bbox, face.bbox) if hasattr(target_face_ref, 'bbox') else 0
                                 score_emb = self._calculate_similarity(target_face_ref.embedding, face.embedding) if hasattr(target_face_ref, 'embedding') else 0
                                 combined = (score_iou * 0.4) + (score_emb * 0.6)
@@ -399,14 +416,37 @@ class ProcessMgr:
                                     best_combined_score = combined
                                     best_match = face
                             
-                            if best_match and best_combined_score > 0.4: # Umbral relajado
+                            if best_match and best_combined_score > 0.35: # Umbral razonable
                                 faces_to_process = [best_match]
                             else:
+                                if best_match:
+                                    print(f"[PROCESS] Cara descartada por bajo score combinado: {best_combined_score:.2f}")
                                 faces_to_process = []
                     else:
-                        # REGLA ESTRICTA: Sin selección explícita en foto = NO hay swap
-                        print(f"[AUTO] Foto {filename}: Sin selección manual, omitiendo swap.")
-                        faces_to_process = []
+                        # FALLBACK: si no hay selección explícita, buscar matching con TARGET_FACES
+                        if self.target_faces:
+                            print(f"[AUTO] Foto {filename}: Sin selección manual, buscando matching automático...")
+                            best_match = None
+                            best_combined_score = 0.0
+                            for face in valid_faces:
+                                for ref_face in self.target_faces:
+                                    if not hasattr(ref_face, 'embedding') or ref_face.embedding is None:
+                                        continue
+                                    score_emb = self._calculate_similarity(ref_face.embedding, face.embedding) if hasattr(face, 'embedding') and face.embedding is not None else 0
+                                    score_bbox = self._bbox_iou(ref_face.bbox, face.bbox) if hasattr(ref_face, 'bbox') and hasattr(face, 'bbox') else 0
+                                    combined = (score_bbox * 0.3) + (score_emb * 0.7)
+                                    if combined > best_combined_score:
+                                        best_combined_score = combined
+                                        best_match = face
+                            if best_match and best_combined_score > 0.35:
+                                print(f"[AUTO] Match automático para {filename} (score={best_combined_score:.2f})")
+                                faces_to_process = [best_match]
+                            else:
+                                print(f"[AUTO] Foto {filename}: Sin selección manual y sin matching, omitiendo swap.")
+                                faces_to_process = []
+                        else:
+                            print(f"[AUTO] Foto {filename}: Sin selección manual, omitiendo swap.")
+                            faces_to_process = []
  
                 if not faces_to_process and face_swap_mode != 'selected':
                     faces_to_process = valid_faces
@@ -564,23 +604,44 @@ class ProcessMgr:
             best_face = None
             best_sim = -1.0
             best_idx = -1
+            best_quality = -1.0
             
+            # 1. Recopilar todos los candidatos con su similitud y calidad
+            candidates = []
             for idx, src_face in enumerate(candidate_faces):
                 src_emb = getattr(src_face, 'embedding', None)
                 if src_emb is None:
                     continue
                 sim = self._cosine_similarity(target_emb, src_emb)
-                if sim > best_sim:
-                    best_sim = sim
-                    best_face = src_face
-                    best_idx = idx
+                quality = self._score_source_face_quality(src_face)
+                candidates.append({
+                    'face': src_face,
+                    'sim': sim,
+                    'quality': quality,
+                    'idx': idx
+                })
             
-            if best_face is None:
+            if not candidates:
                 print(f"[SELECT_SOURCE] No source con embedding, usando quality")
                 return self._select_best_source_face(candidate_faces, 'no_embedding')
+
+            # 2. Encontrar la mejor similitud
+            max_sim = max(c['sim'] for c in candidates)
             
-            # SIEMPRE usar el mejor match encontrado (sin threshold)
-            print(f"[SELECT_SOURCE] Mejor match cara origen #{best_idx + 1} (similarity={best_sim:.4f})")
+            # 3. Filtrar candidatos que estén cerca de la mejor similitud (margen del 5%)
+            # Esto nos permite elegir por calidad entre caras que representan "igualmente bien" la identidad
+            sim_threshold = max_sim * 0.95
+            good_identity_candidates = [c for c in candidates if c['sim'] >= sim_threshold]
+            
+            # 4. De los que tienen buena identidad, elegir el de mejor calidad
+            best_candidate = max(good_identity_candidates, key=lambda c: c['quality'])
+            
+            best_face = best_candidate['face']
+            best_sim = best_candidate['sim']
+            best_idx = best_candidate['idx']
+            
+            # SIEMPRE usar el mejor match encontrado (priorizando calidad en empate técnico de identidad)
+            print(f"[SELECT_SOURCE] Mejor match cara origen #{best_idx + 1} (similarity={best_sim:.4f}, quality={best_candidate['quality']:.2f})")
             return best_face
             
             print(f"[SELECT_SOURCE] Modo selected_faces_frame: mejor match cara origen #{best_idx + 1} (similarity={best_sim:.4f})")
@@ -1323,6 +1384,15 @@ class ProcessMgr:
             # ============================================
             # 1. FACE SWAP
             # ============================================
+            # NUEVO: Usar el Master Embedding si está disponible para máxima estabilidad de identidad
+            if hasattr(self, 'master_source_embedding') and self.master_source_embedding is not None:
+                import copy
+                source_face_obj = copy.copy(source_face)
+                source_face_obj.embedding = self.master_source_embedding
+                source_face_obj.normed_embedding = self.master_source_embedding
+                source_face = source_face_obj
+                print(f"[IDENTITY] Usando Master Embedding para swap (estabilidad optimizada)")
+
             res = self.processors["faceswap"].Run(source_face, target_face, result_frame, paste_back=True)
             if res is None:
                 # Si falla el swap, mantener frame anterior si existe
@@ -1357,7 +1427,7 @@ class ProcessMgr:
                 enhancer_key = "enhance_restoreformer"
 
             # Usa el valor de la UI/globals, con default 0.3 para que el swap sea visible
-            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.3)
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.5)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
@@ -1402,24 +1472,27 @@ class ProcessMgr:
                             if enhanced_face.shape[:2] != swapped_face.shape[:2]:
                                 enhanced_face = cv2.resize(enhanced_face, (swapped_face.shape[1], swapped_face.shape[0]), cv2.INTER_LANCZOS4)
 
-                            # Blending local para el enhancer - máscara centrada en la cara
+                            # Blending local para el enhancer - máscara generosa pero con feather bajo
                             region_h, region_w = enhanced_face.shape[:2]
-                            # Feather reducido a 5 para bordes más nítidos
-                            enhancer_soft_mask = create_soft_mask((1, 1, region_w-2, region_h-2), (region_h, region_w), feather=5)
+                            enhancer_soft_mask = create_soft_mask((1, 1, region_w-2, region_h-2), (region_h, region_w), feather=3)
                             enhancer_mask_3ch = np.stack([enhancer_soft_mask] * 3, axis=-1)
                             
+                            # USAR EL FACTOR DE BLENDING DE GLOBALS (o 0.5 por defecto)
                             swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * enhancer_mask_3ch +
                                            swapped_face.astype(np.float32) * (1 - enhancer_blend_factor * enhancer_mask_3ch)).astype(np.uint8)
 
                             print(f"[QUALITY] {selected_enhancer} aplicado con fuerza {enhancer_blend_factor:.2f}")
                             
-                            use_sharpening = getattr(roop.globals, 'use_sharpening', False)
-                            if use_sharpening:
+                            # Sharpening suave (solo si enhancer_blend_factor es alto)
+                            if enhancer_blend_factor > 0.4:
                                 kernel = np.array([[0, -1, 0],
                                                    [-1,  5, -1],
                                                    [0, -1, 0]])
-                                swapped_face = cv2.filter2D(swapped_face, -1, kernel)
-                                print(f"[QUALITY] Sharpening sutil aplicado")
+                                # Mezclar imagen afilada con la original para suavizar el efecto
+                                sharpened = cv2.filter2D(swapped_face, -1, kernel)
+                                swapped_face = cv2.addWeighted(sharpened, 0.3, swapped_face, 0.7, 0)
+                                print(f"[QUALITY] Sharpening suave aplicado")
+
                             
                 except Exception as e:
                     print(f"[ENHANCER] Error: {e}")
@@ -1430,13 +1503,13 @@ class ProcessMgr:
             try:
                 reference_region = original_face_region
                 if swapped_face.size > 0 and reference_region is not None and reference_region.size > 0:
-                    # Reducido para que el swap sea más visible (menos diluido)
-                    brightness_strength = getattr(roop.globals, 'brightness_strength', 0.1)
+                    # CASI DESACTIVADO para que no se pierda el color de la cara origen
+                    brightness_strength = 0.02 
                     if brightness_strength > 0:
                         swapped_face = adjust_face_brightness(swapped_face, reference_region, strength=brightness_strength)
 
-                    # Reducido para preservar mejor la identidad del origen
-                    color_match_strength = getattr(roop.globals, 'color_match_strength', 0.15)
+                    # CASI DESACTIVADO para preservar la identidad y tono de piel del origen
+                    color_match_strength = 0.02
                     if color_match_strength > 0:
                         swapped_face = match_color_histogram(swapped_face, reference_region, blend_factor=color_match_strength)
             except Exception as e:
@@ -1466,11 +1539,12 @@ class ProcessMgr:
                     mouth_mask_region = mouth_mask[y1:y2, x1:x2]
                     mouth_mask_3ch = np.stack([mouth_mask_region] * 3, axis=-1) if mouth_mask_region.ndim == 2 else mouth_mask_region
 
-                    blur_kernel = 15
+                    # NUEVO: Máscara más localizada y nítida para evitar "mouth on arm"
+                    blur_kernel = 7 # Reducido de 15 para más precisión
                     if isinstance(mouth_region, dict):
                         width = mouth_region.get('width', 30)
                         if isinstance(width, float): width = int(width)
-                        blur_kernel = int(max(9, min(width // 3, 21) | 1))
+                        blur_kernel = int(max(5, min(width // 5, 13) | 1))
 
                     mouth_mask_3ch = cv2.GaussianBlur(mouth_mask_3ch, (blur_kernel, blur_kernel), 0)
                     mouth_mask_3ch = np.clip(mouth_mask_3ch, 0.0, 1.0)
@@ -1485,14 +1559,13 @@ class ProcessMgr:
                 # 5. BLENDING FINAL SIN HALOS (Poisson + Fallback)
                 # ============================================
                 try:
-                    final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=15)
+                    final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=3)
                     final_mask_3ch = np.stack([final_soft_mask] * 3, axis=-1)
                     mask_poisson = (final_soft_mask[y1:y2, x1:x2] > 0.5).astype(np.uint8) * 255
                     center_poisson = (x1 + swapped_face.shape[1] // 2, y1 + swapped_face.shape[0] // 2)
                     
                     try:
-                        # USAR NORMAL_CLONE para preservar mejor los colores del origen si MIXED es muy diluido
-                        clone_type = cv2.NORMAL_CLONE if color_match_strength < 0.2 else cv2.MIXED_CLONE
+                        clone_type = cv2.NORMAL_CLONE
                         result_frame = cv2.seamlessClone(
                             swapped_face.astype(np.uint8),
                             result_frame.astype(np.uint8),
@@ -1500,7 +1573,7 @@ class ProcessMgr:
                             center_poisson,
                             clone_type
                         )
-                        print(f"[BLENDING] Poisson ({'NORMAL' if clone_type==cv2.NORMAL_CLONE else 'MIXED'}) aplicado")
+                        print(f"[BLENDING] Poisson NORMAL aplicado")
                     except Exception as e_poisson:
                         mask_region = final_mask_3ch[y1:y2, x1:x2]
                         blended_face = (swapped_face.astype(np.float32) * mask_region + 
@@ -1514,13 +1587,13 @@ class ProcessMgr:
 
             if not (mouth_open and mouth_region is not None):
                 try:
-                    final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=15)
+                    final_soft_mask = create_soft_mask((x1, y1, x2, y2), result_frame.shape[:2], feather=3)
                     final_mask_3ch = np.stack([final_soft_mask] * 3, axis=-1)
                     mask_poisson = (final_soft_mask[y1:y2, x1:x2] > 0.5).astype(np.uint8) * 255
                     center_poisson = (x1 + swapped_face.shape[1] // 2, y1 + swapped_face.shape[0] // 2)
 
                     try:
-                        clone_type = cv2.NORMAL_CLONE if color_match_strength < 0.2 else cv2.MIXED_CLONE
+                        clone_type = cv2.NORMAL_CLONE
                         result_frame = cv2.seamlessClone(
                             swapped_face.astype(np.uint8),
                             result_frame.astype(np.uint8),
@@ -1528,7 +1601,7 @@ class ProcessMgr:
                             center_poisson,
                             clone_type
                         )
-                        print(f"[BLENDING] Poisson ({'NORMAL' if clone_type==cv2.NORMAL_CLONE else 'MIXED'}) aplicado")
+                        print(f"[BLENDING] Poisson NORMAL aplicado")
                     except Exception as e_poisson:
                         mask_region = final_mask_3ch[y1:y2, x1:x2]
                         blended_face = (swapped_face.astype(np.float32) * mask_region +

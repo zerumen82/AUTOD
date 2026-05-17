@@ -33,7 +33,11 @@ class QwenEditComfyClient:
         base = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
 
         # Seleccionar modelo según versión
-        if qwen_version == "q2":
+        if qwen_version == "nsfw":
+            qwen_model = "Qwen-Rapid-NSFW-v23_Q2_K.gguf"  # Rapid AIO NSFW, ~7.5GB
+        elif qwen_version == "2511":
+            qwen_model = "qwen-image-edit-2511-Q2_K.gguf"  # Qwen 2511 mejorado, ~7.5GB
+        elif qwen_version == "q2":
             qwen_model = "Qwen_Image_Edit-Q2_K.gguf"  # ~7GB VRAM, más rápido
         else:
             qwen_model = "Qwen_Image_Edit-Q3_K_M.gguf"  # ~10GB VRAM, mejor calidad
@@ -105,7 +109,7 @@ class QwenEditComfyClient:
         if num_inference_steps > 8:
             num_inference_steps = 8  # Máximo para velocidad (euler_ancestral + simple = más rápido)
         
-        version_label = "Q2_K (8GB, rápido)" if qwen_version == "q2" else "Q3_K_M (10GB, calidad)"
+        version_label = "NSFW (Rapid AIO, 8GB)" if qwen_version == "nsfw" else ("Qwen 2511 (mejorado, ~8GB)" if qwen_version == "2511" else ("Q2_K (8GB, rápido)" if qwen_version == "q2" else "Q3_K_M (10GB, calidad)"))
         print(f"[QwenEdit] Generando ({num_inference_steps} pasos, denoise={denoise})...", flush=True)
         print(f"[QwenEdit] ✅ Modelo GGUF {version_label} (autoregresivo)", flush=True)
         print(f"[QwenEdit] ⏱️ Tiempo estimado: ~{num_inference_steps * 1.5:.0f} min", flush=True)
@@ -137,7 +141,7 @@ class QwenEditComfyClient:
             qwen_clip_name = os.path.basename(self._model_paths["qwen_clip"])
             vae_name = os.path.basename(self._model_paths["vae"])
 
-            qwen_label = "Q2_K" if qwen_version == "q2" else "Q3_K_M"
+            qwen_label = "NSFW Rapid" if qwen_version == "nsfw" else ("Qwen 2511" if qwen_version == "2511" else ("Q2_K" if qwen_version == "q2" else "Q3_K_M"))
             print(f"[QwenEdit] Modelos: qwen={qwen_name} (GGUF {qwen_label}), clip={qwen_clip_name}, vae={vae_name} (3D→2D)", flush=True)
 
             # Workflow usando Qwen Image con VAE 2D de FLUX
@@ -232,7 +236,7 @@ class QwenEditComfyClient:
                 # Mostrar progreso cada 2 minutos
                 if i > 0 and i % 120 == 0:
                     elapsed_min = i / 60
-                    print(f"[QwenEdit] ⏳ Procesando... {elapsed_min:.1f} min transcurridos (lowvram mode)", flush=True)
+                    print(f"[QwenEdit] ⏳ Procesando... {elapsed_min:.1f} min transcurridos", flush=True)
                 
                 # Verificar que ComfyUI sigue vivo cada 10 segundos
                 if i - last_comfy_check >= 10:
@@ -286,7 +290,7 @@ class QwenEditComfyClient:
                                             f"OK ({elapsed:.1f}s)"
                                         )
             
-            raise Exception("Timeout (>10 min)")
+            raise Exception("Timeout (>30 min) — Qwen demasiado grande para 8GB VRAM. Usa LongCat o FLUX.")
             
         except Exception as e:
             print(f"[QwenEdit] ERROR: {str(e)}", flush=True)

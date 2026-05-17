@@ -130,10 +130,10 @@ def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, in
     width = x2 - x1
     height = y2 - y1
     
-    # Elipse base
-    radius_x = int(width * 0.48)
-    radius_y = int(height * 0.52)
-    adjusted_center_y = center_y - int(height * 0.05)
+    # Elipse base (reducida para no cubrir pelo/orejas/fondo)
+    radius_x = int(width * 0.35)
+    radius_y = int(height * 0.38)
+    adjusted_center_y = center_y - int(height * 0.03)
     
     cv2.ellipse(mask, (center_x, adjusted_center_y), (radius_x, radius_y), 0, 0, 360, 1.0, -1)
     
@@ -149,9 +149,9 @@ def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, in
             # Restar oclusión de la máscara de swap (donde hay pelo, no hay swap)
             mask = cv2.subtract(mask, full_occ_mask)
     
-    # Difuminado de bordes
+    # Difuminado de bordes (kernel mínimo más pequeño para transición más nítida)
     if feather > 0:
-        kernel_size = max(feather * 2 + 1, 31)
+        kernel_size = max(feather * 2 + 1, 11)
         if kernel_size % 2 == 0: kernel_size += 1
         mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), feather / 1.5)
     

@@ -167,11 +167,15 @@ def create_img_editor_tab():
                     use_ai = gr.Checkbox(label="🧠 Usa Inteligencia (IA)", value=True, info="Analiza la imagen y el prompt para mejores resultados (más lento)")
                     engine = gr.Dropdown(
                         choices=[
-                            ("FLUX.1 Dev Abliterated (recomendado)", "flux_dev_abliterated"), 
-                            ("FLUX.2 Klein (requiere CLIP adicional)", "klein_base"), 
-                            ("OmniGen 2", "omnigen2")
+                            ("FLUX.2 Klein", "klein_base"),
+                            ("LongCat Image Edit Turbo", "longcat"),
+                            ("LongCat Image Edit (Full, CFG=4.5)", "longcat_full"),
+                            ("FLUX.1 Dev Q2", "flux_q2"),
+                            ("OmniGen 2", "omnigen2"),
+                            ("FLUX.1 Dev Abliterated", "flux_dev_abliterated"),
+                            ("Qwen Image Edit", "qwen_edit")
                         ],
-                        value="flux_dev_abliterated", label="Motor de Generación"
+                        value="longcat", label="Motor de Generación"
                     )
                     f_preserve = gr.Checkbox(label="💎 Preservar Rostro", value=True)
 

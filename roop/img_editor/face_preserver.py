@@ -154,7 +154,12 @@ class FacePreserver:
                 if best_match is not None and max_sim > 0.25:
                     try:
                         print(f"  [MATCH] Restaurando identidad con sim={max_sim:.4f}")
-                        # Realizar el swap directamente en el frame generado
+                        # INSwapper.get() expects numpy arrays for bbox/kps, not lists
+                        for face in (gen_face, best_match):
+                            if isinstance(face.bbox, list):
+                                face.bbox = np.array(face.bbox, dtype=np.float32)
+                            if isinstance(face.kps, list):
+                                face.kps = np.array(face.kps, dtype=np.float32)
                         result_cv2 = swapper.get(result_cv2, gen_face, best_match, paste_back=True)
                         swapped_count += 1
                     except Exception as e:

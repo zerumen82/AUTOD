@@ -12,6 +12,7 @@ import time
 import requests
 import threading
 from typing import Tuple, Optional
+from roop.utils import get_vram_gb
 
 # Puerto por defecto
 DEFAULT_PORTS = [8188, 8189]
@@ -295,9 +296,10 @@ def start(
         # Usar el Python del venv de ComfyUI
         python_exe = COMFYUI_PYTHON if os.path.exists(COMFYUI_PYTHON) else sys.executable
         
-        # Usar --normalvram para mejor velocidad. GGUF ya optimiza la memoria.
-        # --disable-smart-memory previene descarga automática de modelos
-        cmd = [python_exe, "-u", exe, "--port", str(port), "--normalvram", "--disable-smart-memory"]
+        vram_gb = get_vram_gb()
+        vram_mode = "--normalvram"
+        print(f"[ComfyLauncher] VRAM detectada: {vram_gb}GB → usando {vram_mode}")
+        cmd = [python_exe, "-u", exe, "--port", str(port), vram_mode]
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
         print(f"[ComfyLauncher] Directorio: {COMFYUI_DIR}")
         print(f"[ComfyLauncher] Python: {python_exe}")

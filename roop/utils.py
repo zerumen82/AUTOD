@@ -1,5 +1,6 @@
 import os
 import shutil
+import torch
 import roop.globals
 
 
@@ -87,3 +88,12 @@ def add_audio(output_dir, video, keep_frames, output_file, index):
 
 def is_img(path):
     return path.lower().endswith(("png", "jpg", "jpeg", "bmp"))
+
+
+def get_vram_gb() -> int:
+    try:
+        if torch.cuda.is_available():
+            return round(torch.cuda.get_device_properties(0).total_memory / (1024**3))
+        return 0
+    except:
+        return 0

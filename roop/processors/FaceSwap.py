@@ -293,8 +293,8 @@ class FaceSwap:
             target_region_warped = cv2.warpAffine(target_img, M_inv, (face_w, face_h), borderMode=cv2.BORDER_REPLICATE)
             occ_mask = detect_foreground_occlusion(source_face_img, target_region_warped)
             
-            # Crear máscara suave
-            mask = create_soft_mask(target_bbox, (h, w), feather=25, occlusion_mask=occ_mask)
+            # Crear máscara suave (feather bajo para no afectar exterior)
+            mask = create_soft_mask(target_bbox, (h, w), feather=5, occlusion_mask=occ_mask)
             
             mask_3ch = cv2.merge([mask, mask, mask])
             result = (warped_face * mask_3ch + target_img * (1 - mask_3ch)).astype(np.uint8)

@@ -367,8 +367,8 @@ def extract_face_images(
                     if kps is not None and len(kps) == 5:
                         kps_x = kps[:, 0]
                         kps_y = kps[:, 1]
-                        margin_x = fw * 0.08
-                        margin_y = fh * 0.08
+                        margin_x = fw * 0.03
+                        margin_y = fh * 0.03
                         # Los kps deben estar dentro del bbox con margen
                         if (np.min(kps_x) < f.bbox[0] + margin_x or
                             np.max(kps_x) > f.bbox[2] - margin_x or

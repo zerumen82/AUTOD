@@ -579,6 +579,8 @@ def wire_events(ui_comp):
         state.selected_preview_index = min(len(state.list_files_process)-1, state.selected_preview_index + 1) if direction == "next" else max(0, state.selected_preview_index - 1)
         entry = state.list_files_process[state.selected_preview_index]
         roop.globals.target_path = entry.filename
+        state.CURRENT_DETECTED_FRAME = -1
+        state.SELECTION_FACES_DATA = None
         from roop.capturer import get_video_frame, get_image_frame
         frame = get_video_frame(entry.filename, 1) if util.is_video(entry.filename) else get_image_frame(entry.filename)
         return gr.update(maximum=entry.endframe, value=1), util.convert_to_gradio(frame), gr.update(interactive=state.selected_preview_index>0), gr.update(interactive=state.selected_preview_index<len(state.list_files_process)-1)
@@ -600,22 +602,24 @@ def wire_events(ui_comp):
         return ([], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
     
     def remove_selected_input_face(evt=None):
-        if state.selected_input_face_index is not None:
-            idx = state.selected_input_face_index
-            if 0 <= idx < len(roop.globals.INPUT_FACES):
-                roop.globals.INPUT_FACES.pop(idx)
+        global selected_input_face_idx
+        if selected_input_face_idx is not None:
+            idx = selected_input_face_idx
+            if 0 <= idx < len(roop.globals.INPUT_FACESETS):
+                roop.globals.INPUT_FACESETS.pop(idx)
                 ui.globals.ui_input_thumbs.pop(idx)
-                state.selected_input_face_index = None
+                selected_input_face_idx = None
         total = len(ui.globals.ui_input_thumbs)
         return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total, "input"))
     
     def remove_selected_target_face(evt=None):
-        if state.selected_target_face_index is not None:
-            idx = state.selected_target_face_index
+        global selected_target_face_idx
+        if selected_target_face_idx is not None:
+            idx = selected_target_face_idx
             if 0 <= idx < len(roop.globals.TARGET_FACES):
                 roop.globals.TARGET_FACES.pop(idx)
                 ui.globals.ui_target_thumbs.pop(idx)
-                state.selected_target_face_index = None
+                selected_target_face_idx = None
         total = len(ui.globals.ui_target_thumbs)
         return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total, "target"))
     

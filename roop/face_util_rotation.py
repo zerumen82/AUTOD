@@ -57,15 +57,15 @@ def calculate_iou(bbox1, bbox2):
     return inter_area / union_area if union_area > 0 else 0.0
 
 
-def validate_face_detection(face_data, min_face_size: int = 4, max_aspect_ratio: float = 10.0) -> bool:
+def validate_face_detection(face_data, min_face_size: int = 20, max_aspect_ratio: float = 3.0) -> bool:
     """
-    Valida que una detección de cara sea razonable (no un falso positivo).
-    ULTRA PERMISIVA para maximizar detección en videos difíciles.
+    Valida que una detección de cara sea razonable (no un falso positivo como un brazo).
+    Ahora más estricta para evitar "boca en brazo".
 
     Args:
         face_data: Datos de la cara detectada por insightface
-        min_face_size: Tamaño mínimo de cara en píxeles (MUY REDUCIDO)
-        max_aspect_ratio: Relación de aspecto máxima permitida (MUY AUMENTADO)
+        min_face_size: Tamaño mínimo de cara en píxeles
+        max_aspect_ratio: Relación de aspecto máxima permitida (una cara suele ser ~1:1.2)
 
     Returns:
         bool: True si la cara es válida, False si es un falso positivo
@@ -79,58 +79,58 @@ def validate_face_detection(face_data, min_face_size: int = 4, max_aspect_ratio:
         width = abs(x2 - x1)
         height = abs(y2 - y1)
 
-        # Validar tamaño mínimo - ULTRA PERMISIVO para caras pequeñas/difíciles
-        if width < 1 or height < 1:  # Mínimo 1x1 píxel (casi nada)
+        # Validar tamaño mínimo - Evitar ruidos minúsculos
+        if width < min_face_size or height < min_face_size:
             return False
 
-        # Validar relación de aspecto - MUY PERMISIVA para caras rotadas/ángulos extraños
+        # Validar relación de aspecto - Una cara no es extremadamente alargada
         if width > 0 and height > 0:
             aspect_ratio = max(width, height) / min(width, height)
-            if aspect_ratio > 20.0:  # Aumentado de 10.0 a 20.0 para más tolerancia
+            if aspect_ratio > max_aspect_ratio:
                 return False
 
-        # Validar keypoints si están disponibles - MUY PERMISIVA
+        # Validar score de detección (si existe)
+        det_score = getattr(face_data, 'score', getattr(face_data, 'det_score', 0.0))
+        if det_score < 0.35: # Las caras reales suelen tener > 0.5
+            return False
+
+        # Validar keypoints si están disponibles - CRITICO para evitar brazos
         if hasattr(face_data, 'kps') and face_data.kps is not None:
             kps = face_data.kps
             if len(kps) >= 5:
-                # Verificar que AL MENOS UN keypoint esté cerca del bbox (muy permisivo)
+                # Verificar que los keypoints estén DENTRO del bbox
                 valid_kps = 0
-                bbox_margin = max(width, height) * 0.5  # Margen amplio
                 for kp in kps:
                     kx, ky = kp
-                    # Keypoint válido si está dentro del bbox expandido
-                    if (x1 - bbox_margin) <= kx <= (x2 + bbox_margin) and (y1 - bbox_margin) <= ky <= (y2 + bbox_margin):
+                    if x1 <= kx <= x2 and y1 <= ky <= y2:
                         valid_kps += 1
 
-                # Requerir que al menos 1 keypoint esté cerca (MUY permisivo para caras difíciles)
-                if valid_kps < 1:
-                    # Solo rechazar si TODOS los keypoints están muy lejos
+                # Una cara real tiene casi todos sus puntos principales dentro del bbox
+                if valid_kps < 4:
                     return False
 
-                # Verificar posiciones relativas - ULTRA PERMISIVA para caras en movimiento/ángulos
-                if len(kps) >= 5:
-                    left_eye_y = kps[0][1]
-                    right_eye_y = kps[1][1]
-                    nose_y = kps[2][1]
-                    left_mouth_y = kps[3][1]
-                    right_mouth_y = kps[4][1]
+                # Verificar estructura facial básica (Ojos arriba, Nariz centro, Boca abajo)
+                left_eye_y = kps[0][1]
+                right_eye_y = kps[1][1]
+                nose_y = kps[2][1]
+                left_mouth_y = kps[3][1]
+                right_mouth_y = kps[4][1]
 
-                    # Los ojos deberían estar por encima de la nariz - ULTRA PERMISIVO
-                    avg_eye_y = (left_eye_y + right_eye_y) / 2
-                    if nose_y < avg_eye_y - 200:  # Tolerancia extrema para ángulos raros
-                        # print(f"[DEBUG] Cara rechazada: nariz demasiado arriba (nose_y={nose_y:.1f}, avg_eye_y={avg_eye_y:.1f})")
-                        return False  # Nariz demasiado arriba = inválido
+                avg_eye_y = (left_eye_y + right_eye_y) / 2
+                avg_mouth_y = (left_mouth_y + right_mouth_y) / 2
 
-                    # La boca debería estar debajo de la nariz - ULTRA PERMISIVO
-                    avg_mouth_y = (left_mouth_y + right_mouth_y) / 2
-                    if avg_mouth_y < nose_y - 50:  # Tolerancia extrema
-                        # print(f"[DEBUG] Cara rechazada: boca demasiado arriba (avg_mouth_y={avg_mouth_y:.1f}, nose_y={nose_y:.1f})")
-                        return False  # Boca demasiado arriba = inválido
+                # Los ojos DEBEN estar arriba de la nariz y la boca DEBE estar abajo
+                if not (avg_eye_y < nose_y < avg_mouth_y):
+                    return False
+                
+                # Coherencia horizontal (Ojo izquierdo a la izquierda del derecho, etc.)
+                if kps[0][0] > kps[1][0]: # Solo si la cara no está extremadamente rotada 180 (inusual)
+                    # Si detectamos inversión masiva, probablemente no es una cara estándar
+                    pass
 
         return True
 
     except Exception as e:
-        # print(f"[WARN] Error validando cara: {e}")
         return False
 
 

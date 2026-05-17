@@ -117,11 +117,24 @@ class MoonDreamImageAnalyzer:
             
             if mm_str:
                 print(f"[ANALYZER] Proyector visual cargado: {mmproj_path.name}")
-
-            print(f"[ANALYZER] Moondream (CPU) LISTO")
+            print(f"[ANALYZER] Moondream listo")
         except Exception as e:
             print(f"[ERROR] Error al cargar Moondream: {e}")
             self.model = None
+
+    def unload(self):
+        """Libera la memoria de Moondream inmediatamente"""
+        if self.model is not None:
+            print("[ANALYZER] Liberando memoria de Moondream...")
+            try:
+                del self.model
+                self.model = None
+                import gc, torch
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
 
     def analyze(self, image_path: str, nsfw_level: str = 'explicit') -> dict:
         if not self.model:

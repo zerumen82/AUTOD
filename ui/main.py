@@ -223,35 +223,30 @@ def create_ui():
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
             
-            # Tab 4: SD Launcher
-            with gr.Tab("SD Launcher"):
-                gr.Markdown("### Stable Diffusion WebUI Launcher")
+            # Tab 4: Generation
+            with gr.Tab("🚀 Generate"):
+                try:
+                    from ui.tabs.generation_tab import generation_tab
+                    generation_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
                 
-                with gr.Row():
-                    sd_status = gr.Text(
-                        value=check_sd_status(),
-                        label="Estado",
-                        interactive=False,
-                        scale=2
-                    )
-                    sd_btn_refresh = gr.Button("↻", size="sm", variant="secondary", scale=1)
-                
-                with gr.Row():
-                    sd_btn_start = gr.Button("▶ Iniciar SD", variant="primary", scale=1)
-                    sd_btn_stop = gr.Button("⏹ Detener SD", variant="stop", scale=1)
-                    sd_btn_open = gr.Button("🌐 Abrir en Navegador", variant="secondary", scale=1)
-                
-                sd_msg = gr.Textbox(label="Mensaje", interactive=False, visible=False)
-                
-                gr.Markdown("""
-                ---
-                **Instrucciones:**
-                1. Click en "Iniciar SD" para lanzar Stable Diffusion WebUI
-                2. Espera ~1-2 minutos para que cargue el modelo
-                3. Click en "Abrir en Navegador" cuando esté listo
-                
-                **Puerto por defecto:** 9871-9875
-                """)
+                with gr.Accordion("🔌 Server Controls", open=False):
+                    with gr.Row():
+                        sd_status = gr.Text(
+                            value=check_sd_status(),
+                            label="Estado del Servidor",
+                            interactive=False,
+                            scale=2
+                        )
+                        sd_btn_refresh = gr.Button("↻", size="sm", variant="secondary", scale=1)
+                    
+                    with gr.Row():
+                        sd_btn_start = gr.Button("▶ Iniciar Servidor", variant="primary", scale=1)
+                        sd_btn_stop = gr.Button("⏹ Detener Servidor", variant="stop", scale=1)
+                        sd_btn_open = gr.Button("🌐 Abrir WebUI Completa", variant="secondary", scale=1)
+                    
+                    sd_msg = gr.Textbox(label="Mensaje", interactive=False, visible=False)
             
             # Tab 5: Settings
             with gr.Tab("Settings"):

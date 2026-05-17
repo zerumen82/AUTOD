@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os, sys, json, time, requests, io
+import numpy as np
 from typing import Optional, Tuple
 from PIL import Image
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ class FluxEditComfyClient:
     def __init__(self):
         self._loaded = False
         self._flux_version = None
+        self._is_longcat_turbo = False
 
     def is_available(self):
         try:
@@ -50,6 +52,7 @@ class FluxEditComfyClient:
             "flux1-dev-Q4_K.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
         }
         self._dual_clip = False
+        self._is_gguf_clip = False
         self._clip_name2 = None
 
         if flux_version == "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf":
@@ -58,10 +61,30 @@ class FluxEditComfyClient:
             clip_type = "flux"
             self._dual_clip = True
             self._clip_name2 = clip_name2
-        elif flux_version not in clip_map:
-            return False, f"Versión FLUX no soportada: {flux_version}"
+        elif flux_version == "flux1-dev-Q2_K.gguf":
+            clip_name = "clip_l.safetensors"
+            clip_name2 = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
+            clip_type = "flux"
+            self._dual_clip = True
+            self._clip_name2 = clip_name2
+        elif flux_version == "LongCat-Image-Edit-Turbo-Q4_K_S.gguf":
+            clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+            clip_type = "longcat_image"
+            self._dual_clip = False
+            self._is_gguf_clip = False
+            self._clip_name2 = None
+            self._is_longcat_turbo = True
+        elif flux_version == "LongCat-Image-Edit-Q4_K_S.gguf":
+            clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+            clip_type = "longcat_image"
+            self._dual_clip = False
+            self._is_gguf_clip = False
+            self._clip_name2 = None
+            self._is_longcat_turbo = False
         else:
             clip_name, clip_type = clip_map[flux_version]
+            if clip_name.endswith(".gguf"):
+                self._is_gguf_clip = True
 
         checks = [
             ("diffusion_models", flux_version, f"Modelo FLUX {flux_version}"),
@@ -69,7 +92,9 @@ class FluxEditComfyClient:
         ]
         if self._dual_clip:
             checks.append(("text_encoders", self._clip_name2, f"CLIP2 {self._clip_name2}"))
-        vae_name = "flux2_vae.safetensors" if "flux2" in flux_version else "ae.safetensors"
+        
+        # LongCat y Flux comparten VAE
+        vae_name = "flux2_vae.safetensors" if any(x in flux_version for x in ["flux2", "flux-2"]) else "ae.safetensors"
         checks.append(("vae", vae_name, f"VAE {vae_name}"))
 
         missing = []
@@ -87,6 +112,12 @@ class FluxEditComfyClient:
         self._loaded = True
         return True, f"FLUX {flux_version} listo"
 
+    def _is_probable_gray_failure(self, image: Image.Image) -> bool:
+        arr = np.array(image.convert("RGB"), dtype=np.float32)
+        luma = arr.mean(axis=2)
+        channel_spread = np.abs(arr[:, :, 0] - arr[:, :, 1]).mean() + np.abs(arr[:, :, 1] - arr[:, :, 2]).mean()
+        return luma.std() < 8.0 and channel_spread < 8.0
+
     def generate(
         self,
         image: Image.Image,
@@ -103,6 +134,7 @@ class FluxEditComfyClient:
             return None, "No cargado - llama a load() primero"
 
         t0 = time.time()
+        image = image.convert("RGB")
         w, h = image.size
         new_w, new_h = (w // 64) * 64, (h // 64) * 64
         if new_w != w or new_h != h:
@@ -127,29 +159,73 @@ class FluxEditComfyClient:
         wf = {
             "1": {"class_type": "LoadImage", "inputs": {"image": iname, "upload": "image"}},
             "2": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": self._flux_version, "device": "default"}},
-            "3": {"class_type": "DualCLIPLoaderGGUF" if self._dual_clip else "CLIPLoader", "inputs": {"clip_name1": self._clip_name, "clip_name2": self._clip_name2, "type": self._clip_type} if self._dual_clip else {"clip_name": self._clip_name, "type": self._clip_type, "device": "default"}},
+            "3": {"class_type": "DualCLIPLoaderGGUF" if self._dual_clip else ("CLIPLoaderGGUF" if self._is_gguf_clip else "CLIPLoader"), "inputs": {"clip_name1": self._clip_name, "clip_name2": self._clip_name2, "type": self._clip_type} if self._dual_clip else {"clip_name": self._clip_name, "type": self._clip_type, "device": "default"}},
             "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
-            "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}},
-            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry, pixelated, low resolution, JPEG artifacts", "clip": ["3", 0]}},
-            "8": {
-                "class_type": "KSampler",
-                "inputs": {
-                    "model": ["2", 0], "positive": ["6", 0], "negative": ["7", 0],
-                    "latent_image": ["5", 0], "seed": seed or int(t0) % 1000000,
-                    "steps": num_inference_steps, "cfg": guidance_scale,
-                    "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": denoise
-                }
-            },
-            "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["4", 0]}},
-            "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FastEdit"}}
         }
 
-        if mname:
-            wf["12"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
-            wf["13"] = {"class_type": "ImageToMask", "inputs": {"image": ["12", 0], "channel": "red"}}
-            wf["5"] = {"class_type": "VAEEncodeForInpaint", "inputs": {"pixels": ["1", 0], "vae": ["4", 0], "mask": ["13", 0], "grow_mask_by": 6}}
+        # LongCat Turbo es distilled (CFG=1.0 forzado). Non-Turbo usa guidance real.
+        is_longcat = "LongCat" in self._flux_version
+        if is_longcat and self._is_longcat_turbo:
+            actual_cfg = 1.0
+            actual_denoise = 1.0
         else:
-            wf["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["4", 0]}}
+            actual_cfg = guidance_scale
+            actual_denoise = denoise
+
+        if is_longcat:
+            wf["16"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
+            if self._is_longcat_turbo:
+                wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["2", 0], "shift": 3.1}}
+                model_input = ["17", 0]
+            else:
+                model_input = ["2", 0]
+
+            wf["6"] = {
+                "class_type": "TextEncodeQwenImageEditPlus",
+                "inputs": {"clip": ["3", 0], "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
+            }
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["3", 0]}}
+            wf["11"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index_timestep_zero"}}
+            positive_input = ["11", 0]
+            negative_input = ["7", 0]
+        else:
+            wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}}
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry, pixelated, low resolution, JPEG artifacts", "clip": ["3", 0]}}
+            model_input = ["2", 0]
+            positive_input = ["6", 0]
+            negative_input = ["7", 0]
+
+        wf["8"] = {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": model_input, "positive": positive_input, "negative": negative_input,
+                "latent_image": ["5", 0], "seed": seed or int(t0) % 1000000,
+                "steps": num_inference_steps, "cfg": actual_cfg,
+                "sampler_name": "euler_ancestral", "scheduler": "simple", "denoise": actual_denoise
+            }
+        }
+        wf["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["4", 0]}}
+        wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FastEdit"}}
+
+        if mname:
+            wf["14"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
+            if is_longcat:
+                wf["18"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["14", 0]}}
+            wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["18", 0] if is_longcat else ["14", 0], "channel": "red"}}
+            wf["5"] = {"class_type": "VAEEncodeForInpaint", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0], "mask": ["15", 0], "grow_mask_by": 6}}
+        else:
+            wf["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0]}}
+
+        if is_longcat:
+            print(
+                "[FluxClient] LongCat workflow v4: "
+                f"cfg={wf['8']['inputs']['cfg']}, "
+                f"model={wf['8']['inputs']['model']}, "
+                f"positive={wf['8']['inputs']['positive']}, "
+                f"negative={wf['8']['inputs']['negative']}, "
+                f"nodes={sorted(wf.keys(), key=int)}",
+                flush=True,
+            )
 
         r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf})
         if r.status_code != 200:
@@ -171,7 +247,23 @@ class FluxEditComfyClient:
                     res = requests.get(f"{comfy_url}/view?filename={img_data['filename']}")
                     if res.status_code == 200:
                         elapsed = time.time() - t0
-                        return GenResult(image=Image.open(io.BytesIO(res.content)), time_taken=elapsed), f"OK ({elapsed:.0f}s)"
+                        pil_img = Image.open(io.BytesIO(res.content)).convert("RGB")
+                        arr = np.array(pil_img.convert("RGB"))
+                        std = arr.std()
+                        mean = arr.mean()
+                        print(f"[FluxClient] Generación completa. Estadísticas de imagen: std={std:.2f}, mean={mean:.2f}")
+                        
+                        # Imagen gris detectada (falla de VRAM en Flux GGUF)
+                        # Umbral más estricto: std < 1.0 (casi color sólido)
+                        if self._is_probable_gray_failure(pil_img):
+                            print(f"[FluxClient] ADVERTENCIA: Imagen gris detectada (std={std:.1f}, mean={mean:.1f}).")
+                            print("[FluxClient] Esto suele indicar falta de VRAM o error de VAE.")
+                            return None, "ComfyUI devolvió una imagen casi gris/uniforme. Revisa VRAM, VAE y workflow del motor seleccionado."
+                        return GenResult(image=pil_img, time_taken=elapsed), f"OK ({elapsed:.0f}s)"
+                status = hist.get("status", {})
+                if isinstance(status, dict) and status.get("status_str") == "error":
+                    error_info = status.get("messages", "Error desconocido en ComfyUI")
+                    return None, f"ComfyUI error: {error_info}"
                 if hist.get("status") == "failed":
                     error_info = hist.get("error", "Error desconocido en ComfyUI")
                     return None, f"ComfyUI error: {error_info}"
