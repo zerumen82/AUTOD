@@ -83,7 +83,8 @@ class ImgEditorManager:
                 denoise = max(denoise, 0.85)
             steps = max(8, steps // 2) # LongCat es Turbo, menos pasos
             guidance = 3.5
-        elif engine == "longcat_full":            steps = max(20, min(steps, 30))
+        elif engine == "longcat_full":
+            steps = max(20, min(steps, 30))
             guidance = 4.5
         elif engine == "flux_schnell":
             steps = 4 # Schnell es extremadamente rápido
