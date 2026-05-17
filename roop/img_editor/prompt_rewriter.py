@@ -152,16 +152,22 @@ class PromptRewriter:
 
     def _rewrite_with_llm(self, prompt: str, llm, image_context: str = "") -> Dict:
         ctx = image_context[:200] if len(image_context) > 200 else image_context
+        # Prompt de sistema para un análisis semántico puro
         full_prompt = (
-            f"Analyze this edit request.\n"
-            f"Context: {ctx}\n"
-            f"Request: {prompt}\n"
-            f"Return JSON with magnitude (0-1, >0 if any change) and mask_target (noun to edit)."
+            "<|im_start|>system\n"
+            "You are a semantic image editing analyzer. "
+            "Analyze the user's Request (often in Spanish) based on the Image Context.\n"
+            "1. Translate the request to a concise English prompt.\n"
+            "2. Determine 'magnitude' (0.0 to 1.0): 0.1 for subtle changes, 0.5 for normal edits, 0.9 for radical changes (like nudity, changing whole outfit, or face transformation).\n"
+            "3. Identify 'mask_target': the specific object or body part to edit (e.g., 'clothes', 'face', 'background', 'body'). Use 'subject' for general changes.\n"
+            "Respond ONLY with a valid JSON object.<|im_end|>\n"
+            f"<|im_start|>user\nContext: {ctx}\nRequest: {prompt}<|im_end|>\n"
+            "<|im_start|>assistant\n"
         )
 
         response = llm.create_completion(
-            full_prompt, max_tokens=80, temperature=0.1,
-            echo=False, stop=["\n\n"]
+            full_prompt, max_tokens=150, temperature=0.1,
+            echo=False, stop=["<|im_end|>", "\n\n"]
         )
         
         try:

@@ -46,6 +46,12 @@ class ImgEditorManager:
             self.clip_masker = get_clipseg_masker()
         return self.clip_masker
 
+    def _get_prompt_rewriter(self):
+        if self.prompt_rewriter is None:
+            from roop.img_editor.prompt_rewriter import get_prompt_rewriter
+            self.prompt_rewriter = get_prompt_rewriter()
+        return self.prompt_rewriter
+
     def auto_detect_params(self, analysis: Dict, engine: str) -> Dict:
         """
         Calcula parámetros dinámicos basados puramente en el análisis semántico del LLM.
@@ -104,58 +110,17 @@ class ImgEditorManager:
         
         is_longcat = "longcat" in engine.lower()
 
-        # Diccionario de traducción para comandos comunes
-        translations = {
-            "desnuda": "make nude",
-            "desnudar": "make nude",
-            "quita la ropa": "remove clothes",
-            "pon": "make",
-            "haz": "make",
-            "viste": "dress",
-            "ponle": "add",
-            "cambia": "change",
-            "fondo": "background",
-            "personas": "people",
-            "persona": "person",
-            "cara": "face",
-            "rostro": "face",
-            "pelo": "hair",
-            "traje": "suit",
-            "vestido": "dress",
-            "gafas": "glasses",
-            "lentes": "glasses",
-            "elimina": "remove",
-            "quita": "remove",
-            "borra": "remove",
-            "ojos": "eyes",
-            "boca": "mouth",
-            "sonrisa": "smile"
-        }
-        
-        translated_prompt = user_prompt.lower()
-        for es, en in translations.items():
-            translated_prompt = translated_prompt.replace(es, en)
-
-        # LIMPIEZA AGRESIVA de partículas del español que ensucian el prompt
-        stop_words = [" a ", " la ", " las ", " el ", " los ", " de ", " un ", " una ", " para "]
-        for word in stop_words:
-            translated_prompt = translated_prompt.replace(word, " ")
-        
-        # Eliminar espacios extra
-        translated_prompt = " ".join(translated_prompt.split())
-
         if is_longcat:
-            # PARA LONGCAT: NUNCA usar contexto de MoonDream si hay una instrucción del usuario.
-            # MoonDream describe la escena original y hace que LongCat intente RE-GENERARLA.
-            # Al quitar el contexto, LongCat se ve forzado a usar SOLO la imagen visual y tu orden.
-            base = f"Instruction: {translated_prompt}" if translated_prompt else img_context
-            print(f"[ImgEditor] LongCat Prompt Optimizado: {base}")
+            # PARA LONGCAT: Si hay una instrucción del usuario, priorizarla sin contaminar con contexto descriptivo
+            # (LongCat funciona mejor con instrucciones directas)
+            base = f"Instruction: {user_prompt}" if user_prompt else img_context
+            print(f"[ImgEditor] LongCat Prompt: {base}")
         elif img_context:
             base = f"{img_context}. {user_prompt}"
         else:
             base = user_prompt
 
-        if not is_longcat and not base.lower().startswith(("photo", "a photo", "a picture")):
+        if not is_longcat and base and not base.lower().startswith(("photo", "a photo", "a picture")):
             base = f"Photo of {base}"
 
         return base
@@ -297,48 +262,27 @@ class ImgEditorManager:
         # 2. Análisis Semántico del prompt del usuario
         analysis = {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject"}
         try:
-            analyzer = self._get_prompt_analyzer()
-            mode, confidence = analyzer.analyze(prompt)
-            
-            # Estimar magnitud basada en palabras clave de intensidad
-            magnitude = 0.5
-            text_lower = prompt.lower()
-            
-            # Palabras que implican cambio radical
-            radical_words = ["desnuda", "desnudar", "nude", "naked", "sin ropa", "no clothes", 
-                            "completamente", "totalmente", "mucho", "radical", "extremadamente", "todo", 
-                            "full", "complete", "total", "radical", "extremely", "huge"]
-            
-            weak_words = ["un poco", "ligero", "suave", "sutil", "minimo", "algo",
-                          "a bit", "slight", "soft", "subtle", "minimal", "some"]
-            
-            if any(w in text_lower for w in radical_words): 
-                magnitude = 0.85
-            elif any(w in text_lower for w in weak_words): 
-                magnitude = 0.3
-            
-            # Detectar target de máscara simple
-            mask_target = "subject"
-            if any(w in text_lower for w in ["fondo", "background", "paisaje", "escenario"]):
-                mask_target = "background"
-            elif any(w in text_lower for w in ["ropa", "vestido", "traje", "camisa", "pantalones", "clothes", "outfit", "dress", "suit", "shirt"]):
-                mask_target = "clothes"
-            elif any(w in text_lower for w in ["cara", "rostro", "face", "ojos", "eyes", "pelo", "hair"]):
-                mask_target = "face"
-                
-            analysis["magnitude"] = max(0.1, min(1.0, magnitude))
-            analysis["mask_target"] = mask_target
-            analysis["mode"] = mode.value
-            print(f"[ImgEditor] Análisis: modo={mode.value}, mag={magnitude:.2f}, target={mask_target}")
+            # PRIORIDAD: Usar el Rewriter LLM si está habilitado para un análisis sin hardcoding
+            if use_rewriter:
+                rewriter = self._get_prompt_rewriter()
+                analysis = rewriter.rewrite(prompt, image_context=img_description)
+                # El rewriter devuelve el prompt traducido/optimizado si es posible
+                prompt = analysis.get("prompt", prompt)
+            else:
+                # Análisis básico si el rewriter está desactivado
+                analyzer = self._get_prompt_analyzer()
+                mode, confidence = analyzer.analyze(prompt)
+                analysis["mode"] = mode.value
+                print(f"[ImgEditor] Análisis básico (sin LLM): modo={mode.value}")
         except Exception as e:
             print(f"[ImgEditor] Error en análisis semántico: {e}")
 
-        # 2. Resolución de Parámetros basada en el Análisis
+        # 3. Resolución de Parámetros basada en el Análisis
         params = self.auto_detect_params(analysis, engine)
         
-        # Componer el prompt final (contexto visual + instrucción del usuario)
+        # Componer el prompt final (contexto visual + instrucción optimizada)
         prompt_enhanced = self._compose_generation_prompt(prompt, img_context=img_description, engine=engine)
-        mask_target = analysis.get("mask_target", "subject").lower()
+        mask_target = str(analysis.get("mask_target", "subject")).lower()
 
         print(f"[ImgEditor] Mask target final: {mask_target}", flush=True)
         print(f"[ImgEditor] Prompt final enviado: {prompt_enhanced}", flush=True)
