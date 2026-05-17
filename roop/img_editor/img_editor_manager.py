@@ -61,21 +61,23 @@ class ImgEditorManager:
         else:
             denoise = 0.55 + ((magnitude - 0.6) * 0.5)
             
-        denoise = min(denoise, 0.75) # Cap at 0.75 for realism
-        
+        denoise = min(denoise, 0.95) # Cap at 0.95 for radical changes
+
         # Optimización de pasos: 8 a 12 suele ser suficiente para Turbo/Klein
-        steps = int(8 + (magnitude * 4))
-        
+        steps = int(8 + (magnitude * 8))
+
         # Escalar guidance
-        guidance = 3.0 + (magnitude * 4.0) # 3.0 to 7.0
+        guidance = 3.5 + (magnitude * 3.5) # 3.5 to 7.0
 
 
         # Ajustes según motor
         if engine == "longcat":
-            steps = 8
+            # Para LongCat, si la magnitud es alta, subir denoise para que obedezca
+            if magnitude > 0.7:
+                denoise = max(denoise, 0.85)
+            steps = max(8, steps // 2) # LongCat es Turbo, menos pasos
             guidance = 3.5
-        elif engine == "longcat_full":
-            steps = max(20, min(steps, 30))
+        elif engine == "longcat_full":            steps = max(20, min(steps, 30))
             guidance = 4.5
         elif engine == "flux_schnell":
             steps = 4 # Schnell es extremadamente rápido
@@ -107,17 +109,27 @@ class ImgEditorManager:
             "desnuda": "make nude",
             "desnudar": "make nude",
             "quita la ropa": "remove clothes",
+            "pon": "make",
+            "haz": "make",
+            "viste": "dress",
             "ponle": "add",
             "cambia": "change",
             "fondo": "background",
             "personas": "people",
             "persona": "person",
             "cara": "face",
+            "rostro": "face",
             "pelo": "hair",
             "traje": "suit",
             "vestido": "dress",
             "gafas": "glasses",
-            "lentes": "glasses"
+            "lentes": "glasses",
+            "elimina": "remove",
+            "quita": "remove",
+            "borra": "remove",
+            "ojos": "eyes",
+            "boca": "mouth",
+            "sonrisa": "smile"
         }
         
         translated_prompt = user_prompt.lower()
@@ -291,13 +303,19 @@ class ImgEditorManager:
             # Estimar magnitud basada en palabras clave de intensidad
             magnitude = 0.5
             text_lower = prompt.lower()
-            strong_words = ["completamente", "totalmente", "mucho", "radical", "extremadamente", "todo", 
+            
+            # Palabras que implican cambio radical
+            radical_words = ["desnuda", "desnudar", "nude", "naked", "sin ropa", "no clothes", 
+                            "completamente", "totalmente", "mucho", "radical", "extremadamente", "todo", 
                             "full", "complete", "total", "radical", "extremely", "huge"]
+            
             weak_words = ["un poco", "ligero", "suave", "sutil", "minimo", "algo",
                           "a bit", "slight", "soft", "subtle", "minimal", "some"]
             
-            if any(w in text_lower for w in strong_words): magnitude += 0.25
-            if any(w in text_lower for w in weak_words): magnitude -= 0.2
+            if any(w in text_lower for w in radical_words): 
+                magnitude = 0.85
+            elif any(w in text_lower for w in weak_words): 
+                magnitude = 0.3
             
             # Detectar target de máscara simple
             mask_target = "subject"
