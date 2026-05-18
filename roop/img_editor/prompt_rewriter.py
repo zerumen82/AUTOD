@@ -152,16 +152,19 @@ class PromptRewriter:
 
     def _rewrite_with_llm(self, prompt: str, llm, image_context: str = "") -> Dict:
         ctx = image_context[:200] if len(image_context) > 200 else image_context
-        # Prompt de sistema para un análisis semántico puro
+        # Prompt de sistema para un análisis semántico puro y profesional
         full_prompt = (
             "<|im_start|>system\n"
-            "You are a professional image editing semantic analyzer. "
-            "Analyze the Request (Spanish/English) based on Context.\n"
-            "1. Translate Request to a descriptive English instruction for an AI Image Editor (e.g., 'viste de payaso' -> 'dressed as a clown').\n"
-            "2. Determine 'magnitude' (0.0 to 1.0): 0.1 for tiny changes, 0.5 for normal, 0.9 for total transformation.\n"
-            "3. Identify 'mask_target': specific part to edit. Use 'body' or 'clothes' for outfit/nudity, 'face' for facial features, 'background' for scenery.\n"
-            "4. 'preserve_face': True if editing clothes/body/background/scenery, False ONLY if instruction explicitly targets facial features (eyes, mouth, face paint).\n"
-            "Respond ONLY with a JSON object containing: 'prompt' (string), 'magnitude' (float), 'mask_target' (string), 'preserve_face' (bool).<|im_end|>\n"
+            "You are a professional image editing semantic analyst. "
+            "Analyze the Request (any language) based on the Context.\n"
+            "MANDATORY TASKS:\n"
+            "1. TRANSLATION: You MUST translate the request into a descriptive English image-editing instruction for a generative model.\n"
+            "2. MAGNITUDE: Determine intensity (0.0 to 1.0). High (0.8+) for radical changes (new clothes, nudity, transformation). Low (0.2) for subtle edits.\n"
+            "3. TARGETING: Identify 'mask_target' as the specific object/area to modify. "
+            "Categories: 'body' (nudity/physique), 'clothes' (fashion), 'face' (facial features), 'background' (scene).\n"
+            "4. SCOPE: 'is_global' is True if the modification affects the whole image/atmosphere. False for specific objects.\n"
+            "5. IDENTITY: 'preserve_face' is True UNLESS the user explicitly asks to change facial features, eyes, or identity.\n"
+            "Output ONLY valid JSON.<|im_end|>\n"
             f"<|im_start|>user\nContext: {ctx}\nRequest: {prompt}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
@@ -180,12 +183,13 @@ class PromptRewriter:
                 raise ValueError("No valid JSON found in response")
 
             if not isinstance(data, dict):
-                return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True}
+                return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True, "is_global": True}
 
             magnitude = max(0.0, min(1.0, float(data.get("magnitude", 0.5))))
             mask_target = str(data.get("mask_target", "subject") or "subject").strip().lower()
             translated_prompt = str(data.get("prompt", prompt)).strip()
             preserve_face = bool(data.get("preserve_face", True))
+            is_global = bool(data.get("is_global", False))
 
             # If LLM says no change but user typed a real request, it likely missed it
             if magnitude < 0.1 and len(prompt.strip()) > 2:
@@ -196,15 +200,16 @@ class PromptRewriter:
                 "magnitude": magnitude,
                 "mask_target": mask_target,
                 "preserve_face": preserve_face,
+                "is_global": is_global,
                 "reasoning": data.get("reasoning", "Semantic analysis completed")
             }
             
-            print(f"[PromptRewriter] Translated: '{result['prompt']}' | Mag: {result['magnitude']} | Mask: {result['mask_target']} | Preserve Face: {result['preserve_face']}")
+            print(f"[PromptRewriter] Analysis: '{result['prompt'][:50]}...' | Mag: {result['magnitude']} | Global: {result['is_global']} | Preserve: {result['preserve_face']}")
             
             return result
         except Exception as e:
             print(f"[PromptRewriter] Error parsing LLM JSON: {e}")
-            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True}
+            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True, "is_global": True}
 
 def _extract_first_json(s: str) -> Optional[Dict]:
     """Extract the first complete JSON object from a string using brace-depth matching."""

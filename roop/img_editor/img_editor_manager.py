@@ -128,16 +128,6 @@ class ImgEditorManager:
 
         return base
 
-    def _is_usable_mask_target(self, mask_target: str) -> bool:
-        target = (mask_target or "").strip().lower()
-        if not target:
-            return False
-        broad_targets = {
-            "subject", "person", "human", "body", "whole body", "full body",
-            "image", "photo", "scene", "everything", "all"
-        }
-        return target not in broad_targets
-
     def _should_preserve_faces(self, face_preserve: bool, analysis: Dict, prompt: str) -> bool:
         if not face_preserve:
             return False
@@ -285,9 +275,10 @@ class ImgEditorManager:
         # Componer el prompt final (contexto visual + instrucción optimizada)
         prompt_enhanced = self._compose_generation_prompt(prompt, img_context=img_description, engine=engine)
         mask_target = str(analysis.get("mask_target", "subject")).lower()
+        is_global = bool(analysis.get("is_global", False))
 
-        print(f"[ImgEditor] Mask target final: {mask_target}", flush=True)
-        print(f"[ImgEditor] Prompt final enviado: {prompt_enhanced}", flush=True)
+        print(f"[ImgEditor] Target: {mask_target} (Global: {is_global})", flush=True)
+        print(f"[ImgEditor] Prompt final: {prompt_enhanced}", flush=True)
         analysis["mask_target"] = mask_target
         
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
@@ -296,20 +287,22 @@ class ImgEditorManager:
         # 3. Máscara Automática
         final_mask = mask_image
         
-        # Si no hay máscara manual, intentar generar una con CLIPSeg desde el prompt
-        if final_mask is None:
+        # Si no hay máscara manual y no es un cambio global, intentar generar una con CLIPSeg
+        if final_mask is None and not is_global:
             try:
-                print(f"[ImgEditor] Intentando auto-máscara desde prompt: {prompt[:80]}")
+                # Usar el mask_target sugerido por el LLM para una máscara precisa
+                mask_query = mask_target
+                print(f"[ImgEditor] Intentando auto-máscara para: {mask_query}")
                 masker = self._get_clipseg_masker()
-                auto_mask = masker.generate_mask(img, prompt)
+                auto_mask = masker.generate_mask(img, mask_query)
                 if auto_mask:
                     final_mask = auto_mask
-                    print(f"[ImgEditor] Máscara automática GENERADA desde prompt")
+                    print(f"[ImgEditor] Máscara automática GENERADA para '{mask_query}'")
             except Exception as e:
                 print(f"[ImgEditor] Error en máscara: {e}")
 
-        if final_mask is None and mask_target in ["body", "subject"]:
-             print(f"[ImgEditor] Edición global (sin máscara) para {mask_target}")
+        if final_mask is None and is_global:
+             print(f"[ImgEditor] Edición global detectada (sin máscara)")
 
         try:
             result = None
