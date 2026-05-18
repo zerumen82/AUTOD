@@ -142,18 +142,12 @@ class ImgEditorManager:
         if not face_preserve:
             return False
 
-        text = f"{prompt} {analysis.get('mask_target', '')}".lower()
-        
-        # SIEMPRE preservar si se pide desnudo/ropa (independientemente de lo que diga el LLM)
-        if any(w in text for w in ["nude", "naked", "desnuda", "ropa", "clothes", "outfit", "vestido"]):
-            return True
+        # PRIORIDAD: Usar la decisión semántica del LLM si está disponible en el análisis
+        if "preserve_face" in analysis:
+            return bool(analysis["preserve_face"])
 
-        facial_terms = (
-            "face", "rostro", "cara", "eyes", "ojos", "mouth", "boca",
-            "lips", "labios", "smile", "sonrisa", "expression", "expresion",
-            "expresión", "blink", "wink", "guiño", "hair", "pelo", "cabello"
-        )
-        return not any(term in text for term in facial_terms)
+        # Fallback básico si no hay análisis del LLM (muy simplificado)
+        return True
 
     def _apply_skin_tone_match(self, original: Image.Image, generated: Image.Image, mask: Image.Image) -> Image.Image:
         """Ajusta el tono de la piel generada para que coincida con la original"""
