@@ -361,25 +361,15 @@ def extract_face_images(
                     if not (fw > 20 and fh > 20 and 0.25 < aspect < 3.5):
                         continue
                     
-                    # Validar que la cara sea COMPLETA (no media cara):
-                    # los 5 keypoints deben estar bien distribuidos dentro del bbox
+                    # Validar que la cara sea razonable (filtros básicos de ruido)
                     kps = getattr(f, 'kps', None)
                     if kps is not None and len(kps) == 5:
-                        kps_x = kps[:, 0]
                         kps_y = kps[:, 1]
-                        margin_x = fw * 0.03
-                        margin_y = fh * 0.03
-                        # Los kps deben estar dentro del bbox con margen
-                        if (np.min(kps_x) < f.bbox[0] + margin_x or
-                            np.max(kps_x) > f.bbox[2] - margin_x or
-                            np.min(kps_y) < f.bbox[1] + margin_y or
-                            np.max(kps_y) > f.bbox[3] - margin_y):
-                            continue  # media cara: kps tocan el borde del bbox
-                        # Ojos encima de nariz, nariz encima de boca
+                        # Ojos encima de nariz, nariz encima de boca (validación mínima de estructura)
                         eye_y = min(kps_y[0], kps_y[1])  # ojo más alto
                         mouth_y = max(kps_y[3], kps_y[4])  # boca más baja
-                        if mouth_y - eye_y < fh * 0.15:
-                            continue  # demasiado verticalmente comprimido = media cara
+                        if mouth_y - eye_y < fh * 0.1:
+                            continue  # demasiado comprimido verticalmente
                     
                     valid_source_faces.append(f)
                 
