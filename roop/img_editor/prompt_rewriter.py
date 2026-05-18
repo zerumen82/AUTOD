@@ -155,20 +155,19 @@ class PromptRewriter:
         # Prompt de sistema para un análisis semántico puro
         full_prompt = (
             "<|im_start|>system\n"
-            "You are a semantic image editing analyzer. "
-            "Analyze the user's Request (Spanish/English) based on Context.\n"
-            "Output ONLY a JSON object with these keys:\n"
-            "- 'prompt': The request translated to a concise English image-editing instruction.\n"
-            "- 'magnitude': 0.0 to 1.0 (0.1 for subtle, 0.5 for normal, 0.9 for radical changes).\n"
-            "- 'mask_target': Specific object/body part to edit ('clothes', 'face', 'body', 'background', or 'subject').\n"
-            "- 'preserve_face': Boolean. Set to True if the edit is NOT intended to change the person's identity or facial features (eyes/mouth/nose).\n"
-            "Respond ONLY with valid JSON.<|im_end|>\n"
+            "You are a professional image editing semantic analyzer. "
+            "Analyze the Request (Spanish/English) based on Context.\n"
+            "1. Translate Request to a descriptive English instruction for an AI Image Editor (e.g., 'viste de payaso' -> 'dressed as a clown').\n"
+            "2. Determine 'magnitude' (0.0 to 1.0): 0.1 for tiny changes, 0.5 for normal, 0.9 for total transformation.\n"
+            "3. Identify 'mask_target': specific part to edit. Use 'body' or 'clothes' for outfit/nudity, 'face' for facial features, 'background' for scenery.\n"
+            "4. 'preserve_face': True if editing clothes/body/background/scenery, False ONLY if instruction explicitly targets facial features (eyes, mouth, face paint).\n"
+            "Respond ONLY with a JSON object containing: 'prompt' (string), 'magnitude' (float), 'mask_target' (string), 'preserve_face' (bool).<|im_end|>\n"
             f"<|im_start|>user\nContext: {ctx}\nRequest: {prompt}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
 
         response = llm.create_completion(
-            full_prompt, max_tokens=150, temperature=0.1,
+            full_prompt, max_tokens=250, temperature=0.1,
             echo=False, stop=["<|im_end|>", "\n\n"]
         )
         
@@ -181,34 +180,31 @@ class PromptRewriter:
                 raise ValueError("No valid JSON found in response")
 
             if not isinstance(data, dict):
-                if isinstance(data, list) and len(data) >= 1:
-                    mag = data[0] if isinstance(data[0], (int, float)) else 0.5
-                    mag = max(0.0, min(1.0, float(mag)))
-                    print(f"[PromptRewriter] LLM devolvió lista, interpretando magnitude={mag}")
-                    return {"prompt": prompt, "magnitude": mag, "mask_target": "subject", "reasoning": "Parsed from list"}
-                print(f"[PromptRewriter] Warning: LLM devolvió tipo {type(data).__name__}")
-                return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "reasoning": "Invalid response format"}
+                return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True}
 
             magnitude = max(0.0, min(1.0, float(data.get("magnitude", 0.5))))
             mask_target = str(data.get("mask_target", "subject") or "subject").strip().lower()
+            translated_prompt = str(data.get("prompt", prompt)).strip()
+            preserve_face = bool(data.get("preserve_face", True))
 
-            # If LLM says no change but user typed a real request, the LLM likely didn't understand it
+            # If LLM says no change but user typed a real request, it likely missed it
             if magnitude < 0.1 and len(prompt.strip()) > 2:
                 magnitude = 0.5
 
             result = {
-                "prompt": prompt,
+                "prompt": translated_prompt,
                 "magnitude": magnitude,
                 "mask_target": mask_target,
+                "preserve_face": preserve_face,
                 "reasoning": data.get("reasoning", "Semantic analysis completed")
             }
             
-            print(f"[PromptRewriter] Mag: {result['magnitude']} | Mask: {result['mask_target']}")
+            print(f"[PromptRewriter] Translated: '{result['prompt']}' | Mag: {result['magnitude']} | Mask: {result['mask_target']} | Preserve Face: {result['preserve_face']}")
             
             return result
         except Exception as e:
             print(f"[PromptRewriter] Error parsing LLM JSON: {e}")
-            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject"}
+            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True}
 
 def _extract_first_json(s: str) -> Optional[Dict]:
     """Extract the first complete JSON object from a string using brace-depth matching."""
