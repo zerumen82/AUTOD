@@ -143,6 +143,11 @@ class ImgEditorManager:
             return False
 
         text = f"{prompt} {analysis.get('mask_target', '')}".lower()
+        
+        # SIEMPRE preservar si se pide desnudo/ropa (independientemente de lo que diga el LLM)
+        if any(w in text for w in ["nude", "naked", "desnuda", "ropa", "clothes", "outfit", "vestido"]):
+            return True
+
         facial_terms = (
             "face", "rostro", "cara", "eyes", "ojos", "mouth", "boca",
             "lips", "labios", "smile", "sonrisa", "expression", "expresion",
