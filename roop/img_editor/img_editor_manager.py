@@ -126,6 +126,7 @@ class ImgEditorManager:
         else:
             base = user_prompt
 
+
         if not is_longcat and base and not base.lower().startswith(("photo", "a photo", "a picture")):
             base = f"Photo of {base}"
 
