@@ -7,6 +7,8 @@ import sys
 import socket
 
 _public_url = "http://127.0.0.1:7861"
+_icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
+_icon = _icon_path if os.path.exists(_icon_path) else None
 _sd_url = None
 _sd_process = None
 _sd_window = None
@@ -150,7 +152,8 @@ def run_gradio_and_load_url():
             height=800,
             resizable=True,
             confirm_close=True,
-            background_color='#1a1a1a'
+            background_color='#1a1a1a',
+            icon=_icon
         )
         
         # Iniciar webview

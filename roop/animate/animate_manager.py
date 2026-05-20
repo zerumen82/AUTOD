@@ -20,11 +20,17 @@ class AnimateManager:
 
     def _check_models(self, engine):
         available = []
+        # Check diffusion_models for safetensors
         models_dir = get_models_dir()
         if os.path.exists(models_dir):
             for root, dirs, files in os.walk(models_dir):
                 available.extend(d.lower() for d in dirs)
                 available.extend(f.lower() for f in files if f.endswith((".gguf", ".safetensors")))
+        # Check unet/ for GGUF models
+        unet_dir = os.path.join(os.path.dirname(models_dir), "unet")
+        if os.path.exists(unet_dir):
+            for root, dirs, files in os.walk(unet_dir):
+                available.extend(f.lower() for f in files if f.endswith(".gguf"))
         if engine == "wan_video":
             needed = ["wan2.2", "wan2_2", "wan2.1", "wan2_1"]
         elif engine == "svd_turbo":
@@ -34,7 +40,7 @@ class AnimateManager:
         else:
             needed = []
         if engine == "wan_video":
-            missing = [] if any(n in a for n in needed for a in available) else ["wan2.2/wan2.1"]
+            missing = [] if any(n in a for n in needed for a in available) else ["wan2.2/wan2.1 (GGUF o safetensors)"]
         else:
             missing = [n for n in needed if not any(n in a for a in available)]
         return missing

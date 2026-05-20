@@ -13,6 +13,7 @@ import threading
 sys.path.insert(0, os.getcwd())
 
 GRADIO_URL = "http://127.0.0.1:7861"
+ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
 
 def wait_for_server(url, timeout=60):
     """Espera a que el servidor Gradio esté disponible"""
@@ -58,6 +59,7 @@ def open_webview():
     try:
         import webview
         
+        icon = ICON_PATH if os.path.exists(ICON_PATH) else None
         window = webview.create_window(
             'AUTO-DEEP v2',
             GRADIO_URL,
@@ -65,7 +67,8 @@ def open_webview():
             height=800,
             resizable=True,
             confirm_close=True,
-            background_color='#1a1a1a'
+            background_color='#1a1a1a',
+            icon=icon
         )
         
         print("[PYWEBVIEW] Ventana creada, iniciando bucle...")

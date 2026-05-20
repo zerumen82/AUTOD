@@ -86,5 +86,9 @@ ui/tob/ComfyUI
 ui/tob/stable-diffusion-webui
 vcpkg
 
+# Temp files
+.autodeep_temp/
+
 # Gradio
 .gradio/
+

@@ -69,14 +69,17 @@ class AnimatePhoto:
             "still image, no movement, low resolution, watermark, text"
         )
 
+        # Buscar modelo GGUF en models/unet/ primero
         wan_model = (
-            self._find_model("diffusion_models", ["ti2v", "5b"])
+            self._find_model("unet", ["wan2.2", "ti2v"], extensions=(".gguf",))
+            or self._find_model("unet", ["ti2v"], extensions=(".gguf",))
             or self._find_model("diffusion_models", ["wan2.2"])
             or self._find_model("diffusion_models", ["wan2_2"])
             or self._find_model("diffusion_models", ["wan2.1"])
             or self._find_model("diffusion_models", ["wan2_1"])
             or self._find_model("diffusion_models", ["wan"])
         )
+
         vae_name = (
             self._find_model("vae", ["wan2", "vae"])
             or self._find_model("vae", ["wan", "vae"])
@@ -89,9 +92,10 @@ class AnimatePhoto:
         )
 
         if not wan_model:
-            raise RuntimeError("No se encontró modelo Wan en models/diffusion_models")
+            raise RuntimeError("No se encontró modelo Wan (ni GGUF en unet/ ni safetensors en diffusion_models)")
 
-        return {
+        # WanVideoModelLoader soporta tanto safetensors como GGUF nativamente
+        nodes = {
             "1": {"class_type": "LoadImage", "inputs": {"image": image_path}},
             "2": {
                 "class_type": "WanVideoModelLoader",
@@ -102,6 +106,10 @@ class AnimatePhoto:
                     "load_device": "offload_device"
                 }
             },
+        }
+        node_model_ref = ["2", 0]
+
+        nodes.update({
             "3": {
                 "class_type": "WanVideoVAELoader",
                 "inputs": {"model_name": vae_name, "precision": "bf16"}
@@ -122,7 +130,7 @@ class AnimatePhoto:
                     "negative_prompt": negative_prompt,
                     "t5": ["4", 0],
                     "force_offload": True,
-                    "model_to_offload": ["2", 0]
+                    "model_to_offload": node_model_ref
                 }
             },
             "6": {
@@ -143,11 +151,11 @@ class AnimatePhoto:
             "7": {
                 "class_type": "WanVideoSampler",
                 "inputs": {
-                    "model": ["2", 0],
+                    "model": node_model_ref,
                     "image_embeds": ["6", 0],
                     "text_embeds": ["5", 0],
                     "steps": steps,
-                    "cfg": 5.0,
+                    "cfg": 7.0,
                     "shift": 5.0,
                     "seed": seed,
                     "scheduler": "unipc",
@@ -183,10 +191,12 @@ class AnimatePhoto:
                     "codec": "auto"
                 }
             },
-        }
+        })
+
+        return nodes
 
     def animate_image(self, image_pil=None, prompt="", output_path="output.mp4",
-                      model="wan_video", frames=81, fps=16, timeout=600):
+                      model="wan_video", frames=81, fps=16, timeout=3600):
         if not self.check_comfyui_status():
             return False
 
