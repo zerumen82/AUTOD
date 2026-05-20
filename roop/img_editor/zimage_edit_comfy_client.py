@@ -17,6 +17,9 @@ class GenResult:
     image: Image.Image
     time_taken: float = 0.0
 
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 class ZImageEditComfyClient:
     def __init__(self):
         self._loaded = False
@@ -31,7 +34,7 @@ class ZImageEditComfyClient:
 
     def get_model_paths(self, version: str = "q4") -> dict:
         """Rutas para Z-Image Turbo GGUF"""
-        base = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+        base = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
         
         # Modelos disponibles: Q4_K_M (~5GB), Q4_K_S, Q5, Q6, Q8
         version_map = {

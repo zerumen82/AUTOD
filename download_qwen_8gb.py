@@ -4,10 +4,13 @@ from huggingface_hub import hf_hub_download
 
 os.environ["HF_HUB_OFFLINE"] = "0"
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 # Correct paths
-UNET_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\unet"
-TE_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders"
-VAE_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae"
+UNET_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "unet")
+TE_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "text_encoders")
+VAE_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "vae")
 
 os.makedirs(UNET_DIR, exist_ok=True)
 os.makedirs(TE_DIR, exist_ok=True)

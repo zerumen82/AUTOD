@@ -1,6 +1,10 @@
 import torch
 import safetensors.torch
-path = r'D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders\umt5_xxl_fp8_e4m3fn_scaled.safetensors'
+import os
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
+path = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "text_encoders", "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
 sd = safetensors.torch.load_file(path, device="cpu")
 keys = list(sd.keys())
 has_fp8 = "scaled_fp8" in sd

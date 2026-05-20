@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import huggingface_hub, os, sys, time
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 repo_id = "city96/FLUX.1-schnell-gguf"
 filename = "flux1-schnell-Q4_K_S.gguf"
-local_dir = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models"
+local_dir = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "diffusion_models")
 
 dest = os.path.join(local_dir, filename)
 if os.path.exists(dest):

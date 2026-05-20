@@ -417,11 +417,11 @@ class ProcessMgr:
                                     best_combined_score = combined
                                     best_match = face
                             
-                            if best_match and best_combined_score > 0.15: # Reducido de 0.25
+                            if best_match and best_combined_score > 0.10: # Reducido de 0.15 para ser más permisivo en fotos
                                 faces_to_process = [best_match]
                             else:
                                 if best_match:
-                                    print(f"[PROCESS] Cara en {filename} descartada por bajo score combinado: {best_combined_score:.2f}")
+                                    print(f"[PROCESS] Cara en {filename} descartada por bajo score combinado: {best_combined_score:.2f} (umbral=0.10)")
                                 else:
                                     print(f"[PROCESS] No se encontró ningún match para la cara seleccionada en {filename}")
                                 faces_to_process = []
@@ -441,7 +441,7 @@ class ProcessMgr:
                                     if combined > best_combined_score:
                                         best_combined_score = combined
                                         best_match = face
-                            if best_match and best_combined_score > 0.15: # Reducido de 0.25
+                            if best_match and best_combined_score > 0.10: # Reducido de 0.15 para ser más permisivo
                                 print(f"[AUTO] Match automático para {filename} (score={best_combined_score:.2f})")
                                 faces_to_process = [best_match]
                             else:
@@ -450,10 +450,18 @@ class ProcessMgr:
                         else:
                             print(f"[AUTO] Foto {filename}: Sin selección manual ni caras destino en lista, omitiendo swap.")
                             faces_to_process = []
- 
+
+                    # FALLBACK: Si el usuario seleccionó esta cara explícitamente, forzar swap aunque falle validación
+                    if not faces_to_process and face_ref_data:
+                        if valid_faces:
+                            print(f"[PROCESS] Foto {filename}: Forzando swap (cara seleccionada, {len(valid_faces)} cara(s) detectadas)")
+                            faces_to_process = valid_faces[:1]
+                        else:
+                            print(f"[PROCESS] Foto {filename}: No se detectaron caras, omitiendo swap.")
+
                 if not faces_to_process and face_swap_mode != 'selected':
                     faces_to_process = valid_faces
-                  
+                
                 result_frame = frame.copy()
                 faces_to_process_limited = faces_to_process[:1] if face_swap_mode in ['selected_faces_frame', 'selected_faces', 'selected'] else faces_to_process
                 
@@ -465,8 +473,23 @@ class ProcessMgr:
                                 all_faces.extend(faceset.faces)
                           
                         if not all_faces: continue
-                        
-                        source_face = self._select_source_face(target_face, all_faces, face_swap_mode, video_path)
+
+                        source_face = None
+                        if video_path:
+                            lock_key = f'_video_locked_source_idx_{os.path.basename(video_path)}'
+                            locked_idx = getattr(self, lock_key, None)
+                            if locked_idx is not None and locked_idx < len(all_faces):
+                                source_face = all_faces[locked_idx]
+
+                        if source_face is None:
+                            source_face = self._select_source_face(target_face, all_faces, face_swap_mode, video_path)
+                            if source_face is not None and video_path:
+                                try:
+                                    locked_idx = all_faces.index(source_face)
+                                    setattr(self, lock_key, locked_idx)
+                                except ValueError:
+                                    pass
+
                         if source_face is None: continue
 
                         # USAR EL FRAME ORIGINAL COMO BASE PARA EVITAR DOBLE BLENDING/DIFUMINADO
@@ -738,7 +761,7 @@ class ProcessMgr:
             # - Si el usuario seleccionó cara: usar ESA cara como referencia (sin fallback)
             # - Si el usuario NO seleccionó cara: usar fallback a la cara más grande PERO mantenerla fija
             if not user_has_selected_face:
-                print(f"[SELECTED_FACES_FRAME] ℹ️ No hay cara seleccionada por el usuario para {video_basename}, usando fallback automático a la cara más grande (FIJA para todo el video)")
+                print(f"[SELECTED_FACES_FRAME] No hay cara seleccionada por el usuario para {video_basename}, usando fallback automatico a la cara mas grande (FIJA para todo el video)")
 
             if face_ref_data:
                 user_selected_face = face_ref_data.get('face_obj')
@@ -803,7 +826,7 @@ class ProcessMgr:
             setattr(self, f'_frame_count_{video_basename}', 0)
 
             setattr(self, f'_reference_face_selected_{video_basename}', True)
-            print(f"[SETUP] {video_basename}: {selection_method}, embedding={'✓' if has_embedding else '✗'}")
+            print(f"[SETUP] {video_basename}: {selection_method}, embedding={'YES' if has_embedding else 'NO'}")
 
         except Exception as e:
             print(f"[SETUP ERROR] {os.path.basename(video_path)}: {e}")
@@ -1165,6 +1188,14 @@ class ProcessMgr:
                                     setattr(self, consecutive_success_attr, 0)
                                     print(f"[TRACK] Frame {frame_count}: Reference embedding refined (score={best_score:.2f})")
                         
+                        # Save tracking embedding as recovery fallback
+                        tracking_emb_attr = f'_tracking_embedding_{video_basename}'
+                        if hasattr(best_match, 'embedding') and best_match.embedding is not None:
+                            emb_arr = np.array(best_match.embedding, dtype=np.float32)
+                            norm = np.linalg.norm(emb_arr)
+                            if norm > 0:
+                                setattr(self, tracking_emb_attr, emb_arr / norm)
+                        
                         print(f"[TRACK] Frame {frame_count}: Success (score={best_score:.2f}, dist={best_distance:.1f}px)")
                         return best_match
                     
@@ -1173,7 +1204,11 @@ class ProcessMgr:
                     # ==========================================================
                     print(f"[TRACK] Frame {frame_count}: Local tracking failed, attempting Global Recognition...")
                     
-                    if original_embedding is not None:
+                    rec_embedding = original_embedding
+                    if rec_embedding is None:
+                        rec_embedding = getattr(self, f'_tracking_embedding_{video_basename}', None)
+                    
+                    if rec_embedding is not None:
                         best_recognition = None
                         best_rec_score = -1
                         
@@ -1181,19 +1216,16 @@ class ProcessMgr:
                             if not hasattr(face, 'embedding') or face.embedding is None:
                                 continue
                             
-                            # Use original embedding to find the face anywhere in the frame
-                            rec_score = self._calculate_similarity(original_embedding, face.embedding)
+                            rec_score = self._calculate_similarity(rec_embedding, face.embedding)
                             if rec_score > best_rec_score:
                                 best_rec_score = rec_score
                                 best_recognition = face
                         
-                        # Threshold for recognition can be slightly lower if we just lost tracking
                         rec_threshold = 0.30 if lost_count < 5 else 0.40
                         
                         if best_recognition and best_rec_score >= rec_threshold:
-                            print(f"[TRACK] Frame {frame_count}: 💡 RE-ACQUIRED via Global Recognition (score={best_rec_score:.2f})")
+                            print(f"[TRACK] Frame {frame_count}: RE-ACQUIRED via Global Recognition (score={best_rec_score:.2f})")
                             
-                            # Reset tracking state to this new position
                             setattr(self, assigned_attr, best_recognition)
                             setattr(self, tracking_lost_attr, 0)
                             new_center = get_face_center(best_recognition)
@@ -1213,38 +1245,65 @@ class ProcessMgr:
                         if assigned_face:
                             return assigned_face
                     
-                    # Reset
+                    # Reset y preparar re-intento periódico
                     print(f"[TRACK] Resetting state after {lost_count} failures")
                     setattr(self, assigned_attr, None)
                     setattr(self, position_history_attr, [])
                     return None
             
-            # Initial acquisition or reacquisition
-            if original_embedding is not None:
+            # ==========================================================
+            # PERIODIC RE-ACQUISITION after reset
+            #   - Progressive thresholds as more frames pass
+            #   - Falls back to tracking embedding if original is None
+            # ==========================================================
+            recovery_attr = f'_recovery_attempts_{video_basename}'
+            if not hasattr(self, recovery_attr):
+                setattr(self, recovery_attr, 0)
+            recovery_attempts = getattr(self, recovery_attr) + 1
+            setattr(self, recovery_attr, recovery_attempts)
+            
+            # Best embedding available: original > tracking > None
+            reacquire_emb = original_embedding
+            if reacquire_emb is None:
+                reacquire_emb = getattr(self, f'_tracking_embedding_{video_basename}', None)
+            
+            if reacquire_emb is not None:
                 best_reacquire = None
                 best_reacquire_score = -1
+                best_threshold = 0.15
+                
+                # Progressive threshold: stricter early, more lenient over time
+                if recovery_attempts < 30:
+                    base_thresh = 0.15
+                elif recovery_attempts < 120:
+                    base_thresh = 0.10
+                elif recovery_attempts < 300:
+                    base_thresh = 0.07
+                else:
+                    base_thresh = 0.05
                 
                 for face in valid_faces:
                     if not hasattr(face, 'embedding') or face.embedding is None:
                         continue
                     
-                    emb_score = self._calculate_similarity(original_embedding, face.embedding)
+                    emb_score = self._calculate_similarity(reacquire_emb, face.embedding)
                     
-                    # Dynamic threshold
                     face_area = (face.bbox[2]-face.bbox[0]) * (face.bbox[3]-face.bbox[1]) if hasattr(face, 'bbox') else 0
-                    threshold = 0.12 if face_area > 10000 else 0.15
+                    face_thresh = base_thresh - 0.03 if face_area > 10000 else base_thresh
                     
-                    if emb_score >= threshold and emb_score > best_reacquire_score:
+                    if emb_score >= face_thresh and emb_score > best_reacquire_score:
                         best_reacquire_score = emb_score
                         best_reacquire = face
+                        best_threshold = face_thresh
                 
-                if best_reacquire and best_reacquire_score >= 0.15:
+                if best_reacquire and best_reacquire_score >= best_threshold:
+                    print(f"[TRACK] RE-ACQUIRED after {recovery_attempts} frames (score={best_reacquire_score:.2f}, thresh={best_threshold:.2f})")
                     setattr(self, assigned_attr, best_reacquire)
                     setattr(self, tracking_lost_attr, 0)
+                    setattr(self, recovery_attr, 0)
                     center = get_face_center(best_reacquire)
                     if center:
                         setattr(self, position_history_attr, [center])
-                    print(f"[TRACK] Reacquired (score={best_reacquire_score:.2f})")
                     return best_reacquire
             
             return None
@@ -1429,7 +1488,7 @@ class ProcessMgr:
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
 
-            # Usa el valor de la UI/globals, con default 0.3 para que el swap sea visible
+            # Usa el valor de la UI/globals, con default 0.5 para un equilibrio entre swap y calidad
             enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.5)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
@@ -1439,14 +1498,14 @@ class ProcessMgr:
                         def __init__(self, faces, ref_imgs):
                             self.faces = faces if faces else []
                             self.ref_images = ref_imgs if ref_imgs else []
-                    
+
                     # Buscar imagen de referencia de la cara origen
                     ref_face_img = None
                     if hasattr(source_face, 'face_img_ref') and source_face.face_img_ref is not None:
                         ref_face_img = source_face.face_img_ref
                     elif hasattr(source_face, 'face_img') and source_face.face_img is not None:
                         ref_face_img = source_face.face_img_ref = source_face.face_img
-                    
+
                     # Upscale de la imagen de referencia si es pequeña
                     # Use 512px minimum for high quality (was 256)
                     min_face_size = max(512, (x2-x1), (y2-y1))
@@ -1456,7 +1515,7 @@ class ProcessMgr:
                             source_face.face_img_ref = ref_face_img
                         elif hasattr(source_face, 'face_img'):
                             source_face.face_img_ref = ref_face_img
-                    
+
                     mock_faceset = FaceSetWithRef(
                         [source_face] if source_face else [],
                         [ref_face_img] if ref_face_img is not None else []
@@ -1479,15 +1538,15 @@ class ProcessMgr:
                             region_h, region_w = enhanced_face.shape[:2]
                             enhancer_soft_mask = create_soft_mask((1, 1, region_w-2, region_h-2), (region_h, region_w), feather=3)
                             enhancer_mask_3ch = np.stack([enhancer_soft_mask] * 3, axis=-1)
-                            
-                            # USAR EL FACTOR DE BLENDING DE GLOBALS (o 0.5 por defecto)
+
+                            # USAR EL FACTOR DE BLENDING DE GLOBALS
                             swapped_face = (enhanced_face.astype(np.float32) * enhancer_blend_factor * enhancer_mask_3ch +
                                            swapped_face.astype(np.float32) * (1 - enhancer_blend_factor * enhancer_mask_3ch)).astype(np.uint8)
 
                             print(f"[QUALITY] {selected_enhancer} aplicado con fuerza {enhancer_blend_factor:.2f}")
-                            
-                            # Sharpening suave (solo si enhancer_blend_factor es alto)
-                            if enhancer_blend_factor > 0.4:
+
+                            # Sharpening suave (solo si enhancer_blend_factor es suficiente)
+                            if enhancer_blend_factor > 0.2:
                                 kernel = np.array([[0, -1, 0],
                                                    [-1,  5, -1],
                                                    [0, -1, 0]])
@@ -1496,28 +1555,27 @@ class ProcessMgr:
                                 swapped_face = cv2.addWeighted(sharpened, 0.3, swapped_face, 0.7, 0)
                                 print(f"[QUALITY] Sharpening suave aplicado")
 
-                            
+
                 except Exception as e:
                     print(f"[ENHANCER] Error: {e}")
-            
+
             # ============================================
             # 3. COLOR MATCHING Y AJUSTE DE BRILLO
             # ============================================
             try:
                 reference_region = original_face_region
                 if swapped_face.size > 0 and reference_region is not None and reference_region.size > 0:
-                    # CASI DESACTIVADO para que no se pierda el color de la cara origen
-                    brightness_strength = 0.02 
+                    # Ajuste de brillo para igualar al target
+                    brightness_strength = 0.10
                     if brightness_strength > 0:
                         swapped_face = adjust_face_brightness(swapped_face, reference_region, strength=brightness_strength)
 
-                    # CASI DESACTIVADO para preservar la identidad y tono de piel del origen
-                    color_match_strength = 0.02
+                    # Color matching para integrar tono de piel
+                    color_match_strength = 0.15
                     if color_match_strength > 0:
                         swapped_face = match_color_histogram(swapped_face, reference_region, blend_factor=color_match_strength)
             except Exception as e:
-                print(f"[COLOR_MATCH] Error: {e}")
-            
+                print(f"[COLOR_MATCH] Error: {e}")            
             # ============================================
             # 4. PRESERVACIÓN DE BOCA (CON TRACKING PARA VIDEOS)
             # ============================================
@@ -1775,7 +1833,7 @@ class ProcessMgr:
             print(f"Processing video: {os.path.basename(video_path)} ({start_frame}-{end_frame}/{total_frames} frames)")
 
             # Yield inicial
-            yield (0, f"🎬 Iniciando: {os.path.basename(video_path)}")
+            yield (0, f"Iniciando: {os.path.basename(video_path)}")
 
             # ============================================
             # INICIALIZAR MÉTRICAS EN TIEMPO REAL
@@ -1840,7 +1898,7 @@ class ProcessMgr:
                         eta_seconds = remaining_frames / fps_current if fps_current > 0 else 0
                         eta_str = f"{int(eta_seconds // 60):02d}:{int(eta_seconds % 60):02d}"
 
-                        yield (progress_pct, f"⚡ {fps_current:.1f} FPS | {processed_count}/{total_frames_to_process} frames | ETA: {eta_str}")
+                        yield (progress_pct, f"{fps_current:.1f} FPS | {processed_count}/{total_frames_to_process} frames | ETA: {eta_str}")
                         last_yield_time = current_time
 
                 except Exception as e:
@@ -1889,7 +1947,7 @@ class ProcessMgr:
                 print(f"[CLEANUP] Error eliminando temporal: {e}")
 
             # Yield de completado
-            yield (100, f"✅ Video completado: {os.path.basename(output_path)}")
+            yield (100, f"Video completado: {os.path.basename(output_path)}")
 
         except Exception as e:
             print(f"[BATCH] Error en run_batch_inmem: {e}")
@@ -2001,7 +2059,7 @@ class ProcessMgr:
         except:
             pass
         
-        print("[ProcessMgr] ✅ Limpieza de VRAM completada")
+        print("[ProcessMgr] Limpieza de VRAM completada")
 
     def _log_audio_merge_error(self, error, video_path, temp_output):
         error_type = type(error).__name__

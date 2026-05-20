@@ -73,20 +73,19 @@ def validate_face_detection(face_data, min_face_size: int = 15, max_aspect_ratio
 
         # Validar tamaño mínimo - Evitar ruidos minúsculos
         if width < min_face_size or height < min_face_size:
-            # print(f"  [VALIDATE] Falló tamaño: {width}x{height}")
             return False
 
         # Validar relación de aspecto - Una cara no es extremadamente alargada
         if width > 0 and height > 0:
             aspect_ratio = max(width, height) / min(width, height)
             if aspect_ratio > max_aspect_ratio:
-                # print(f"  [VALIDATE] Falló aspect_ratio: {aspect_ratio:.2f}")
                 return False
 
         # Validar score de detección (si existe)
-        det_score = getattr(face_data, 'score', getattr(face_data, 'det_score', 0.0))
-        if det_score < 0.15: # Muy permisivo
-            # print(f"  [VALIDATE] Falló det_score: {det_score:.2f}")
+        det_score = face_data.get('det_score', face_data.get('score', 0.0))
+        if det_score is None:
+            det_score = 0.0
+        if det_score < 0.10:
             return False
 
         # OMITIR validaciones estructurales complejas que están fallando en caras reales
@@ -98,7 +97,6 @@ def validate_face_detection(face_data, min_face_size: int = 15, max_aspect_ratio
         return True
 
     except Exception as e:
-        # print(f"  [VALIDATE] Excepción: {e}")
         return False
 
 
@@ -177,19 +175,18 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
         
         # Para detección de destino (target): usar umbral razonable para evitar ruido pero captar caras reales
         if for_target:
-            effective_threshold = 0.35  # Reducido de 0.45 para ser más inclusivo con caras difíciles
+            effective_threshold = 0.20  # Reducido de 0.35 para ser más inclusivo con caras difíciles en fotos
         else:
-            effective_threshold = max(0.35, threshold * 0.5)
+            effective_threshold = max(0.20, threshold * 0.5)
         
         try:
             faces = analizador.get(frame_rgb)
             if faces and len(faces) > 0:
                 valid_faces = []
                 for f in faces:
-                    # Usar f.score que es el score de detección de insightface
-                    face_score = getattr(f, 'score', None)
+                    face_score = f.get('det_score', f.get('score', None))
                     if face_score is None:
-                        face_score = getattr(f, 'det_score', 0.0)
+                        face_score = 0.0
                     
                     # Aceptar caras con score sobre el umbral efectivo
                     if face_score >= effective_threshold:
@@ -226,13 +223,17 @@ def convert_faces_to_face_objects(faces) -> List[Face]:
                 landmark_106 = lm.tolist() if hasattr(lm, 'tolist') else lm
         
         # Extraer gender y age si están disponibles
-        gender = getattr(face_data, 'gender', None)
-        age = getattr(face_data, 'age', None)
+        gender = face_data.get('gender', None)
+        age = face_data.get('age', None)
+        
+        score_value = face_data.get('det_score', face_data.get('score', 0.0))
+        if score_value is None:
+            score_value = 0.0
         
         face_obj = Face(
             bbox=face_data.bbox.astype(int).tolist(),
-            score=face_data.score,
-            det_score=face_data.score,
+            score=score_value,
+            det_score=score_value,
             kps=face_data.kps.tolist() if face_data.kps is not None else None,
             embedding=face_data.embedding.tolist() if face_data.embedding is not None else None,
             landmark_106=landmark_106,
@@ -256,10 +257,14 @@ def transform_faces_from_rotation(faces, angle: int, width: int, height: int) ->
         if hasattr(face_data, 'landmark_2d_106') and face_data.landmark_2d_106 is not None:
             landmark_106 = face_data.landmark_2d_106.tolist()
         
+        score_value = face_data.get('det_score', face_data.get('score', 0.0))
+        if score_value is None:
+            score_value = 0.0
+        
         face_obj = Face(
             bbox=face_data.bbox.astype(int).tolist(),
-            score=face_data.score,
-            det_score=face_data.score,
+            score=score_value,
+            det_score=score_value,
             kps=face_data.kps.tolist() if face_data.kps is not None else None,
             embedding=face_data.embedding.tolist() if face_data.embedding is not None else None,
             landmark_106=landmark_106,

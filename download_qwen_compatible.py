@@ -4,10 +4,13 @@ from huggingface_hub import hf_hub_download
 
 os.environ["HF_HUB_OFFLINE"] = "0"
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 # Paths
-DM_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models"
-TE_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders"
-VAE_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae"
+DM_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "diffusion_models")
+TE_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "text_encoders")
+VAE_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "vae")
 
 # Download FP8 diffusion model (compatible with ComfyUI standard nodes)
 print("[1/3] Downloading Qwen Image Edit FP8...")

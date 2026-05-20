@@ -2,10 +2,13 @@
 """Descarga Qwen-Rapid-NSFW-v23 (All-In-One, NSFW explícito) desde HuggingFace"""
 import huggingface_hub, os, sys
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 REPO = "Novice25/Qwen-Image-Edit-Rapid-AIO-GGUF"
 VERSION = "v23"
 FILENAME = f"{VERSION}/Qwen-Rapid-NSFW-v23_Q2_K.gguf"
-LOCAL_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models"
+LOCAL_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "diffusion_models")
 
 print(f"=== Qwen Rapid NSFW v23 Q2_K ===")
 print(f"Repo: {REPO}")

@@ -21,7 +21,10 @@ MODELS = {
     ],
 }
 
-BASE_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
 
 def download_file(url: str, dest: str) -> bool:
     """Descarga un archivo usando requests con token HF"""

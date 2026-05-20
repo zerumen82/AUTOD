@@ -11,8 +11,11 @@ import subprocess
 import requests
 from pathlib import Path
 
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Configuración
-LORA_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\loras"
+LORA_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "loras")
 BASE_URL = "https://huggingface.co"
 
 # LoRAs compatibles conocidos (públicos o con access token)

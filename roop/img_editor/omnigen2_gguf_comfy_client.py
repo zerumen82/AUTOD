@@ -17,6 +17,9 @@ class GenResult:
     image: Image.Image
     time_taken: float = 0.0
 
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 class OmniGen2ComfyClient:
     def __init__(self):
         self._loaded = False
@@ -30,7 +33,6 @@ class OmniGen2ComfyClient:
             return False
 
     def get_model_paths(self) -> dict:
-        base = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
         return {
             "model": "omnigen2_fp16.safetensors",
             "qwen": "qwen_2.5_vl_fp16.safetensors",
@@ -38,7 +40,7 @@ class OmniGen2ComfyClient:
         }
 
     def check_models(self) -> Tuple[bool, str]:
-        base = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+        base = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
         
         model_path = os.path.join(base, "diffusion_models", "omnigen2_fp16.safetensors")
         qwen_path = os.path.join(base, "text_encoders", "qwen_2.5_vl_fp16.safetensors")

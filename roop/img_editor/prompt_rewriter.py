@@ -13,8 +13,11 @@ if sys.platform == "win32":
     if cuda_path not in os.environ.get("PATH", ""):
         os.environ["PATH"] = cuda_path + os.pathsep + os.environ.get("PATH", "")
 
-MOONDREAM_TEXT_PATH = r"D:\PROJECTS\AUTOAUTO\models\moondream\moondream2-text-model-f16.gguf"
-QWEN_LLM_PATH = r"D:\PROJECTS\AUTOAUTO\models\llm\qwen2.5-0.5b-instruct-q4_k_m.gguf"
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+MOONDREAM_TEXT_PATH = os.path.join(get_project_root(), "models", "moondream", "moondream2-text-model-f16.gguf")
+QWEN_LLM_PATH = os.path.join(get_project_root(), "models", "llm", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
 
 def ensure_llm_model():
     """Baixa modelo de lenguaje si no existe"""
@@ -52,11 +55,10 @@ class PromptRewriter:
         try:
             from llama_cpp import Llama
             
-            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            root = get_project_root()
             
             llm_paths = [
                 QWEN_LLM_PATH,
-                os.path.join(root, "models", "llm", "qwen2.5-0.5b-instruct-q4_k_m.gguf"),
                 os.path.join(root, "models", "llm", "llama-3.2-1b-instruct-q4_k_m.gguf"),
             ]
             
@@ -70,7 +72,6 @@ class PromptRewriter:
             if not model_path:
                 moondream_paths = [
                     MOONDREAM_TEXT_PATH,
-                    os.path.join(root, "models", "moondream", "moondream2-text-model-f16.gguf"),
                 ]
                 for p in moondream_paths:
                     if os.path.exists(p):
@@ -155,16 +156,15 @@ class PromptRewriter:
         # Prompt de sistema para un análisis semántico puro y profesional
         full_prompt = (
             "<|im_start|>system\n"
-            "You are a professional image editing semantic analyst. "
-            "Analyze the Request (any language) based on the Context.\n"
-            "MANDATORY TASKS:\n"
-            "1. TRANSLATION: You MUST translate the request into a descriptive English image-editing instruction for a generative model.\n"
-            "2. MAGNITUDE: Determine intensity (0.0 to 1.0). High (0.8+) for radical changes (new clothes, nudity, transformation). Low (0.2) for subtle edits.\n"
-            "3. TARGETING: Identify 'mask_target' as the specific object/area to modify. "
-            "Categories: 'body' (nudity/physique), 'clothes' (fashion), 'face' (facial features), 'background' (scene).\n"
-            "4. SCOPE: 'is_global' is True if the modification affects the whole image/atmosphere. False for specific objects.\n"
-            "5. IDENTITY: 'preserve_face' is True UNLESS the user explicitly asks to change facial features, eyes, or identity.\n"
-            "Output ONLY valid JSON.<|im_end|>\n"
+            "You analyze image editing requests. Output ONLY this JSON format (no markdown, no code blocks):\n"
+            "{\"prompt\": \"short English instruction\", \"magnitude\": 0.5, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": false}\n"
+            "Rules:\n"
+            "- 'prompt': translate to short English instruction (e.g. 'make hair pink', 'add sunglasses', 'change background to beach')\n"
+            "- 'magnitude': 0.0-1.0 (0.8+ for radical, 0.2 for subtle)\n"
+            "- 'mask_target': specific object ('face', 'hair', 'clothes', 'background', 'body', 'subject')\n"
+            "- 'preserve_face': true UNLESS user wants to change facial features/identity\n"
+            "- 'is_global': true ONLY if entire image changes (style, lighting). false for specific objects.\n"
+            "Respond with ONLY the JSON object, nothing else.<|im_end|>\n"
             f"<|im_start|>user\nContext: {ctx}\nRequest: {prompt}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
@@ -185,11 +185,87 @@ class PromptRewriter:
             if not isinstance(data, dict):
                 return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True, "is_global": True}
 
-            magnitude = max(0.0, min(1.0, float(data.get("magnitude", 0.5))))
-            mask_target = str(data.get("mask_target", "subject") or "subject").strip().lower()
-            translated_prompt = str(data.get("prompt", prompt)).strip()
-            preserve_face = bool(data.get("preserve_face", True))
-            is_global = bool(data.get("is_global", False))
+            # Funciones auxiliares para extraer valores de forma robusta
+            def extract_text(val):
+                if isinstance(val, dict):
+                    for k in ['TARGET', 'target', 'value', 'Translation', 'TRANSLATION', 'instruction', 'text', 'prompt']:
+                        if k in val: return str(val[k]).strip()
+                    for v in val.values():
+                        if isinstance(v, str): return v.strip()
+                    if val.values(): return str(list(val.values())[0]).strip()
+                return str(val).strip() if val is not None else ""
+
+            def extract_float(val, default=0.5):
+                if isinstance(val, dict):
+                    for k in ['TARGET', 'target', 'value', 'Magnitude', 'MAGNITUDE', 'magnitude']:
+                        if k in val: 
+                            try: return float(val[k])
+                            except: pass
+                    for v in val.values():
+                        try: return float(v)
+                        except: pass
+                try: return float(val)
+                except: return default
+
+            def get_flexible(d, keys):
+                """Busca una clave en un dict ignorando mayúsculas, espacios y guiones bajos."""
+                if not isinstance(d, dict): return None
+                # Crear mapa normalizado: "mandatorytasks" -> "MANDATORY TASKS"
+                norm_map = {k.lower().replace(" ", "").replace("_", ""): k for k in d.keys()}
+                for k in keys:
+                    norm_k = k.lower().replace(" ", "").replace("_", "")
+                    if norm_k in norm_map:
+                        return d[norm_map[norm_k]]
+                return None
+
+            # 1. EXTRAER MAGNITUDE
+            magnitude = 0.5
+            m_val = get_flexible(data, ["magnitude"])
+            if m_val is None:
+                mt = get_flexible(data, ["mandatory tasks", "tasks"])
+                if mt: m_val = get_flexible(mt, ["magnitude"])
+            magnitude = extract_float(m_val, 0.5)
+            magnitude = max(0.0, min(1.0, magnitude))
+
+            # 2. EXTRAER MASK_TARGET
+            mask_target = "subject"
+            t_val = get_flexible(data, ["mask_target", "targeting"])
+            if t_val is None:
+                mt = get_flexible(data, ["mandatory tasks", "tasks"])
+                if mt: t_val = get_flexible(mt, ["mask_target", "targeting"])
+            if t_val:
+                if isinstance(t_val, list) and t_val:
+                    mask_target = str(t_val[0]).strip().lower()
+                else:
+                    mask_target = extract_text(t_val).lower()
+
+            # 3. BUSCAR TRADUCCIÓN (PROMPT)
+            translated_prompt = prompt
+            p_val = get_flexible(data, ["prompt", "instruction", "output", "translation"])
+            if p_val is None:
+                mt = get_flexible(data, ["mandatory tasks", "tasks"])
+                if mt: p_val = get_flexible(mt, ["translation", "prompt", "instruction"])
+            
+            if p_val:
+                translated_prompt = extract_text(p_val)
+            
+            # 4. PRESERVE FACE
+            preserve_face = True
+            id_val = get_flexible(data, ["preserve_face", "identity", "preserve face"])
+            if id_val is None:
+                mt = get_flexible(data, ["mandatory tasks", "tasks"])
+                if mt: id_val = get_flexible(mt, ["identity", "preserve_face"])
+            if id_val is not None:
+                preserve_face = bool(id_val)
+
+            # 5. IS GLOBAL
+            is_global = False
+            g_val = get_flexible(data, ["is_global", "scope", "is global"])
+            if g_val is None:
+                mt = get_flexible(data, ["mandatory tasks", "tasks"])
+                if mt: g_val = get_flexible(mt, ["scope", "is_global"])
+            if g_val is not None:
+                is_global = bool(g_val)
 
             # If LLM says no change but user typed a real request, it likely missed it
             if magnitude < 0.1 and len(prompt.strip()) > 2:
@@ -211,6 +287,19 @@ class PromptRewriter:
             print(f"[PromptRewriter] Error parsing LLM JSON: {e}")
             return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True, "is_global": True}
 
+def _fix_malformed_json(s: str) -> str:
+    """Preprocessa JSON malformado donde el LLM usa { 'valor' } en vez de 'valor' o valor."""
+    def fix_bare_object(m):
+        inner = m.group(1).strip()
+        if re.match(r'^-?\d+(\.\d+)?$', inner):
+            return inner
+        if inner in ('true', 'false', 'null'):
+            return inner
+        return json.dumps(inner)
+    s = re.sub(r'\{\s*"([^"]+)"\s*\}', fix_bare_object, s)
+    s = re.sub(r"\{\s*'([^']+)'\s*\}", lambda m: json.dumps(m.group(1)), s)
+    return s
+
 def _extract_first_json(s: str) -> Optional[Dict]:
     """Extract the first complete JSON object from a string using brace-depth matching."""
     s = s.strip()
@@ -230,6 +319,7 @@ def _extract_first_json(s: str) -> Optional[Dict]:
                 candidate = s[start:i + 1]
                 if '"' not in candidate and "'" in candidate:
                     candidate = candidate.replace("'", '"')
+                candidate = _fix_malformed_json(candidate)
                 for attempt in [candidate, re.sub(r'[\x00-\x1f\x7f]', '', candidate)]:
                     try:
                         return json.loads(attempt)

@@ -106,13 +106,14 @@ def cleanup_old_temps_async():
     except Exception as e:
         print(f"[CLEANUP] Error limpiando temporales de roop: {e}")
     
-    # 3. Limpiar temporales del proyecto (D:\.autodeep_temp) - usar patrones específicos
+    # 3. Limpiar temporales del proyecto - usar patrones específicos
     try:
-        project_temp_path = "D:\\.autodeep_temp"
+        current_root = os.path.dirname(os.path.abspath(__file__))
+        project_temp_path = os.path.join(current_root, ".autodeep_temp")
         if os.path.exists(project_temp_path):
             print(f"[CLEANUP] Limpiando temporales del proyecto: {project_temp_path}")
             # Patrones: solo borrar archivos temporales conocidos, no toda la carpeta
-            patterns = ("temp_frame_", "faceset_", "faceswap_", "roop_", "gradio_")
+            patterns = ("temp_frame_", "faceset_", "faceswap_", "roop_", "gradio_", "tmp", "fast_")
             cleaned_count += _safe_remove_old_items(project_temp_path, min_age_seconds=0, patterns=patterns)
     except Exception as e:
         print(f"[CLEANUP] Error limpiando temporales del proyecto: {e}")
@@ -128,24 +129,24 @@ cleanup_thread = threading.Thread(target=cleanup_old_temps_async, daemon=True)
 cleanup_thread.start()
 
 
-# --- CONFIGURACION DE CARPETAS TEMPORALES (D: DRIVE Opcional / Forzado) ---
-project_temp = "D:\\.autodeep_temp"
+# --- CONFIGURACION DE CARPETAS TEMPORALES ---
+# Preferir una carpeta temporal local en la misma unidad que el proyecto para mayor velocidad y portabilidad
+project_root = os.path.dirname(os.path.abspath(__file__))
+project_temp = os.path.join(project_root, ".autodeep_temp")
+
 try:
-    if not os.path.exists("D:\\"):
-        project_temp = os.path.abspath(os.path.join(os.getcwd(), "temp_local"))
     os.makedirs(project_temp, exist_ok=True)
     
-    # 1. Inyectar en variables de entorno
+    # Inyectar en variables de entorno
     os.environ["TEMP"] = project_temp
     os.environ["TMP"] = project_temp
     os.environ["GRADIO_TEMP_DIR"] = project_temp
     
-    # 2. Forzar en el modulo tempfile de Python (Gradio lo usa)
+    # Forzar en el modulo tempfile de Python (Gradio lo usa)
     tempfile.tempdir = project_temp
-    # Monkey patch para que cualquier llamada a gettempdir devuelva nuestra ruta
     tempfile.gettempdir = lambda: project_temp
     
-    print(f" (TEMP) Forzado a: {project_temp}")
+    print(f" (TEMP) Configurado en: {project_temp}")
 except Exception as e:
     print(f" (ERROR) Error configurando carpetas temporales: {e}")
 

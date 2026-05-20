@@ -18,6 +18,9 @@ class GenResult:
     image: Image.Image
     time_taken: float = 0.0
 
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 class ICEditComfyClient:
     def __init__(self):
         self._loaded = False
@@ -31,7 +34,7 @@ class ICEditComfyClient:
     
     def get_model_paths(self) -> dict:
         """Rutas de modelos para FLUX Fill Dev"""
-        base = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+        base = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
         
         return {
             # FLUX Fill Dev GGUF (gpustack)

@@ -1,8 +1,11 @@
 """Download Animate Models from HuggingFace"""
 import os, sys, time
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 TOKEN = os.environ.get("HF_TOKEN", "")
-BASE = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+BASE = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
 
 MODELS = [
     {

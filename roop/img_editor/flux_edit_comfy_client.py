@@ -94,7 +94,13 @@ class FluxEditComfyClient:
             checks.append(("text_encoders", self._clip_name2, f"CLIP2 {self._clip_name2}"))
         
         # LongCat y Flux comparten VAE
-        vae_name = "flux2_vae.safetensors" if any(x in flux_version for x in ["flux2", "flux-2"]) else "ae.safetensors"
+        if any(x in flux_version for x in ["flux2", "flux-2"]):
+            vae_name = "flux2_vae.safetensors"
+        else:
+            # LongCat usa el VAE de 16 canales estándar de Flux (ae.safetensors)
+            # qwen_image_vae.safetensors es un WanVAE (5D) y causa error de dimensiones
+            vae_name = "ae.safetensors"
+
         checks.append(("vae", vae_name, f"VAE {vae_name}"))
 
         missing = []
@@ -122,6 +128,7 @@ class FluxEditComfyClient:
         self,
         image: Image.Image,
         prompt: str,
+        negative_prompt: Optional[str] = None,
         num_inference_steps: int = 8,
         guidance_scale: float = 3.5,
         seed: int = None,
@@ -133,15 +140,25 @@ class FluxEditComfyClient:
         if not self._loaded:
             return None, "No cargado - llama a load() primero"
 
+        # Autorrelleno de prompt negativo si no se proporciona
+        if not negative_prompt:
+            negative_prompt = "low quality, blurry, distorted, deformed, ugly, bad anatomy, pixelated, low resolution"
+
+        is_longcat = "LongCat" in self._flux_version
+
         t0 = time.time()
         image = image.convert("RGB")
         w, h = image.size
         new_w, new_h = (w // 64) * 64, (h // 64) * 64
         if new_w != w or new_h != h:
             image = image.resize((new_w, new_h), Image.LANCZOS)
-        if new_w > 768 or new_h > 768:
-            image.thumbnail((768, 768), Image.LANCZOS)
+        # LongCat maneja hasta 1024px nativamente; otros modelos 768px
+        max_dim = 1024 if is_longcat else 768
+        if new_w > max_dim or new_h > max_dim:
+            image.thumbnail((max_dim, max_dim), Image.LANCZOS)
             new_w, new_h = image.size
+            new_w, new_h = (new_w // 64) * 64, (new_h // 64) * 64
+            image = image.resize((new_w, new_h), Image.LANCZOS)
 
         iname = f"fast_{int(t0)}.png"
         buf = io.BytesIO(); image.save(buf, "PNG"); buf.seek(0)
@@ -164,7 +181,6 @@ class FluxEditComfyClient:
         }
 
         # LongCat Turbo es distilled (CFG=1.0 forzado). Non-Turbo usa guidance real.
-        is_longcat = "LongCat" in self._flux_version
         if is_longcat and self._is_longcat_turbo:
             actual_cfg = 1.0
             actual_denoise = 1.0
@@ -184,13 +200,12 @@ class FluxEditComfyClient:
                 "class_type": "TextEncodeQwenImageEditPlus",
                 "inputs": {"clip": ["3", 0], "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
             }
-            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["3", 0]}}
-            wf["11"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index_timestep_zero"}}
-            positive_input = ["11", 0]
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["3", 0]}}
+            positive_input = ["6", 0]
             negative_input = ["7", 0]
         else:
             wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}}
-            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry, pixelated, low resolution, JPEG artifacts", "clip": ["3", 0]}}
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["3", 0]}}
             model_input = ["2", 0]
             positive_input = ["6", 0]
             negative_input = ["7", 0]
@@ -204,7 +219,15 @@ class FluxEditComfyClient:
                 "sampler_name": "euler_ancestral", "scheduler": "simple", "denoise": actual_denoise
             }
         }
-        wf["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["4", 0]}}
+        # Cambiado a VAEDecode estándar para mayor estabilidad en 8GB. 
+        # VAEDecodeTiled con parámetros temporales era erróneo para imágenes estáticas.
+        wf["9"] = {
+            "class_type": "VAEDecode",
+            "inputs": {
+                "samples": ["8", 0], 
+                "vae": ["4", 0]
+            }
+        }
         wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FastEdit"}}
 
         if mname:
@@ -212,7 +235,7 @@ class FluxEditComfyClient:
             if is_longcat:
                 wf["18"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["14", 0]}}
             wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["18", 0] if is_longcat else ["14", 0], "channel": "red"}}
-            wf["5"] = {"class_type": "VAEEncodeForInpaint", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0], "mask": ["15", 0], "grow_mask_by": 6}}
+            wf["5"] = {"class_type": "VAEEncodeForInpaint", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0], "mask": ["15", 0], "grow_mask_by": 4}}
         else:
             wf["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0]}}
 

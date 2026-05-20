@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import huggingface_hub, os, sys
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 repo_id = "city96/t5-v1_1-xxl-encoder-gguf"
 filename = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
-local_dir = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders"
+local_dir = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "text_encoders")
 
 print(f"Downloading {filename} from {repo_id}...")
 try:

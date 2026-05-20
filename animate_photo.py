@@ -2,8 +2,11 @@ import os, json, requests, time, io
 from typing import Optional
 from PIL import Image
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 COMFY_URL = "http://127.0.0.1:8188"
-MODELS_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models"
+MODELS_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
 
 
 class AnimatePhoto:
@@ -67,7 +70,8 @@ class AnimatePhoto:
         )
 
         wan_model = (
-            self._find_model("diffusion_models", ["wan2.2"])
+            self._find_model("diffusion_models", ["ti2v", "5b"])
+            or self._find_model("diffusion_models", ["wan2.2"])
             or self._find_model("diffusion_models", ["wan2_2"])
             or self._find_model("diffusion_models", ["wan2.1"])
             or self._find_model("diffusion_models", ["wan2_1"])

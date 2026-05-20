@@ -4,8 +4,11 @@ from huggingface_hub import hf_hub_download
 
 os.environ["HF_HUB_OFFLINE"] = "0"
 
+def get_project_root():
+    return os.path.dirname(os.path.abspath(__file__))
+
 # Qwen VAE
-VAE_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae"
+VAE_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "vae")
 os.makedirs(VAE_DIR, exist_ok=True)
 
 print("[DOWNLOAD] Qwen VAE...")
@@ -23,7 +26,7 @@ except Exception as e:
     print(f"[ERROR] VAE: {e}")
 
 # Qwen Text Encoder (4 shards)
-TE_DIR = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders"
+TE_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "text_encoders")
 os.makedirs(TE_DIR, exist_ok=True)
 
 print("\n[DOWNLOAD] Qwen Text Encoder (4 shards, ~15GB total)...")

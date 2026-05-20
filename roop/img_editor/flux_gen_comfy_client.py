@@ -81,8 +81,8 @@ class FluxGenComfyClient:
         clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
         clip_type = "longcat_image"
 
-        # VAE: flux2 para modelos flux2/flux-2, ae.safetensors para LongCat
-        if "flux2" in flux_version or "flux-2" in flux_version:
+        # VAE: flux2 para modelos flux2/flux-2/LongCat, ae.safetensors para otros
+        if "flux2" in flux_version or "flux-2" in flux_version or "LongCat" in flux_version:
             vae_name = "flux2_vae.safetensors"
         else:
             vae_name = "ae.safetensors"
@@ -219,9 +219,14 @@ class FluxGenComfyClient:
                     "denoise": denoise
                 }
             },
+            # VAEDecode estándar (no Tiled) para máxima compatibilidad con imágenes estáticas
+            # VAEDecodeTiled con params temporales es para video y causa errores en 8GB
             "9": {
                 "class_type": "VAEDecode",
-                "inputs": {"samples": ["8", 0], "vae": ["4", 0]}
+                "inputs": {
+                    "samples": ["8", 0], 
+                    "vae": ["4", 0]
+                }
             },
             "10": {
                 "class_type": "SaveImage",

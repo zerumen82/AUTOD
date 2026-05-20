@@ -78,10 +78,10 @@ class ImgEditorManager:
 
         # Ajustes según motor
         if engine == "longcat":
-            # Para LongCat, si la magnitud es alta, subir denoise y pasos para que obedezca
+            # Para LongCat, si la magnitud es alta, subir denoise para que obedezca
             if magnitude > 0.7:
                 denoise = max(denoise, 0.85)
-                steps = max(14, steps) # Más pasos para calidad en cambios radicales
+                steps = max(12, steps)
             else:
                 steps = max(8, steps // 2)
             guidance = 3.5
@@ -114,9 +114,12 @@ class ImgEditorManager:
         is_longcat = "longcat" in engine.lower()
 
         if is_longcat:
-            # PARA LONGCAT: Si hay una instrucción del usuario, priorizarla sin contaminar con contexto descriptivo
-            # (LongCat funciona mejor con instrucciones directas)
-            base = f"Instruction: {user_prompt}" if user_prompt else img_context
+            # PARA LONGCAT: Si hay una instrucción del usuario, usarla TAL CUAL (LongCat es instructivo)
+            # Si no hay prompt de usuario, usar el contexto de la imagen como fallback
+            base = user_prompt if user_prompt else img_context
+            # Asegurar prefijo Instruction: si no lo tiene
+            if base and not base.lower().startswith("instruction:"):
+                base = f"Instruction: {base}"
             print(f"[ImgEditor] LongCat Prompt: {base}")
         elif img_context:
             base = f"{img_context}. {user_prompt}"
@@ -189,6 +192,7 @@ class ImgEditorManager:
         self,
         image,
         prompt: str,
+        negative_prompt: str = "",
         num_inference_steps: int = None,
         guidance_scale: float = None,
         seed: int = None,
@@ -207,6 +211,7 @@ class ImgEditorManager:
             img = Image.open(image.name).copy().convert("RGB")
 
         prompt = (prompt or "").strip()
+        negative_prompt = (negative_prompt or "").strip()
 
         # Auto-switch a klein_base si no hay VRAM suficiente para Flux Dev
         if engine == "flux_dev_abliterated":
@@ -221,9 +226,13 @@ class ImgEditorManager:
         img_description = ""
         if use_rewriter:
             try:
-                # Obtener ID único de la imagen o usar el nombre si es archivo
-                img_id = str(id(image))
-                if hasattr(image, 'name'): img_id = image.name
+                # Obtener ID único de la imagen - usar hash del contenido para evitar caché obsoleta
+                import hashlib
+                if hasattr(image, 'name'):
+                    img_id = image.name
+                else:
+                    img_array = np.array(img.resize((64, 64)).convert("RGB"))
+                    img_id = hashlib.md5(img_array.tobytes()).hexdigest()[:16]
                 
                 if img_id in self._analysis_cache:
                     print("[ImgEditor] Usando análisis de imagen cacheado")
@@ -365,6 +374,7 @@ class ImgEditorManager:
                 print(f"[ImgEditor] Enviando a ComfyUI ({engine}, version={version})...")
                 gen_params = {
                     "image": img, "prompt": prompt_enhanced,
+                    "negative_prompt": negative_prompt,
                     "num_inference_steps": params["num_inference_steps"],
                     "guidance_scale": params["guidance_scale"],
                     "seed": seed, "denoise": params["denoise"]
@@ -397,7 +407,14 @@ class ImgEditorManager:
                         result = Image.composite(result, orig_bg, soft_mask)
 
             if result is not None and self._should_preserve_faces(face_preserve, analysis, prompt):
-                print(f"[ImgEditor] Aplicando preservación de rostro (face_preserve={face_preserve})")
+                # NO preservar rostros si la edición es de cuerpo completo (mask_target=body) y no se mencionan rostros
+                mask_target = analysis.get("mask_target", "subject")
+                preserve_override = analysis.get("preserve_face", True)
+                # Si el target es "body" y preserve_face es True (LLM dijo que no cambia rostros), igual aplicar
+                # Pero si es "body" y la magnitud es alta con preservación forzada del LLM, respetar esa decisión
+                if preserve_override and mask_target == "body":
+                    print(f"[ImgEditor] mask_target=body con preserve_face=True, aplicando preservación parcial")
+                print(f"[ImgEditor] Aplicando preservación de rostro (face_preserve={face_preserve}, preserve_override={preserve_override})")
                 try:
                     fp = self._get_face_preserver()
                     if fp:

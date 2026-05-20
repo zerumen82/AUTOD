@@ -212,8 +212,8 @@ class FaceSwap:
             if not paste_back:
                 return bgr_fake, M
             
-            # 5. Paste back estilo INSwapper: mÃ¡scara basada en diferencia de pÃ­xeles
-            #    para evitar el efecto de doble ojo: solo se mezcla donde la cara cambiÃ³ realmente
+            # 5. Paste back estilo INSwapper: máscara basada en diferencia de píxeles
+            #    para evitar el efecto de doble ojo: solo se mezcla donde la cara cambió realmente
             fake_diff = bgr_fake.astype(np.float32) - aimg.astype(np.float32)
             fake_diff = np.abs(fake_diff).mean(axis=2)
             # Solo mezclar donde el cambio es significativo (evita bordes y zonas sin cambio)
@@ -235,19 +235,23 @@ class FaceSwap:
             mask_h = np.max(mask_h_inds) - np.min(mask_h_inds)
             mask_w = np.max(mask_w_inds) - np.min(mask_w_inds)
             mask_size = int(np.sqrt(mask_h*mask_w))
-            k = max(mask_size//10, 10)
-            kernel = np.ones((k,k),np.uint8)
-            img_mask = cv2.erode(img_mask,kernel,iterations = 1)
-            kernel = np.ones((2,2),np.uint8)
-            fake_diff = cv2.dilate(fake_diff,kernel,iterations = 1)
-            k = max(mask_size//20, 5)
-            kernel_size = (k, k)
-            blur_size = tuple(2*i+1 for i in kernel_size)
-            img_mask = cv2.GaussianBlur(img_mask, blur_size, 0)
-            k = 5
-            kernel_size = (k, k)
-            blur_size = tuple(2*i+1 for i in kernel_size)
-            fake_diff = cv2.GaussianBlur(fake_diff, blur_size, 0)
+            
+            # MEJORA: Valores equilibrados para eliminar bordes dobles sin perder el swap
+            k_erode = max(mask_size//20, 12) # Reducido de 30 para conservar más área de la cara
+            kernel_erode = np.ones((k_erode, k_erode), np.uint8)
+            img_mask = cv2.erode(img_mask, kernel_erode, iterations=1)
+            
+            kernel_dilate = np.ones((2,2),np.uint8)
+            fake_diff = cv2.dilate(fake_diff, kernel_dilate, iterations=1)
+            
+            k_blur = max(mask_size//25, 8) # Reducido de 15 para más nitidez
+            blur_kernel = (k_blur * 2 + 1, k_blur * 2 + 1)
+            img_mask = cv2.GaussianBlur(img_mask, blur_kernel, 0)
+            
+            k_blur_diff = 5 # Reducido de 7
+            blur_kernel_diff = (k_blur_diff * 2 + 1, k_blur_diff * 2 + 1)
+            fake_diff = cv2.GaussianBlur(fake_diff, blur_kernel_diff, 0)
+            
             img_mask /= 255
             fake_diff /= 255
             img_mask = np.reshape(img_mask, [img_mask.shape[0],img_mask.shape[1],1])
@@ -308,35 +312,50 @@ class FaceSwap:
 # --- FUNCIONES DE PRESERVACIÓN DE BOCA ---
 
 def detect_mouth_open(target_face, landmarks_106, image) -> Tuple[bool, Optional[Dict], float]:
-    """Detecta boca abierta usando MouthDetector avanzado"""
+    """Detecta boca abierta usando MouthDetector avanzado, con fallback a landmarks 106"""
     try:
         from roop.mouth_detector import get_mouth_detector
         detector = get_mouth_detector()
         if detector and detector.is_initialized:
-            # Extraer región de la cara para mediapipe
             x1, y1, x2, y2 = target_face.bbox
-            # Ampliar un poco el recorte para asegurar que entra toda la boca
             h, w = image.shape[:2]
             pw, ph = int((x2-x1)*0.2), int((y2-y1)*0.2)
             x1, y1 = max(0, int(x1-pw)), max(0, int(y1-ph))
             x2, y2 = min(w, int(x2+pw)), min(h, int(y2+ph))
-            
+
             face_roi = image[y1:y2, x1:x2]
             if face_roi.size == 0:
                 return False, None, 0.0
-                
+
             is_open, ratio, mouth_data = detector.detect_mouth_open(face_roi)
-            
-            # Mapear coordenadas de mouth_data al frame original
+
             if mouth_data:
                 for key, val in mouth_data.items():
                     if isinstance(val, tuple) and len(val) == 2:
                         mouth_data[key] = (val[0] + x1, val[1] + y1)
-                
-                # Añadir dimensiones del ROI para referencia
                 mouth_data['roi_offset'] = (x1, y1)
                 mouth_data['roi_size'] = (face_roi.shape[1], face_roi.shape[0])
-                
+                return is_open, mouth_data, ratio
+
+            # Fallback: MediaPipe no dio datos, usar landmarks_106 si están disponibles
+            if landmarks_106 is not None and len(landmarks_106) >= 68:
+                mouth_pts = landmarks_106[52:68]
+                if len(mouth_pts) >= 4:
+                    upper_y = min(p[1] for p in mouth_pts[:8])
+                    lower_y = max(p[1] for p in mouth_pts[8:])
+                    mouth_height = lower_y - upper_y
+                    face_height = y2 - y1
+                    if face_height > 0:
+                        ratio_est = mouth_height / face_height
+                        is_open_est = ratio_est > 0.035
+                        mouth_data = {
+                            'mouth_left': (int(mouth_pts[0][0]), int(mouth_pts[0][1])),
+                            'mouth_right': (int(mouth_pts[6][0]), int(mouth_pts[6][1])),
+                            'upper_lip_top': (int(mouth_pts[3][0]), int(upper_y)),
+                            'lower_lip_bottom': (int(mouth_pts[11][0]), int(lower_y)),
+                        }
+                        return is_open_est, mouth_data, ratio_est
+
             return is_open, mouth_data, ratio
     except Exception as e:
         print(f"[MOUTH_DETECT] Error: {e}")

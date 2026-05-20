@@ -4,7 +4,10 @@ from huggingface_hub import hf_hub_download
 
 HF_TOKEN = ""  # Set your HuggingFace token here
 
-output_dir = r"D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\checkpoints"
+def get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+output_dir = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models", "checkpoints")
 os.makedirs(output_dir, exist_ok=True)
 
 print("Descargando flux1-dev con hf_hub_download...")
