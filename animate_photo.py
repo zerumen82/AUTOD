@@ -155,7 +155,7 @@ class AnimatePhoto:
                     "image_embeds": ["6", 0],
                     "text_embeds": ["5", 0],
                     "steps": steps,
-                    "cfg": 7.0,
+                    "cfg": 5.0,
                     "shift": 5.0,
                     "seed": seed,
                     "scheduler": "unipc",

@@ -359,7 +359,7 @@ class WanVideoSampler:
                         vae_latent = torch.cat([vae_latent, vae_latent[:, -1:].repeat(1, noise.shape[1] - vae_latent.shape[1], 1, 1)], dim=1)
                 if vae_latent.shape[2:] != noise.shape[2:]:
                     vae_latent = F.interpolate(vae_latent.unsqueeze(0), size=noise.shape[1:], mode='trilinear', align_corners=False).squeeze(0)
-                noise_aug = 0.35
+                noise_aug = 0.05
                 vae_frame0 = vae_latent[:, :1].repeat(1, noise.shape[1], 1, 1)
                 noise = vae_frame0 * (1 - noise_aug) + noise * noise_aug
                 image_cond = None
