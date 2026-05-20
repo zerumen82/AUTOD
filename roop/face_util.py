@@ -323,8 +323,8 @@ def extract_face_images(
             h, w = img_rgb.shape[:2]
             print(f"[SOURCE_DETECT] Cargando cara de origen: {os.path.basename(str(image_path))} ({w}x{h})")
             
-            # 1. Intentar detección normal (Más estricta para evitar ruido)
-            faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.35)
+            # 1. Intentar detección normal
+            faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.25)
             
             # 2. Si falla, intentar con PADDING pero solo si la imagen es razonable
             if not faces and w > 100 and h > 100:

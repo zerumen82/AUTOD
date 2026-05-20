@@ -153,18 +153,18 @@ class PromptRewriter:
 
     def _rewrite_with_llm(self, prompt: str, llm, image_context: str = "") -> Dict:
         ctx = image_context[:200] if len(image_context) > 200 else image_context
-        # Prompt de sistema para un análisis semántico puro y profesional
+        # Few-shot prompting para guiar al modelo pequeño (0.5B)
         full_prompt = (
             "<|im_start|>system\n"
-            "You analyze image editing requests. Output ONLY this JSON format (no markdown, no code blocks):\n"
-            "{\"prompt\": \"short English instruction\", \"magnitude\": 0.5, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": false}\n"
-            "Rules:\n"
-            "- 'prompt': translate to short English instruction (e.g. 'make hair pink', 'add sunglasses', 'change background to beach')\n"
-            "- 'magnitude': 0.0-1.0 (0.8+ for radical, 0.2 for subtle)\n"
-            "- 'mask_target': specific object ('face', 'hair', 'clothes', 'background', 'body', 'subject')\n"
-            "- 'preserve_face': true UNLESS user wants to change facial features/identity\n"
-            "- 'is_global': true ONLY if entire image changes (style, lighting). false for specific objects.\n"
-            "Respond with ONLY the JSON object, nothing else.<|im_end|>\n"
+            "You are a professional image editor. Translate and analyze the user Request.\n"
+            "Examples:\n"
+            "User: ponle gafas de sol\n"
+            "Assistant: {\"prompt\": \"add sunglasses\", \"magnitude\": 0.5, \"mask_target\": \"face\", \"preserve_face\": true, \"is_global\": false}\n"
+            "User: make her hair red\n"
+            "Assistant: {\"prompt\": \"make hair red\", \"magnitude\": 0.6, \"mask_target\": \"hair\", \"preserve_face\": true, \"is_global\": false}\n"
+            "User: cambia el fondo por una playa\n"
+            "Assistant: {\"prompt\": \"change background to a beach\", \"magnitude\": 0.8, \"mask_target\": \"background\", \"preserve_face\": true, \"is_global\": false}\n"
+            "<|im_end|>\n"
             f"<|im_start|>user\nContext: {ctx}\nRequest: {prompt}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
