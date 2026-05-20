@@ -88,9 +88,38 @@ def open_sd_window(url, title="Stable Diffusion"):
     
     # Crear un script temporal para abrir la ventana de SD
     # Esto evita el problema de que pywebview debe correr en el main thread
+    _sd_icon = _icon_path.replace('\\', '\\\\')
     script = f'''
 import webview
-import sys
+import os
+import threading
+import time
+
+_icon_path = "{_sd_icon}"
+
+def _set_window_icon(uid):
+    try:
+        from webview.platforms.winforms import BrowserView
+        import clr
+        clr.AddReference('System.Drawing')
+        from System.Drawing import Icon as DotNetIcon
+    except Exception:
+        return
+    if not os.path.exists(_icon_path):
+        return
+    while uid not in BrowserView.instances:
+        time.sleep(0.1)
+    form = BrowserView.instances[uid]
+    try:
+        form.Icon = DotNetIcon.CreateFromFile(_icon_path)
+    except Exception:
+        try:
+            from System import Func, Type
+            def _set():
+                form.Icon = DotNetIcon.CreateFromFile(_icon_path)
+            form.Invoke(Func[Type](_set))
+        except Exception:
+            pass
 
 def open_sd():
     window = webview.create_window(
@@ -101,6 +130,7 @@ def open_sd():
         resizable=True,
         background_color='#1a1a1a'
     )
+    threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
     webview.start(debug=False)
 
 if __name__ == "__main__":
@@ -137,6 +167,31 @@ if __name__ == "__main__":
         print(f"[MainCase] SD abierto en navegador: {url}")
         return False
 
+def _set_window_icon(uid):
+    import time
+    try:
+        from webview.platforms.winforms import BrowserView
+        import clr
+        clr.AddReference('System.Drawing')
+        from System.Drawing import Icon as DotNetIcon
+    except Exception:
+        return
+    if not os.path.exists(_icon_path):
+        return
+    while uid not in BrowserView.instances:
+        time.sleep(0.1)
+    form = BrowserView.instances[uid]
+    try:
+        form.Icon = DotNetIcon.CreateFromFile(_icon_path)
+    except Exception:
+        try:
+            from System import Func, Type
+            def _set():
+                form.Icon = DotNetIcon.CreateFromFile(_icon_path)
+            form.Invoke(Func[Type](_set))
+        except Exception:
+            pass
+
 def run_gradio_and_load_url():
     """Lanza la ventana de webview"""
     global _public_url, _main_window
@@ -152,9 +207,10 @@ def run_gradio_and_load_url():
             height=800,
             resizable=True,
             confirm_close=True,
-            background_color='#1a1a1a',
-            icon=_icon
+            background_color='#1a1a1a'
         )
+        
+        threading.Thread(target=_set_window_icon, args=(_main_window.uid,), daemon=True).start()
         
         # Iniciar webview
         webview.start(debug=False)

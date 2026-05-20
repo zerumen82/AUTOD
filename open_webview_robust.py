@@ -15,6 +15,31 @@ sys.path.insert(0, os.getcwd())
 GRADIO_URL = "http://127.0.0.1:7861"
 ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
 
+def _set_window_icon(uid):
+    import time
+    try:
+        from webview.platforms.winforms import BrowserView
+        import clr
+        clr.AddReference('System.Drawing')
+        from System.Drawing import Icon as DotNetIcon
+    except Exception:
+        return
+    if not os.path.exists(ICON_PATH):
+        return
+    while uid not in BrowserView.instances:
+        time.sleep(0.1)
+    form = BrowserView.instances[uid]
+    try:
+        form.Icon = DotNetIcon.CreateFromFile(ICON_PATH)
+    except Exception:
+        try:
+            from System import Func, Type
+            def _set():
+                form.Icon = DotNetIcon.CreateFromFile(ICON_PATH)
+            form.Invoke(Func[Type](_set))
+        except Exception:
+            pass
+
 def wait_for_server(url, timeout=60):
     """Espera a que el servidor Gradio esté disponible"""
     print(f"[WAIT] Esperando a que {url} esté disponible...")
@@ -59,7 +84,6 @@ def open_webview():
     try:
         import webview
         
-        icon = ICON_PATH if os.path.exists(ICON_PATH) else None
         window = webview.create_window(
             'AUTO-DEEP v2',
             GRADIO_URL,
@@ -67,9 +91,10 @@ def open_webview():
             height=800,
             resizable=True,
             confirm_close=True,
-            background_color='#1a1a1a',
-            icon=icon
+            background_color='#1a1a1a'
         )
+        
+        threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
         
         print("[PYWEBVIEW] Ventana creada, iniciando bucle...")
         webview.start(debug=False)

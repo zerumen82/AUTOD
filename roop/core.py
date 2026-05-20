@@ -208,12 +208,41 @@ def run():
         # AHORA si abrir pywebview
         print("[UI] Abriendo pywebview...")
         import webview
+        _icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
+
+        def _set_window_icon(uid):
+            import time
+            from webview.platforms.winforms import BrowserView
+            try:
+                import clr
+                clr.AddReference('System.Drawing')
+                from System.Drawing import Icon as DotNetIcon
+            except Exception:
+                return
+            if not os.path.exists(_icon_path):
+                return
+            # Esperar a que la ventana se cree
+            while uid not in BrowserView.instances:
+                time.sleep(0.1)
+            form = BrowserView.instances[uid]
+            try:
+                form.Icon = DotNetIcon.CreateFromFile(_icon_path)
+            except Exception:
+                try:
+                    from System import Func, Type
+                    def _set():
+                        form.Icon = DotNetIcon.CreateFromFile(_icon_path)
+                    form.Invoke(Func[Type](_set))
+                except Exception:
+                    pass
+
         window = webview.create_window(
             "AutoAuto",
             url=server_url,
             width=1400,
             height=900
         )
+        threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
         webview.start(debug=False, func=None)
         
         print("[EXIT] Ventana cerrada")
