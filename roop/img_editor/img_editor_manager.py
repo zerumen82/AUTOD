@@ -59,46 +59,35 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         
-        # Escalar denoise (más conservador para evitar artefactos)
-        if magnitude < 0.3:
-            denoise = 0.25 + (magnitude * 0.5)
-        elif magnitude < 0.6:
-            denoise = 0.40 + ((magnitude - 0.3) * 0.5)
-        else:
-            denoise = 0.55 + ((magnitude - 0.6) * 0.5)
-            
-        denoise = min(denoise, 0.95) # Cap at 0.95 for radical changes
+        # Escalamiento lineal dinámico basado en magnitud (0.0 a 1.0)
+        # Denoise: 0.25 (sutil) a 0.85 (radical)
+        denoise = 0.25 + (magnitude * 0.60)
+        denoise = min(denoise, 0.95)
 
-        # Optimización de pasos: 8 a 12 suele ser suficiente para Turbo/Klein
-        steps = int(8 + (magnitude * 8))
+        # Pasos: 8 (rápido) a 20 (calidad) para modelos estándar
+        steps = int(8 + (magnitude * 12))
 
-        # Escalar guidance
-        guidance = 3.5 + (magnitude * 3.5) # 3.5 to 7.0
+        # Guidance: 3.0 a 7.0
+        guidance = 3.0 + (magnitude * 4.0)
 
-
-        # Ajustes según motor
+        # Ajustes técnicos mínimos por motor (sin hardcoding semántico)
         if engine == "longcat":
-            # Para LongCat, si la magnitud es alta, subir denoise para que obedezca
-            if magnitude > 0.7:
-                denoise = max(denoise, 0.85)
-                steps = max(12, steps)
-            else:
-                steps = max(8, steps // 2)
-            guidance = 3.5
+            # LongCat es instructivo, requiere denoise alto para cambios notables
+            if magnitude > 0.5:
+                denoise = max(denoise, 0.75)
+            guidance = 3.5 # Valor óptimo para el modelo LongCat
         elif engine == "longcat_full":
-            steps = max(20, min(steps, 30))
+            steps = int(20 + (magnitude * 10))
             guidance = 4.5
         elif engine == "flux_schnell":
-            steps = 4 # Schnell es extremadamente rápido
+            steps = 4 # Limitación técnica del modelo Schnell
         elif "qwen" in engine:
-            steps = min(steps, 8)
+            steps = min(steps, 8) # Qwen es muy lento, limitamos por UX
             guidance = min(guidance, 4.0)
-        elif "klein" in engine:
-            steps = min(steps, 10)
-        elif "abliterated" in engine:
-            steps = min(steps, 10)
+        elif "klein" in engine or "abliterated" in engine:
+            steps = min(steps, 12) # Balance velocidad/calidad para 8GB
 
-        print(f"[ImgEditor] Optimization Applied: Denoise={denoise:.2f}, Steps={steps}, Guidance={guidance:.1f}")
+        print(f"[ImgEditor] Dynamic Params: Mag={magnitude:.2f}, Denoise={denoise:.2f}, Steps={steps}, CFG={guidance:.1f}")
         
         return {
             "denoise": denoise,
@@ -128,7 +117,8 @@ class ImgEditorManager:
 
 
         if not is_longcat and base and not base.lower().startswith(("photo", "a photo", "a picture")):
-            base = f"Photo of {base}"
+            # Eliminado prefijo hardcoded 'Photo of' para mayor fidelidad al prompt del LLM
+            pass
 
         return base
 

@@ -211,6 +211,9 @@ def run():
         _icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
 
         def _set_window_icon(uid):
+            """
+            Forzar icono usando WinForms para entornos Windows
+            """
             import time
             from webview.platforms.winforms import BrowserView
             try:
@@ -219,28 +222,34 @@ def run():
                 from System.Drawing import Icon as DotNetIcon
             except Exception:
                 return
+            
             if not os.path.exists(_icon_path):
                 return
-            # Esperar a que la ventana se cree
-            while uid not in BrowserView.instances:
+                
+            # Esperar a que la ventana esté lista
+            timeout = 15
+            start = time.time()
+            while uid not in BrowserView.instances and (time.time() - start) < timeout:
                 time.sleep(0.1)
+            
+            if uid not in BrowserView.instances:
+                return
+                
             form = BrowserView.instances[uid]
             try:
-                form.Icon = DotNetIcon.CreateFromFile(_icon_path)
-            except Exception:
-                try:
-                    from System import Func, Type
-                    def _set():
-                        form.Icon = DotNetIcon.CreateFromFile(_icon_path)
-                    form.Invoke(Func[Type](_set))
-                except Exception:
-                    pass
+                # Intentar vía Invoke para seguridad de hilos
+                from System import Action
+                form.Invoke(Action(lambda: setattr(form, 'Icon', DotNetIcon.CreateFromFile(_icon_path))))
+                print(f"[UI] Icono forzado exitosamente")
+            except Exception as e:
+                print(f"[DEBUG] Error forzando icono principal: {e}")
 
         window = webview.create_window(
             "AutoAuto",
             url=server_url,
             width=1400,
-            height=900
+            height=900,
+            icon=_icon_path
         )
         threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
         webview.start(debug=False, func=None)

@@ -128,7 +128,8 @@ def open_sd():
         width=1400,
         height=900,
         resizable=True,
-        background_color='#1a1a1a'
+        background_color='#1a1a1a',
+        icon=_icon_path
     )
     threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
     webview.start(debug=False)
@@ -168,29 +169,41 @@ if __name__ == "__main__":
         return False
 
 def _set_window_icon(uid):
+    """
+    Intenta forzar el icono de la ventana usando WinForms (necesario en algunos entornos Windows)
+    """
     import time
+    from webview.platforms.winforms import BrowserView
     try:
-        from webview.platforms.winforms import BrowserView
         import clr
         clr.AddReference('System.Drawing')
         from System.Drawing import Icon as DotNetIcon
     except Exception:
         return
+    
     if not os.path.exists(_icon_path):
         return
-    while uid not in BrowserView.instances:
+        
+    # Esperar a que la ventana esté registrada en pywebview
+    timeout = 10
+    start = time.time()
+    while uid not in BrowserView.instances and (time.time() - start) < timeout:
         time.sleep(0.1)
+    
+    if uid not in BrowserView.instances:
+        return
+        
     form = BrowserView.instances[uid]
     try:
+        # Intentar asignación directa
         form.Icon = DotNetIcon.CreateFromFile(_icon_path)
     except Exception:
         try:
-            from System import Func, Type
-            def _set():
-                form.Icon = DotNetIcon.CreateFromFile(_icon_path)
-            form.Invoke(Func[Type](_set))
-        except Exception:
-            pass
+            # Si falla, intentar vía Invoke (thread safety)
+            from System import Action
+            form.Invoke(Action(lambda: setattr(form, 'Icon', DotNetIcon.CreateFromFile(_icon_path))))
+        except Exception as e:
+            print(f"[DEBUG] Error forzando icono: {e}")
 
 def run_gradio_and_load_url():
     """Lanza la ventana de webview"""
@@ -207,7 +220,8 @@ def run_gradio_and_load_url():
             height=800,
             resizable=True,
             confirm_close=True,
-            background_color='#1a1a1a'
+            background_color='#1a1a1a',
+            icon=_icon_path
         )
         
         threading.Thread(target=_set_window_icon, args=(_main_window.uid,), daemon=True).start()

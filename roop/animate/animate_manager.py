@@ -45,30 +45,51 @@ class AnimateManager:
             missing = [n for n in needed if not any(n in a for a in available)]
         return missing
 
-    def resolve_params(self, engine, motion=127, frames=81, fps=16):
-        base = {"engine": engine, "motion": motion, "frames": frames, "fps": fps, "steps": 25, "cfg": 5.0}
+    def resolve_params(self, engine, motion=127, frames=81, fps=16, magnitude=0.5):
+        # Base dinámica escalada por magnitud detectada por el LLM
+        # Magnitude (0.0 - 1.0)
+        base = {
+            "engine": engine,
+            "motion": int(64 + (magnitude * 192)), # 64 a 256
+            "frames": frames,
+            "fps": fps,
+            "steps": int(15 + (magnitude * 20)), # 15 a 35 pasos
+            "cfg": 3.5 + (magnitude * 4.0) # 3.5 a 7.5
+        }
+        
+        # Ajustes técnicos mínimos por motor
         if engine == "svd_turbo":
-            base.update({"steps": 8, "cfg": 2.5})
+            # SVD Turbo es destilado, requiere pocos pasos y CFG bajo
+            base.update({
+                "steps": int(4 + (magnitude * 4)), # 4 a 8 pasos
+                "cfg": 1.5 + (magnitude * 1.5)  # 1.5 a 3.0
+            })
+        elif engine == "wan_video":
+            # Wan Video 14B escala bien con pasos moderados
+            base["steps"] = int(20 + (magnitude * 10))
+            
+        print(f"[AnimateManager] Dynamic Params: Mag={magnitude:.2f}, Motion={base['motion']}, Steps={base['steps']}, CFG={base['cfg']:.1f}")
         return base
 
     def rewrite_prompt(self, prompt, image_context=""):
         prompt = (prompt or "").strip()
-        if not prompt and not image_context:
-            return "natural motion, subtle realistic movement, cinematic image to video"
-
-        # Usamos el rewriter como apoyo, pero el prompt original siempre manda.
+        
+        # Usamos el rewriter LLM para una fusión semántica completa sin hardcoding
         try:
             from roop.img_editor.prompt_rewriter import get_prompt_rewriter
             rewriter = get_prompt_rewriter()
-            # Pasar image_context si existe para fusión inteligente
+            
+            # El rewriter devuelve un análisis completo incluyendo magnitud e intención
             analysis = rewriter.rewrite(prompt, image_context=image_context)
             enhanced = analysis.get("prompt", prompt)
-            magnitude = analysis.get("magnitude", 0.5)
-            print(f"[AnimateManager] Semantic boost: {enhanced[:60]}... (Mag: {magnitude})")
+            self._last_magnitude = analysis.get("magnitude", 0.5)
+            
+            print(f"[AnimateManager] Semantic boost: {enhanced[:60]}... (Mag: {self._last_magnitude})")
             return enhanced if enhanced else prompt
         except Exception as e:
             print(f"[AnimateManager] Rewriter no disponible: {e}")
-            return f"{prompt}, high quality, cinematic, realistic motion"
+            self._last_magnitude = 0.5
+            return f"{prompt}, natural motion, high quality"
 
     def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=81, fps=16,
                        face_stabilize=True, mask_image=None, mask_mode="global", mask_prompt="",
@@ -77,27 +98,30 @@ class AnimateManager:
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        print(f"[AnimateManager] Engine={engine} Frames={frames} FPS={fps}")
-
-        # Intentar obtener descripción de imagen para contexto
+        # 1. Análisis y reescritura inteligente (obtiene magnitud semántica)
         img_description = ""
         try:
-            from scripts.moondream_analyzer import analyze_image_with_moondream
+            from scripts.moondream_analyzer import MoonDreamImageAnalyzer
+            analyzer = MoonDreamImageAnalyzer()
+            import tempfile
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
                 image.save(tmp.name)
-                res = analyze_image_with_moondream(tmp.name)
+                res = analyzer.analyze(tmp.name)
                 img_description = res.get('positive', '')
-            if img_description:
-                print(f"[AnimateManager] Imagen analizada: {img_description[:100]}...")
+            analyzer.unload()
+            del analyzer
         except: pass
 
-        missing = self._check_models(engine)
-        if missing:
-            return None, f"Modelos faltantes: {', '.join(missing)}"
-
-        p = self.resolve_params(engine, motion_bucket, frames, fps)
         final_prompt = self.rewrite_prompt(prompt, image_context=img_description)
-        print(f"[AnimateManager] Prompt: {final_prompt[:80]}...")
+        magnitude = getattr(self, "_last_magnitude", 0.5)
+
+        # 2. Resolución dinámica de parámetros técnicos
+        p = self.resolve_params(engine, motion_bucket, frames, fps, magnitude=magnitude)
+        
+        print(f"[AnimateManager] Engine={engine} Frames={frames} FPS={fps} Mag={magnitude}")
+        print(f"[AnimateManager] Final Prompt: {final_prompt[:80]}...")
+
+        missing = self._check_models(engine)
 
 
         temp_dir = tempfile.gettempdir()

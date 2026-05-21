@@ -91,7 +91,8 @@ def open_webview():
             height=800,
             resizable=True,
             confirm_close=True,
-            background_color='#1a1a1a'
+            background_color='#1a1a1a',
+            icon=ICON_PATH
         )
         
         threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()

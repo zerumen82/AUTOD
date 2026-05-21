@@ -40,37 +40,19 @@ class FluxGenComfyClient:
         path = os.path.join(get_models_base(), subdir, name)
         return os.path.exists(path)
 
-    def _clean_prompt(self, prompt: str) -> str:
-        """Limpia y traduce el prompt de forma similar al editor"""
-        translations = {
-            "mujer": "woman",
-            "hombre": "man",
-            "chica": "girl",
-            "chico": "boy",
-            "paisaje": "landscape",
-            "retrato": "portrait",
-            "realista": "realistic",
-            "foto": "photo",
-            "playa": "beach",
-            "ciudad": "city",
-            "montaña": "mountain",
-            "bosque": "forest",
-            "noche": "night",
-            "dia": "day",
-            "vikingo": "viking",
-            "guerrero": "warrior"
-        }
-
-        cleaned = (prompt or "").lower().strip()
-        for es, en in translations.items():
-            cleaned = cleaned.replace(es, en)
-
-        # Limpiar particulas
-        stop_words = [" a ", " la ", " las ", " el ", " los ", " de ", " un ", " una ", " con ", " en "]
-        for word in stop_words:
-            cleaned = cleaned.replace(word, " ")
-
-        return " ".join(cleaned.split())
+    def _rewrite_prompt(self, prompt: str) -> Tuple[str, float]:
+        """Usa el LLM para traducir y analizar el prompt semánticamente"""
+        try:
+            from roop.img_editor.prompt_rewriter import get_prompt_rewriter
+            rewriter = get_prompt_rewriter()
+            analysis = rewriter.rewrite(prompt)
+            enhanced = analysis.get("prompt", prompt)
+            magnitude = analysis.get("magnitude", 0.5)
+            print(f"[GenFlux] Semantic boost: {enhanced[:60]}... (Mag: {magnitude})")
+            return enhanced, magnitude
+        except Exception as e:
+            print(f"[GenFlux] Rewriter error, using original: {e}")
+            return prompt, 0.5
 
     def _resolve_models(self) -> Optional[Tuple[str, str, str]]:
         """Resuelve los nombres de modelo, CLIP y VAE desde ComfyUI o modelo local."""
@@ -107,8 +89,8 @@ class FluxGenComfyClient:
         self,
         prompt: str,
         negative_prompt: str = "",
-        steps: int = 8,
-        guidance_scale: float = 3.5,
+        steps: int = None,
+        guidance_scale: float = None,
         seed: int = None,
         width: int = 512,
         height: int = 768,
@@ -131,14 +113,27 @@ class FluxGenComfyClient:
             return None, err
         flux_version, clip_name, clip_type, vae_name = resolved
 
-        # Limpiar y optimizar prompt
-        clean_p = self._clean_prompt(prompt)
-        final_prompt = f"{clean_p}, realistic, high quality, 8k, photorealistic"
-
+        # 1. Análisis Semántico y Traducción Dinámica
+        final_prompt, magnitude = self._rewrite_prompt(prompt)
+        
+        # 2. Resolución Dinámica de Parámetros (si no se pasan explícitamente)
         is_longcat = "LongCat" in flux_version
         is_longcat_turbo = "Turbo" in flux_version
-        cfg = 1.0 if is_longcat_turbo else guidance_scale
+        
+        if steps is None:
+            # Escalar pasos: 8 a 24 según magnitud
+            steps = int(8 + (magnitude * 16))
+            if is_longcat_turbo: steps = min(steps, 12)
+            
+        if guidance_scale is None:
+            # Escalar CFG: 3.0 a 7.5
+            guidance_scale = 3.0 + (magnitude * 4.5)
+            if is_longcat_turbo: guidance_scale = 1.0
+
+        cfg = guidance_scale
         denoise = 1.0
+
+        print(f"[GenFlux] Dynamic Params: Mag={magnitude:.2f}, Steps={steps}, CFG={cfg:.1f}")
 
         # Construir workflow desde cero (txt2img)
         # LongCat Turbo inserta ModelSamplingAuraFlow (17) entre UNET (2) y KSampler (8)

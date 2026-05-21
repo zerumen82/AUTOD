@@ -140,9 +140,9 @@ class FluxEditComfyClient:
         if not self._loaded:
             return None, "No cargado - llama a load() primero"
 
-        # Autorrelleno de prompt negativo si no se proporciona
+        # Prompt negativo base (mínimo para calidad)
         if not negative_prompt:
-            negative_prompt = "low quality, blurry, distorted, deformed, ugly, bad anatomy, pixelated, low resolution"
+            negative_prompt = "low quality, blurry, distorted, low resolution"
 
         is_longcat = "LongCat" in self._flux_version
 
