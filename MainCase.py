@@ -94,15 +94,51 @@ import webview
 import os
 import threading
 import time
+import ctypes
 
 _icon_path = "{_sd_icon}"
+
+def _set_window_icon_impl(form, path):
+    from System import Action
+    import ctypes
+    user32 = ctypes.windll.user32
+    WM_SETICON = 0x0080
+    ICON_SMALL = 0
+    ICON_BIG = 1
+    GCLP_HICON = -14
+    GCLP_HICONSM = -34
+    def _set():
+        try:
+            try:
+                setAppId = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+                setAppId.argtypes = [ctypes.c_wchar_p]
+                setAppId.restype = ctypes.c_long
+                setAppId("AutoAuto")
+            except Exception:
+                pass
+            from System.Drawing import Icon
+            ico = Icon(path)
+            form.Icon = ico
+            hWnd_ptr = ctypes.c_void_p(form.Handle.ToInt64())
+            shell32 = ctypes.windll.shell32
+            shell32.ExtractIconExW.argtypes = [ctypes.c_wchar_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
+            shell32.ExtractIconExW.restype = ctypes.c_uint
+            large = ctypes.c_void_p()
+            small = ctypes.c_void_p()
+            if shell32.ExtractIconExW(path, 0, ctypes.byref(large), ctypes.byref(small), 1) > 0:
+                h32 = ctypes.c_void_p(large.value)
+                h16 = ctypes.c_void_p(small.value)
+                user32.SendMessageW(hWnd_ptr, WM_SETICON, ICON_BIG, h32)
+                user32.SetClassLongPtrW(hWnd_ptr, GCLP_HICON, h32)
+                user32.SendMessageW(hWnd_ptr, WM_SETICON, ICON_SMALL, h16)
+                user32.SetClassLongPtrW(hWnd_ptr, GCLP_HICONSM, h16)
+        except Exception:
+            pass
+    form.Invoke(Action(_set))
 
 def _set_window_icon(uid):
     try:
         from webview.platforms.winforms import BrowserView
-        import clr
-        clr.AddReference('System.Drawing')
-        from System.Drawing import Icon as DotNetIcon
     except Exception:
         return
     if not os.path.exists(_icon_path):
@@ -110,16 +146,8 @@ def _set_window_icon(uid):
     while uid not in BrowserView.instances:
         time.sleep(0.1)
     form = BrowserView.instances[uid]
-    try:
-        form.Icon = DotNetIcon.CreateFromFile(_icon_path)
-    except Exception:
-        try:
-            from System import Func, Type
-            def _set():
-                form.Icon = DotNetIcon.CreateFromFile(_icon_path)
-            form.Invoke(Func[Type](_set))
-        except Exception:
-            pass
+    _set_window_icon_impl(form, _icon_path)
+
 
 def open_sd():
     window = webview.create_window(
@@ -128,8 +156,7 @@ def open_sd():
         width=1400,
         height=900,
         resizable=True,
-        background_color='#1a1a1a',
-        icon=_icon_path
+        background_color='#1a1a1a'
     )
     threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
     webview.start(debug=False)
@@ -168,42 +195,18 @@ if __name__ == "__main__":
         print(f"[MainCase] SD abierto en navegador: {url}")
         return False
 
-def _set_window_icon(uid):
-    """
-    Intenta forzar el icono de la ventana usando WinForms (necesario en algunos entornos Windows)
-    """
+def _set_window_icon2(uid):
     import time
     from webview.platforms.winforms import BrowserView
-    try:
-        import clr
-        clr.AddReference('System.Drawing')
-        from System.Drawing import Icon as DotNetIcon
-    except Exception:
-        return
-    
     if not os.path.exists(_icon_path):
         return
-        
-    # Esperar a que la ventana esté registrada en pywebview
     timeout = 10
     start = time.time()
     while uid not in BrowserView.instances and (time.time() - start) < timeout:
         time.sleep(0.1)
-    
     if uid not in BrowserView.instances:
         return
-        
-    form = BrowserView.instances[uid]
-    try:
-        # Intentar asignación directa
-        form.Icon = DotNetIcon.CreateFromFile(_icon_path)
-    except Exception:
-        try:
-            # Si falla, intentar vía Invoke (thread safety)
-            from System import Action
-            form.Invoke(Action(lambda: setattr(form, 'Icon', DotNetIcon.CreateFromFile(_icon_path))))
-        except Exception as e:
-            print(f"[DEBUG] Error forzando icono: {e}")
+    _set_window_icon_impl(BrowserView.instances[uid], _icon_path)
 
 def run_gradio_and_load_url():
     """Lanza la ventana de webview"""
@@ -220,11 +223,10 @@ def run_gradio_and_load_url():
             height=800,
             resizable=True,
             confirm_close=True,
-            background_color='#1a1a1a',
-            icon=_icon_path
+            background_color='#1a1a1a'
         )
         
-        threading.Thread(target=_set_window_icon, args=(_main_window.uid,), daemon=True).start()
+        threading.Thread(target=_set_window_icon2, args=(_main_window.uid,), daemon=True).start()
         
         # Iniciar webview
         webview.start(debug=False)

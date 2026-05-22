@@ -137,40 +137,11 @@ class MoonDreamImageAnalyzer:
                 pass
 
     def analyze(self, image_path: str, nsfw_level: str = 'explicit') -> dict:
-        if not self.model:
-            return self._fallback_basic(image_path, nsfw_level)
-        
         print(f"[ANALYZER] Analizando imagen: {os.path.basename(image_path)}...")
-        try:
-            # Prompt optimizado para Moondream
-            prompt = "<IMAGE>\nDescribe the main subject and their clothing in one descriptive paragraph."
-            
-            response = self.model.create_completion(
-                prompt=prompt,
-                max_tokens=200,
-                temperature=0.2,
-                stop=["<|endoftext|>", "</s>", "\n\n"]
-            )
-            
-            description = response['choices'][0]['text'].strip()
-            if not description or len(description) < 5:
-                # Fallback
-                response = self.model.create_completion(
-                    prompt=f"Question: What is in this image?\nAnswer:",
-                    max_tokens=150
-                )
-                description = response['choices'][0]['text'].strip()
-            
-            print(f"[ANALYZER] Descripción generada: {description[:100]}...")
-            
-            return {
-                'positive': description,
-                'negative': "blurry, low quality",
-                'analysis': {'description': description}
-            }
-        except Exception as e:
-            print(f"[ERROR] Durante análisis LLM: {e}")
-            return self._fallback_basic(image_path, nsfw_level)
+        # NOTA: llama-cpp-python 0.3.4 no soporta multimodal en la API Python.
+        # El clip_model_path se carga pero create_completion no procesa la imagen.
+        # Usamos el fallback basado en detección facial hasta actualizar la librería.
+        return self._fallback_basic(image_path, nsfw_level)
 
     def _fallback_basic(self, image_path: str, nsfw_level: str):
         try:

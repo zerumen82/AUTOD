@@ -90,16 +90,9 @@ def analyze_click(img, user_prompt):
         from PIL import Image
         img = Image.open(img).convert("RGB")
     try:
-        from scripts.moondream_analyzer import analyze_image_with_moondream
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            img.save(tmp.name)
-            res = analyze_image_with_moondream(tmp.name)
-        desc = res.get('positive', 'No se pudo analizar')
-        
-        # Combinar descripción con prompt del usuario
-        combined = f"{desc[:150]}... {user_prompt}" if user_prompt else desc[:200]
-        
-        status_html = f"<div style='color:#22d3ee; font-size:12px;'><b>Imagen:</b> {desc[:150]}...</div>"
+        desc = "Análisis deshabilitado: el descriptor de imagen no está disponible"
+        combined = user_prompt or ""
+        status_html = f"<div style='color:#fbbf24; font-size:12px;'><b>Info:</b> {desc}</div>"
         return status_html, combined
     except:
         return "<div style='color:#f87171;'>Análisis no disponible</div>", user_prompt

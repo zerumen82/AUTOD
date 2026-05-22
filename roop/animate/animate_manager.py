@@ -71,25 +71,29 @@ class AnimateManager:
         print(f"[AnimateManager] Dynamic Params: Mag={magnitude:.2f}, Motion={base['motion']}, Steps={base['steps']}, CFG={base['cfg']:.1f}")
         return base
 
+    def _get_semantic_analyzer(self):
+        if not hasattr(self, 'semantic_analyzer') or self.semantic_analyzer is None:
+            from roop.img_editor.nlp.semantic_analyzer import SemanticIntentAnalyzer
+            self.semantic_analyzer = SemanticIntentAnalyzer()
+        return self.semantic_analyzer
+
     def rewrite_prompt(self, prompt, image_context=""):
         prompt = (prompt or "").strip()
+        from roop.img_editor.prompt_translator import translate_prompt
+        translated = translate_prompt(prompt)
         
-        # Usamos el rewriter LLM para una fusión semántica completa sin hardcoding
+        # Análisis semántico para video (Cero Hardcoding)
         try:
-            from roop.img_editor.prompt_rewriter import get_prompt_rewriter
-            rewriter = get_prompt_rewriter()
-            
-            # El rewriter devuelve un análisis completo incluyendo magnitud e intención
-            analysis = rewriter.rewrite(prompt, image_context=image_context)
-            enhanced = analysis.get("prompt", prompt)
-            self._last_magnitude = analysis.get("magnitude", 0.5)
-            
-            print(f"[AnimateManager] Semantic boost: {enhanced[:60]}... (Mag: {self._last_magnitude})")
-            return enhanced if enhanced else prompt
+            nlp = self._get_semantic_analyzer()
+            mag = nlp.get_magnitude(translated)
+            self._last_magnitude = mag
+            print(f"[AnimateManager] Semantic Analysis: Magnitude={mag:.2f}")
         except Exception as e:
-            print(f"[AnimateManager] Rewriter no disponible: {e}")
+            print(f"[AnimateManager] NLP Error: {e}. Fallback to 0.5")
             self._last_magnitude = 0.5
-            return f"{prompt}, natural motion, high quality"
+            
+        print(f"[AnimateManager] Prompt: {translated[:80]}...")
+        return f"{translated}, natural motion, high quality"
 
     def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=81, fps=16,
                        face_stabilize=True, mask_image=None, mask_mode="global", mask_prompt="",
@@ -98,20 +102,8 @@ class AnimateManager:
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        # 1. Análisis y reescritura inteligente (obtiene magnitud semántica)
+        # 1. Análisis de imagen omitido - el modelo recibe la imagen directamente
         img_description = ""
-        try:
-            from scripts.moondream_analyzer import MoonDreamImageAnalyzer
-            analyzer = MoonDreamImageAnalyzer()
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                image.save(tmp.name)
-                res = analyzer.analyze(tmp.name)
-                img_description = res.get('positive', '')
-            analyzer.unload()
-            del analyzer
-        except: pass
-
         final_prompt = self.rewrite_prompt(prompt, image_context=img_description)
         magnitude = getattr(self, "_last_magnitude", 0.5)
 
@@ -137,7 +129,8 @@ class AnimateManager:
             ok = animator.animate_image(
                 image_pil=image, prompt=final_prompt,
                 output_path=output_path, model=engine,
-                frames=p["frames"], fps=p["fps"]
+                frames=p["frames"], fps=p["fps"],
+                steps=p["steps"], cfg=p["cfg"]
             )
             if ok and os.path.exists(output_path):
                 if face_stabilize:

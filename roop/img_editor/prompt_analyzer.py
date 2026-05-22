@@ -45,13 +45,30 @@ class PromptAnalyzer:
         "transforma", "mejora", "ajusta", "corrige", "fix"
     ]
     
-    # Palabras clave para pose/cuerpo
-    POSE_KEYWORDS = [
-        "de rodillas", "sentado", "de pie", "acostado", "de pie",
-        "pose", "postura", "posicion", "gesto", "movimiento",
-        "kneeling", "sitting", "standing", "lying", "pose"
+    # Palabras clave para cambios estructurales (añadir/quitar objetos/personas)
+    STRUCTURAL_KEYWORDS = [
+        "anade", "add", "pon", "put", "coloca", "place", "insert", 
+        "insertar", "quita", "remove", "borra", "delete", "erase",
+        "fondo", "background", "persona", "person", "hombre", "man",
+        "mujer", "woman", "chica", "girl", "chico", "boy", "objeto", "object"
     ]
-    
+
+    # Palabras clave para cambios de pose/anatomía
+    POSE_KEYWORDS = [
+        "de rodillas", "sentado", "de pie", "acostado", "pose", 
+        "postura", "posicion", "gesto", "movimiento", "kneeling", 
+        "sitting", "standing", "lying", "action", "corriendo", "running",
+        "saltando", "jumping", "walking", "caminando"
+    ]
+
+    # Palabras clave para cambios de atributo (color, textura, ropa)
+    ATTRIBUTE_KEYWORDS = [
+        "color", "textura", "ropa", "clothes", "vestido", "dress",
+        "camisa", "shirt", "pantalones", "pants", "pelo", "hair",
+        "ojos", "eyes", "piel", "skin", "brillo", "bright", "oscuro", "dark",
+        "estilo", "style", "filtro", "filter"
+    ]
+
     def __init__(self):
         self._build_patterns()
     
@@ -60,12 +77,43 @@ class PromptAnalyzer:
         self._outpaint_pattern = self._create_pattern(self.OUTPAINT_KEYWORDS)
         self._inpaint_pattern = self._create_pattern(self.INPAINT_KEYWORDS)
         self._pose_pattern = self._create_pattern(self.POSE_KEYWORDS)
-    
-    def _create_pattern(self, keywords):
-        """Crea un patron regex de palabras clave"""
-        escaped = [re.escape(kw) for kw in keywords]
-        return re.compile(r'\b(' + '|'.join(escaped) + r')\b', re.IGNORECASE)
-    
+        self._structural_pattern = self._create_pattern(self.STRUCTURAL_KEYWORDS)
+        self._attribute_pattern = self._create_pattern(self.ATTRIBUTE_KEYWORDS)
+
+    def get_suggested_magnitude(self, prompt: str) -> float:
+        """
+        Calcula una magnitud (0.0 a 1.0) sugerida basada en la complejidad semántica.
+        - Cambios de pose/estructura -> Alta magnitud (0.75 - 0.9)
+        - Cambios de objeto/persona -> Alta magnitud (0.7 - 0.85)
+        - Cambios de atributo/color -> Baja/Media magnitud (0.3 - 0.5)
+        """
+        if not prompt or not prompt.strip():
+            return 0.5
+            
+        prompt_lower = prompt.lower()
+        
+        # Conteo de intenciones
+        structural_count = len(self._structural_pattern.findall(prompt_lower))
+        pose_count = len(self._pose_pattern.findall(prompt_lower))
+        attribute_count = len(self._attribute_pattern.findall(prompt_lower))
+        outpaint_count = len(self._outpaint_pattern.findall(prompt_lower))
+        
+        # Base conservadora
+        magnitude = 0.4
+        
+        # Escalamiento por complejidad (No hardcoded if-else, sino acumulativo)
+        magnitude += (pose_count * 0.25)       # Las poses requieren mucho denoise
+        magnitude += (structural_count * 0.15) # Estructuras requieren denoise
+        magnitude += (outpaint_count * 0.10)   # Outpainting requiere espacio para crear
+        magnitude += (attribute_count * 0.05)  # Atributos son ligeros
+        
+        # Ajustes por palabras clave de "fuerza"
+        if any(w in prompt_lower for w in ["totalmente", "completamente", "radical", "radicalmente", "total", "complete"]):
+            magnitude += 0.2
+            
+        # Límites de seguridad
+        return max(0.25, min(0.95, magnitude))
+
     def analyze(self, prompt: str) -> Tuple[EditingMode, float]:
         """
         Analiza un prompt y devuelve el modo de edicion.

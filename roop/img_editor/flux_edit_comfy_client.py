@@ -93,12 +93,9 @@ class FluxEditComfyClient:
         if self._dual_clip:
             checks.append(("text_encoders", self._clip_name2, f"CLIP2 {self._clip_name2}"))
         
-        # LongCat y Flux comparten VAE
         if any(x in flux_version for x in ["flux2", "flux-2"]):
             vae_name = "flux2_vae.safetensors"
         else:
-            # LongCat usa el VAE de 16 canales estándar de Flux (ae.safetensors)
-            # qwen_image_vae.safetensors es un WanVAE (5D) y causa error de dimensiones
             vae_name = "ae.safetensors"
 
         checks.append(("vae", vae_name, f"VAE {vae_name}"))
@@ -200,8 +197,9 @@ class FluxEditComfyClient:
                 "class_type": "TextEncodeQwenImageEditPlus",
                 "inputs": {"clip": ["3", 0], "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
             }
+            wf["11"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index_timestep_zero"}}
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["3", 0]}}
-            positive_input = ["6", 0]
+            positive_input = ["11", 0]
             negative_input = ["7", 0]
         else:
             wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}}
@@ -233,15 +231,15 @@ class FluxEditComfyClient:
         if mname:
             wf["14"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
             if is_longcat:
-                wf["18"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["14", 0]}}
-            wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["18", 0] if is_longcat else ["14", 0], "channel": "red"}}
+                wf["19"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["14", 0]}}
+            wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["19", 0] if is_longcat else ["14", 0], "channel": "red"}}
             wf["5"] = {"class_type": "VAEEncodeForInpaint", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0], "mask": ["15", 0], "grow_mask_by": 4}}
         else:
             wf["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0]}}
 
         if is_longcat:
             print(
-                "[FluxClient] LongCat workflow v4: "
+                "[FluxClient] LongCat edit workflow: "
                 f"cfg={wf['8']['inputs']['cfg']}, "
                 f"model={wf['8']['inputs']['model']}, "
                 f"positive={wf['8']['inputs']['positive']}, "

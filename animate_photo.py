@@ -61,7 +61,7 @@ class AnimatePhoto:
             frames += 4 - remainder
         return frames
 
-    def build_wan_workflow(self, image_path, prompt, frames=81, fps=16, steps=25):
+    def build_wan_workflow(self, image_path, prompt, frames=81, fps=16, steps=25, cfg=5.0, width=832, height=480):
         seed = int(time.time()) % 1000000
         prompt = (prompt or "").strip() or "natural gentle movement, subtle realistic motion"
         frames = self._normalize_wan_frames(frames)
@@ -139,8 +139,8 @@ class AnimatePhoto:
             "6": {
                 "class_type": "WanVideoImageToVideoEncode",
                 "inputs": {
-                    "width": 832,
-                    "height": 480,
+                    "width": width,
+                    "height": height,
                     "num_frames": frames,
                     "noise_aug_strength": 0.0,
                     "start_latent_strength": 1.0,
@@ -148,7 +148,7 @@ class AnimatePhoto:
                     "force_offload": True,
                     "vae": ["3", 0],
                     "start_image": ["1", 0],
-                    "fun_or_fl2v_model": True
+                    "fun_or_fl2v_model": False
                 }
             },
             "7": {
@@ -158,7 +158,7 @@ class AnimatePhoto:
                     "image_embeds": ["6", 0],
                     "text_embeds": ["5", 0],
                     "steps": steps,
-                    "cfg": 5.0,
+                    "cfg": cfg,
                     "shift": 5.0,
                     "seed": seed,
                     "scheduler": "unipc",
@@ -171,7 +171,7 @@ class AnimatePhoto:
                 "inputs": {
                     "vae": ["3", 0],
                     "samples": ["7", 0],
-                    "enable_vae_tiling": False,
+                    "enable_vae_tiling": True,
                     "tile_x": 272,
                     "tile_y": 272,
                     "tile_stride_x": 144,
@@ -199,7 +199,7 @@ class AnimatePhoto:
         return nodes
 
     def animate_image(self, image_pil=None, prompt="", output_path="output.mp4",
-                      model="wan_video", frames=81, fps=16, timeout=3600):
+                      model="wan_video", frames=81, fps=16, steps=25, cfg=5.0, timeout=86400):
         if not self.check_comfyui_status():
             return False
 
@@ -218,7 +218,7 @@ class AnimatePhoto:
         if model != "wan_video":
             print(f"[AnimatePhoto] Motor {model} no implementado aquí; usando WanVideo para respetar prompt.")
 
-        wf = self.build_wan_workflow(fname, prompt, frames, fps)
+        wf = self.build_wan_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh)
 
         r = requests.post(f"{self.base}/prompt", json={"prompt": wf})
         if r.status_code != 200:
@@ -233,7 +233,7 @@ class AnimatePhoto:
             r = requests.get(f"{self.base}/history/{pid}")
             if r.status_code == 200 and pid in r.json():
                 hist = r.json()[pid]
-                if "outputs" in hist:
+                if "outputs" in hist and hist["outputs"]:
                     for node_id, node_out in hist["outputs"].items():
                         files = node_out.get("gifs", []) or node_out.get("videos", []) or node_out.get("images", [])
                         for f in files:

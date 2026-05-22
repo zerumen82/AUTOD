@@ -97,7 +97,7 @@ class PromptRewriter:
             self._llm = Llama(
                 model_path=model_path,
                 n_gpu_layers=n_gpu_layers,
-                n_ctx=2048,
+                n_ctx=8192,
                 verbose=False
             )
             print("[PromptRewriter] Rewriter listo")
@@ -156,7 +156,7 @@ class PromptRewriter:
         # Few-shot prompting para guiar al modelo pequeño (0.5B)
         full_prompt = (
             "<|im_start|>system\n"
-            "You are a professional image editor. Translate and analyze the user Request.\n"
+            "You are a professional image editor. Translate requests to English. If the user wants to remove or reveal something, the prompt should describe the result (e.g. 'desnuda' -> 'naked'). If adding, describe what to add.\n"
             "Examples:\n"
             "User: ponle gafas de sol\n"
             "Assistant: {\"prompt\": \"add sunglasses\", \"magnitude\": 0.5, \"mask_target\": \"face\", \"preserve_face\": true, \"is_global\": false}\n"

@@ -17,6 +17,8 @@ def check_engine_status():
     return "🔴 Motor Detenido"
 
 def on_generate_image(prompt, negative_prompt, steps, cfg_scale, width, height):
+    from roop.img_editor.prompt_translator import translate_prompt
+    prompt = translate_prompt(prompt)
     client = get_flux_gen_client()
     if not client.is_available():
         return None, "❌ El motor de IA no está activo. Inícialo en los controles de arriba."

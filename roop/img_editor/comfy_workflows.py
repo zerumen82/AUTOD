@@ -230,7 +230,7 @@ def build_inpaint_workflow(
         raise ValueError("No hay checkpoints disponibles en ComfyUI")
 
     # Negative prompt optimizado para contenido adulto
-final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed"
+    final_negative_prompt = "low quality, blurry, distorted, bad anatomy, ugly, deformed"
     if negative_prompt:
         final_negative_prompt += f", {negative_prompt}"
     
