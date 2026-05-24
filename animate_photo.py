@@ -238,67 +238,36 @@ class AnimatePhoto:
         }
         node_model_ref = ["2", 0]
 
-        if is_5b_ti2v:
-            image_embeds_node = "11"
-            nodes.update({
-                "6": {
-                    "class_type": "WanVideoEncode",
-                    "inputs": {
-                        "vae": ["3", 0],
-                        "image": ["1", 0],
-                        "enable_vae_tiling": False,
-                        "tile_x": 272,
-                        "tile_y": 272,
-                        "tile_stride_x": 144,
-                        "tile_stride_y": 128,
-                        "noise_aug_strength": 0.0,
-                        "latent_strength": 1.0
-                    }
-                },
-                "11": {
-                    "class_type": "WanVideoEmptyEmbeds",
-                    "inputs": {
-                        "width": width,
-                        "height": height,
-                        "num_frames": frames,
-                        "extra_latents": ["6", 0]
-                    }
+        image_embeds_node = "6"
+        context_ref = ["12", 0] if is_5b_ti2v and frames > 49 else None
+        nodes["6"] = {
+            "class_type": "WanVideoImageToVideoEncode",
+            "inputs": {
+                "width": width,
+                "height": height,
+                "num_frames": frames,
+                "noise_aug_strength": 0.0,
+                "start_latent_strength": 1.0,
+                "end_latent_strength": 1.0,
+                "force_offload": True,
+                "vae": ["3", 0],
+                "start_image": ["1", 0],
+                "fun_or_fl2v_model": use_fun_mode
+            }
+        }
+        if context_ref:
+            nodes["12"] = {
+                "class_type": "WanVideoContextOptions",
+                "inputs": {
+                    "context_schedule": "uniform_standard",
+                    "context_frames": 49,
+                    "context_stride": 4,
+                    "context_overlap": 24,
+                    "freenoise": True,
+                    "verbose": False,
+                    "fuse_method": "linear"
                 }
-            })
-            context_ref = ["12", 0] if frames > 49 else None
-            if context_ref:
-                nodes["12"] = {
-                    "class_type": "WanVideoContextOptions",
-                    "inputs": {
-                        "context_schedule": "uniform_standard",
-                        "context_frames": 49,
-                        "context_stride": 4,
-                        "context_overlap": 24,
-                        "freenoise": True,
-                        "verbose": False,
-                        "fuse_method": "linear"
-                    }
-                }
-        else:
-            image_embeds_node = "6"
-            context_ref = None
-            nodes.update({
-                "6": {
-                    "class_type": "WanVideoImageToVideoEncode",
-                    "inputs": {
-                        "width": width,
-                        "height": height,
-                        "num_frames": frames,
-                        "noise_aug_strength": 0.0,
-                        "start_latent_strength": 1.0,
-                        "end_latent_strength": 1.0,
-                        "force_offload": True,
-                        "vae": ["3", 0],
-                        "start_image": ["1", 0],
-                        "fun_or_fl2v_model": use_fun_mode
-                    }
-                }
-            })
+            }
 
         nodes.update({
             "3": {
@@ -405,7 +374,6 @@ class AnimatePhoto:
 
         vram_gb = get_vram_gb()
         if vram_gb <= 8:
-            steps = min(steps, 20)
             frames = min(frames, 81)
 
         w, h = image_pil.size
