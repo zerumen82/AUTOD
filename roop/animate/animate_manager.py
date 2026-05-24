@@ -1,4 +1,4 @@
-import os, time, tempfile
+import os, time, tempfile, subprocess, re
 from typing import Optional, Tuple
 from PIL import Image
 import numpy as np
@@ -6,6 +6,7 @@ import cv2
 import roop.globals
 
 from roop.comfy_workflows import get_comfyui_url
+from roop.utils import get_vram_gb
 
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,15 +19,21 @@ class AnimateManager:
         self.face_swapper = None
         self.face_analyzer = None
 
+    def _emit_progress(self, callback, message):
+        if callback is None:
+            return
+        try:
+            callback(message)
+        except Exception as e:
+            print(f"[AnimateManager] Progress callback error: {e}")
+
     def _check_models(self, engine):
         available = []
-        # Check diffusion_models for safetensors
         models_dir = get_models_dir()
         if os.path.exists(models_dir):
             for root, dirs, files in os.walk(models_dir):
                 available.extend(d.lower() for d in dirs)
                 available.extend(f.lower() for f in files if f.endswith((".gguf", ".safetensors")))
-        # Check unet/ for GGUF models
         unet_dir = os.path.join(os.path.dirname(models_dir), "unet")
         if os.path.exists(unet_dir):
             for root, dirs, files in os.walk(unet_dir):
@@ -45,30 +52,37 @@ class AnimateManager:
             missing = [n for n in needed if not any(n in a for a in available)]
         return missing
 
-    def resolve_params(self, engine, motion=127, frames=81, fps=16, magnitude=0.5):
-        # Base dinámica escalada por magnitud detectada por el LLM
-        # Magnitude (0.0 - 1.0)
+    def resolve_params(self, engine, motion=127, frames=33, fps=16, magnitude=0.5, steps=None, cfg=None):
         base = {
             "engine": engine,
-            "motion": int(64 + (magnitude * 192)), # 64 a 256
+            "motion": int(64 + (magnitude * 192)),
             "frames": frames,
             "fps": fps,
-            "steps": int(15 + (magnitude * 20)), # 15 a 35 pasos
-            "cfg": 3.5 + (magnitude * 4.0) # 3.5 a 7.5
+            "steps": steps if steps is not None else int(15 + (magnitude * 10)),
+            "cfg": cfg if cfg is not None else 3.5 + (magnitude * 2.0)
         }
-        
-        # Ajustes técnicos mínimos por motor
+
         if engine == "svd_turbo":
-            # SVD Turbo es destilado, requiere pocos pasos y CFG bajo
-            base.update({
-                "steps": int(4 + (magnitude * 4)), # 4 a 8 pasos
-                "cfg": 1.5 + (magnitude * 1.5)  # 1.5 a 3.0
-            })
-        elif engine == "wan_video":
-            # Wan Video 14B escala bien con pasos moderados
-            base["steps"] = int(20 + (magnitude * 10))
-            
-        print(f"[AnimateManager] Dynamic Params: Mag={magnitude:.2f}, Motion={base['motion']}, Steps={base['steps']}, CFG={base['cfg']:.1f}")
+            if steps is None:
+                base["steps"] = int(4 + (magnitude * 4))
+            if cfg is None:
+                base["cfg"] = 1.5 + (magnitude * 1.5)
+
+        vram_gb = get_vram_gb()
+        if vram_gb > 0 and vram_gb <= 8:
+            if engine == "wan_video":
+                if base["frames"] > 81:
+                    base["frames"] = 81
+                if base["steps"] > 20:
+                    base["steps"] = 20
+            else:
+                if base["frames"] > 33:
+                    base["frames"] = 33
+                if base["steps"] > 10:
+                    base["steps"] = 10
+            print(f"[AnimateManager] VRAM baja ({vram_gb}GB). Ajustando frames={base['frames']}, steps={base['steps']}.")
+
+        print(f"[AnimateManager] Params: frames={base['frames']}, steps={base['steps']}, cfg={base['cfg']:.1f}")
         return base
 
     def _get_semantic_analyzer(self):
@@ -81,8 +95,7 @@ class AnimateManager:
         prompt = (prompt or "").strip()
         from roop.img_editor.prompt_translator import translate_prompt
         translated = translate_prompt(prompt)
-        
-        # Análisis semántico para video (Cero Hardcoding)
+
         try:
             nlp = self._get_semantic_analyzer()
             mag = nlp.get_magnitude(translated)
@@ -91,30 +104,194 @@ class AnimateManager:
         except Exception as e:
             print(f"[AnimateManager] NLP Error: {e}. Fallback to 0.5")
             self._last_magnitude = 0.5
-            
-        print(f"[AnimateManager] Prompt: {translated[:80]}...")
-        return f"{translated}, natural motion, high quality"
 
-    def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=81, fps=16,
-                       face_stabilize=True, mask_image=None, mask_mode="global", mask_prompt="",
-                       progress_callback=None):
+        print(f"[AnimateManager] Prompt: {translated[:80]}...")
+        self._last_user_motion_prompt = translated
+        return translated
+
+    def _split_motion_clauses(self, prompt):
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return []
+
+        parts = re.split(
+            r"\s*(?:,|;|\.|\band then\b|\bthen\b|\bafter that\b|\bluego\b|\by luego\b|\bdespues\b|\bdespués\b)\s*",
+            prompt,
+            flags=re.IGNORECASE
+        )
+        clauses = [p.strip() for p in parts if len(p.strip()) > 2]
+
+        if len(clauses) <= 1 and re.search(r"\s+and\s+", prompt, flags=re.IGNORECASE):
+            clauses = [p.strip() for p in re.split(r"\s+\band\b\s+", prompt, flags=re.IGNORECASE) if len(p.strip()) > 2]
+
+        return clauses or [prompt]
+
+    def _build_autoregressive_chunk_prompt(self, final_prompt, chunk_index, total_chunks):
+        motion_prompt = getattr(self, "_last_user_motion_prompt", "") or final_prompt
+        clauses = self._split_motion_clauses(motion_prompt)
+
+        if len(clauses) >= total_chunks:
+            start = int(chunk_index * len(clauses) / total_chunks)
+            end = int((chunk_index + 1) * len(clauses) / total_chunks)
+            end = max(start + 1, end)
+            chunk_action = ", ".join(clauses[start:end])
+        elif len(clauses) > 1:
+            if chunk_index == 0:
+                chunk_action = clauses[0]
+            elif chunk_index == total_chunks - 1:
+                chunk_action = f"continuing the motion, {clauses[-1]}"
+            else:
+                action_index = min(len(clauses) - 1, chunk_index)
+                previous_action = clauses[max(0, action_index - 1)]
+                chunk_action = f"{previous_action}, continuing with {clauses[action_index]}"
+        elif total_chunks > 1:
+            temporal_hints = [
+                "",
+                "continuing the natural flow,",
+                "the scene unfolds further,",
+                "progressing the moment,",
+            ]
+            hint = temporal_hints[min(chunk_index, len(temporal_hints) - 1)]
+            chunk_action = f"{hint} {motion_prompt}".strip().lstrip(",").strip()
+        else:
+            chunk_action = motion_prompt
+
+        prompt_parts = []
+        for part in (chunk_action, motion_prompt, final_prompt):
+            part = (part or "").strip()
+            if part and part not in prompt_parts:
+                prompt_parts.append(part)
+        return ". ".join(prompt_parts)
+
+    def _extract_last_frame(self, video_path):
+        cap = cv2.VideoCapture(video_path)
+        last_frame = None
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            last_frame = frame
+        cap.release()
+        if last_frame is None:
+            return None
+        rgb = cv2.cvtColor(last_frame, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(rgb)
+
+    def _concat_video_chunks(self, chunk_paths, output_path, fps):
+        if not chunk_paths:
+            return False
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        if self._concat_video_chunks_ffmpeg(chunk_paths, output_path, fps):
+            return True
+
+        first = cv2.VideoCapture(chunk_paths[0])
+        width = int(first.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(first.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        first.release()
+        if width <= 0 or height <= 0:
+            return False
+
+        writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+        if not writer.isOpened():
+            print("[AnimateManager] OpenCV VideoWriter no disponible para concatenar MP4.")
+            return False
+
+        written = 0
+        for chunk_index, chunk_path in enumerate(chunk_paths):
+            cap = cv2.VideoCapture(chunk_path)
+            frame_index = 0
+            skip_first = chunk_index > 0
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frame_index += 1
+                if skip_first and frame_index == 1:
+                    continue
+                if frame.shape[1] != width or frame.shape[0] != height:
+                    frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+                writer.write(frame)
+                written += 1
+            cap.release()
+        writer.release()
+
+        valid = self._video_has_frames(output_path)
+        print(f"[AnimateManager] Autoregressive concat: {len(chunk_paths)} chunks, {written} frames -> {output_path}")
+        return written > 0 and valid
+
+    def _concat_video_chunks_ffmpeg(self, chunk_paths, output_path, fps):
+        try:
+            from roop.utils import get_ffmpeg_path
+            ffmpeg = get_ffmpeg_path()
+
+            cmd = [ffmpeg, "-hide_banner", "-y"]
+            for chunk_path in chunk_paths:
+                cmd.extend(["-i", chunk_path])
+
+            filters = []
+            labels = []
+            for index in range(len(chunk_paths)):
+                label = f"v{index}"
+                if index == 0:
+                    filters.append(f"[{index}:v]setpts=PTS-STARTPTS[{label}]")
+                else:
+                    filters.append(f"[{index}:v]trim=start_frame=1,setpts=PTS-STARTPTS[{label}]")
+                labels.append(f"[{label}]")
+            filter_complex = ";".join(filters) + ";" + "".join(labels) + f"concat=n={len(chunk_paths)}:v=1:a=0[outv]"
+
+            cmd.extend([
+                "-filter_complex", filter_complex,
+                "-map", "[outv]",
+                "-r", str(fps),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                output_path
+            ])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if result.returncode != 0:
+                print(f"[AnimateManager] FFmpeg concat failed: {result.stderr[-500:]}")
+                return False
+
+            if not self._video_has_frames(output_path):
+                print("[AnimateManager] FFmpeg concat generó un vídeo ilegible.")
+                return False
+
+            print(f"[AnimateManager] Autoregressive concat via FFmpeg: {len(chunk_paths)} chunks -> {output_path}")
+            return True
+        except Exception as e:
+            print(f"[AnimateManager] FFmpeg concat no disponible: {e}")
+            return False
+
+    def _video_has_frames(self, video_path):
+        if not os.path.exists(video_path) or os.path.getsize(video_path) <= 0:
+            return False
+        cap = cv2.VideoCapture(video_path)
+        try:
+            return cap.isOpened() and int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) > 0
+        finally:
+            cap.release()
+
+    def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=33, fps=16,
+                       face_stabilize=False, mask_image=None, mask_mode="global", mask_prompt="",
+                       progress_callback=None, steps=None, cfg=None, autoregressive_chunks=1):
         t0 = time.time()
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        # 1. Análisis de imagen omitido - el modelo recibe la imagen directamente
         img_description = ""
         final_prompt = self.rewrite_prompt(prompt, image_context=img_description)
         magnitude = getattr(self, "_last_magnitude", 0.5)
 
-        # 2. Resolución dinámica de parámetros técnicos
-        p = self.resolve_params(engine, motion_bucket, frames, fps, magnitude=magnitude)
-        
-        print(f"[AnimateManager] Engine={engine} Frames={frames} FPS={fps} Mag={magnitude}")
-        print(f"[AnimateManager] Final Prompt: {final_prompt[:80]}...")
+        p = self.resolve_params(engine, motion_bucket, frames, fps, magnitude=magnitude, steps=steps, cfg=cfg)
+
+        print(f"[AnimateManager] Engine={engine} Frames={p['frames']} FPS={fps} Steps={p['steps']} CFG={p['cfg']}")
 
         missing = self._check_models(engine)
-
+        if missing:
+            return None, f"Faltan modelos para {engine}: {', '.join(missing)}"
 
         temp_dir = tempfile.gettempdir()
         img_path = os.path.join(temp_dir, f"anim_in_{int(t0)}.png")
@@ -126,18 +303,65 @@ class AnimateManager:
         try:
             from animate_photo import AnimatePhoto
             animator = AnimatePhoto()
-            ok = animator.animate_image(
-                image_pil=image, prompt=final_prompt,
-                output_path=output_path, model=engine,
-                frames=p["frames"], fps=p["fps"],
-                steps=p["steps"], cfg=p["cfg"]
-            )
+            autoregressive_chunks = max(1, int(autoregressive_chunks or 1))
+
+            if engine == "wan_video" and autoregressive_chunks > 1:
+                print(f"[AnimateManager] Autoregressive mode: {autoregressive_chunks} chunks x {p['frames']} frames")
+                chunk_paths = []
+                current_image = image
+                for chunk_index in range(autoregressive_chunks):
+                    chunk_path = output_path.replace(".mp4", f"_chunk{chunk_index + 1:02d}.mp4")
+                    chunk_prompt = self._build_autoregressive_chunk_prompt(
+                        final_prompt,
+                        chunk_index,
+                        autoregressive_chunks
+                    )
+
+                    print(f"[AnimateManager] AR chunk {chunk_index + 1}/{autoregressive_chunks}: {chunk_path}")
+                    print(f"[AnimateManager] AR prompt {chunk_index + 1}: {chunk_prompt[:220]}...")
+                    self._emit_progress(
+                        progress_callback,
+                        f"Generando bloque AR {chunk_index + 1}/{autoregressive_chunks}..."
+                    )
+                    ok = animator.animate_image(
+                        image_pil=current_image, prompt=chunk_prompt,
+                        output_path=chunk_path, model=engine,
+                        frames=p["frames"], fps=p["fps"],
+                        steps=p["steps"], cfg=p["cfg"]
+                    )
+                    if not ok or not os.path.exists(chunk_path):
+                        elapsed = time.time() - t0
+                        return None, f"Error en chunk AR {chunk_index + 1}/{autoregressive_chunks} tras {elapsed:.0f}s"
+
+                    chunk_paths.append(chunk_path)
+                    if chunk_index < autoregressive_chunks - 1:
+                        self._emit_progress(
+                            progress_callback,
+                            f"Preparando continuidad desde el bloque {chunk_index + 1}..."
+                        )
+                        current_image = self._extract_last_frame(chunk_path)
+                        if current_image is None:
+                            elapsed = time.time() - t0
+                            return None, f"No se pudo extraer último frame del chunk {chunk_index + 1} tras {elapsed:.0f}s"
+
+                self._emit_progress(progress_callback, "Uniendo bloques AR...")
+                ok = self._concat_video_chunks(chunk_paths, output_path, p["fps"])
+            else:
+                self._emit_progress(progress_callback, "Generando animación...")
+                ok = animator.animate_image(
+                    image_pil=image, prompt=final_prompt,
+                    output_path=output_path, model=engine,
+                    frames=p["frames"], fps=p["fps"],
+                    steps=p["steps"], cfg=p["cfg"]
+                )
             if ok and os.path.exists(output_path):
                 if face_stabilize:
+                    self._emit_progress(progress_callback, "Estabilizando rostro...")
                     output_path = self.apply_face_stabilize(output_path, image)
                 elapsed = time.time() - t0
                 return output_path, f"OK ({elapsed:.0f}s)"
-            return None, "Error en generación"
+            elapsed = time.time() - t0
+            return None, f"Error en generación tras {elapsed:.0f}s"
         except Exception as e:
             return None, f"Error: {str(e)}"
 
@@ -153,14 +377,10 @@ class AnimateManager:
             ctx = 0 if torch.cuda.is_available() else -1
             self.face_analyzer.prepare(ctx_id=ctx, det_size=(1024, 1024))
             self.face_swapper = FaceSwap()
-            # Check for higher resolution model first (256x256 > 128x128)
             base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
             model_256 = os.path.join(base_dir, 'models', 'inswapper_256.onnx')
             model_128 = os.path.join(base_dir, 'models', 'inswapper_128.onnx')
-            if os.path.exists(model_256):
-                model_path = model_256
-            else:
-                model_path = model_128
+            model_path = model_256 if os.path.exists(model_256) else model_128
             self.face_swapper.Initialize({'devicename': 'cuda' if torch.cuda.is_available() else 'cpu',
                                           'model': model_path})
             return True
