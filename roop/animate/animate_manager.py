@@ -73,8 +73,6 @@ class AnimateManager:
             if engine == "wan_video":
                 if base["frames"] > 81:
                     base["frames"] = 81
-                if base["steps"] > 20:
-                    base["steps"] = 20
             else:
                 if base["frames"] > 33:
                     base["frames"] = 33

@@ -251,8 +251,8 @@ class AnimatePhoto:
                         "tile_y": 272,
                         "tile_stride_x": 144,
                         "tile_stride_y": 128,
-                        "noise_aug_strength": 0.2,
-                        "latent_strength": 0.5
+                        "noise_aug_strength": 0.0,
+                        "latent_strength": 1.0
                     }
                 },
                 "11": {
