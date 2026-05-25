@@ -865,6 +865,14 @@ class WanVideoSampler:
                     noise_multipliers[idx] = noise_multiplier_list[i]
                 log.info(f"Using Pusa noise multipliers: {noise_multipliers}")
 
+            # 5B Hybrid: keep frame 0 = clean VAE latent, broadcast to frames 1+ with noise_aug
+            if start_step == 0 and is_5b and noise.shape[1] > 1:
+                if len(extra_latents) == 1 and extra_latents[0]["index"] == 0 and extra_latents[0]["samples"].shape[2] == 1:
+                    vae_frame0 = noise[:, :1].clone()
+                    noise_aug_val = 0.15
+                    noise[:, 1:] = vae_frame0 * (1 - noise_aug_val) + noise[:, 1:] * noise_aug_val
+                    log.info(f"[Hybrid 5B] Injected frame 0 clean; broadcast to {noise.shape[1]-1} frames with noise_aug={noise_aug_val}")
+
         # lucy edit
         extra_channel_latents = image_embeds.get("extra_channel_latents", None)
         if extra_channel_latents is not None:
