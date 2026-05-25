@@ -359,7 +359,7 @@ class WanVideoSampler:
                         vae_latent = torch.cat([vae_latent, vae_latent[:, -1:].repeat(1, noise.shape[1] - vae_latent.shape[1], 1, 1)], dim=1)
                 if vae_latent.shape[2:] != noise.shape[2:]:
                     vae_latent = F.interpolate(vae_latent.unsqueeze(0), size=noise.shape[1:], mode='trilinear', align_corners=False).squeeze(0)
-                noise_aug = 0.15
+                noise_aug = 0.6
                 vae_frame0 = vae_latent[:, :1].repeat(1, noise.shape[1], 1, 1)
                 noise = vae_frame0 * (1 - noise_aug) + noise * noise_aug
                 image_cond = None
@@ -869,7 +869,7 @@ class WanVideoSampler:
             if start_step == 0 and is_5b and noise.shape[1] > 1:
                 if len(extra_latents) == 1 and extra_latents[0]["index"] == 0 and extra_latents[0]["samples"].shape[2] == 1:
                     vae_frame0 = noise[:, :1].clone()
-                    noise_aug_val = 0.4
+                    noise_aug_val = 0.15
                     noise[:, 1:] = vae_frame0 * (1 - noise_aug_val) + noise[:, 1:] * noise_aug_val
                     log.info(f"[Hybrid 5B] Injected frame 0 clean; broadcast to {noise.shape[1]-1} frames with noise_aug={noise_aug_val}")
 
