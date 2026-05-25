@@ -43,16 +43,11 @@ def build_animate_ui():
                     elem_classes=["btn-animate-main"]
                 )
 
-                with gr.Accordion("⚙️ Calidad / Velocidad", open=False):
-                    quality = gr.Radio(
-                        choices=["Rápido (20 pasos, 1 bloque)", "Normal AR (25 pasos, 2 bloques)", "Calidad AR (30 pasos, 3 bloques)"],
-                        value="Normal AR (25 pasos, 2 bloques)", label="Modo"
-                    )
-                    stabilize = gr.Checkbox(
-                        label="💠 Estabilizar rostro (post-proceso)",
-                        value=False,
-                        info="Aplica restauración facial frame a frame al final (alarga el proceso)"
-                    )
+                stabilize = gr.Checkbox(
+                    label="💠 Estabilizar rostro (post-proceso)",
+                    value=False,
+                    info="Aplica restauración facial frame a frame al final (alarga el proceso)"
+                )
 
                 progress_html = gr.HTML(
                     "<div style='text-align:center; color:#8b5cf6; padding:10px; font-weight:bold;'>Listo</div>"
@@ -70,6 +65,5 @@ def build_animate_ui():
         "btn_animate": btn_animate,
         "video_output": video_output,
         "progress_html": progress_html,
-        "quality": quality,
         "stabilize": stabilize,
     }
