@@ -39,6 +39,12 @@ class MouthDetector:
     MOUTH_CENTER_TOP = 0  # Encima de la boca
     MOUTH_CENTER_BOTTOM = 17  # Debajo de la boca
     
+    # Puntos intermedios para contorno de labios (máscara más precisa)
+    UPPER_LIP_LEFT_CURVE = 37   # Curva superior izquierda
+    UPPER_LIP_RIGHT_CURVE = 267  # Curva superior derecha
+    LOWER_LIP_LEFT_CURVE = 84   # Curva inferior izquierda
+    LOWER_LIP_RIGHT_CURVE = 314  # Curva inferior derecha
+
     # Puntos para detectar lengua (si está visible)
     TONGUE_TIP = 156  # Punta de lengua (aproximado)
     
@@ -95,9 +101,10 @@ class MouthDetector:
             face_landmarks = results.multi_face_landmarks[0]
             height, width = image.shape[:2]
             
-            # Extraer puntos de boca
+            # Extraer puntos de boca (incluyendo puntos intermedios para mejor forma)
+            mouth_indices = [0, 13, 14, 17, 18, 37, 84, 61, 267, 291, 314]
             mouth_points = {}
-            for idx in [0, 13, 14, 17, 18, 61, 291]:
+            for idx in mouth_indices:
                 landmark = face_landmarks.landmark[idx]
                 mouth_points[idx] = (
                     int(landmark.x * width),
@@ -128,7 +135,7 @@ class MouthDetector:
             # 0.30+ = boca muy abierta
             is_open = open_ratio > 0.12
             
-            # Datos adicionales
+            # Datos adicionales (con puntos intermedios para máscara más precisa)
             mouth_data = {
                 'upper_lip_top': mouth_points[13],
                 'upper_lip_bottom': mouth_points[14],
@@ -136,6 +143,10 @@ class MouthDetector:
                 'lower_lip_bottom': mouth_points[18],
                 'mouth_left': mouth_points[61],
                 'mouth_right': mouth_points[291],
+                'upper_lip_left_curve': mouth_points[37],
+                'upper_lip_right_curve': mouth_points[267],
+                'lower_lip_left_curve': mouth_points[84],
+                'lower_lip_right_curve': mouth_points[314],
                 'mouth_height': mouth_height,
                 'mouth_width': mouth_width,
                 'open_ratio': open_ratio,

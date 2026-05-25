@@ -8,6 +8,58 @@ from typing import Any, Tuple, Optional, Dict
 from roop.types import Face, Frame
 
 
+# Cache: detect once per face-type whether normed_embedding is writable (no setter = read-only)
+_writable_cache: dict[int, bool] = {}
+
+def _is_normed_embedding_writable(face) -> bool:
+    """
+    Duck-type detect: can this Face object accept a write to .normed_embedding?
+    insightface.Face  -> .normed_embedding is a read-only @property -> False
+    roop.*.Face        -> .normed_embedding is a plain attribute  -> True
+    Cached by class identity (type object id), not by name, so two Face classes
+    with the same __name__ cannot collide.
+    """
+    key = type(face)
+    if key not in _writable_cache:
+        try:
+            key.__setattr__(face, 'normed_embedding', None)
+        except AttributeError:
+            _writable_cache[key] = False
+        except Exception:
+            _writable_cache[key] = False
+        else:
+            _writable_cache[key] = True
+    return _writable_cache[key]
+
+
+def _normalize_source_embedding(source_face: Any) -> bool:
+    """
+    Normalize source_face.embedding into a unit-norm embedding, handling both
+    writable and read-only .normed_embedding (insightface.Face).
+
+    Returns True on success, False if embedding was absent or normalization failed.
+    Works with:
+      - roop.face_util.Face    (normed_embedding writable  -> sets both attrs)
+      - roop.types.Face        (normed_embedding writable  -> sets both attrs)
+      - insightface.Face       (normed_embedding wirter-only  -> only sets embedding so the property computes correctly)
+    """
+    import numpy as np
+    emb = getattr(source_face, 'embedding', None)
+    if emb is None:
+        return False
+    emb = np.array(emb, dtype=np.float32).flatten()
+    if emb.shape[0] > 512:
+        emb = emb[:512]
+    norm = np.linalg.norm(emb)
+    if norm <= 0:
+        return False
+    normalized = emb / norm
+    source_face.embedding = normalized
+    if _is_normed_embedding_writable(source_face):
+        source_face.normed_embedding = normalized
+    return True
+
+
 class FaceSwap:
     def __init__(self) -> None:
         self.model = None
@@ -95,22 +147,17 @@ class FaceSwap:
             
             # Preparar caras: convertir listas a numpy arrays si es necesario
             for face in (target_face, source_face):
-                for attr in ['kps', 'bbox', 'embedding', 'normed_embedding']:
+                for attr in ['kps', 'bbox', 'embedding']:
                     val = getattr(face, attr, None)
-                    if val is not None and isinstance(val, list):
-                        setattr(face, attr, np.array(val, dtype=np.float32))
+                    if val is not None and isinstance(val, (list, tuple)):
+                        try:
+                            setattr(face, attr, np.array(val, dtype=np.float32))
+                        except (AttributeError, TypeError) as e:
+                            print(f"[FaceSwap] Aviso: No se pudo convertir {attr} a numpy array: {e}")
+                # normed_embedding se maneja por separado via _normalize_* si es necesario
             
             # Preparar embedding de origen específicamente para inswapper (512-dim)
-            if hasattr(source_face, 'embedding') and source_face.embedding is not None:
-                emb = np.array(source_face.embedding, dtype=np.float32).flatten()
-                if emb.shape[0] > 512:
-                    emb = emb[:512]
-                source_face.embedding = emb
-                
-                # Normalizar si no lo está
-                norm = np.linalg.norm(emb)
-                if norm > 0:
-                    source_face.normed_embedding = emb / norm
+            _normalize_source_embedding(source_face)
 
             # Ejecutar swap
             try:
@@ -330,8 +377,9 @@ def detect_mouth_open(target_face, landmarks_106, image) -> Tuple[bool, Optional
             is_open, ratio, mouth_data = detector.detect_mouth_open(face_roi)
 
             if mouth_data:
+                landmark_keys = {'upper_lip_top', 'upper_lip_bottom', 'lower_lip_top', 'lower_lip_bottom', 'mouth_left', 'mouth_right', 'upper_lip_left_curve', 'upper_lip_right_curve', 'lower_lip_left_curve', 'lower_lip_right_curve', 'mouth_center_top', 'mouth_center_bottom', 'upper_lip_center', 'lower_lip_center'}
                 for key, val in mouth_data.items():
-                    if isinstance(val, tuple) and len(val) == 2:
+                    if key in landmark_keys and isinstance(val, tuple) and len(val) == 2:
                         mouth_data[key] = (val[0] + x1, val[1] + y1)
                 mouth_data['roi_offset'] = (x1, y1)
                 mouth_data['roi_size'] = (face_roi.shape[1], face_roi.shape[0])
@@ -363,29 +411,42 @@ def detect_mouth_open(target_face, landmarks_106, image) -> Tuple[bool, Optional
 
 
 def create_mouth_preservation_mask(image, mouth_data, blend_ratio=0.5) -> np.ndarray:
-    """Crea máscara suave para la boca basándose en los datos detectados"""
+    """Crea máscara suave para la boca con forma elíptica de 8 puntos"""
     mask = np.zeros(image.shape[:2], dtype=np.float32)
     if not mouth_data:
         return mask
-        
+
     try:
-        # Puntos clave para el polígono de la boca
+        # 8 puntos en orden circular para forma elíptica
         pts = []
-        # Labio superior
-        if 'upper_lip_top' in mouth_data: pts.append(mouth_data['upper_lip_top'])
-        if 'mouth_right' in mouth_data: pts.append(mouth_data['mouth_right'])
-        # Labio inferior
-        if 'lower_lip_bottom' in mouth_data: pts.append(mouth_data['lower_lip_bottom'])
-        if 'mouth_left' in mouth_data: pts.append(mouth_data['mouth_left'])
-        
+        order = [
+            'mouth_left',
+            'upper_lip_left_curve',
+            'upper_lip_top',
+            'upper_lip_right_curve',
+            'mouth_right',
+            'lower_lip_right_curve',
+            'lower_lip_bottom',
+            'lower_lip_left_curve',
+        ]
+
+        for key in order:
+            if key in mouth_data:
+                pts.append(mouth_data[key])
+
+        # Fallback a 4 puntos si faltan los intermedios
+        if len(pts) < 4:
+            pts = []
+            if 'upper_lip_top' in mouth_data: pts.append(mouth_data['upper_lip_top'])
+            if 'mouth_right' in mouth_data: pts.append(mouth_data['mouth_right'])
+            if 'lower_lip_bottom' in mouth_data: pts.append(mouth_data['lower_lip_bottom'])
+            if 'mouth_left' in mouth_data: pts.append(mouth_data['mouth_left'])
+
         if len(pts) >= 3:
             pts_arr = np.array(pts, dtype=np.int32)
             cv2.fillPoly(mask, [pts_arr], 1.0)
-            
-            # Aplicar desenfoque fuerte para suavizar la transición
-            blur_size = 15
-            mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
     except Exception as e:
         print(f"[MOUTH_MASK] Error: {e}")
-        
+
+    # NO hacer blur aquí (ProcessMgr ya lo hace con tamaño dinámico)
     return mask * blend_ratio

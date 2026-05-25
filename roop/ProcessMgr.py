@@ -1451,8 +1451,8 @@ class ProcessMgr:
                 import copy
                 source_face_obj = copy.copy(source_face)
                 source_face_obj.embedding = self.master_source_embedding
-                source_face_obj.normed_embedding = self.master_source_embedding
                 source_face = source_face_obj
+                # normed_embedding es una propiedad de solo lectura en insightface.Face; no se puede asignar directamente
                 print(f"[IDENTITY] Usando Master Embedding para swap (estabilidad optimizada)")
 
             res = self.processors["faceswap"].Run(source_face, target_face, result_frame, paste_back=True)
@@ -1488,8 +1488,8 @@ class ProcessMgr:
             elif selected_enhancer == "Restoreformer++":
                 enhancer_key = "enhance_restoreformer"
 
-            # Usa el valor de la UI/globals, con default 0.5 para un equilibrio entre swap y calidad
-            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.5)
+            # Usa el valor de la UI/globals, con default 0.8 para máxima nitidez (menos mezcla con el original pixelado)
+            enhancer_blend_factor = getattr(roop.globals, 'enhancer_blend_factor', 0.8)
 
             if use_enhancer and enhancer_key and enhancer_key in self.processors:
                 try:
@@ -1579,14 +1579,20 @@ class ProcessMgr:
             # ============================================
             # 4. PRESERVACIÓN DE BOCA (CON TRACKING PARA VIDEOS)
             # ============================================
-            if mouth_open and mouth_region is not None:
+            if mouth_open and mouth_region is not None and mouth_open_ratio > 0.15:
                 try:
                     is_video_mode = getattr(self.options, 'current_video_path', None) is not None
                     video_key = getattr(self, '_current_video_key', f'frame_{call_num}') if is_video_mode else None
 
-                    # Reducido: Preservar menos boca original para que el swap sea más visible
-                    dynamic_blend = 0.3 - (mouth_open_ratio * 0.2)
-                    dynamic_blend = min(0.3, max(0.1, dynamic_blend))
+                    if not hasattr(self, '_mouth_blend_smooth'):
+                        self._mouth_blend_smooth = {}
+
+                    # Preservación progresiva: más apertura = más preservación
+                    # open_ratio 0.15 → blend ~0.30 (mínimo, predomina el swap)
+                    # open_ratio 0.30 → blend ~0.50 (mitad y mitad)
+                    # open_ratio 0.50+ → blend ~0.75 (predomina boca original)
+                    dynamic_blend = 0.10 + (mouth_open_ratio * 1.3)
+                    dynamic_blend = min(0.80, max(0.25, dynamic_blend))
 
                     if video_key and video_key in self._mouth_blend_smooth:
                         smooth_blend = 0.7 * dynamic_blend + 0.3 * self._mouth_blend_smooth[video_key]
@@ -1600,12 +1606,11 @@ class ProcessMgr:
                     mouth_mask_region = mouth_mask[y1:y2, x1:x2]
                     mouth_mask_3ch = np.stack([mouth_mask_region] * 3, axis=-1) if mouth_mask_region.ndim == 2 else mouth_mask_region
 
-                    # NUEVO: Máscara más localizada y nítida para evitar "mouth on arm"
-                    blur_kernel = 7 # Reducido de 15 para más precisión
+                    blur_kernel = 7
                     if isinstance(mouth_region, dict):
-                        width = mouth_region.get('width', 30)
-                        if isinstance(width, float): width = int(width)
-                        blur_kernel = int(max(5, min(width // 5, 13) | 1))
+                        mw = mouth_region.get('mouth_width', 30)
+                        if isinstance(mw, (int, float)):
+                            blur_kernel = int(max(5, min(mw // 6, 15) | 1))
 
                     mouth_mask_3ch = cv2.GaussianBlur(mouth_mask_3ch, (blur_kernel, blur_kernel), 0)
                     mouth_mask_3ch = np.clip(mouth_mask_3ch, 0.0, 1.0)

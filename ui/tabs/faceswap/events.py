@@ -287,6 +287,12 @@ selected_target_face_idx = None
 
 def wire_events(ui_comp):
     """Conecta los componentes con la lógica"""
+
+    # Warmup: precargar FaceAnalysis al iniciar la pestaña
+    try:
+        _warmup_face_analyser_async()
+    except Exception as e:
+        print(f"[FaceSwap] Warmup error: {e}")
     
     # --- FILTRADO ---
     def on_filter_change(gender, size):
@@ -447,8 +453,12 @@ def wire_events(ui_comp):
         frame_idx = max(1, int(frame_num or 1))
         
         detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
-        state.ALL_DETECTED_FACES_DATA = detected_faces # Guardar todo para filtros
+        state.ALL_DETECTED_FACES_DATA = detected_faces
         state.SELECTION_FACES_DATA = detected_faces
+        
+        if not detected_faces:
+            print(f"[FACES] ⚠️ No se detectaron caras en frame {frame_idx}")
+            gr.Warning(f"⚠️ No se detectaron caras en frame {frame_idx}. Prueba con otro frame o imagen.")
         
         thumbs = [_normalize_face_thumb(util.convert_to_gradio(f[1], is_rgb=True), 300) for f in detected_faces]
         
@@ -494,6 +504,9 @@ def wire_events(ui_comp):
         for f in files:
             f_path = f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
             faces_data = logic.extract_face_images(f_path, is_source_face=True)
+            if not faces_data:
+                print(f"[FACES] ⚠️ No se detectaron caras en: {os.path.basename(f_path)}")
+                gr.Warning(f"⚠️ No se detectaron caras en {os.path.basename(f_path)}")
             for face_obj, face_img in faces_data:
                 if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE: continue
                 from roop.types import FaceSet
