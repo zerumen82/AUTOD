@@ -154,12 +154,7 @@ class AnimateManager:
         else:
             chunk_action = motion_prompt
 
-        prompt_parts = []
-        for part in (chunk_action, motion_prompt, final_prompt):
-            part = (part or "").strip()
-            if part and part not in prompt_parts:
-                prompt_parts.append(part)
-        return ". ".join(prompt_parts)
+        return chunk_action.strip()
 
     def _extract_last_frame(self, video_path):
         cap = cv2.VideoCapture(video_path)
