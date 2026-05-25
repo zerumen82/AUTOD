@@ -4,15 +4,15 @@ import roop.globals
 from roop.animate.animate_manager import get_animate_manager
 
 QUALITY_PRESETS = {
-    "Rápido (1 bloque)":  {"frames": 49, "steps": 20, "cfg": 5.0, "chunks": 1},
-    "Normal AR (2 bloques)":  {"frames": 49, "steps": 25, "cfg": 5.5, "chunks": 2},
-    "Calidad AR (3 bloques)": {"frames": 49, "steps": 30, "cfg": 6.0, "chunks": 3},
+    "Rápido (20 pasos, 1 bloque)":  {"frames": 49, "steps": 20, "cfg": 5.0, "chunks": 1},
+    "Normal AR (25 pasos, 2 bloques)":  {"frames": 49, "steps": 25, "cfg": 5.5, "chunks": 2},
+    "Calidad AR (30 pasos, 3 bloques)": {"frames": 49, "steps": 30, "cfg": 6.0, "chunks": 3},
 }
 
 
-def generate_grok_animation(image, prompt, quality="Normal AR (2 bloques)", stabilize=False, progress_callback=None):
+def generate_grok_animation(image, prompt, quality="Normal AR (25 pasos, 2 bloques)", stabilize=False, progress_callback=None):
     try:
-        presets = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["Normal AR (2 bloques)"])
+        presets = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["Normal AR (25 pasos, 2 bloques)"])
         manager = get_animate_manager()
 
         video_path, msg = manager.generate_video(
