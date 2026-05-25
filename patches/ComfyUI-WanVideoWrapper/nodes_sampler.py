@@ -223,6 +223,7 @@ class WanVideoSampler:
         add_cond = attn_cond = attn_cond_neg = noise_pred_flipped = None
         humo_audio = humo_audio_neg = None
         has_ref = image_embeds.get("has_ref", False)
+        _is_5b_i2v = False  # flag for official 5B TI2V approach (frame 0 frozen + clean_latent_indices)
 
         #I2V
         story_mem_latents = image_embeds.get("story_mem_latents", None)
@@ -349,7 +350,9 @@ class WanVideoSampler:
 
             seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * noise.shape[1])
 
-            # 5B TI2V (in_dim == out_dim): use VAE latent as initial noise, don't pass y to model
+            # 5B TI2V (in_dim == out_dim): match official WanTI2V.i2v() approach
+            # frame 0 = pure VAE latent (no noise), frames 1+ = pure random noise
+            # frame 0 is kept frozen via clean_latent_indices during denoising
             if transformer.in_dim == transformer.out_dim and image_cond_raw is not None:
                 vae_latent = image_cond_raw.to(dtype=noise.dtype, device=noise.device)
                 if vae_latent.shape[1] != noise.shape[1]:
@@ -359,9 +362,8 @@ class WanVideoSampler:
                         vae_latent = torch.cat([vae_latent, vae_latent[:, -1:].repeat(1, noise.shape[1] - vae_latent.shape[1], 1, 1)], dim=1)
                 if vae_latent.shape[2:] != noise.shape[2:]:
                     vae_latent = F.interpolate(vae_latent.unsqueeze(0), size=noise.shape[1:], mode='trilinear', align_corners=False).squeeze(0)
-                noise_aug = 0.6
-                vae_frame0 = vae_latent[:, :1].repeat(1, noise.shape[1], 1, 1)
-                noise = vae_frame0 * (1 - noise_aug) + noise * noise_aug
+                noise[:, :1] = vae_latent[:, :1]  # frame 0 = exact VAE latent (pure)
+                _is_5b_i2v = True  # signal for clean_latent_indices setup
                 image_cond = None
                 image_cond_mask = None
 
@@ -872,6 +874,11 @@ class WanVideoSampler:
                     noise_aug_val = 0.15
                     noise[:, 1:] = vae_frame0 * (1 - noise_aug_val) + noise[:, 1:] * noise_aug_val
                     log.info(f"[Hybrid 5B] Injected frame 0 clean; broadcast to {noise.shape[1]-1} frames with noise_aug={noise_aug_val}")
+
+            # Official 5B TI2V approach: frame 0 = pure VAE latent, frozen during sampling
+            if _is_5b_i2v and start_step == 0:
+                clean_latent_indices = [0]
+                log.info("[5B I2V] Frame 0 frozen as exact VAE latent; frames 1+ = pure noise")
 
         # lucy edit
         extra_channel_latents = image_embeds.get("extra_channel_latents", None)
