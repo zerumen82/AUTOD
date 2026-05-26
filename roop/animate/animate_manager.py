@@ -38,7 +38,9 @@ class AnimateManager:
         if os.path.exists(unet_dir):
             for root, dirs, files in os.walk(unet_dir):
                 available.extend(f.lower() for f in files if f.endswith(".gguf"))
-        if engine == "wan_video":
+        if engine == "framepack":
+            needed = []
+        elif engine == "wan_video":
             needed = ["wan2.2", "wan2_2", "wan2.1", "wan2_1"]
         elif engine == "svd_turbo":
             needed = ["svd", "stablevideo"]
@@ -48,6 +50,8 @@ class AnimateManager:
             needed = []
         if engine == "wan_video":
             missing = [] if any(n in a for n in needed for a in available) else ["wan2.2/wan2.1 (GGUF o safetensors)"]
+        elif engine == "framepack":
+            missing = []
         else:
             missing = [n for n in needed if not any(n in a for a in available)]
         return missing
@@ -62,7 +66,17 @@ class AnimateManager:
             "cfg": cfg if cfg is not None else 3.5 + (magnitude * 2.0)
         }
 
-        if engine == "svd_turbo":
+        if engine == "framepack":
+            if steps is None:
+                base["steps"] = int(25 + (magnitude * 10))
+            if cfg is None:
+                base["cfg"] = 4.5 + (magnitude * 2.0)
+        elif engine == "wan_video":
+            if steps is None:
+                base["steps"] = int(20 + (magnitude * 15))
+            if cfg is None:
+                base["cfg"] = 4.0 + (magnitude * 2.0)
+        elif engine == "svd_turbo":
             if steps is None:
                 base["steps"] = int(4 + (magnitude * 4))
             if cfg is None:
@@ -73,6 +87,11 @@ class AnimateManager:
             if engine == "wan_video":
                 if base["frames"] > 81:
                     base["frames"] = 81
+            elif engine == "framepack":
+                # Forzar 121 frames para 5 segundos a 24fps
+                base["frames"] = 121
+                if base["steps"] > 35:
+                    base["steps"] = 35
             else:
                 if base["frames"] > 33:
                     base["frames"] = 33
@@ -298,7 +317,15 @@ class AnimateManager:
             animator = AnimatePhoto()
             autoregressive_chunks = max(1, int(autoregressive_chunks or 1))
 
-            if engine == "wan_video" and autoregressive_chunks > 1:
+            if engine == "framepack":
+                self._emit_progress(progress_callback, "Generando animación con FramePack...")
+                ok = animator.animate_image(
+                    image_pil=image, prompt=final_prompt,
+                    output_path=output_path, model="framepack",
+                    frames=p["frames"], fps=p["fps"],
+                    steps=p["steps"], cfg=p["cfg"]
+                )
+            elif engine == "wan_video" and autoregressive_chunks > 1:
                 print(f"[AnimateManager] Autoregressive mode: {autoregressive_chunks} chunks x {p['frames']} frames")
                 chunk_paths = []
                 current_image = image

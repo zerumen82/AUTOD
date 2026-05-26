@@ -5,6 +5,7 @@ ComfyUI Workflows para Video AI
 
 import os
 import requests
+from roop.utils import get_vram_gb
 
 # Modelos disponibles
 SVD_TURBO_MODEL = "stable_video_diffusion"  # Nombre base del modelo SVD
@@ -1160,6 +1161,10 @@ def get_wan_video_workflow(
             wan_model = p
             print(f"[WanVideo] Modelo encontrado: {wan_model}")
             break
+
+
+
+
     
     if not wan_model:
         # Buscar cualquier archivo GGUF
@@ -1171,7 +1176,28 @@ def get_wan_video_workflow(
     
     if not wan_model:
         raise ValueError("No se encontró modelo WanVideo GGUF en diffusion_models")
-    
+
+    # Auto-detectar VAE segun modelo (14B = 16-ch VAE, 5B = 48-ch VAE)
+    vae_path = os.path.join(models_path, "vae")
+    is_14b = "14b" in wan_model.lower()
+    vae_name = "Wan2.1_VAE.pth" if is_14b else "Wan2.2_VAE_bf16.safetensors"
+    if os.path.exists(vae_path):
+        for f in os.listdir(vae_path):
+            if f.lower().endswith((".safetensors", ".pth")) and "wan" in f.lower():
+                if is_14b and ("wan2.1" in f.lower() or "wan21" in f.lower()):
+                    vae_name = f
+                    break
+                elif not is_14b and ("wan2.2" in f.lower() or "wan22" in f.lower()):
+                    vae_name = f
+                    break
+        else:
+            for f in os.listdir(vae_path):
+                if f.lower().endswith((".safetensors", ".pth")) and ("wan" in f.lower()):
+                    vae_name = f
+                    break
+
+    _check_wan_vae_channels(vae_path, vae_name)
+
     return {
         # 1: Cargar imagen de entrada
         "1": {
@@ -1193,21 +1219,22 @@ def get_wan_video_workflow(
             "class_type": "WanVideoModelLoader",
             "_meta": {"title": f"WanVideoModelLoader ({wan_model})"}
         },
-        # 3: Cargar VAE
+        # 3: Cargar VAE (auto-detectado segun modelo)
         "3": {
             "inputs": {
-                "model_name": "Wan2.2_VAE.safetensors",
+                "model_name": vae_name,
                 "precision": "bf16"
             },
             "class_type": "WanVideoVAELoader",
-            "_meta": {"title": "WanVideoVAELoader"}
+            "_meta": {"title": f"WanVideoVAELoader ({vae_name})"}
         },
         # 4: Cargar T5 Text Encoder
         "4": {
             "inputs": {
                 "model_name": "umt5-xxl-enc-bf16.safetensors",
                 "precision": "bf16",
-                "load_device": "offload_device"
+                "load_device": "offload_device",
+                "quantization": "fp8_e4m3fn" if get_vram_gb() <= 12 else "disabled"
             },
             "class_type": "LoadWanVideoT5TextEncoder",
             "_meta": {"title": "LoadWanVideoT5TextEncoder"}
@@ -1287,10 +1314,31 @@ def get_wan_video_workflow(
                  "pingpong": False,
                  "save_output": True
              },
-             "class_type": "VHS_VideoCombine",
-             "_meta": {"title": "Video Combine (MP4)"}
-         }
+            "class_type": "VHS_VideoCombine",
+            "_meta": {"title": "Video Combine (MP4)"}
+        }
     }
+
+
+# Shared VAE validation helper
+def _check_wan_vae_channels(vae_path, vae_name):
+    """Validate VAE channel count and log it."""
+    full_path = os.path.join(vae_path, vae_name)
+    if not os.path.exists(full_path):
+        return
+    try:
+        if vae_name.endswith(".safetensors"):
+            from safetensors import safe_open
+            with safe_open(full_path, framework="pt") as sf:
+                vae_ch = sf.get_tensor("conv2.weight").shape[0] if "conv2.weight" in sf.keys() else sf.get_tensor("model.conv2.weight").shape[0]
+        else:
+            import torch
+            sd = torch.load(full_path, map_location="cpu", weights_only=True)
+            key = "model.conv2.weight" if "model.conv2.weight" in sd else "conv2.weight"
+            vae_ch = sd[key].shape[0]
+        print(f"[WanVideo] VAE {vae_name}: {vae_ch} canales")
+    except Exception as e:
+        print(f"[WanVideo] No se pudo validar VAE: {e}")
 
 
 def get_wan_video_workflow_optimized(
@@ -1354,6 +1402,26 @@ def get_wan_video_workflow_optimized(
     if not wan_model:
         raise ValueError("No se encontró modelo WanVideo GGUF en diffusion_models")
 
+    # Auto-detectar VAE segun modelo (14B = 16-ch VAE, 5B = 48-ch VAE)
+    is_14b = "14b" in wan_model.lower()
+    vae_name = "Wan2.1_VAE.pth" if is_14b else "Wan2.2_VAE_bf16.safetensors"
+    if os.path.exists(vae_path):
+        for f in os.listdir(vae_path):
+            if f.lower().endswith((".safetensors", ".pth")) and "wan" in f.lower():
+                if is_14b and ("wan2.1" in f.lower() or "wan21" in f.lower()):
+                    vae_name = f
+                    break
+                elif not is_14b and ("wan2.2" in f.lower() or "wan22" in f.lower()):
+                    vae_name = f
+                    break
+        else:
+            for f in os.listdir(vae_path):
+                if f.lower().endswith((".safetensors", ".pth")) and ("wan" in f.lower()):
+                    vae_name = f
+                    break
+
+    _check_wan_vae_channels(vae_path, vae_name)
+
     return {
         # 1: Cargar imagen de entrada
         "1": {
@@ -1375,21 +1443,22 @@ def get_wan_video_workflow_optimized(
             "class_type": "WanVideoModelLoader",
             "_meta": {"title": f"WanVideoModelLoader ({wan_model})"}
         },
-        # 3: Cargar VAE
+        # 3: Cargar VAE (auto-detectado segun modelo)
         "3": {
             "inputs": {
-                "model_name": "Wan2.2_VAE.safetensors",
+                "model_name": vae_name,
                 "precision": "bf16"
             },
             "class_type": "WanVideoVAELoader",
-            "_meta": {"title": "WanVideoVAELoader"}
+            "_meta": {"title": f"WanVideoVAELoader ({vae_name})"}
         },
         # 4: Cargar T5 Text Encoder
         "4": {
             "inputs": {
                 "model_name": "umt5-xxl-enc-bf16.safetensors",
                 "precision": "bf16",
-                "load_device": "offload_device"
+                "load_device": "offload_device",
+                "quantization": "fp8_e4m3fn" if get_vram_gb() <= 12 else "disabled"
             },
             "class_type": "LoadWanVideoT5TextEncoder",
             "_meta": {"title": "LoadWanVideoT5TextEncoder"}

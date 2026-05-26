@@ -32,16 +32,16 @@ else:
     COMFYUI_VENV_PYTHON = os.path.join(COMFYUI_DIR, "venv", "bin", "python")
     PROJECT_VENV_PYTHON = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "venv", "bin", "python"))
 
-# Determinar cual Python usar - preferir venv_flux (GPU)
-if os.path.exists(FLUX_VENV_PYTHON):
-    COMFYUI_PYTHON = FLUX_VENV_PYTHON
-    print(f"[ComfyLauncher] Usando venv_flux (GPU): {COMFYUI_PYTHON}")
-elif os.path.exists(COMFYUI_VENV_PYTHON):
+# Determinar cual Python usar - preferir venv de ComfyUI (el mas completo)
+if os.path.exists(COMFYUI_VENV_PYTHON):
     COMFYUI_PYTHON = COMFYUI_VENV_PYTHON
-    print(f"[ComfyLauncher] Usando venv de ComfyUI: {COMFYUI_PYTHON}")
+    print(f"[ComfyLauncher] Usando venv de ComfyUI (RECOMENDADO): {COMFYUI_PYTHON}")
 elif os.path.exists(PROJECT_VENV_PYTHON):
     COMFYUI_PYTHON = PROJECT_VENV_PYTHON
     print(f"[ComfyLauncher] Usando venv del proyecto: {COMFYUI_PYTHON}")
+elif os.path.exists(FLUX_VENV_PYTHON):
+    COMFYUI_PYTHON = FLUX_VENV_PYTHON
+    print(f"[ComfyLauncher] Usando venv_flux: {COMFYUI_PYTHON}")
 else:
     COMFYUI_PYTHON = sys.executable
     print(f"[ComfyLauncher] Usando Python del sistema: {COMFYUI_PYTHON}")

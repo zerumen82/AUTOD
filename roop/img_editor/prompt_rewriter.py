@@ -123,14 +123,14 @@ class PromptRewriter:
             except:
                 pass
 
-    def rewrite(self, prompt: str, image_context: str = "") -> Dict:
+    def rewrite(self, prompt: str, image_context: str = "", mode: str = "img2img") -> Dict:
         """Devuelve un diccionario con el análisis completo del LLM"""
         if self._llm == "heuristic":
             return self._rewrite_heuristic(prompt)
         
         if self._llm is not None:
             try:
-                return self._rewrite_with_llm(prompt, self._llm, image_context=image_context)
+                return self._rewrite_with_llm(prompt, self._llm, image_context=image_context, mode=mode)
             except Exception as e:
                 print(f"[PromptRewriter] Error con LLM: {e}")
         
@@ -151,22 +151,34 @@ class PromptRewriter:
             "reasoning": "LLM unavailable"
         }
 
-    def _rewrite_with_llm(self, prompt: str, llm, image_context: str = "") -> Dict:
+    def _rewrite_with_llm(self, prompt: str, llm, image_context: str = "", mode: str = "img2img") -> Dict:
         ctx = image_context[:200] if len(image_context) > 200 else image_context
-        # Few-shot prompting para guiar al modelo pequeño (0.5B)
+        
+        if mode == "txt2img":
+            # Prompt para GENERACIÓN PURA (txt2img) - TRADUCTOR ESTRICTO: CERO ADICIONES
+            system_msg = (
+                "You are a strict literal translator. Your only job is to translate the user request from Spanish to English.\n"
+                "CRITICAL: DO NOT add any extra words. DO NOT add quality keywords like 'photorealistic' or '8k'.\n"
+                "KEEP the exact same level of detail as the user provided. If the user is brief, keep it brief. If the user describes a color, use that exact color.\n"
+                "Examples:\n"
+                "User: una mujer en el bosque\n"
+                "Assistant: {\"prompt\": \"a woman in a forest\", \"magnitude\": 0.5, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": true}\n"
+                "User: guerrero vikingo moreno\n"
+                "Assistant: {\"prompt\": \"brunette viking warrior\", \"magnitude\": 0.8, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": true}\n"
+            )
+        else:
+            # Prompt para EDICIÓN (img2img)
+            system_msg = (
+                "You are a professional image editor. Translate requests to English. If the user wants to remove or reveal something, the prompt should describe the result (e.g. 'desnuda' -> 'naked'). If adding, describe what to add.\n"
+                "Examples:\n"
+                "User: ponle gafas de sol\n"
+                "Assistant: {\"prompt\": \"add sunglasses\", \"magnitude\": 0.5, \"mask_target\": \"face\", \"preserve_face\": true, \"is_global\": false}\n"
+                "User: ponle un traje de payaso\n"
+                "Assistant: {\"prompt\": \"wear a clown costume\", \"magnitude\": 0.9, \"mask_target\": \"clothes\", \"preserve_face\": true, \"is_global\": false}\n"
+            )
+
         full_prompt = (
-            "<|im_start|>system\n"
-            "You are a professional image editor. Translate requests to English. If the user wants to remove or reveal something, the prompt should describe the result (e.g. 'desnuda' -> 'naked'). If adding, describe what to add.\n"
-            "Examples:\n"
-            "User: ponle gafas de sol\n"
-            "Assistant: {\"prompt\": \"add sunglasses\", \"magnitude\": 0.5, \"mask_target\": \"face\", \"preserve_face\": true, \"is_global\": false}\n"
-            "User: ponle un traje de payaso\n"
-            "Assistant: {\"prompt\": \"wear a clown costume\", \"magnitude\": 0.9, \"mask_target\": \"clothes\", \"preserve_face\": true, \"is_global\": false}\n"
-            "User: cambia el fondo por una playa\n"
-            "Assistant: {\"prompt\": \"change background to a beach\", \"magnitude\": 0.8, \"mask_target\": \"background\", \"preserve_face\": true, \"is_global\": false}\n"
-            "User: haz que sea de noche\n"
-            "Assistant: {\"prompt\": \"make it night time\", \"magnitude\": 0.7, \"mask_target\": \"background\", \"preserve_face\": true, \"is_global\": true}\n"
-            "<|im_end|>\n"
+            f"<|im_start|>system\n{system_msg}<|im_end|>\n"
             f"<|im_start|>user\nContext: {ctx}\nRequest: {prompt}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
