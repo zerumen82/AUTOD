@@ -63,7 +63,7 @@ use_color_matching = True  # REACTIVADO para tono de piel del origen
 # Factor de blending del enhancer (0-1)
 # 0 = sin enhancer, 1 = enhancer completo
 # 0.3 para que el swap sea visible pero con calidad
-enhancer_blend_factor = 0.3
+enhancer_blend_factor = 0.15
 
 # Ajuste de brillo (0-1)
 # 0.15 para no lavar demasiado la cara original

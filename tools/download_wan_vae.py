@@ -52,23 +52,26 @@ def download_file(url: str, dest_path: str, desc: str = "") -> bool:
 
 
 def download_wan_vae():
-    """Download WanVideo VAE"""
+    """Download WanVideo VAEs - both 16-channel (Wan2.1, for 14B models) and 48-channel (Wan2.2, for 5B models)"""
     
     print("\n" + "="*60)
-    print("DESCARGANDO WANVIDEO VAE")
+    print("DESCARGANDO WANVIDEO VAEs")
     print("="*60)
     
-    # VAE path for WanVideo
     vae_path = os.path.join(BASE_PATH, "vae")
     os.makedirs(vae_path, exist_ok=True)
     
-    # Files to download
     files_to_download = [
+        (
+            "https://huggingface.co/alibaba-pai/Wan2.1-Fun-V1.1-1.3B-InP/resolve/main/Wan2.1_VAE.pth",
+            os.path.join(vae_path, "Wan2.1_VAE.pth"),
+            "WanVideo 2.1 VAE (16 canales, para modelos 14B)"
+        ),
         (
             "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_2_VAE_bf16.safetensors",
             os.path.join(vae_path, "Wan2_2_VAE_bf16.safetensors"),
-            "WanVideo 2.2 VAE (bf16)"
-        )
+            "WanVideo 2.2 VAE (48 canales, para modelos 5B)"
+        ),
     ]
     
     success = True
@@ -76,7 +79,6 @@ def download_wan_vae():
     for url, dest, desc in files_to_download:
         print(f"\n[INFO] {desc}")
         
-        # Check size first
         size = get_file_size(url)
         if size > 0:
             print(f"   Tamano: {size / (1024*1024):.1f} MB")
@@ -86,12 +88,13 @@ def download_wan_vae():
     
     if success:
         print(f"\n{'-'*60}")
-        print("✓ Descarga completada!")
-        print(f"VAE guardado en: {os.path.join(BASE_PATH, 'vae', 'Wan2.1_VAE.pth')}")
-        print(f"\nNOTA: Este VAE es compatible con los modelos WanVideo y WanVideoXL")
+        print("[OK] Descarga completada!")
+        print(f"  - Wan2.1_VAE.pth (16 canales, 8x upsampling) - para modelos 14B (I2V/T2V)")
+        print(f"  - Wan2_2_VAE_bf16.safetensors (48 canales, 16x upsampling) - para modelos 5B")
+        print(f"\nNOTA: Usar Wan2.1 VAE para modelos 14B y Wan2.2 VAE para modelos 5B")
     else:
         print(f"\n{'-'*60}")
-        print("✗ Error al descargar el VAE")
+        print("[ERROR] Error al descargar algun VAE")
     
     return success
 

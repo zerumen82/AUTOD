@@ -27,7 +27,7 @@ def open_output_folder():
 _is_generating = False
 
 
-def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val):
+def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_val, lora_name, lora_strength, denoise_val):
     global _is_generating
     
     if _is_generating:
@@ -63,7 +63,11 @@ def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val):
         res_img, msg, mask_img = manager.generate_intelligent(
             image=img, prompt=p_text,
             face_preserve=f_preserve, use_rewriter=use_ai_val,
-            engine=engine_val
+            engine=engine_val,
+            enhance_faces=enhance_val,
+            lora_name=lora_name,
+            lora_strength=lora_strength,
+            denoise=denoise_val if denoise_val > 0 else None
         )
 
         if res_img:
@@ -84,18 +88,40 @@ def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val):
 
 def analyze_click(img, user_prompt):
     if not img: return "<div style='color:#f87171;'>Sube una imagen primero</div>", ""
+    
     if isinstance(img, dict): 
-        img = img.get("background")
-    elif isinstance(img, str):
-        from PIL import Image
-        img = Image.open(img).convert("RGB")
+        img_pil = img.get("background")
+    else:
+        img_pil = img
+
+    if img_pil is None:
+        return "<div style='color:#f87171;'>Imagen inválida</div>", user_prompt
+
     try:
-        desc = "Análisis deshabilitado: el descriptor de imagen no está disponible"
-        combined = user_prompt or ""
-        status_html = f"<div style='color:#fbbf24; font-size:12px;'><b>Info:</b> {desc}</div>"
+        from scripts.image_analyzer_for_prompt import ImageAnalyzer
+        analyzer = ImageAnalyzer()
+        
+        # Guardar temporalmente para analizar
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            img_pil.save(tmp.name)
+            tmp_path = tmp.name
+        
+        analysis = analyzer.analyze(tmp_path)
+        os.unlink(tmp_path)
+        
+        desc = analysis.get('suggested_prompt', "No se pudo generar descripción")
+        
+        # Combinar con el prompt del usuario si existe
+        if user_prompt and user_prompt.strip():
+            combined = f"{user_prompt}, {desc}"
+        else:
+            combined = desc
+            
+        status_html = f"<div style='color:#22d3ee; font-size:12px;'><b>Análisis IA:</b> {desc}</div>"
         return status_html, combined
-    except:
-        return "<div style='color:#f87171;'>Análisis no disponible</div>", user_prompt
+    except Exception as e:
+        print(f"[ImgEditor] Error en análisis: {e}")
+        return f"<div style='color:#f87171;'>Error en análisis: {str(e)}</div>", user_prompt
 
 
 def create_img_editor_tab():
@@ -158,6 +184,10 @@ def create_img_editor_tab():
 
                 with gr.Accordion("⚙️ Opciones Avanzadas", open=False):
                     use_ai = gr.Checkbox(label="🧠 Usa Inteligencia (IA)", value=True, info="Analiza la imagen y el prompt para mejores resultados (más lento)")
+                    
+                    with gr.Row():
+                        denoise = gr.Slider(minimum=0.0, maximum=1.0, step=0.05, value=0.0, label="Fuerza de Edición (0 = Auto)", info="0.2: Sutil, 0.6: Medio, 0.9: Radical")
+
                     engine = gr.Dropdown(
                         choices=[
                             ("FLUX.2 Klein", "klein_base"),
@@ -171,6 +201,19 @@ def create_img_editor_tab():
                         value="longcat", label="Motor de Generación"
                     )
                     f_preserve = gr.Checkbox(label="💎 Preservar Rostro", value=True)
+                    enhance_faces = gr.Checkbox(label="🌟 Mejorar Rostro (CodeFormer)", value=False, info="Post-procesa los rostros con CodeFormer para más realismo (usa VRAM)")
+
+                    with gr.Row():
+                        from ui.tabs.generation_tab import get_available_loras
+                        lora_dropdown = gr.Dropdown(
+                            choices=get_available_loras(),
+                            value="None",
+                            label="LoRA (Estilo/Personaje)"
+                        )
+                        lora_strength = gr.Slider(minimum=-2.0, maximum=2.0, step=0.05, value=1.0, label="Fuerza LoRA")
+                    
+                    bt_refresh_loras = gr.Button("🔄 Refrescar LoRAs", size="sm")
+                    bt_refresh_loras.click(fn=lambda: gr.update(choices=get_available_loras()), outputs=[lora_dropdown])
 
                 status = gr.HTML("<div style='text-align:center; color:#64748b; padding:10px;'>Listo</div>")
 
@@ -184,11 +227,14 @@ def create_img_editor_tab():
                 
                 with gr.Row():
                     bt_open_folder = gr.Button("📂 ABRIR SALIDA")
+                    bt_use_as_input = gr.Button("🔄 USAR COMO ENTRADA")
+                    
                     bt_open_folder.click(fn=open_output_folder)
+                    bt_use_as_input.click(fn=lambda x: x, inputs=[output_img], outputs=[input_img])
 
     gen_btn.click(
         on_generate,
-        [input_img, prompt, engine, f_preserve, use_ai],
+        [input_img, prompt, engine, f_preserve, use_ai, enhance_faces, lora_dropdown, lora_strength, denoise],
         [output_img, status, mask_preview],
         concurrency_limit=None
     )
@@ -198,5 +244,6 @@ def create_img_editor_tab():
 
     return {
         "input_img": input_img, "prompt": prompt, "gen_btn": gen_btn,
-        "output_img": output_img, "status": status, "mask_preview": mask_preview
+        "output_img": output_img, "status": status, "mask_preview": mask_preview,
+        "enhance_faces": enhance_faces
     }

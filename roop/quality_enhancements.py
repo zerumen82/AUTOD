@@ -10,152 +10,117 @@ import numpy as np
 from typing import Tuple
 
 
-def match_color_histogram(source: np.ndarray, target: np.ndarray, blend_factor: float = 0.25) -> np.ndarray:
-    """
-    Ajusta el histograma de color de la cara origen para que coincida con el destino.
-    Esto mejora la integración visual de la cara intercambiada.
-    
-    MEJORADO: Matching más suave y natural con control de intensidad.
-    NOTA: blend_factor reducido a 0.25 por defecto para preservar mejor la identidad de origen.
-    
-    Args:
-        source: Imagen de la cara origen (BGR)
-        target: Imagen de la cara destino (BGR)
-        blend_factor: Factor de mezcla (0.0 = sin cambio, 1.0 = matching completo)
-    
-    Returns:
-        Cara origen con colores ajustados
-    """
-    try:
-        # Validar inputs
-        if source is None or target is None or source.size == 0 or target.size == 0:
-            return source
-        
-        # Asegurar mismo tamaño
-        if source.shape != target.shape:
-            target = cv2.resize(target, (source.shape[1], source.shape[0]), interpolation=cv2.INTER_LINEAR)
-        
-        # Convertir a LAB para mejor ajuste de color (LAB separa luminancia de color)
-        source_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
-        target_lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB).astype(np.float32)
-        
-        result_lab = source_lab.copy()
-        
-        # Canal L (luminancia) - ajuste más fuerte
-        # Canales A y B (color) - ajuste más suave para no perder naturalidad
-        channel_factors = [0.8, 0.6, 0.6]  # L, A, B
-        
-        for i in range(3):
-            source_mean = np.mean(source_lab[:, :, i])
-            source_std = np.std(source_lab[:, :, i])
-            target_mean = np.mean(target_lab[:, :, i])
-            target_std = np.std(target_lab[:, :, i])
-            
-            if source_std > 0.1:  # Evitar división por valores muy pequeños
-                # Calcular ajuste
-                std_ratio = min(target_std / source_std, 2.0)  # Limitar ratio para evitar excesos
-                mean_diff = target_mean - source_mean
-                
-                # Aplicar con factor de mezcla por canal
-                adjusted = source_lab[:, :, i] * std_ratio + mean_diff
-                
-                # Mezclar con original según blend_factor
-                result_lab[:, :, i] = source_lab[:, :, i] * (1 - blend_factor * channel_factors[i]) + \
-                                      adjusted * (blend_factor * channel_factors[i])
-        
-        # Clip seguro
-        result_lab = np.clip(result_lab, 0, 255)
-        
-        # Convertir de vuelta a BGR
-        result = cv2.cvtColor(result_lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
-        
-        # Blending final suave para evitar cambios bruscos
-        result = cv2.addWeighted(source, 1 - blend_factor * 0.3, result, blend_factor * 0.3, 0)
-        
-        return result
-        
-    except Exception as e:
-        print(f"[COLOR_MATCH] Error: {e}")
-        return source
-
-
 def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray) -> np.ndarray:
     """
-    Detecta elementos en primer plano (pelo, flequillo, micrófonos) que no deben ser swapeados.
-    Crea una máscara de protección basada en la diferencia de textura y luminancia.
+    Detecta pelo, flequillo o manos sobre la cara para protegerlos durante el swap. (v2.8)
+    Versión ultra-conservadora para evitar artefactos en la integración.
     """
     try:
         if face_img.shape != target_region.shape:
             target_region = cv2.resize(target_region, (face_img.shape[1], face_img.shape[0]))
             
-        # 1. Diferencia de color y estructura
-        diff = cv2.absdiff(cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY), 
-                          cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY))
+        # 1. Análisis de texturas y bordes (Sobel)
+        src_gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+        tgt_gray = cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY)
         
-        # 2. Detectar zonas muy oscuras en el target (típicamente pelo/flequillo sobre la frente)
-        target_gray = cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY)
-        _, dark_mask = cv2.threshold(target_gray, 40, 255, cv2.THRESH_BINARY_INV)
+        tgt_sob = cv2.Sobel(tgt_gray, cv2.CV_32F, 1, 1, ksize=3)
+        src_sob = cv2.Sobel(src_gray, cv2.CV_32F, 1, 1, ksize=3)
+        diff_sob = cv2.absdiff(tgt_sob, src_sob)
         
-        # 3. Detectar bordes fuertes en el target que no están en el face_img (oclusiones)
-        edges_target = cv2.Canny(target_region, 50, 150)
-        edges_face = cv2.Canny(face_img, 50, 150)
-        occlusion_edges = cv2.subtract(edges_target, edges_face)
+        # Máscara de textura: umbral alto (50) para detectar solo oclusiones reales y densas
+        _, texture_mask = cv2.threshold(diff_sob.astype(np.uint8), 50, 255, cv2.THRESH_BINARY)
         
-        # Combinar para crear máscara de protección
-        protection_mask = cv2.dilate(occlusion_edges, np.ones((3,3), np.uint8), iterations=1)
-        protection_mask = cv2.bitwise_or(protection_mask, dark_mask)
+        # 2. Análisis de color (No-Piel) - HSV Skin mask más permisiva
+        tgt_hsv = cv2.cvtColor(target_region, cv2.COLOR_BGR2HSV)
+        # Rango de piel más amplio para no confundir piel con pelo
+        lower_skin = np.array([0, 10, 50])
+        upper_skin = np.array([30, 255, 255])
+        skin_mask = cv2.inRange(tgt_hsv, lower_skin, upper_skin)
+        not_skin_mask = cv2.bitwise_not(skin_mask)
         
-        # Suavizar protección
-        protection_mask = cv2.GaussianBlur(protection_mask, (7, 7), 0)
-        return protection_mask.astype(np.float32) / 255.0
+        # 3. Combinar: es oclusión si hay textura extra Y NO ES PIEL
+        occlusion = cv2.bitwise_and(texture_mask, not_skin_mask)
+        
+        # Limpiar ruido: solo oclusiones medianas/grandes
+        kernel = np.ones((5,5), np.uint8)
+        occlusion = cv2.erode(occlusion, kernel, iterations=1)
+        occlusion = cv2.dilate(occlusion, kernel, iterations=1)
+        
+        # Blur suave
+        occlusion = cv2.GaussianBlur(occlusion, (11, 11), 0)
+        
+        return occlusion.astype(np.float32) / 255.0
     except:
         return np.zeros(face_img.shape[:2], dtype=np.float32)
 
 
-def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, int], feather: int = 30, occlusion_mask: np.ndarray = None) -> np.ndarray:
+def match_color_histogram(source: np.ndarray, target: np.ndarray, blend_factor: float = 0.25) -> np.ndarray:
     """
-    Crea una máscara suave ELÍPTICA con protección de oclusiones (flequillo/pelo).
+    Ajusta el histograma de color de forma ultra-estable para evitar parpadeos. (v2.7)
+    """
+    try:
+        if source is None or target is None or source.size == 0 or target.size == 0:
+            return source
+        
+        if source.shape != target.shape:
+            target = cv2.resize(target, (source.shape[1], source.shape[0]), interpolation=cv2.INTER_LINEAR)
+        
+        # Convertir a LAB para preservar luminancia y tono natural
+        source_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
+        target_lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB).astype(np.float32)
+        
+        # Estadísticas globales de la cara
+        for i in range(3):
+            s_mean, s_std = np.mean(source_lab[:,:,i]), np.std(source_lab[:,:,i])
+            t_mean, t_std = np.mean(target_lab[:,:,i]), np.std(target_lab[:,:,i])
+            
+            if s_std > 0.1:
+                # Ratio de desviación más restrictivo para evitar colores lavados
+                ratio = np.clip(t_std / (s_std + 1e-6), 0.90, 1.10)
+                adjusted = (source_lab[:,:,i] - s_mean) * ratio + t_mean
+                
+                # Mezcla conservadora por canal
+                source_lab[:,:,i] = source_lab[:,:,i] * (1 - blend_factor) + adjusted * blend_factor
+        
+        matched = cv2.cvtColor(np.clip(source_lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
+        return matched
+    except Exception as e:
+        return source
+
+
+def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, int], feather: int = 25, occlusion_mask: np.ndarray = None) -> np.ndarray:
+    """
+    Crea una máscara de integración optimizada con degradado dinámico. (v2.8)
     """
     h, w = frame_shape[:2]
     x1, y1, x2, y2 = map(int, bbox)
-    x1 = max(0, min(w - 1, x1))
-    y1 = max(0, min(h - 1, y1))
-    x2 = max(0, min(w, x2))
-    y2 = max(0, min(h, y2))
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
     
+    bw, bh = x2 - x1, y2 - y1
+    if bw <= 0 or bh <= 0:
+        return np.zeros((h, w), dtype=np.float32)
+
     mask = np.zeros((h, w), dtype=np.float32)
     
-    center_x = (x1 + x2) // 2
-    center_y = (y1 + y2) // 2
-    width = x2 - x1
-    height = y2 - y1
+    # Centro y ejes para elipse - v2.8.1: Reducido para evitar bordes del buffer
+    center = ((x1 + x2) // 2, (y1 + y2) // 2)
+    axes = (int(bw * 0.47), int(bh * 0.49))
+    cv2.ellipse(mask, center, axes, 0, 0, 360, 1.0, -1)
     
-    # Elipse base (reducida para no cubrir pelo/orejas/fondo)
-    radius_x = int(width * 0.35)
-    radius_y = int(height * 0.38)
-    adjusted_center_y = center_y - int(height * 0.03)
-    
-    cv2.ellipse(mask, (center_x, adjusted_center_y), (radius_x, radius_y), 0, 0, 360, 1.0, -1)
-    
-    # Aplicar protección contra oclusiones (Evita el "efecto flequillo")
+    # Protección de oclusiones (pelo/objetos)
     if occlusion_mask is not None:
-        bbox_w = max(0, x2 - x1)
-        bbox_h = max(0, y2 - y1)
-        if bbox_w > 0 and bbox_h > 0:
-            full_occ_mask = np.zeros_like(mask)
-            occ_resized = cv2.resize(occlusion_mask, (bbox_w, bbox_h), interpolation=cv2.INTER_LINEAR)
-            full_occ_mask[y1:y2, x1:x2] = occ_resized
-            
-            # Restar oclusión de la máscara de swap (donde hay pelo, no hay swap)
-            mask = cv2.subtract(mask, full_occ_mask)
+        full_occ_mask = np.zeros_like(mask)
+        occ_resized = cv2.resize(occlusion_mask, (bw, bh), interpolation=cv2.INTER_LINEAR)
+        full_occ_mask[y1:y2, x1:x2] = occ_resized
+        # Solo restar oclusión si es muy clara (>0.7) para evitar parches transparentes en la cara
+        mask = np.clip(mask - (full_occ_mask * 0.70), 0, 1)
     
-    # Difuminado de bordes (kernel mínimo más pequeño para transición más nítida)
-    if feather > 0:
-        kernel_size = max(feather * 2 + 1, 11)
-        if kernel_size % 2 == 0: kernel_size += 1
-        mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), feather / 1.5)
+    # Blur dinámico basado en tamaño de cara - Aumentado feathering
+    blur_size = int(max(feather, min(bw, bh) // 5)) | 1
+    mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
     
     return np.clip(mask, 0, 1.0)
+
 
 
 def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray, center: Tuple[int, int]) -> np.ndarray:

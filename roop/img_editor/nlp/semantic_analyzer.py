@@ -83,11 +83,11 @@ class SemanticIntentAnalyzer:
         structural_weight = similarities.get("structural", 0)
         attribute_weight = similarities.get("attribute", 0)
         
-        # Escalamiento por impacto
+        # Escalamiento por impacto — pesos más generosos
         impact_weights = {
-            "pose": pose_weight * 0.6,
-            "structural": structural_weight * 0.5,
-            "attribute": attribute_weight * 0.25
+            "pose": pose_weight * 0.7,
+            "structural": structural_weight * 0.7,
+            "attribute": attribute_weight * 0.5
         }
         
         best_intent = max(impact_weights, key=impact_weights.get)
@@ -95,11 +95,12 @@ class SemanticIntentAnalyzer:
         
         print(f"[NLP] Similitudes: Pose={pose_weight:.2f}, Struct={structural_weight:.2f}, Attr={attribute_weight:.2f}")
         
-        if max_impact > 0.15: # Umbral de activación
+        # Umbral bajo para que prompts "difusos" (escenas complejas) sigan teniendo efecto
+        if max_impact > 0.06:
             magnitude += max_impact
             
-        # Normalización final
-        return max(0.30, min(0.95, magnitude))
+        # Normalización final (mínimo 0.40 para que siempre haya cambio visible)
+        return max(0.40, min(0.95, magnitude))
 
     def detect_target(self, prompt: str) -> str:
         """Determina el objetivo de la máscara mediante semántica"""

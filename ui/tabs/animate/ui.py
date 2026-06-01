@@ -1,5 +1,6 @@
 import os
 import gradio as gr
+from animate_photo import AnimatePhoto
 
 
 def open_animations_folder():
@@ -38,10 +39,32 @@ def build_animate_ui():
                     elem_classes=["prompt-box-anim"]
                 )
 
-                btn_animate = gr.Button(
-                    "🎬 GENERAR ANIMACIÓN", variant="primary",
-                    elem_classes=["btn-animate-main"]
-                )
+                with gr.Accordion("🎨 Ajustes de Estilo (LoRA)", open=False):
+                    animator = AnimatePhoto()
+                    lora_list = ["None"] + animator.get_available_loras()
+                    
+                    lora_name = gr.Dropdown(
+                        label="Seleccionar LoRA",
+                        choices=lora_list,
+                        value="None",
+                        info="Aplica un estilo específico (motor WanVideo)"
+                    )
+                    
+                    lora_strength = gr.Slider(
+                        label="Intensidad LoRA",
+                        minimum=0.0,
+                        maximum=2.0,
+                        step=0.05,
+                        value=1.0
+                    )
+
+                with gr.Row():
+                    btn_suggest = gr.Button("🪄 SUGERIR", size="sm", variant="secondary", scale=1)
+                    btn_animate = gr.Button(
+                        "🎬 GENERAR ANIMACIÓN", variant="primary",
+                        elem_classes=["btn-animate-main"],
+                        scale=3
+                    )
 
                 stabilize = gr.Checkbox(
                     label="💠 Estabilizar rostro (post-proceso)",
@@ -63,7 +86,10 @@ def build_animate_ui():
         "input_img": input_img,
         "prompt": prompt,
         "btn_animate": btn_animate,
+        "btn_suggest": btn_suggest,
         "video_output": video_output,
         "progress_html": progress_html,
         "stabilize": stabilize,
+        "lora_name": lora_name,
+        "lora_strength": lora_strength,
     }

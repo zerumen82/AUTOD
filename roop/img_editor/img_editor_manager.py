@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, time, threading
+import os, sys, time, threading, cv2
 from typing import Optional, Tuple, Dict
 from PIL import Image
 import numpy as np
 import roop.globals
 from roop.utils import get_vram_gb
 from concurrent.futures import ThreadPoolExecutor
+from roop.utilities import resolve_relative_path
 
 class ImgEditorManager:
     def __init__(self):
@@ -22,6 +23,7 @@ class ImgEditorManager:
         self.semantic_analyzer = None
         self._last_context = "normal"
         self._executor = ThreadPoolExecutor(max_workers=4)
+        self._codeformer = None
 
     def _get_prompt_analyzer(self):
         if self.prompt_analyzer is None:
@@ -59,12 +61,14 @@ class ImgEditorManager:
         magnitude = analysis.get("magnitude", 0.5)
         
         # Escalamiento lineal dinámico basado en magnitud (0.0 a 1.0)
-        # Denoise: 0.25 (sutil) a 0.85 (radical)
-        denoise = 0.25 + (magnitude * 0.60)
+        # Denoise: 0.20 (sutil) a 0.90 (radical)
+        denoise = 0.20 + (magnitude * 0.70)
         denoise = min(denoise, 0.95)
 
-        # Pasos: 8 (rápido) a 20 (calidad) para modelos estándar
-        steps = int(8 + (magnitude * 12))
+        # Pasos: 12 (rápido) a 28 (calidad) para modelos estándar
+        min_steps = 12
+        max_steps = 28
+        steps = int(min_steps + (magnitude * (max_steps - min_steps)))
 
         # Guidance: 3.0 a 7.0
         guidance = 3.0 + (magnitude * 4.0)
@@ -84,7 +88,7 @@ class ImgEditorManager:
             steps = min(steps, 8) # Qwen es muy lento, limitamos por UX
             guidance = min(guidance, 4.0)
         elif "klein" in engine or "abliterated" in engine:
-            steps = min(steps, 12) # Balance velocidad/calidad para 8GB
+            steps = min(steps, 20) # Balance velocidad/calidad
 
         print(f"[ImgEditor] Dynamic Params: Mag={magnitude:.2f}, Denoise={denoise:.2f}, Steps={steps}, CFG={guidance:.1f}")
         
@@ -167,6 +171,79 @@ class ImgEditorManager:
         from PIL import ImageFilter
         return mask.filter(ImageFilter.GaussianBlur(radius=amount))
 
+    def _get_codeformer(self):
+        if self._codeformer is None:
+            from roop.processors.Enhance_CodeFormer import Enhance_CodeFormer
+            model_path = resolve_relative_path('../models/CodeFormer/CodeFormerv0.1.onnx')
+            if os.path.exists(model_path):
+                try:
+                    cf = Enhance_CodeFormer()
+                    opts = {"devicename": "cuda"}
+                    cf.Initialize(opts)
+                    self._codeformer = cf
+                    print("[ImgEditor] CodeFormer listo para enhancement facial")
+                except Exception as e:
+                    print(f"[ImgEditor] CodeFormer no disponible: {e}")
+            else:
+                print(f"[ImgEditor] CodeFormer model not found at {model_path}")
+        return self._codeformer
+
+    def _enhance_faces(self, image: Image.Image) -> Image.Image:
+        """Mejora rostros en la imagen usando CodeFormer. Sin hardcoding."""
+        cf = self._get_codeformer()
+        if cf is None:
+            return image
+
+        fp = self._get_face_preserver()
+        if fp is None:
+            return image
+
+        try:
+            faces = fp.detect_faces(image)
+            if not faces:
+                return image
+
+            img_np = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+            h, w = img_np.shape[:2]
+            result = img_np.copy()
+
+            for face in faces:
+                bbox = face["bbox"]
+                x1, y1, x2, y2 = [int(v) for v in bbox]
+                margin = int(max(x2 - x1, y2 - y1) * 0.3)
+                x1 = max(0, x1 - margin)
+                y1 = max(0, y1 - margin)
+                x2 = min(w, x2 + margin)
+                y2 = min(h, y2 + margin)
+
+                face_crop = img_np[y1:y2, x1:x2]
+                if face_crop.size == 0:
+                    continue
+
+                enhanced_bgr, _ = cf.Run(None, None, face_crop)
+                if enhanced_bgr.shape[:2] != face_crop.shape[:2]:
+                    enhanced_bgr = cv2.resize(
+                        enhanced_bgr, (face_crop.shape[1], face_crop.shape[0]),
+                        cv2.INTER_LANCZOS4
+                    )
+
+                # Low blend: just subtle texture/quality improvement, keeps edit intact
+                det_score = face.get("det_score", 0.9)
+                blend = float(np.clip(det_score * 0.15, 0.05, 0.3))
+
+                roi = result[y1:y2, x1:x2]
+                result[y1:y2, x1:x2] = (
+                    roi.astype(np.float32) * (1 - blend)
+                    + enhanced_bgr.astype(np.float32) * blend
+                ).astype(np.uint8)
+
+            print(f"[ImgEditor] Enhancement aplicado a {len(faces)} rostro(s)")
+            return Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
+
+        except Exception as e:
+            print(f"[ImgEditor] Face enhancement error: {e}")
+            return image
+
     def generate_intelligent(
         self,
         image,
@@ -181,7 +258,11 @@ class ImgEditorManager:
         engine: str = "flux_klein",
         mask_image: Optional[Image.Image] = None,
         mask_mode: str = "global",
-        mask_prompt: str = ""
+        mask_prompt: str = "",
+        enhance_faces: bool = False,
+        lora_name: str = None,
+        lora_strength: float = 1.0,
+        denoise: float = None
     ) -> Tuple[Optional[Image.Image], str, Optional[Image.Image]]:
 
         if isinstance(image, Image.Image):
@@ -238,6 +319,7 @@ class ImgEditorManager:
         
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
         if guidance_scale: params["guidance_scale"] = guidance_scale
+        if denoise: params["denoise"] = denoise
 
         final_mask = mask_image
         
@@ -317,7 +399,9 @@ class ImgEditorManager:
                     "negative_prompt": negative_prompt,
                     "num_inference_steps": params["num_inference_steps"],
                     "guidance_scale": params["guidance_scale"],
-                    "seed": seed, "denoise": params["denoise"]
+                    "seed": seed, "denoise": params["denoise"],
+                    "lora_name": lora_name,
+                    "lora_strength": lora_strength
                 }
                 if "qwen" not in engine:
                     gen_params["mask_image"] = final_mask if mask_mode in ["manual", "global"] else None
@@ -343,6 +427,9 @@ class ImgEditorManager:
                         result = fp.preserve_faces(img, result, method="swap")
                 except Exception as e:
                     print(f"[ImgEditor] Face preservation falló: {e}")
+
+            if result is not None and enhance_faces:
+                result = self._enhance_faces(result)
 
             if result is not None:
                 return result, msg, final_mask

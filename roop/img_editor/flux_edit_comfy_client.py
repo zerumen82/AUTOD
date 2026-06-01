@@ -93,6 +93,7 @@ class FluxEditComfyClient:
         if self._dual_clip:
             checks.append(("text_encoders", self._clip_name2, f"CLIP2 {self._clip_name2}"))
         
+        # VAE: flux2 para modelos flux2/flux-2, ae.safetensors para LongCat y otros (16 canales)
         if any(x in flux_version for x in ["flux2", "flux-2"]):
             vae_name = "flux2_vae.safetensors"
         else:
@@ -131,6 +132,8 @@ class FluxEditComfyClient:
         seed: int = None,
         denoise: float = 0.60,
         mask_image: Optional[Image.Image] = None,
+        lora_name: Optional[str] = None,
+        lora_strength: float = 1.0,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
@@ -177,6 +180,23 @@ class FluxEditComfyClient:
             "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
         }
 
+        # Manejo de LoRAs
+        last_model = ["2", 0]
+        last_clip = ["3", 0]
+        if lora_name and lora_name != "None":
+            wf["20"] = {
+                "class_type": "LoraLoader",
+                "inputs": {
+                    "model": last_model,
+                    "clip": last_clip,
+                    "lora_name": lora_name,
+                    "strength_model": lora_strength,
+                    "strength_clip": lora_strength
+                }
+            }
+            last_model = ["20", 0]
+            last_clip = ["20", 1]
+
         # LongCat Turbo es distilled (CFG=1.0 forzado). Non-Turbo usa guidance real.
         if is_longcat and self._is_longcat_turbo:
             actual_cfg = 1.0
@@ -188,23 +208,23 @@ class FluxEditComfyClient:
         if is_longcat:
             wf["16"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
             if self._is_longcat_turbo:
-                wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["2", 0], "shift": 3.1}}
+                wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": last_model, "shift": 3.1}}
                 model_input = ["17", 0]
             else:
-                model_input = ["2", 0]
+                model_input = last_model
 
             wf["6"] = {
                 "class_type": "TextEncodeQwenImageEditPlus",
-                "inputs": {"clip": ["3", 0], "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
+                "inputs": {"clip": last_clip, "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
             }
             wf["11"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index_timestep_zero"}}
-            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["3", 0]}}
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
             positive_input = ["11", 0]
             negative_input = ["7", 0]
         else:
-            wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["3", 0]}}
-            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": ["3", 0]}}
-            model_input = ["2", 0]
+            wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": last_clip}}
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
+            model_input = last_model
             positive_input = ["6", 0]
             negative_input = ["7", 0]
 
@@ -214,7 +234,9 @@ class FluxEditComfyClient:
                 "model": model_input, "positive": positive_input, "negative": negative_input,
                 "latent_image": ["5", 0], "seed": seed or int(t0) % 1000000,
                 "steps": num_inference_steps, "cfg": actual_cfg,
-                "sampler_name": "euler_ancestral", "scheduler": "simple", "denoise": actual_denoise
+                "sampler_name": "euler_ancestral",
+                "scheduler": "simple",
+                "denoise": actual_denoise
             }
         }
         # Cambiado a VAEDecode estándar para mayor estabilidad en 8GB. 

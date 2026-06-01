@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os
+import re
 import time
 import requests
 import io
-from typing import Optional, Tuple
+import json
+from typing import Optional, Tuple, Dict
 from PIL import Image
 from dataclasses import dataclass
 
@@ -21,13 +23,15 @@ def get_models_base():
 @dataclass
 class GenResult:
     image: Image.Image
+    final_prompt: str = ""
     time_taken: float = 0.0
 
 class FluxGenComfyClient:
-    """Cliente para generacion pura (txt2img) en ComfyUI usando FLUX/LongCat"""
+    """Cliente para generacion pura (txt2img) en ComfyUI usando FLUX/LongCat/SDXL"""
     def __init__(self):
         self._loaded = False
         self._flux_version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+        self._alias = "longcat"
         self._clip_name = None
         self._clip_name2 = None
         self._clip_type = "flux"
@@ -35,6 +39,15 @@ class FluxGenComfyClient:
         self._is_dual_clip = False
         self._is_longcat = False
         self._is_longcat_turbo = False
+        self._is_sdxl = False
+        self._model_configs = self._load_model_configs()
+
+    def _load_model_configs(self):
+        path = os.path.join(get_project_root(), "config", "model_configs.json")
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
 
     def is_available(self):
         try:
@@ -48,25 +61,33 @@ class FluxGenComfyClient:
         return os.path.exists(path)
 
     def load(self, flux_version="longcat") -> Tuple[bool, str]:
-        """Configura los modelos a usar (con alias compatibles con Image Editor)"""
-        
-        # Mapeo de alias de Image Editor a archivos GGUF
+        """Configura los modelos a usar"""
         alias_map = {
             "longcat": "LongCat-Image-Edit-Turbo-Q4_K_S.gguf",
             "longcat_full": "LongCat-Image-Edit-Q4_K_S.gguf",
             "klein_base": "flux-2-klein-base-4b-Q4_K_S.gguf",
             "flux_q2": "flux1-dev-Q2_K.gguf",
             "flux_dev_abliterated": "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf",
+            "miamodel_nsfw": "miamodelSFWNSFWSDXL_v30.safetensors",
+            "nova_nsfw": "novaillustrousNSFW_v20.safetensors",
+            "lazy_nsfw": "realisticLazyMixNSFW_v10.safetensors"
         }
         
-        # Si es un alias, convertirlo al nombre de archivo real
+        self._alias = flux_version
         real_model = alias_map.get(flux_version, flux_version)
-        
         self._flux_version = real_model
+        
+        self._is_sdxl = any(x in real_model.lower() for x in ["sdxl", "miamodel", "nova", "lazy"])
         self._is_longcat = "LongCat" in real_model
         self._is_longcat_turbo = "Turbo" in real_model
         self._is_dual_clip = False
         self._clip_name2 = None
+
+        if self._is_sdxl:
+            self._clip_type = "sdxl"
+            self._vae_name = "baked"
+            self._loaded = True
+            return True, "Listo (SDXL)"
 
         if self._is_longcat:
             self._clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
@@ -81,14 +102,12 @@ class FluxGenComfyClient:
             self._clip_type = "flux2"
             self._vae_name = "flux2_vae.safetensors"
         else:
-            # Dev / Abliterated
             self._clip_name = "clip_l.safetensors"
             self._clip_name2 = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
             self._clip_type = "flux"
             self._is_dual_clip = True
             self._vae_name = "ae.safetensors"
 
-        # Verificar
         checks = [("diffusion_models", self._flux_version, "Modelo")]
         checks.append(("text_encoders", self._clip_name, "CLIP 1"))
         if self._is_dual_clip: checks.append(("text_encoders", self._clip_name2, "CLIP 2"))
@@ -104,81 +123,49 @@ class FluxGenComfyClient:
         self._loaded = True
         return True, "Listo"
 
-    def _rewrite_prompt(self, prompt: str) -> Tuple[str, float]:
-        """Traducción limpia y directa sin intervención creativa de LLM para máxima fidelidad"""
-        try:
-            # 1. Traducir de forma literal (español -> inglés)
-            from roop.img_editor.prompt_translator import translate_prompt
-            final_prompt = translate_prompt(prompt)
-            
-            # 2. Magnitud fija neutra (ya no afecta a los parámetros numéricos)
-            magnitude = 0.5
-            
-            # 3. Formatear para LongCat si es necesario
-            if self._is_longcat and not final_prompt.lower().startswith("instruction:"):
-                final_prompt = f"Instruction: {final_prompt}"
-
-            print(f"[GenFlux] Prompt Enviado: {final_prompt}")
-            
-            return final_prompt, magnitude
-        except Exception as e:
-            print(f"[GenFlux] Error en traducción: {e}")
-            if self._is_longcat and not prompt.lower().startswith("instruction:"):
-                prompt = f"Instruction: {prompt}"
-            return prompt, 0.5
-
-    def _rewrite_prompt_semantic(self, prompt: str) -> Tuple[str, float]:
-        """Analiza semánticamente el prompt usando embeddings (como Image Editor)"""
+    def _prepare_prompt(self, prompt: str) -> str:
+        """Preparación básica: Traducción y limpieza de prefijos."""
         try:
             from roop.img_editor.prompt_translator import translate_prompt
-            translated = translate_prompt(prompt)
-            
-            from roop.img_editor.nlp.semantic_analyzer import SemanticIntentAnalyzer
-            nlp = SemanticIntentAnalyzer()
-            magnitude = nlp.get_magnitude(prompt)
-            
-            # LongCat es un modelo instructivo
-            if "LongCat" in self._flux_version and not translated.lower().startswith("instruction:"):
-                translated = f"Instruction: {translated}"
+            final = translate_prompt(prompt).strip()
+            if final.lower().startswith("instruction:"):
+                final = final[12:].strip()
+            if self._is_longcat:
+                final = f"Instruction: {final}"
+            return final
+        except:
+            return prompt
 
-            print(f"[GenFlux] Semantic embedding analysis: Mag={magnitude:.2f}")
-            print(f"[GenFlux] Final Translated: {translated[:80]}...")
+    def _prepare_prompt_intelligent(self, prompt: str) -> Tuple[str, Dict]:
+        """Traduce el prompt y ajusta parámetros básicos sin añadir palabras ocultas."""
+        try:
+            from roop.img_editor.prompt_translator import translate_prompt
+            translated = translate_prompt(prompt).strip()
+
+            if translated.lower().startswith("instruction:"):
+                translated = translated[12:].strip()
+
+            if self._is_longcat:
+                final_prompt = f"Instruction: {translated}"
+            else:
+                final_prompt = translated
+
+            # Cargar config dinámica (solo para steps/cfg, no para el prompt)
+            conf = self._model_configs.get(self._alias, self._model_configs.get("default", {}))
             
-            return translated, magnitude
+            p = {
+                "steps": conf.get("steps", 25),
+                "cfg": conf.get("cfg", 3.5),
+                "neg": conf.get("negative_prompt", "")
+            }
+            
+            # NO AÑADIMOS PREFIJOS NI TAGS HARDCODEADOS
+
+            print(f"[GenFlux] Prompt Final: {final_prompt[:200]}...")
+            return final_prompt, p
         except Exception as e:
-            print(f"[GenFlux] Semantic embedding error, falling back: {e}")
-            return self._rewrite_prompt(prompt)
-
-    def _resolve_models(self) -> Optional[Tuple[str, str, str]]:
-        """Resuelve los nombres de modelo, CLIP y VAE desde ComfyUI o modelo local."""
-        comfy_url = get_comfyui_url()
-        flux_version = self._flux_version
-
-        # CLIP para LongCat
-        clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
-        clip_type = "longcat_image"
-
-        # VAE: flux2 para modelos flux2/flux-2, ae.safetensors para LongCat y otros (16 canales)
-        if "flux2" in flux_version or "flux-2" in flux_version:
-            vae_name = "flux2_vae.safetensors"
-        else:
-            vae_name = "ae.safetensors"
-
-        # Verificar que los archivos existen
-        checks = [
-            ("diffusion_models", flux_version, f"Modelo {flux_version}"),
-            ("text_encoders", clip_name, f"CLIP {clip_name}"),
-            ("vae", vae_name, f"VAE {vae_name}"),
-        ]
-        missing = []
-        for subdir, fname, label in checks:
-            path = os.path.join(get_models_base(), subdir, fname)
-            if not os.path.exists(path):
-                missing.append(f"  - {label}: {path}")
-        if missing:
-            return None, "Modelos faltantes:\n" + "\n".join(missing)
-
-        return (flux_version, clip_name, clip_type, vae_name), None
+            print(f"[GenFlux] Error: {e}")
+            return prompt, {"steps": 25, "cfg": 7.5, "neg": ""}
 
     def generate(
         self,
@@ -187,216 +174,185 @@ class FluxGenComfyClient:
         steps: int = None,
         guidance_scale: float = None,
         seed: int = None,
-        width: int = 512,
-        height: int = 768,
+        width: int = 768,
+        height: int = 1024,
+        _skip_rewrite: bool = False,
+        use_ai: bool = False,
+        lora_name: str = None,
+        lora_strength: float = 1.0,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
         comfy_url = get_comfyui_url()
-        if not self.is_available():
-            return None, "ComfyUI no esta disponible"
-
-        if not self._loaded:
-            self.load() # Cargar default si no se cargo nada
+        if not self.is_available(): return None, "ComfyUI no disponible"
+        if not self._loaded: self.load()
 
         start = time.time()
+        w, h = (width // 64) * 64, (height // 64) * 64
+        
+        conf = self._model_configs.get(self._alias, self._model_configs.get("default", {}))
 
-        # Dimensiones multiplo de 64
-        width = (width // 64) * 64
-        height = (height // 64) * 64
-
-        flux_version = self._flux_version
-        clip_name = self._clip_name
-        clip_name2 = self._clip_name2
-        clip_type = self._clip_type
-        vae_name = self._vae_name
-
-        # 1. Análisis Semántico y Traducción Dinámica
-        final_prompt, magnitude = self._rewrite_prompt(prompt)
-
-        # 2. Resolución Dinámica de Parámetros
-        is_longcat = self._is_longcat
-        is_longcat_turbo = self._is_longcat_turbo
-
-        # 2. Resolución de Parámetros - RESPETO TOTAL A LA ENTRADA
-        if steps is None:
-            # Solo default si no se especifica. No escalamos nada.
-            steps = 20 if not is_longcat_turbo else 8
-
-        if guidance_scale is None:
-            # Solo default si no se especifica.
-            guidance_scale = 3.5 if not is_longcat_turbo else 1.0
-
-        cfg = guidance_scale
-        denoise = 1.0
-
-        print(f"[GenFlux] Params Finales: Steps={steps}, CFG={cfg:.1f}")
-
-        # Construir workflow
-        wf = {
-            "1": {
-                "class_type": "EmptyLatentImage",
-                "inputs": {"width": width, "height": height, "batch_size": 1}
-            },
-            "2": {
-                "class_type": "UnetLoaderGGUF",
-                "inputs": {"unet_name": flux_version}
-            },
-            "4": {
-                "class_type": "VAELoader",
-                "inputs": {"vae_name": vae_name}
-            },
-        }
-
-        # CLIP Loader
-        if self._is_dual_clip:
-            wf["3"] = {
-                "class_type": "DualCLIPLoaderGGUF",
-                "inputs": {"clip_name1": clip_name, "clip_name2": clip_name2, "type": clip_type}
-            }
+        # 1. Resolución de Prompt, Parámetros y Negativo
+        current_neg = negative_prompt
+        if use_ai and not _skip_rewrite:
+            final_prompt, ai_params = self._prepare_prompt_intelligent(prompt)
+            actual_steps = ai_params["steps"]
+            actual_cfg = ai_params["cfg"]
+            if ai_params.get("neg"):
+                current_neg = f"{ai_params['neg']}, {negative_prompt}"
         else:
-            wf["3"] = {
-                "class_type": "CLIPLoader",
-                "inputs": {"clip_name": clip_name, "type": clip_type}
-            }
+            final_prompt = self._prepare_prompt(prompt) if not _skip_rewrite else prompt
+            actual_steps = steps if steps is not None else conf.get("steps", 25)
+            actual_cfg = guidance_scale if guidance_scale is not None else conf.get("cfg", 3.5)
 
-        # Prompt Encoding
-        if is_longcat:
-            wf["6"] = {
-                "class_type": "TextEncodeQwenImageEditPlus",
+        sampler_name = conf.get("sampler", "euler_ancestral")
+        scheduler = conf.get("scheduler", "simple")
+
+        if self._is_sdxl:
+            wf = {
+                "1": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+                "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": self._flux_version}},
+            }
+            
+            last_model = ["2", 0]
+            last_clip = ["2", 1]
+            
+            if lora_name and lora_name != "None":
+                wf["20"] = {
+                    "class_type": "LoraLoader",
+                    "inputs": {
+                        "model": last_model,
+                        "clip": last_clip,
+                        "lora_name": lora_name,
+                        "strength_model": lora_strength,
+                        "strength_clip": lora_strength
+                    }
+                }
+                last_model = ["20", 0]
+                last_clip = ["20", 1]
+
+            wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": final_prompt, "clip": last_clip}}
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": current_neg, "clip": last_clip}}
+            wf["8"] = {
+                "class_type": "KSampler",
                 "inputs": {
-                    "clip": ["3", 0], "prompt": final_prompt, "vae": ["4", 0],
-                    "image1": None, "image2": None, "image3": None
+                    "model": last_model, "positive": ["6", 0], "negative": ["7", 0],
+                    "latent_image": ["1", 0], "seed": seed or int(time.time()) % 1000000,
+                    "steps": actual_steps, "cfg": actual_cfg,
+                    "sampler_name": sampler_name, "scheduler": scheduler, "denoise": 1.0
                 }
             }
-            wf["11"] = {
-                "class_type": "FluxKontextMultiReferenceLatentMethod",
-                "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index_timestep_zero"}
-            }
-            positive_input = ["11", 0]
+            wf["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["2", 2]}}
+            wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "GenSDXL"}}
         else:
-            wf["6"] = {
-                "class_type": "CLIPTextEncode",
-                "inputs": {"text": final_prompt, "clip": ["3", 0]}
+            # Workflow FLUX / LongCat
+            wf = {
+                "1": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+                "2": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": self._flux_version}},
+                "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
             }
-            positive_input = ["6", 0]
 
-        wf["7"] = {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative_prompt, "clip": ["3", 0]}
-        }
+            if self._is_dual_clip:
+                wf["3"] = {"class_type": "DualCLIPLoaderGGUF", "inputs": {"clip_name1": self._clip_name, "clip_name2": self._clip_name2, "type": self._clip_type}}
+            else:
+                wf["3"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": self._clip_name, "type": self._clip_type}}
 
-        # Turbo Sampler Shift
-        if is_longcat_turbo:
-            wf["17"] = {
-                "class_type": "ModelSamplingAuraFlow",
-                "inputs": {"model": ["2", 0], "shift": 3.1}
+            last_model = ["2", 0]
+            last_clip = ["3", 0]
+
+            if lora_name and lora_name != "None":
+                wf["20"] = {
+                    "class_type": "LoraLoader",
+                    "inputs": {
+                        "model": last_model,
+                        "clip": last_clip,
+                        "lora_name": lora_name,
+                        "strength_model": lora_strength,
+                        "strength_clip": lora_strength
+                    }
+                }
+                last_model = ["20", 0]
+                last_clip = ["20", 1]
+
+            if self._is_longcat:
+                wf["13"] = {"class_type": "EmptyImage", "inputs": {"width": w, "height": h, "batch_size": 1, "color": 0}}
+                wf["6"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"clip": last_clip, "prompt": final_prompt, "vae": ["4", 0], "image1": ["13", 0]}}
+                wf["11"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index_timestep_zero"}}
+                pos_cond = "11"
+            else:
+                wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": final_prompt, "clip": last_clip}}
+                pos_cond = "6"
+
+            if actual_cfg > 1.0:
+                wf["14"] = {"class_type": "FluxGuidance", "inputs": {"conditioning": [pos_cond, 0], "guidance": actual_cfg}}
+                positive_input = ["14", 0]
+                ksampler_cfg = 1.0
+            else:
+                positive_input = [pos_cond, 0]
+                ksampler_cfg = actual_cfg
+
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": current_neg, "clip": last_clip}}
+            
+            model_node = last_model
+            if self._is_longcat_turbo:
+                wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": last_model, "shift": 3.1}}
+                model_node = ["17", 0]
+
+            wf["8"] = {
+                "class_type": "KSampler",
+                "inputs": {
+                    "model": model_node, "positive": positive_input, "negative": ["7", 0],
+                    "latent_image": ["1", 0], "seed": seed or int(time.time()) % 1000000,
+                    "steps": actual_steps, "cfg": ksampler_cfg,
+                    "sampler_name": sampler_name, "scheduler": scheduler, "denoise": 1.0
+                }
             }
-            model_input = ["17", 0]
-        else:
-            model_input = ["2", 0]
+            wf["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["4", 0]}}
+            wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "GenFlux"}}
 
-        wf["8"] = {
-            "class_type": "KSampler",
-            "inputs": {
-                "model": model_input,
-                "positive": positive_input,
-                "negative": ["7", 0],
-                "latent_image": ["1", 0],
-                "seed": seed or int(time.time()) % 1000000,
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": "euler_ancestral",
-                "scheduler": "simple",
-                "denoise": denoise
-            }
-        }
-        wf["9"] = {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["8", 0], "vae": ["4", 0]}
-        }
-        wf["10"] = {
-            "class_type": "SaveImage",
-            "inputs": {"images": ["9", 0], "filename_prefix": "GenFlux"}
-        }
-
-
-        if is_longcat:
-            print(
-                "[GenFlux] LongCat workflow: "
-                f"cfg={cfg}, denoise={denoise}, "
-                f"model={flux_version}, "
-                f"nodes={sorted(wf.keys(), key=lambda x: int(x) if x.isdigit() else 99)}",
-                flush=True,
-            )
 
         try:
             r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf})
-            if r.status_code != 200:
-                return None, f"ComfyUI rechazo el prompt: {r.text[:200]}"
-
             pid = r.json().get("prompt_id")
-            deadline = time.time() + 600
-            while time.time() < deadline:
+            print(f"[GenFlux] Ejecutando: {self._flux_version} | Steps={actual_steps} | CFG={actual_cfg}")
+            
+            while True:
                 r = requests.get(f"{comfy_url}/history/{pid}")
                 if r.status_code == 200 and pid in r.json():
                     hist = r.json()[pid]
-                    if "outputs" in hist and "10" in hist["outputs"]:
-                        img_data = hist["outputs"]["10"]["images"][0]
-                        res = requests.get(f"{comfy_url}/view?filename={img_data['filename']}")
-                        if res.status_code == 200:
-                            pil_img = Image.open(io.BytesIO(res.content)).convert("RGB")
-                            return GenResult(image=pil_img, time_taken=time.time()-start), "OK"
-                time.sleep(1)
-            return None, "Timeout (600s)"
+                    for node_out in hist.get("outputs", {}).values():
+                        if "images" in node_out:
+                            img_data = node_out["images"][0]
+                            res = requests.get(f"{comfy_url}/view?filename={img_data['filename']}&subfolder={img_data.get('subfolder','')}&type={img_data.get('type','output')}")
+                            return GenResult(image=Image.open(io.BytesIO(res.content)).convert("RGB"), final_prompt=final_prompt, time_taken=time.time()-start), "OK"
+                time.sleep(1.5)
         except Exception as e:
             return None, str(e)
 
     def generate_ai(
         self,
         prompt: str,
-        negative_prompt: str = "",
-        steps: int = None,
-        guidance_scale: float = None,
-        seed: int = None,
-        width: int = 512,
-        height: int = 768,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
-        """Genera con análisis semántico completo (como Image Editor)"""
-        # 1. Traducir y Analizar con LLM (Qwen)
-        final_prompt, magnitude = self._rewrite_prompt(prompt)
+        """
+        Genera usando el sistema de Análisis Inteligente.
+        Bypassea el rewriter de lenguaje si se solicita.
+        """
+        # Limpiar use_ai de kwargs si viene de la UI para evitar duplicados
+        kwargs.pop("use_ai", None)
         
-        # 2. Detectar parámetros recomendados
-        from roop.img_editor.img_editor_manager import ImgEditorManager
-        manager = ImgEditorManager()
-        analysis = {"magnitude": magnitude, "prompt": final_prompt}
-        
-        # Determinar el engine semántico para auto_detect_params
-        sem_engine = "longcat" if self._is_longcat else "flux_dev"
-        if "schnell" in self._flux_version.lower(): sem_engine = "flux_schnell"
-        
-        params = manager.auto_detect_params(analysis, sem_engine)
-        
-        # Priorizar sliders de la UI si NO son None, sino usar los de la IA
-        s = steps if steps is not None else params.get("num_inference_steps", 20)
-        c = guidance_scale if guidance_scale is not None else params.get("guidance_scale", 3.5)
-        
-        print(f"[GenFlux] AI Generation: Mag={magnitude:.2f}, Final Steps={s}, Final CFG={c:.1f}")
+        # Extraer skip_rewrite si existe en kwargs, por defecto False para IA
+        skip_rewrite = kwargs.pop("_skip_rewrite", False)
         
         return self.generate(
-            prompt=final_prompt,
-            negative_prompt=negative_prompt,
-            steps=s,
-            guidance_scale=c,
-            seed=seed,
-            width=width,
-            height=height
+            prompt=prompt,
+            use_ai=True,
+            _skip_rewrite=skip_rewrite,
+            **kwargs
         )
 
 _gen_client = None
 def get_flux_gen_client() -> FluxGenComfyClient:
     global _gen_client
-    if _gen_client is None:
-        _gen_client = FluxGenComfyClient()
+    if _gen_client is None: _gen_client = FluxGenComfyClient()
     return _gen_client

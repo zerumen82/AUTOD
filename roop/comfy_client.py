@@ -331,6 +331,23 @@ class ComfyClient:
         """Alias de get_checkpoints para compatibilidad"""
         return self.get_checkpoints()
 
+    def get_loras(self) -> list:
+        """Obtiene lista de LoRAs disponibles"""
+        try:
+            response = requests.get(f"{self.base_url}/object_info/LoraLoader", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if "LoraLoader" in data:
+                    node = data["LoraLoader"]
+                    if "input" in node and "required" in node["input"]:
+                        lora_list = node["input"]["required"].get("lora_name")
+                        if lora_list and len(lora_list) > 0 and len(lora_list[0]) > 0:
+                            return lora_list[0]
+            return []
+        except Exception as e:
+            print(f"[ComfyClient] Error obteniendo LoRAs: {e}")
+            return []
+
     def get_controlnet_models(self) -> list:
         """Obtiene lista de ControlNet models disponibles"""
         try:

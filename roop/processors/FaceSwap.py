@@ -179,7 +179,6 @@ class FaceSwap:
                 return None
             
             if not paste_back:
-                if isinstance(res_data, tuple): return res_data[0]
                 return res_data
 
             if isinstance(res_data, tuple):
@@ -411,15 +410,24 @@ def detect_mouth_open(target_face, landmarks_106, image) -> Tuple[bool, Optional
 
 
 def create_mouth_preservation_mask(image, mouth_data, blend_ratio=0.5) -> np.ndarray:
-    """Crea máscara suave para la boca con forma elíptica de 8 puntos"""
+    """Crea máscara suave para la boca con forma elíptica optimizada para el interior"""
     mask = np.zeros(image.shape[:2], dtype=np.float32)
     if not mouth_data:
         return mask
 
     try:
-        # 8 puntos en orden circular para forma elíptica
-        pts = []
-        order = [
+        # Puntos para el INTERIOR de la boca (donde fallan más los swaps)
+        pts_inner = []
+        inner_order = [
+            'mouth_left',
+            'upper_lip_bottom',  # Usar el borde INTERIOR del labio superior
+            'mouth_right',
+            'lower_lip_top',     # Usar el borde INTERIOR del labio inferior
+        ]
+        
+        # Puntos para el contorno GENERAL (incluyendo labios)
+        pts_full = []
+        full_order = [
             'mouth_left',
             'upper_lip_left_curve',
             'upper_lip_top',
@@ -430,21 +438,25 @@ def create_mouth_preservation_mask(image, mouth_data, blend_ratio=0.5) -> np.nda
             'lower_lip_left_curve',
         ]
 
-        for key in order:
+        for key in full_order:
             if key in mouth_data:
-                pts.append(mouth_data[key])
+                pts_full.append(mouth_data[key])
+        
+        for key in inner_order:
+            if key in mouth_data:
+                pts_inner.append(mouth_data[key])
 
-        # Fallback a 4 puntos si faltan los intermedios
-        if len(pts) < 4:
-            pts = []
-            if 'upper_lip_top' in mouth_data: pts.append(mouth_data['upper_lip_top'])
-            if 'mouth_right' in mouth_data: pts.append(mouth_data['mouth_right'])
-            if 'lower_lip_bottom' in mouth_data: pts.append(mouth_data['lower_lip_bottom'])
-            if 'mouth_left' in mouth_data: pts.append(mouth_data['mouth_left'])
-
-        if len(pts) >= 3:
-            pts_arr = np.array(pts, dtype=np.int32)
-            cv2.fillPoly(mask, [pts_arr], 1.0)
+        if len(pts_full) >= 3:
+            # Dibujar primero el contorno completo con peso muy bajo para labios
+            # Reducido de 0.3 a 0.15 para máxima fidelidad de la forma de la boca de origen
+            pts_full_arr = np.array(pts_full, dtype=np.int32)
+            cv2.fillPoly(mask, [pts_full_arr], 0.15) 
+            
+            # Dibujar el interior con peso máximo (preservar dientes/lengua al 100%)
+            if len(pts_inner) >= 3:
+                pts_inner_arr = np.array(pts_inner, dtype=np.int32)
+                cv2.fillPoly(mask, [pts_inner_arr], 1.0)
+                
     except Exception as e:
         print(f"[MOUTH_MASK] Error: {e}")
 

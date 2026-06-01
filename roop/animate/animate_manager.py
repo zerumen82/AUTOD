@@ -288,7 +288,8 @@ class AnimateManager:
 
     def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=33, fps=16,
                        face_stabilize=False, mask_image=None, mask_mode="global", mask_prompt="",
-                       progress_callback=None, steps=None, cfg=None, autoregressive_chunks=1):
+                       progress_callback=None, steps=None, cfg=None, autoregressive_chunks=1,
+                       lora_name=None, lora_strength=1.0):
         t0 = time.time()
         if image.mode != "RGB":
             image = image.convert("RGB")
@@ -299,7 +300,7 @@ class AnimateManager:
 
         p = self.resolve_params(engine, motion_bucket, frames, fps, magnitude=magnitude, steps=steps, cfg=cfg)
 
-        print(f"[AnimateManager] Engine={engine} Frames={p['frames']} FPS={fps} Steps={p['steps']} CFG={p['cfg']}")
+        print(f"[AnimateManager] Engine={engine} Frames={p['frames']} FPS={fps} Steps={p['steps']} CFG={p['cfg']} LoRA={lora_name}")
 
         missing = self._check_models(engine)
         if missing:
@@ -347,7 +348,8 @@ class AnimateManager:
                         image_pil=current_image, prompt=chunk_prompt,
                         output_path=chunk_path, model=engine,
                         frames=p["frames"], fps=p["fps"],
-                        steps=p["steps"], cfg=p["cfg"]
+                        steps=p["steps"], cfg=p["cfg"],
+                        lora_name=lora_name, lora_strength=lora_strength
                     )
                     if not ok or not os.path.exists(chunk_path):
                         elapsed = time.time() - t0
@@ -372,7 +374,8 @@ class AnimateManager:
                     image_pil=image, prompt=final_prompt,
                     output_path=output_path, model=engine,
                     frames=p["frames"], fps=p["fps"],
-                    steps=p["steps"], cfg=p["cfg"]
+                    steps=p["steps"], cfg=p["cfg"],
+                    lora_name=lora_name, lora_strength=lora_strength
                 )
             if ok and os.path.exists(output_path):
                 if face_stabilize:

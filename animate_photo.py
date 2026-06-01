@@ -52,7 +52,7 @@ class AnimatePhoto:
 
     def check_comfyui_status(self):
         try:
-            r = requests.get(f"{self.base}/system_stats", timeout=5)
+            r = requests.get(f"{self.base}/system_stats", timeout=10)
             return r.status_code == 200
         except:
             return False
@@ -88,6 +88,18 @@ class AnimatePhoto:
             print(f"[AnimatePhoto] No se pudieron leer opciones de {node_name}.{input_name}: {e}")
         return []
 
+    def get_available_loras(self):
+        """Lista los LoRAs disponibles en ComfyUI/models/loras"""
+        loras = self._get_node_input_options("WanVideoLoraSelect", "lora")
+        if not loras:
+            # Fallback manual si ComfyUI no responde o el nodo no existe
+            loras_dir = os.path.join(MODELS_DIR, "loras")
+            if os.path.exists(loras_dir):
+                loras = [f for f in os.listdir(loras_dir) if f.endswith(".safetensors")]
+        
+        # Limpiar nombres (quitar extensiones si es necesario para la UI)
+        return sorted(loras) if loras else []
+
     def _select_wan_t5_encoder(self):
         available = self._get_node_input_options("LoadWanVideoT5TextEncoder", "model_name")
         if available:
@@ -116,7 +128,7 @@ class AnimatePhoto:
             frames += 4 - remainder
         return frames
 
-    def build_wan_workflow(self, image_path, prompt, frames=33, fps=16, steps=25, cfg=5.5, width=512, height=512, t2v_mode=False):
+    def build_wan_workflow(self, image_path, prompt, frames=33, fps=16, steps=25, cfg=5.5, width=512, height=512, t2v_mode=False, lora_name=None, lora_strength=1.0):
         seed = int(time.time()) % 1000000
         prompt = (prompt or "").strip() or "cinematic motion, dynamic camera movement, natural flowing movement, 24fps, gentle motion, realistic video"
         frames = self._normalize_wan_frames(frames)
@@ -221,12 +233,14 @@ class AnimatePhoto:
         # WanVideoWrapper espera UMT5 en safetensors. Los T5 GGUF de Flux no validan en este nodo.
         t5_name = self._select_wan_t5_encoder()
         
-        print(f"[AnimatePhoto] Config: model={wan_model}, vae={vae_name}, is_5b={is_5b_ti2v}, vae_ch={vae_channels}, fun_mode={use_fun_mode}, t5={t5_name}")
+        print(f"[AnimatePhoto] Config: model={wan_model}, vae={vae_name}, is_5b={is_5b_ti2v}, vae_ch={vae_channels}, fun_mode={use_fun_mode}, lora={lora_name}, t5={t5_name}")
         print(f"[AnimatePhoto] Sampler: flowmatch_pusa, Shift=5.0" if is_5b_ti2v else "[AnimatePhoto] Sampler: UniPC, Shift=5.0")
 
         nodes = {}
         if not t2v_mode:
             nodes["1"] = {"class_type": "LoadImage", "inputs": {"image": image_path}}
+        
+        # Nodo base del modelo
         nodes["2"] = {
             "class_type": "WanVideoModelLoader",
             "inputs": {
@@ -236,8 +250,19 @@ class AnimatePhoto:
                 "load_device": "offload_device"
             }
         }
+        
+        # Soporte para LoRA
         node_model_ref = ["2", 0]
-
+        if lora_name and lora_name != "None":
+             nodes["11"] = {
+                "class_type": "WanVideoLoraSelectByName",
+                "inputs": {
+                    "lora_name": lora_name,
+                    "strength": lora_strength
+                }
+            }
+             nodes["2"]["inputs"]["lora"] = ["11", 0]
+        
         image_embeds_node = "6"
         context_ref = ["12", 0] if is_5b_ti2v else None
         if t2v_mode:
@@ -362,7 +387,7 @@ class AnimatePhoto:
 
     def check_progress(self, pid):
         try:
-            r = requests.get(f"{self.base}/progress", timeout=5)
+            r = requests.get(f"{self.base}/progress", timeout=10)
             if r.status_code == 200:
                 data = r.json()
                 if data.get("running_prompt") == pid:
@@ -372,7 +397,7 @@ class AnimatePhoto:
                         "step": data.get("current_step", 0),
                         "total": data.get("total_steps", 0),
                     }
-            h = requests.get(f"{self.base}/history/{pid}", timeout=5)
+            h = requests.get(f"{self.base}/history/{pid}", timeout=10)
             if h.status_code == 200 and pid in h.json():
                 return {"done": True}
             return None
@@ -510,7 +535,8 @@ class AnimatePhoto:
         return nodes
 
     def animate_image(self, image_pil=None, prompt="", output_path="output.mp4",
-                      model="wan_video", frames=33, fps=16, steps=25, cfg=5.5, timeout=1800, t2v_mode=False):
+                      model="wan_video", frames=33, fps=16, steps=25, cfg=5.5, timeout=1800, t2v_mode=False,
+                      lora_name=None, lora_strength=1.0):
         if not self.check_comfyui_status():
             print("[AnimatePhoto] ComfyUI no responde en /system_stats")
             return False
@@ -521,7 +547,8 @@ class AnimatePhoto:
 
         vram_gb = get_vram_gb()
         if vram_gb <= 8:
-            frames = min(frames, 81)
+            frames = min(frames, 49)
+            steps = min(steps, 25)
 
         if t2v_mode:
             # T2V: sin imagen, usa dimensiones por defecto
@@ -549,11 +576,11 @@ class AnimatePhoto:
             wf = self.build_framepack_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh)
         elif model != "wan_video":
             print(f"[AnimatePhoto] Motor {model} no implementado aquí; usando WanVideo para respetar prompt.")
-            wf = self.build_wan_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh, t2v_mode=t2v_mode)
+            wf = self.build_wan_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh, t2v_mode=t2v_mode, lora_name=lora_name, lora_strength=lora_strength)
         else:
-            wf = self.build_wan_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh, t2v_mode=t2v_mode)
+            wf = self.build_wan_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh, t2v_mode=t2v_mode, lora_name=lora_name, lora_strength=lora_strength)
 
-        r = requests.post(f"{self.base}/prompt", json={"prompt": wf})
+        r = requests.post(f"{self.base}/prompt", json={"prompt": wf}, timeout=60)
         if r.status_code != 200:
             print(f"[AnimatePhoto] ComfyUI prompt error ({r.status_code}): {r.text[:300]}")
             return False
@@ -563,9 +590,17 @@ class AnimatePhoto:
             return False
 
         t0 = time.time()
+        hard_deadline = t0 + timeout
         last_progress_log = 0
         last_health_check = 0
         while True:
+            if time.time() > hard_deadline:
+                print(f"[AnimatePhoto] Timeout global de {timeout}s alcanzado. Abortando.")
+                try:
+                    requests.post(f"{self.base}/queue", json={"delete": [pid]}, timeout=5)
+                except:
+                    pass
+                return False
             prog = self.check_progress(pid)
             now = time.time()
             if prog:
@@ -580,10 +615,16 @@ class AnimatePhoto:
                         print(f"[AnimatePhoto] ComfyUI: {pct:.0f}% | step {step}/{total} | ETA {eta:.0f}s")
                         last_progress_log = now
             else:
-                if now - last_health_check > 60:
+                if now - last_health_check > 180:
                     if not self.check_comfyui_status():
-                        print("[AnimatePhoto] ComfyUI dejó de responder. Abortando.")
-                        return False
+                        time.sleep(5)
+                        if not self.check_comfyui_status():
+                            print("[AnimatePhoto] ComfyUI dejó de responder. Abortando.")
+                            try:
+                                requests.post(f"{self.base}/queue", json={"delete": [pid]}, timeout=5)
+                            except:
+                                pass
+                            return False
                     last_health_check = now
             r = requests.get(f"{self.base}/history/{pid}")
             if r.status_code == 200 and pid in r.json():

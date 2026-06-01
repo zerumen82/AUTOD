@@ -155,16 +155,15 @@ class PromptRewriter:
         ctx = image_context[:200] if len(image_context) > 200 else image_context
         
         if mode == "txt2img":
-            # Prompt para GENERACIÓN PURA (txt2img) - TRADUCTOR ESTRICTO: CERO ADICIONES
             system_msg = (
-                "You are a strict literal translator. Your only job is to translate the user request from Spanish to English.\n"
-                "CRITICAL: DO NOT add any extra words. DO NOT add quality keywords like 'photorealistic' or '8k'.\n"
-                "KEEP the exact same level of detail as the user provided. If the user is brief, keep it brief. If the user describes a color, use that exact color.\n"
-                "Examples:\n"
-                "User: una mujer en el bosque\n"
-                "Assistant: {\"prompt\": \"a woman in a forest\", \"magnitude\": 0.5, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": true}\n"
-                "User: guerrero vikingo moreno\n"
-                "Assistant: {\"prompt\": \"brunette viking warrior\", \"magnitude\": 0.8, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": true}\n"
+                "You are a professional prompt engineer. Translate the user's request to English and enrich it with technical quality keywords.\n"
+                "CRITICAL: Translate the subject description EXACTLY. Do NOT change, add, or remove any details about the subject (age, hair, skin, body, clothing, setting, action).\n"
+                "Keep the user's exact description, only translate it to English. Then append quality tags at the end.\n"
+                "Quality tags: lighting (cinematic, soft, raytracing), camera (8k, macro, depth of field), texture (highly detailed skin, photorealistic).\n"
+                "Structure: \"<exact translated description>, <quality tags>\"\n"
+                "Example:\n"
+                "User: una mujer morena en la playa\n"
+                "Assistant: {\"prompt\": \"a brunette woman on the beach, cinematic lighting, golden hour, highly detailed skin textures, photorealistic, 8k resolution, sharp focus, depth of field\", \"magnitude\": 0.6, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": true}\n"
             )
         else:
             # Prompt para EDICIÓN (img2img)

@@ -41,7 +41,7 @@ FACE_ANALYSER = None
 FACE_ANALYSER_CPU = None  # Fallback a CPU
 BLOQUEO = threading.Lock()
 FACE_ANALYSER_STATUS = "not_initialized"
-USE_CPU_FALLBACK = False  # Activar fallback a CPU si CUDA falla
+USE_CPU_FALLBACK = False  # Solo CUDA
 
 # Configuracion optimizada para MAXIMA DETECCION de caras
 DETECTION_SIZE = (1024, 1024)  # Aumentado de 640 a 1024 para mejor calidad
@@ -286,15 +286,13 @@ def extract_face_images(
     if cache_key in CACHE_RESULTS:
         return CACHE_RESULTS[cache_key]
     
-    # Inicializar analizador CUDA si es necesario
+    # Inicializar analizador CUDA
     if FACE_ANALYSER is None:
         FACE_ANALYSER = get_face_analyser()
         if FACE_ANALYSER is None:
+            print(f"[FACES] ❌ FaceAnalysis (CUDA) no disponible.")
+            print(f"[FACES]    Verifica que models/buffalo_l/ exista o que la descarga automatica funcione.")
             return []
-    
-    # Inicializar analizador CPU si no existe (para fallback)
-    if FACE_ANALYSER_CPU is None and USE_CPU_FALLBACK:
-        FACE_ANALYSER_CPU = get_face_analyser_cpu()
     
     try:
         # Cargar la imagen
@@ -323,15 +321,15 @@ def extract_face_images(
             h, w = img_rgb.shape[:2]
             print(f"[SOURCE_DETECT] Cargando cara de origen: {os.path.basename(str(image_path))} ({w}x{h})")
             
-            # 1. Intentar detección normal
-            faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.25)
+            # 1. Intentar detección normal (aumentado umbral a 0.50 para evitar falsos positivos)
+            faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.50)
             
             # 2. Si falla, intentar con PADDING pero solo si la imagen es razonable
             if not faces and w > 100 and h > 100:
                 print(f"[SOURCE_DETECT] No se detectó cara directamente. Intentando con padding controlado...")
                 pad_h, pad_w = h // 3, w // 3
                 img_padded = cv2.copyMakeBorder(img_rgb, pad_h, pad_h, pad_w, pad_w, cv2.BORDER_CONSTANT, value=[127, 127, 127])
-                faces_padded = detect_faces_robust(img_padded, FACE_ANALYSER, 0.25)
+                faces_padded = detect_faces_robust(img_padded, FACE_ANALYSER, 0.40)
                 if faces_padded:
                     # Validar que las caras detectadas tengan sentido
                     for f in faces_padded:
@@ -466,8 +464,6 @@ def extract_face_images(
         img_to_detect = cv2.cvtColor(img_preprocessed, cv2.COLOR_BGR2RGB)
         
         faces = detect_faces_robust(img_to_detect, FACE_ANALYSER, target_thresh)
-        if not faces and FACE_ANALYSER_CPU is not None:
-            faces = detect_faces_robust(img_to_detect, FACE_ANALYSER_CPU, target_thresh)
             
         if not faces:
             CACHE_RESULTS[cache_key] = []
@@ -502,7 +498,7 @@ def extract_face_images(
                         normed_embedding = embedding_np / norm
                 
                 # landmark_106 si esta disponible
-                landmark_106 = None                     if hasattr(face_data, 'landmark_2d_106') and face_data.landmark_2d_106 is not None                     else None
+                landmark_106 = None                    if hasattr(face_data, 'landmark_2d_106') and face_data.landmark_2d_106 is not None                    else None
                 
                 face_obj = Face(
                     bbox=face_data.bbox.astype(int).tolist(),

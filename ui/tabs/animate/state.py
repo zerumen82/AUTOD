@@ -8,7 +8,7 @@ _animation_thread = None
 
 # Caché de modelos y workflows
 AVAILABLE_MODELS = {}
-SELECTED_MODEL = "wan_video" # Por defecto para calidad Grok-style
+SELECTED_MODEL = "framepack" # FramePack para img2vid en VRAM baja
 
 # Configuración de VRAM
 VRAM_8GB_MODE = True # Optimizado para la GPU del usuario

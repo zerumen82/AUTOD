@@ -85,7 +85,7 @@ def validate_face_detection(face_data, min_face_size: int = 15, max_aspect_ratio
         det_score = face_data.get('det_score', face_data.get('score', 0.0))
         if det_score is None:
             det_score = 0.0
-        if det_score < 0.10:
+        if det_score < 0.08:
             return False
 
         # OMITIR validaciones estructurales complejas que están fallando en caras reales
