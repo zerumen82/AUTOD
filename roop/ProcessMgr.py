@@ -1238,7 +1238,7 @@ class ProcessMgr:
                             best_distance = dist
                     
                     # Decision making
-                    if best_match and best_score > 0.15:  # Minimum confidence threshold (v3.2: reducido aún más para evitar pérdidas)
+                    if best_match and best_score > 0.20:  # Minimum confidence threshold (v3.6: Aumentado para evitar enganchar objetos falsos)
                         # Update state
                         setattr(self, assigned_attr, best_match)
                         new_center = get_face_center(best_match)
@@ -1600,10 +1600,18 @@ class ProcessMgr:
                     velocity = np.max(np.abs(curr_center - prev_center))
                     setattr(self, '_last_velocity', velocity)
                     
-                    # DETECTAR CAMBIO DE PLANO ANTES DE SUAVIZAR (v3.5)
+                    # DETECTAR CAMBIO DE PLANO ANTES DE SUAVIZAR (v3.6)
                     # Si el salto es masivo (>160px), es un cambio de plano: RESET TOTAL
-                    if velocity > 160:
+                    # Añadido Lockout de 5 frames para evitar resets consecutivos erráticos (flicker)
+                    last_reset = getattr(self, '_last_reset_call', {}).get(video_key, 0)
+                    is_lockout = (call_num - last_reset) < 5
+                    
+                    if velocity > 160 and not is_lockout:
                         print(f"[SCENE_CUT] Frame {call_num}: Salto detectado ({velocity:.0f}px). Reseteando historial temporal.")
+                        # Registrar este reset para el lockout
+                        if not hasattr(self, '_last_reset_call'): self._last_reset_call = {}
+                        self._last_reset_call[video_key] = call_num
+
                         # Limpiar historiales EMA para evitar "ghosting" de color/brillo del plano anterior
                         for attr in ['_color_ema', '_brightness_ema', '_enhancer_ema', '_mouth_state_history']:
                             if hasattr(self, attr):
@@ -1616,13 +1624,13 @@ class ProcessMgr:
                         f_size = 1.0
                         kps_ema = 1.0
                     else:
-                        # Suavizado adaptativo ultra-estable para evitar "cara vibrante" (flicker)
-                        if velocity < 5:
-                            f_center = 0.40 # Mucho más estable cuando está quieta
-                            kps_ema = 0.35   # Landmarks muy estables
-                        elif velocity < 15:
-                            f_center = 0.60
-                            kps_ema = 0.50
+                        # Suavizado adaptativo ultra-estable para evitar "cara vibrante" (v3.6: Refinado)
+                        if velocity < 4:
+                            f_center = 0.35 # Más estable en reposo
+                            kps_ema = 0.30   # Landmarks muy estables
+                        elif velocity < 12:
+                            f_center = 0.55
+                            kps_ema = 0.45
                         else:
                             # f_center aumenta con la velocidad para seguir el movimiento sin retraso
                             f_center = min(0.95, 0.65 + (velocity / 200))
@@ -1794,7 +1802,8 @@ class ProcessMgr:
                 swapped_face_aligned = cv2.cvtColor(face_lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
 
             # Color Matching EMA
-            color_match_strength = 0.20
+            # v3.6: Aumentado de 0.20 a 0.30 para mejor adaptación cromática
+            color_match_strength = 0.30
             swapped_face_aligned = match_color_histogram(swapped_face_aligned, reference_region, blend_factor=color_match_strength)
             if enable_temporal_smoothing and video_key:
                 if not hasattr(self, '_color_ema'): self._color_ema = {}
@@ -1817,7 +1826,8 @@ class ProcessMgr:
                 mask_align = np.zeros((h_align, w_align), dtype=np.float32)
                 c_a = (w_align // 2, h_align // 2)
                 # v2.8.1: Reducido de 0.52/0.53 a 0.47/0.49 para evitar bordes rectangulares del buffer 128x128
-                axes_a = (int(w_align * 0.47), int(h_align * 0.49))
+                # v3.6: Reducido aún más a 0.44/0.47 para total desaparición de bordes "sticker"
+                axes_a = (int(w_align * 0.44), int(h_align * 0.47))
                 cv2.ellipse(mask_align, c_a, axes_a, 0, 0, 360, 1.0, -1)
                 
                 # C. Aplicar oclusión en espacio alineado (cabello/flequillo)
