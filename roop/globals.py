@@ -39,13 +39,13 @@ flip_faces = None
 face_rotation_correction = None
 face_rotation_angle = None
 blend_ratio = 1.0  # 100% source - MÁXIMA SIMILITUD AL ORIGEN
-distance_threshold = 0.30  # MÁS ESTRICTO: solo matches muy cercanos al origen
+distance_threshold = 0.20  # MÁS ESTRICTO: solo matches muy cercanos al origen
 
 # Thresholds optimizados para MÁXIMA FIDELIDAD
 similarity_threshold_selected = 0.2  # ESTRICTO para máxima semejanza al origen
 similarity_threshold_auto = 0.15     # ESTRICTO para matching automático
 similarity_threshold_fallback = 0.1 # FALLBACK estricto
-min_similarity_threshold = 0.25  # MÍNIMO para hacer swap (skip frame si es menor)
+min_similarity_threshold = 0.20  # MÍNIMO para hacer swap (skip frame si es menor)
 default_det_size = True  # Usar tamaño de detector por defecto - más rápido
 
 # Threshold más estricto para MÁXIMA FIDELIDAD al origen

@@ -1,0 +1,75 @@
+{
+  "miamodel_nsfw": {
+    "name": "Miamodel SDXL",
+    "steps": 30,
+    "cfg": 7.5,
+    "sampler": "dpmpp_sde_gpu",
+    "scheduler": "karras",
+    "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, 3d render, oversaturated, low quality, worst quality, monochrome",
+    "prefix": "masterpiece, best quality, ultra-detailed, realistic, "
+  },
+  "nova_nsfw": {
+    "name": "Nova Illustrous",
+    "steps": 25,
+    "cfg": 7.0,
+    "sampler": "dpmpp_sde_gpu",
+    "scheduler": "karras",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated",
+    "prefix": "masterpiece, best quality, "
+  },
+  "lazy_nsfw": {
+    "name": "Realistic Lazy Mix",
+    "steps": 25,
+    "cfg": 7.0,
+    "sampler": "dpmpp_sde_gpu",
+    "scheduler": "karras",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated"
+  },
+  "longcat": {
+    "name": "LongCat Turbo",
+    "steps": 8,
+    "cfg": 1.0,
+    "sampler": "euler_ancestral",
+    "scheduler": "simple",
+    "negative_prompt": "blurry, low quality, deformed"
+  },
+  "longcat_full": {
+    "name": "LongCat Full",
+    "steps": 20,
+    "cfg": 3.5,
+    "sampler": "euler_ancestral",
+    "scheduler": "simple",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated"
+  },
+  "flux_dev_abliterated": {
+    "name": "FLUX.1 Dev Abliterated",
+    "steps": 20,
+    "cfg": 3.5,
+    "sampler": "euler_ancestral",
+    "scheduler": "simple",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated"
+  },
+  "flux_dev": {
+    "name": "FLUX.1 Dev",
+    "steps": 20,
+    "cfg": 3.5,
+    "sampler": "euler_ancestral",
+    "scheduler": "simple",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated"
+  },
+  "klein_base": {
+    "name": "FLUX.2 Klein",
+    "steps": 20,
+    "cfg": 3.5,
+    "sampler": "euler_ancestral",
+    "scheduler": "simple",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated"
+  },
+  "default": {
+    "steps": 20,
+    "cfg": 3.5,
+    "sampler": "euler_ancestral",
+    "scheduler": "simple",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated"
+  }
+}

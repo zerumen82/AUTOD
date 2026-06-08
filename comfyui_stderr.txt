@@ -1,0 +1,1547 @@
+WARNING:root:WARNING: blake3 package not installed
+INFO:root:Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+INFO:root:Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+INFO:root:Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+INFO:root:
+Prestartup times for custom nodes:
+
+Prestartup times for custom nodes:
+INFO:root:   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+INFO:root:
+
+ERROR:root:Failed to import comfy_kitchen, Error: No module named 'comfy_kitchen', fp8 and fp4 support will not be available.
+Failed to import comfy_kitchen, Error: No module named 'comfy_kitchen', fp8 and fp4 support will not be available.
+INFO:root:Checkpoint files will always be loaded safely.
+Checkpoint files will always be loaded safely.
+INFO:root:Total VRAM 8192 MB, total RAM 32713 MB
+Total VRAM 8192 MB, total RAM 32713 MB
+INFO:root:pytorch version: 2.6.0+cu124
+pytorch version: 2.6.0+cu124
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\ctypes\__init__.py", line 376 in __init__
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_ops.py", line 1357 in load_library
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\_cpp_lib.py", line 132 in _register_extensions
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\_cpp_lib.py", line 142 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1232 in _handle_fromlist
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\__init__.py", line 11 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\model_management.py", line 297 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 17 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 198 in <module>
+WARNING:xformers:WARNING[XFORMERS]: xFormers can't load C++/CUDA extensions. xFormers was built for:
+    PyTorch 2.10.0+cu128 with CUDA 1208 (you have 2.6.0+cu124)
+    Python  3.10.11 (you have 3.11.9)
+  Please reinstall xformers (see https://github.com/facebookresearch/xformers#installing-xformers)
+  Memory-efficient attention, SwiGLU, sparse and more won't be available.
+  Set XFORMERS_MORE_DETAILS=1 for more details
+WARNING[XFORMERS]: xFormers can't load C++/CUDA extensions. xFormers was built for:
+    PyTorch 2.10.0+cu128 with CUDA 1208 (you have 2.6.0+cu124)
+    Python  3.10.11 (you have 3.11.9)
+  Please reinstall xformers (see https://github.com/facebookresearch/xformers#installing-xformers)
+  Memory-efficient attention, SwiGLU, sparse and more won't be available.
+  Set XFORMERS_MORE_DETAILS=1 for more details
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\fmha\flash.py", line 58 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1232 in _handle_fromlist
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\fmha\__init__.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\__init__.py", line 9 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\model_management.py", line 298 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 17 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 198 in <module>
+INFO:root:Set vram state to: HIGH_VRAM
+Set vram state to: HIGH_VRAM
+INFO:root:Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+INFO:root:Using async weight offloading with 2 streams
+Using async weight offloading with 2 streams
+INFO:root:Enabled pinned memory 13085.0
+Enabled pinned memory 13085.0
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ldm\modules\attention.py", line 42 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ldm\genmo\vae\model.py", line 13 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\sd.py", line 13 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\latent_preview.py", line 5 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 20 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 198 in <module>
+INFO:root:Using pytorch attention
+Using pytorch attention
+WARNING:root:No comfy kitchen, using old apply_rope functions.
+No comfy kitchen, using old apply_rope functions.
+INFO:root:Python version: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+Python version: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+INFO:root:ComfyUI version: 0.19.0
+ComfyUI version: 0.19.0
+WARNING:root:________________________________________________________________________
+WARNING WARNING WARNING WARNING WARNING
+
+Installed frontend version 1.28.8 is lower than the recommended version 1.42.10.
+
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+This error is happening because the ComfyUI frontend is no longer shipped as part of the main repo but as a pip package instead.
+________________________________________________________________________
+________________________________________________________________________
+WARNING WARNING WARNING WARNING WARNING
+
+Installed frontend version 1.28.8 is lower than the recommended version 1.42.10.
+
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+This error is happening because the ComfyUI frontend is no longer shipped as part of the main repo but as a pip package instead.
+________________________________________________________________________
+INFO:root:[Prompt Server] web root: C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\comfyui_frontend_package\static
+[Prompt Server] web root: C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\comfyui_frontend_package\static
+INFO:root:Asset seeder disabled
+Asset seeder disabled
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_url" in Model has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+INFO:root:Successfully imported spandrel_extra_arches: support for non commercial upscale models.
+Successfully imported spandrel_extra_arches: support for non commercial upscale models.
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\lightglue.py", line 48 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\integrated.py", line 34 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\__init__.py", line 24 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\image_stitching.py", line 24 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\__init__.py", line 32 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\plasma.py", line 22 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\__init__.py", line 47 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\__init__.py", line 19 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\augment.py", line 23 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\__init__.py", line 18 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\policy.py", line 24 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\__init__.py", line 20 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  ...
+WARNING:root:Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_canny.py", line 1, in <module>
+    from kornia.filters import canny
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\__init__.py", line 25, in <module>
+    from . import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\__init__.py", line 19, in <module>
+    from kornia.augmentation import auto, container
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\autoaugment.py", line 22, in <module>
+    from kornia.augmentation.auto.base import SUBPOLICY_CONFIG, PolicyAugmentBase
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\base.py", line 22, in <module>
+    from kornia.augmentation.auto.operations.base import OperationBase
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\__init__.py", line 20, in <module>
+    from .policy import PolicySequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\policy.py", line 24, in <module>
+    from kornia.augmentation.container.base import ImageSequentialBase, TransformMatrixMinIn
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\__init__.py", line 18, in <module>
+    from kornia.augmentation.container.augment import AugmentationSequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\augment.py", line 23, in <module>
+    from kornia.augmentation._2d.base import RigidAffineAugmentationBase2D
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\__init__.py", line 19, in <module>
+    from kornia.augmentation._2d.intensity import *
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\__init__.py", line 47, in <module>
+    from kornia.augmentation._2d.intensity.plasma import RandomPlasmaBrightness, RandomPlasmaContrast, RandomPlasmaShadow
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\plasma.py", line 22, in <module>
+    from kornia.contrib import diamond_square
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\__init__.py", line 32, in <module>
+    from .image_stitching import ImageStitcher
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\image_stitching.py", line 24, in <module>
+    from kornia.feature import LocalFeatureMatcher, LoFTR
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\__init__.py", line 24, in <module>
+    from .integrated import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\integrated.py", line 34, in <module>
+    from .lightglue import LightGlue
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\lightglue.py", line 48, in <module>
+    from flash_attn.modules.mha import FlashCrossAttention
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3, in <module>
+    from flash_attn.flash_attn_interface import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10, in <module>
+    import flash_attn_2_cuda as flash_attn_cuda
+ImportError: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_canny.py", line 1, in <module>
+    from kornia.filters import canny
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\__init__.py", line 25, in <module>
+    from . import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\__init__.py", line 19, in <module>
+    from kornia.augmentation import auto, container
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\autoaugment.py", line 22, in <module>
+    from kornia.augmentation.auto.base import SUBPOLICY_CONFIG, PolicyAugmentBase
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\base.py", line 22, in <module>
+    from kornia.augmentation.auto.operations.base import OperationBase
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\__init__.py", line 20, in <module>
+    from .policy import PolicySequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\policy.py", line 24, in <module>
+    from kornia.augmentation.container.base import ImageSequentialBase, TransformMatrixMinIn
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\__init__.py", line 18, in <module>
+    from kornia.augmentation.container.augment import AugmentationSequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\augment.py", line 23, in <module>
+    from kornia.augmentation._2d.base import RigidAffineAugmentationBase2D
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\__init__.py", line 19, in <module>
+    from kornia.augmentation._2d.intensity import *
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\__init__.py", line 47, in <module>
+    from kornia.augmentation._2d.intensity.plasma import RandomPlasmaBrightness, RandomPlasmaContrast, RandomPlasmaShadow
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\plasma.py", line 22, in <module>
+    from kornia.contrib import diamond_square
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\__init__.py", line 32, in <module>
+    from .image_stitching import ImageStitcher
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\image_stitching.py", line 24, in <module>
+    from kornia.feature import LocalFeatureMatcher, LoFTR
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\__init__.py", line 24, in <module>
+    from .integrated import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\integrated.py", line 34, in <module>
+    from .lightglue import LightGlue
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\lightglue.py", line 48, in <module>
+    from flash_attn.modules.mha import FlashCrossAttention
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3, in <module>
+    from flash_attn.flash_attn_interface import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10, in <module>
+    import flash_attn_2_cuda as flash_attn_cuda
+ImportError: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+
+WARNING:root:Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_canny.py module for custom nodes: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_canny.py module for custom nodes: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\lightglue.py", line 48 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\integrated.py", line 34 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\__init__.py", line 24 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\image_stitching.py", line 24 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\__init__.py", line 32 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\plasma.py", line 22 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\__init__.py", line 47 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\__init__.py", line 19 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\mix\transplantation.py", line 18 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\mix\__init__.py", line 18 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\__init__.py", line 20 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\augment.py", line 24 in <module>
+  ...
+WARNING:root:Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_morphology.py", line 6, in <module>
+    from kornia.morphology import dilation, erosion, opening, closing, gradient, top_hat, bottom_hat
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\__init__.py", line 25, in <module>
+    from . import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\__init__.py", line 19, in <module>
+    from kornia.augmentation import auto, container
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\autoaugment.py", line 22, in <module>
+    from kornia.augmentation.auto.base import SUBPOLICY_CONFIG, PolicyAugmentBase
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\base.py", line 23, in <module>
+    from kornia.augmentation.auto.operations.policy import PolicySequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\__init__.py", line 20, in <module>
+    from .policy import PolicySequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\policy.py", line 24, in <module>
+    from kornia.augmentation.container.base import ImageSequentialBase, TransformMatrixMinIn
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\__init__.py", line 18, in <module>
+    from kornia.augmentation.container.augment import AugmentationSequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\augment.py", line 24, in <module>
+    from kornia.augmentation._3d.base import AugmentationBase3D, RigidAffineAugmentationBase3D
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\__init__.py", line 20, in <module>
+    from kornia.augmentation._3d.mix import *
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\mix\__init__.py", line 18, in <module>
+    from kornia.augmentation._3d.mix.transplantation import RandomTransplantation3D
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\mix\transplantation.py", line 18, in <module>
+    from kornia.augmentation._2d.mix.transplantation import RandomTransplantation
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\__init__.py", line 19, in <module>
+    from kornia.augmentation._2d.intensity import *
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\__init__.py", line 47, in <module>
+    from kornia.augmentation._2d.intensity.plasma import RandomPlasmaBrightness, RandomPlasmaContrast, RandomPlasmaShadow
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\plasma.py", line 22, in <module>
+    from kornia.contrib import diamond_square
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\__init__.py", line 32, in <module>
+    from .image_stitching import ImageStitcher
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\image_stitching.py", line 24, in <module>
+    from kornia.feature import LocalFeatureMatcher, LoFTR
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\__init__.py", line 24, in <module>
+    from .integrated import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\integrated.py", line 34, in <module>
+    from .lightglue import LightGlue
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\lightglue.py", line 48, in <module>
+    from flash_attn.modules.mha import FlashCrossAttention
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3, in <module>
+    from flash_attn.flash_attn_interface import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10, in <module>
+    import flash_attn_2_cuda as flash_attn_cuda
+ImportError: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_morphology.py", line 6, in <module>
+    from kornia.morphology import dilation, erosion, opening, closing, gradient, top_hat, bottom_hat
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\__init__.py", line 25, in <module>
+    from . import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\__init__.py", line 19, in <module>
+    from kornia.augmentation import auto, container
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\__init__.py", line 18, in <module>
+    from .autoaugment import AutoAugment
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\autoaugment\autoaugment.py", line 22, in <module>
+    from kornia.augmentation.auto.base import SUBPOLICY_CONFIG, PolicyAugmentBase
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\base.py", line 23, in <module>
+    from kornia.augmentation.auto.operations.policy import PolicySequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\__init__.py", line 20, in <module>
+    from .policy import PolicySequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\auto\operations\policy.py", line 24, in <module>
+    from kornia.augmentation.container.base import ImageSequentialBase, TransformMatrixMinIn
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\__init__.py", line 18, in <module>
+    from kornia.augmentation.container.augment import AugmentationSequential
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\container\augment.py", line 24, in <module>
+    from kornia.augmentation._3d.base import AugmentationBase3D, RigidAffineAugmentationBase3D
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\__init__.py", line 20, in <module>
+    from kornia.augmentation._3d.mix import *
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\mix\__init__.py", line 18, in <module>
+    from kornia.augmentation._3d.mix.transplantation import RandomTransplantation3D
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_3d\mix\transplantation.py", line 18, in <module>
+    from kornia.augmentation._2d.mix.transplantation import RandomTransplantation
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\__init__.py", line 19, in <module>
+    from kornia.augmentation._2d.intensity import *
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\__init__.py", line 47, in <module>
+    from kornia.augmentation._2d.intensity.plasma import RandomPlasmaBrightness, RandomPlasmaContrast, RandomPlasmaShadow
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\augmentation\_2d\intensity\plasma.py", line 22, in <module>
+    from kornia.contrib import diamond_square
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\__init__.py", line 32, in <module>
+    from .image_stitching import ImageStitcher
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\contrib\image_stitching.py", line 24, in <module>
+    from kornia.feature import LocalFeatureMatcher, LoFTR
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\__init__.py", line 24, in <module>
+    from .integrated import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\integrated.py", line 34, in <module>
+    from .lightglue import LightGlue
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\kornia\feature\lightglue.py", line 48, in <module>
+    from flash_attn.modules.mha import FlashCrossAttention
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3, in <module>
+    from flash_attn.flash_attn_interface import (
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10, in <module>
+    import flash_attn_2_cuda as flash_attn_cuda
+ImportError: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+
+WARNING:root:Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_morphology.py module for custom nodes: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_morphology.py module for custom nodes: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+WARNING:root:Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_glsl.py", line 64, in <module>
+    _check_opengl_availability()
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_glsl.py", line 35, in _check_opengl_availability
+    raise RuntimeError(
+RuntimeError: OpenGL dependencies not available.
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_glsl.py", line 64, in <module>
+    _check_opengl_availability()
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_glsl.py", line 35, in _check_opengl_availability
+    raise RuntimeError(
+RuntimeError: OpenGL dependencies not available.
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+
+WARNING:root:Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_glsl.py module for custom nodes: OpenGL dependencies not available.
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_glsl.py module for custom nodes: OpenGL dependencies not available.
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+WARNING:root:Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_math.py", line 12, in <module>
+    from simpleeval import simple_eval
+ModuleNotFoundError: No module named 'simpleeval'
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227, in load_custom_node
+    module_spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_math.py", line 12, in <module>
+    from simpleeval import simple_eval
+ModuleNotFoundError: No module named 'simpleeval'
+
+WARNING:root:Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_math.py module for custom nodes: No module named 'simpleeval'
+Cannot import D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy_extras\nodes_math.py module for custom nodes: No module named 'simpleeval'
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in KlingImageGenerationsRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in KlingVirtualTryOnRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_params" in MoonvalleyPromptResponse has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in KlingDualCharacterEffectInput has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in KlingImage2VideoRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in KlingSingleImageEffectInput has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in KlingText2VideoRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_version" in BriaEditImageRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_id" in SpeechToTextRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_id" in TextToSpeechRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_id" in SpeechToSpeechRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_id" in TextToDialogueRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in ImageEnhanceTaskCreateRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in VideoEnhanceTaskCreateRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in OmniProText2VideoRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in OmniProFirstLastFrameRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in OmniProReferences2VideoRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in OmniProImageRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in TextToVideoWithAudioRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in ImageToVideoWithAudioRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_name" in MotionControlRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_urls" in MeshyModelResult has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_version" in TripoTextToModelRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_seed" in TripoTextToModelRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_version" in TripoImageToModelRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_seed" in TripoImageToModelRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_version" in TripoMultiviewToModelRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_seed" in TripoMultiviewToModelRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_seed" in TripoTextureModelRequest has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\fmha\flash.py", line 58 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1232 in _handle_fromlist
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\fmha\__init__.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\__init__.py", line 9 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\diffusers\models\attention_processor.py", line 35 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\py\modules\brushnet\model.py", line 13 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\py\modules\brushnet\__init__.py", line 16 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\py\libs\sampler.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\py\__init__.py", line 2 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1204 in _gcd_import
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1204 in _gcd_import
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py", line 126 in import_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\__init__.py", line 15 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227 in load_custom_node
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2337 in init_external_custom_nodes
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2500 in init_extra_nodes
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py", line 84 in _run
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1936 in _run_once
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 608 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 321 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 641 in run_until_complete
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 469 in start_comfyui
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 522 in <module>
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\fmha\flash.py", line 58 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1232 in _handle_fromlist
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\fmha\__init__.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\xformers\ops\__init__.py", line 9 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\diffusers\models\attention_processor.py", line 35 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\diffusers\models\embeddings.py", line 24 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\diffusers\models\unets\unet_1d.py", line 23 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\diffusers\models\unets\__init__.py", line 5 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\py\modules\layer_diffuse\model.py", line 23 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\py\modules\layer_diffuse\__init__.py", line 13 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\py\nodes\preSampling.py", line 7 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1204 in _gcd_import
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py", line 126 in import_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\__init__.py", line 19 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227 in load_custom_node
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2337 in init_external_custom_nodes
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2500 in init_extra_nodes
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py", line 84 in _run
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1936 in _run_once
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 608 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 321 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 641 in run_until_complete
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 469 in start_comfyui
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 522 in <module>
+INFO:root:ComfyUI-GGUF: Partial torch compile only, consider updating pytorch
+ComfyUI-GGUF: Partial torch compile only, consider updating pytorch
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\modules\attention_flash.py", line 14 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\modules\attention.py", line 9 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\modules\model.py", line 16 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\modules\__init__.py", line 1 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\nodes_sampler.py", line 7 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1204 in _gcd_import
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py", line 126 in import_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\__init__.py", line 59 in register_nodes
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\__init__.py", line 70 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227 in load_custom_node
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2337 in init_external_custom_nodes
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2500 in init_extra_nodes
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py", line 84 in _run
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1936 in _run_once
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 608 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 321 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 641 in run_until_complete
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 469 in start_comfyui
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 522 in <module>
+WARNING:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Warning: Could not load sageattention: No module named 'sageattention'
+Warning: Could not load sageattention: No module named 'sageattention'
+WARNING:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:sageattention package is not installed, sageattention will not be available
+sageattention package is not installed, sageattention will not be available
+Windows fatal exception: code 0xc0000139
+
+Stack (most recent call first):
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 1233 in create_module
+  File "<frozen importlib._bootstrap>", line 573 in module_from_spec
+  File "<frozen importlib._bootstrap>", line 676 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\flash_attn_interface.py", line 10 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\flash_attn\__init__.py", line 3 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1126 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\transformers\modeling_flash_attention_utils.py", line 30 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\transformers\models\qwen2\modeling_qwen2.py", line 16 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\qwen\qwen.py", line 14 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "<frozen importlib._bootstrap>", line 690 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1147 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1176 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1204 in _gcd_import
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py", line 126 in import_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\__init__.py", line 59 in register_nodes
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\__init__.py", line 73 in <module>
+  File "<frozen importlib._bootstrap>", line 241 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 940 in exec_module
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2227 in load_custom_node
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2337 in init_external_custom_nodes
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 2500 in init_extra_nodes
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py", line 84 in _run
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1936 in _run_once
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 608 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 321 in run_forever
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 641 in run_until_complete
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 469 in start_comfyui
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 522 in <module>
+WARNING:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:WanVideoWrapper WARNING: Qwen nodes not available: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+WanVideoWrapper WARNING: Qwen nodes not available: DLL load failed while importing flash_attn_2_cuda: No se encontró el proceso especificado.
+INFO:root:
+Import times for custom nodes:
+
+Import times for custom nodes:
+INFO:root:   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+INFO:root:   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+INFO:root:   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+INFO:root:   0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+   0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+INFO:root:   1.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+   1.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+INFO:root:  12.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+  12.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+INFO:root:  30.5 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+  30.5 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+INFO:root:
+
+WARNING:root:WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.
+
+WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.
+
+WARNING:root:IMPORT FAILED: nodes_canny.py
+IMPORT FAILED: nodes_canny.py
+WARNING:root:IMPORT FAILED: nodes_morphology.py
+IMPORT FAILED: nodes_morphology.py
+WARNING:root:IMPORT FAILED: nodes_glsl.py
+IMPORT FAILED: nodes_glsl.py
+WARNING:root:IMPORT FAILED: nodes_math.py
+IMPORT FAILED: nodes_math.py
+WARNING:root:
+This issue might be caused by new missing dependencies added the last time you updated ComfyUI.
+
+This issue might be caused by new missing dependencies added the last time you updated ComfyUI.
+WARNING:root:Please run the update script: update/update_comfyui.bat
+Please run the update script: update/update_comfyui.bat
+WARNING:root:
+
+INFO:alembic.runtime.migration:Context impl SQLiteImpl.
+Context impl SQLiteImpl.
+INFO:alembic.runtime.migration:Will assume non-transactional DDL.
+Will assume non-transactional DDL.
+WARNING:root:________________________________________________________________________
+WARNING WARNING WARNING WARNING WARNING
+
+Installed frontend version 1.28.8 is lower than the recommended version 1.42.10.
+
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+This error is happening because the ComfyUI frontend is no longer shipped as part of the main repo but as a pip package instead.
+________________________________________________________________________
+________________________________________________________________________
+WARNING WARNING WARNING WARNING WARNING
+
+Installed frontend version 1.28.8 is lower than the recommended version 1.42.10.
+
+Please install the updated requirements.txt file by running:
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\python.exe -m pip install -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\requirements.txt
+If you are on the portable package you can run: update\update_comfyui.bat to solve this problem.
+
+This error is happening because the ComfyUI frontend is no longer shipped as part of the main repo but as a pip package instead.
+________________________________________________________________________
+INFO:root:Starting server
+
+Starting server
+
+INFO:root:To see the GUI go to: http://127.0.0.1:8188
+To see the GUI go to: http://127.0.0.1:8188
+INFO:root:got prompt
+got prompt
+ERROR:root:Failed to validate prompt for output 10:
+Failed to validate prompt for output 10:
+ERROR:root:* WanVideoSampler 7:
+* WanVideoSampler 7:
+ERROR:root:  - Bad linked input, must be a length-2 list of [node_id, slot_index]: cfg
+  - Bad linked input, must be a length-2 list of [node_id, slot_index]: cfg
+ERROR:root:Output will be ignored
+Output will be ignored
+WARNING:root:invalid prompt: {'type': 'prompt_outputs_failed_validation', 'message': 'Prompt outputs failed validation', 'details': '', 'extra_info': {}}
+invalid prompt: {'type': 'prompt_outputs_failed_validation', 'message': 'Prompt outputs failed validation', 'details': '', 'extra_info': {}}
+INFO:root:got prompt
+got prompt
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:CUDA Compute Capability: 8.6
+CUDA Compute Capability: 8.6
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Detected model in_channels: 48
+Detected model in_channels: 48
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Model cross attention type: t2v, num_heads: 24, num_layers: 30
+Model cross attention type: t2v, num_heads: 24, num_layers: 30
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:5B model detected, no Teacache or MagCache coefficients available, consider using EasyCache for this model
+5B model detected, no Teacache or MagCache coefficients available, consider using EasyCache for this model
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Model variant detected: 14B
+Model variant detected: 14B
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Converting T5 text encoder model to the expected format...
+Converting T5 text encoder model to the expected format...
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Moving video model to cuda:0
+Moving video model to cuda:0
+Loading T5 parameters:   0%|          | 0/242 [00:00<?, ?it/s]Loading T5 parameters:   0%|          | 1/242 [00:45<3:01:39, 45.23s/it]Loading T5 parameters:   1%|1         | 3/242 [00:45<46:51, 11.77s/it]  Loading T5 parameters:   2%|2         | 5/242 [00:45<22:51,  5.79s/it]Loading T5 parameters:   3%|2         | 7/242 [00:45<13:09,  3.36s/it]Loading T5 parameters:   4%|3         | 9/242 [00:46<08:28,  2.18s/it]Loading T5 parameters:   5%|4         | 11/242 [00:46<05:40,  1.47s/it]Loading T5 parameters:   5%|5         | 13/242 [00:46<03:48,  1.00it/s]Loading T5 parameters:   6%|6         | 15/242 [00:46<02:43,  1.39it/s]Loading T5 parameters:   7%|7         | 18/242 [00:47<01:45,  2.12it/s]Loading T5 parameters:   8%|8         | 20/242 [00:47<01:30,  2.44it/s]Loading T5 parameters:  10%|9         | 24/242 [00:47<00:54,  4.00it/s]Loading T5 parameters:  12%|#2        | 30/242 [00:48<00:29,  7.27it/s]Loading T5 parameters:  14%|#3        | 33/242 [00:48<00:26,  7.82it/s]Loading T5 parameters:  18%|#7        | 43/242 [00:48<00:12, 15.91it/s]Loading T5 parameters:  22%|##2       | 54/242 [00:48<00:07, 26.39it/s]Loading T5 parameters:  27%|##6       | 65/242 [00:48<00:04, 37.84it/s]Loading T5 parameters:  32%|###2      | 78/242 [00:48<00:03, 52.47it/s]Loading T5 parameters:  37%|###6      | 89/242 [00:48<00:02, 61.12it/s]Loading T5 parameters:  41%|####1     | 100/242 [00:48<00:02, 69.95it/s]Loading T5 parameters:  45%|####5     | 110/242 [00:50<00:05, 23.54it/s]Loading T5 parameters:  48%|####8     | 117/242 [00:50<00:05, 21.54it/s]Loading T5 parameters:  51%|#####     | 123/242 [00:51<00:07, 15.22it/s]Loading T5 parameters:  52%|#####2    | 127/242 [00:51<00:07, 14.72it/s]Loading T5 parameters:  54%|#####4    | 131/242 [00:52<00:09, 11.39it/s]Loading T5 parameters:  55%|#####5    | 134/242 [00:52<00:09, 11.03it/s]Loading T5 parameters:  56%|#####6    | 136/242 [00:52<00:10,  9.94it/s]Loading T5 parameters:  57%|#####7    | 138/242 [00:53<00:10,  9.71it/s]Loading T5 parameters:  58%|#####7    | 140/242 [00:53<00:13,  7.40it/s]Loading T5 parameters:  60%|#####9    | 144/242 [00:53<00:10,  9.34it/s]Loading T5 parameters:  60%|######    | 146/242 [00:54<00:10,  8.93it/s]Loading T5 parameters:  61%|######1   | 148/242 [00:54<00:11,  8.17it/s]Loading T5 parameters:  62%|######1   | 149/242 [00:54<00:13,  6.77it/s]Loading T5 parameters:  62%|######1   | 150/242 [00:55<00:16,  5.44it/s]Loading T5 parameters:  63%|######3   | 153/242 [00:55<00:10,  8.20it/s]Loading T5 parameters:  64%|######4   | 155/242 [00:55<00:11,  7.68it/s]Loading T5 parameters:  65%|######4   | 157/242 [00:55<00:09,  9.01it/s]Loading T5 parameters:  66%|######5   | 159/242 [00:56<00:13,  6.08it/s]Loading T5 parameters:  66%|######6   | 160/242 [00:56<00:16,  5.09it/s]Loading T5 parameters:  67%|######7   | 163/242 [00:56<00:10,  7.62it/s]Loading T5 parameters:  68%|######8   | 165/242 [00:57<00:10,  7.30it/s]Loading T5 parameters:  69%|######9   | 167/242 [00:57<00:08,  8.74it/s]Loading T5 parameters:  70%|######9   | 169/242 [00:57<00:12,  5.70it/s]Loading T5 parameters:  70%|#######   | 170/242 [00:58<00:13,  5.23it/s]Loading T5 parameters:  71%|#######1  | 173/242 [00:58<00:09,  7.24it/s]Loading T5 parameters:  72%|#######2  | 175/242 [00:58<00:09,  7.35it/s]Loading T5 parameters:  73%|#######2  | 176/242 [00:58<00:09,  7.04it/s]Loading T5 parameters:  74%|#######3  | 178/242 [00:59<00:09,  6.42it/s]Loading T5 parameters:  74%|#######3  | 179/242 [00:59<00:12,  4.98it/s]Loading T5 parameters:  74%|#######4  | 180/242 [00:59<00:13,  4.47it/s]Loading T5 parameters:  76%|#######5  | 183/242 [00:59<00:07,  7.48it/s]Loading T5 parameters:  76%|#######6  | 185/242 [01:00<00:07,  7.31it/s]Loading T5 parameters:  77%|#######7  | 187/242 [01:00<00:06,  9.00it/s]Loading T5 parameters:  78%|#######8  | 189/242 [01:00<00:08,  5.95it/s]Loading T5 parameters:  79%|#######8  | 191/242 [01:01<00:08,  6.26it/s]Loading T5 parameters:  80%|#######9  | 193/242 [01:01<00:06,  7.74it/s]Loading T5 parameters:  81%|########  | 195/242 [01:01<00:06,  7.57it/s]Loading T5 parameters:  82%|########1 | 198/242 [01:01<00:05,  7.62it/s]Loading T5 parameters:  82%|########2 | 199/242 [01:02<00:06,  6.50it/s]Loading T5 parameters:  83%|########2 | 200/242 [01:02<00:07,  5.58it/s]Loading T5 parameters:  86%|########6 | 209/242 [01:02<00:02, 16.22it/s]Loading T5 parameters:  90%|######### | 219/242 [01:02<00:00, 28.67it/s]Loading T5 parameters:  94%|#########4| 228/242 [01:02<00:00, 37.73it/s]Loading T5 parameters:  97%|#########6| 234/242 [01:02<00:00, 41.13it/s]Loading T5 parameters: 100%|#########9| 241/242 [01:03<00:00, 46.86it/s]Loading T5 parameters: 100%|##########| 242/242 [01:03<00:00,  3.84it/s]
+T5Encoder:   0%|          | 0/24 [00:00<?, ?it/s]T5Encoder:   4%|4         | 1/24 [00:01<00:43,  1.89s/it]T5Encoder:  62%|######2   | 15/24 [00:02<00:01,  6.24it/s]T5Encoder:  67%|######6   | 16/24 [00:04<00:02,  3.22it/s]T5Encoder:  71%|#######   | 17/24 [00:06<00:03,  2.08it/s]T5Encoder:  75%|#######5  | 18/24 [00:08<00:03,  1.52it/s]T5Encoder:  79%|#######9  | 19/24 [00:10<00:04,  1.17it/s]T5Encoder:  83%|########3 | 20/24 [00:12<00:04,  1.04s/it]T5Encoder:  88%|########7 | 21/24 [00:13<00:03,  1.20s/it]T5Encoder:  92%|#########1| 22/24 [00:15<00:02,  1.38s/it]T5Encoder:  96%|#########5| 23/24 [00:17<00:01,  1.48s/it]T5Encoder: 100%|##########| 24/24 [00:20<00:00,  1.76s/it]T5Encoder: 100%|##########| 24/24 [00:20<00:00,  1.19it/s]
+T5Encoder:   0%|          | 0/24 [00:00<?, ?it/s]T5Encoder:  58%|#####8    | 14/24 [00:00<00:00, 17.99it/s]T5Encoder:  67%|######6   | 16/24 [00:04<00:02,  2.89it/s]T5Encoder:  71%|#######   | 17/24 [00:06<00:03,  2.00it/s]T5Encoder:  75%|#######5  | 18/24 [00:07<00:04,  1.48it/s]T5Encoder:  79%|#######9  | 19/24 [00:09<00:04,  1.18it/s]T5Encoder:  83%|########3 | 20/24 [00:11<00:04,  1.02s/it]T5Encoder:  88%|########7 | 21/24 [00:13<00:03,  1.18s/it]T5Encoder:  92%|#########1| 22/24 [00:15<00:02,  1.32s/it]T5Encoder:  96%|#########5| 23/24 [00:16<00:01,  1.44s/it]T5Encoder: 100%|##########| 24/24 [00:18<00:00,  1.53s/it]T5Encoder: 100%|##########| 24/24 [00:18<00:00,  1.29it/s]
+WanVAE encoding frames:   0%|          | 0/13 [00:00<?, ?it/s]WanVAE encoding frames:   8%|7         | 1/13 [00:05<01:10,  5.90s/it]WanVAE encoding frames:  15%|#5        | 2/13 [00:31<03:09, 17.26s/it]WanVAE encoding frames:  23%|##3       | 3/13 [00:57<03:33, 21.37s/it]WanVAE encoding frames:  31%|###       | 4/13 [01:12<02:49, 18.80s/it]WanVAE encoding frames:  38%|###8      | 5/13 [01:45<03:12, 24.04s/it]WanVAE encoding frames:  46%|####6     | 6/13 [02:02<02:30, 21.49s/it]WanVAE encoding frames:  54%|#####3    | 7/13 [02:39<02:39, 26.57s/it]WanVAE encoding frames:  62%|######1   | 8/13 [02:56<01:57, 23.54s/it]WanVAE encoding frames:  69%|######9   | 9/13 [03:22<01:38, 24.56s/it]WanVAE encoding frames:  77%|#######6  | 10/13 [03:56<01:21, 27.31s/it]WanVAE encoding frames:  85%|########4 | 11/13 [04:27<00:57, 28.53s/it]WanVAE encoding frames:  92%|#########2| 12/13 [04:56<00:28, 28.65s/it]WanVAE encoding frames: 100%|##########| 13/13 [05:26<00:00, 29.09s/it]WanVAE encoding frames: 100%|##########| 13/13 [05:26<00:00, 25.14s/it]
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Loading and assigning model weights to device...
+Loading and assigning model weights to device...
+Loading transformer parameters to cuda:0:   0%|          | 0/825 [00:00<?, ?it/s]Loading transformer parameters to cuda:0:  97%|#########6| 800/825 [00:00<00:00, 7987.19it/s]Loading transformer parameters to cuda:0: 100%|##########| 825/825 [00:00<00:00, 7939.33it/s]
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:-------------------------
+-------------------------
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Transformer weights loaded:
+Transformer weights loaded:
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Device: cuda:0   | Memory: 2,033,661.72 MB
+Device: cuda:0   | Memory: 2,033,661.72 MB
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:------- Scheduler info -------
+------- Scheduler info -------
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Total timesteps: tensor([1000.0000,  994.1520,  988.0240,  981.5952,  974.8428,  967.7418,
+         960.2648,  952.3810,  944.0560,  935.2518,  925.9260,  916.0305,
+         905.5118,  894.3090,  882.3529,  869.5652,  855.8559,  841.1215,
+         825.2427,  808.0809,  789.4736,  769.2308,  747.1264,  722.8915,
+         696.2025,  666.6667,  633.8029,  597.0150,  555.5556,  508.4746,
+         454.5455,  392.1569,  319.1490,  232.5582,  128.2051])
+Total timesteps: tensor([1000.0000,  994.1520,  988.0240,  981.5952,  974.8428,  967.7418,
+         960.2648,  952.3810,  944.0560,  935.2518,  925.9260,  916.0305,
+         905.5118,  894.3090,  882.3529,  869.5652,  855.8559,  841.1215,
+         825.2427,  808.0809,  789.4736,  769.2308,  747.1264,  722.8915,
+         696.2025,  666.6667,  633.8029,  597.0150,  555.5556,  508.4746,
+         454.5455,  392.1569,  319.1490,  232.5582,  128.2051])
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Using timesteps: tensor([1000.0000,  994.1520,  988.0240,  981.5952,  974.8428,  967.7418,
+         960.2648,  952.3810,  944.0560,  935.2518,  925.9260,  916.0305,
+         905.5118,  894.3090,  882.3529,  869.5652,  855.8559,  841.1215,
+         825.2427,  808.0809,  789.4736,  769.2308,  747.1264,  722.8915,
+         696.2025,  666.6667,  633.8029,  597.0150,  555.5556,  508.4746,
+         454.5455,  392.1569,  319.1490,  232.5582,  128.2051])
+Using timesteps: tensor([1000.0000,  994.1520,  988.0240,  981.5952,  974.8428,  967.7418,
+         960.2648,  952.3810,  944.0560,  935.2518,  925.9260,  916.0305,
+         905.5118,  894.3090,  882.3529,  869.5652,  855.8559,  841.1215,
+         825.2427,  808.0809,  789.4736,  769.2308,  747.1264,  722.8915,
+         696.2025,  666.6667,  633.8029,  597.0150,  555.5556,  508.4746,
+         454.5455,  392.1569,  319.1490,  232.5582,  128.2051])
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Using sigmas: tensor([1.0000, 0.9942, 0.9880, 0.9816, 0.9748, 0.9677, 0.9603, 0.9524, 0.9441,
+        0.9353, 0.9259, 0.9160, 0.9055, 0.8943, 0.8824, 0.8696, 0.8559, 0.8411,
+        0.8252, 0.8081, 0.7895, 0.7692, 0.7471, 0.7229, 0.6962, 0.6667, 0.6338,
+        0.5970, 0.5556, 0.5085, 0.4545, 0.3922, 0.3191, 0.2326, 0.1282])
+Using sigmas: tensor([1.0000, 0.9942, 0.9880, 0.9816, 0.9748, 0.9677, 0.9603, 0.9524, 0.9441,
+        0.9353, 0.9259, 0.9160, 0.9055, 0.8943, 0.8824, 0.8696, 0.8559, 0.8411,
+        0.8252, 0.8081, 0.7895, 0.7692, 0.7471, 0.7229, 0.6962, 0.6667, 0.6338,
+        0.5970, 0.5556, 0.5085, 0.4545, 0.3922, 0.3191, 0.2326, 0.1282])
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:------------------------------
+------------------------------
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:Rope function: default
+Rope function: default
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:---------- Sampling start ----------
+---------- Sampling start ----------
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:49 frames at 512x704 (Input sequence length: 4576) with 35 steps
+49 frames at 512x704 (Input sequence length: 4576) with 35 steps
+  0%|          | 0/35 [00:00<?, ?it/s]  3%|2         | 1/35 [07:35<4:18:01, 455.34s/it]  6%|5         | 2/35 [15:55<4:25:05, 481.99s/it]  9%|8         | 3/35 [22:55<4:01:51, 453.49s/it] 11%|#1        | 4/35 [30:51<3:58:53, 462.36s/it] 14%|#4        | 5/35 [37:41<3:41:42, 443.41s/it] 17%|#7        | 6/35 [44:39<3:30:07, 434.75s/it] 20%|##        | 7/35 [52:44<3:30:31, 451.12s/it] 23%|##2       | 8/35 [1:01:48<3:36:24, 480.90s/it] 26%|##5       | 9/35 [1:09:56<3:29:19, 483.05s/it] 29%|##8       | 10/35 [1:17:25<3:16:53, 472.52s/it] 31%|###1      | 11/35 [1:24:53<3:05:58, 464.96s/it] 34%|###4      | 12/35 [1:32:19<2:56:04, 459.33s/it] 37%|###7      | 13/35 [1:39:49<2:47:20, 456.41s/it] 40%|####      | 14/35 [2:16:32<5:44:21, 983.88s/it] 43%|####2     | 15/35 [3:28:52<11:05:11, 1995.56s/it] 46%|####5     | 16/35 [4:27:20<12:56:09, 2451.00s/it] 49%|####8     | 17/35 [4:54:50<11:02:58, 2209.91s/it] 51%|#####1    | 18/35 [8:33:27<25:54:47, 5487.48s/it] 54%|#####4    | 19/35 [8:42:35<17:47:41, 4003.84s/it] 57%|#####7    | 20/35 [8:46:33<11:58:19, 2873.30s/it] 60%|######    | 21/35 [8:50:03<8:03:51, 2073.70s/it]  63%|######2   | 22/35 [8:53:04<5:26:15, 1505.81s/it] 66%|######5   | 23/35 [8:56:04<3:41:35, 1107.92s/it] 69%|######8   | 24/35 [8:59:23<2:33:07, 835.22s/it]  71%|#######1  | 25/35 [9:02:45<1:47:33, 645.34s/it] 74%|#######4  | 26/35 [9:05:36<1:15:25, 502.87s/it] 77%|#######7  | 27/35 [9:08:16<53:20, 400.07s/it]   80%|########  | 28/35 [9:10:56<38:15, 327.88s/it] 83%|########2 | 29/35 [9:13:03<26:46, 267.78s/it] 86%|########5 | 30/35 [9:15:30<19:17, 231.53s/it] 89%|########8 | 31/35 [9:18:47<14:44, 221.21s/it] 91%|#########1| 32/35 [9:21:55<10:33, 211.19s/it] 94%|#########4| 33/35 [9:25:01<06:47, 203.68s/it] 97%|#########7| 34/35 [9:27:35<03:08, 188.69s/it]100%|##########| 35/35 [9:29:57<00:00, 174.76s/it]100%|##########| 35/35 [9:29:57<00:00, 977.08s/it]
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:---------- Sampling end ------------
+---------- Sampling end ------------
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:[Sampling] Max allocated memory: max_memory=13.587 GB
+[Sampling] Max allocated memory: max_memory=13.587 GB
+INFO:D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper.utils:[Sampling] Max reserved memory: max_reserved=14.031 GB
+[Sampling] Max reserved memory: max_reserved=14.031 GB
+WanVAE decoding frames:   0%|          | 0/13 [00:00<?, ?it/s]WanVAE decoding frames:   8%|7         | 1/13 [00:01<00:14,  1.19s/it]WanVAE decoding frames:   8%|7         | 1/13 [00:45<09:02, 45.22s/it]
+ERROR:root:!!! Exception during processing !!! Allocation on device 
+!!! Exception during processing !!! Allocation on device 
+ERROR:root:Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 534, in execute
+    output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
+                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 334, in get_output_data
+    return_values = await _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, obj.FUNCTION, allow_interrupt=True, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 308, in _async_map_node_over_list
+    await process_inputs(input_dict, i)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 296, in process_inputs
+    result = f(**inputs)
+             ^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\nodes.py", line 2149, in decode
+    images = vae.decode(latents, device=device, end_=(end_image is not None), tiled=enable_vae_tiling, tile_size=(tile_x//vae.upsampling_factor, tile_y//vae.upsampling_factor), tile_stride=(tile_stride_x//vae.upsampling_factor, tile_stride_y//vae.upsampling_factor))[0]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 1421, in decode
+    video = self.single_decode(hidden_state, device, pbar=pbar)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 1375, in single_decode
+    video = self.model.decode(hidden_state, pbar=pbar)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 1525, in decode
+    out_ = self.decoder(x[:, :, i:i + 1, :, :],
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 948, in forward
+    x = layer(x, feat_cache, feat_idx, first_chunk)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 526, in forward
+    x_main = module(x_main, feat_cache, feat_idx)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 279, in forward
+    return self._forward(x, feat_cache, feat_idx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 294, in _forward
+    x = layer(x, feat_cache[idx])
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 39, in forward
+    x = torch.cat([cache_x, x], dim=2)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: Allocation on device 
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 534, in execute
+    output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
+                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 334, in get_output_data
+    return_values = await _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, obj.FUNCTION, allow_interrupt=True, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 308, in _async_map_node_over_list
+    await process_inputs(input_dict, i)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 296, in process_inputs
+    result = f(**inputs)
+             ^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\nodes.py", line 2149, in decode
+    images = vae.decode(latents, device=device, end_=(end_image is not None), tiled=enable_vae_tiling, tile_size=(tile_x//vae.upsampling_factor, tile_y//vae.upsampling_factor), tile_stride=(tile_stride_x//vae.upsampling_factor, tile_stride_y//vae.upsampling_factor))[0]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 1421, in decode
+    video = self.single_decode(hidden_state, device, pbar=pbar)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 1375, in single_decode
+    video = self.model.decode(hidden_state, pbar=pbar)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 1525, in decode
+    out_ = self.decoder(x[:, :, i:i + 1, :, :],
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 948, in forward
+    x = layer(x, feat_cache, feat_idx, first_chunk)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 526, in forward
+    x_main = module(x_main, feat_cache, feat_idx)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 279, in forward
+    return self._forward(x, feat_cache, feat_idx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 294, in _forward
+    x = layer(x, feat_cache[idx])
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper\wanvideo\wan_video_vae.py", line 39, in forward
+    x = torch.cat([cache_x, x], dim=2)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: Allocation on device 
+
+INFO:root:Memory summary: |===========================================================================|
+|                  PyTorch CUDA memory summary, device ID 0                 |
+|---------------------------------------------------------------------------|
+|            CUDA OOMs: 0            |        cudaMalloc retries: 0         |
+|===========================================================================|
+|        Metric         | Cur Usage  | Peak Usage | Tot Alloc  | Tot Freed  |
+|---------------------------------------------------------------------------|
+| Allocated memory      |  15103 MiB |  15279 MiB |      0 B   |      0 B   |
+|       from large pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|       from small pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Active memory         |  15103 MiB |  15279 MiB |      0 B   |      0 B   |
+|       from large pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|       from small pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Requested memory      |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from large pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from small pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| GPU reserved memory   |  15872 MiB |  15872 MiB |      0 B   |      0 B   |
+|       from large pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|       from small pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Non-releasable memory |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from large pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from small pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Allocations           |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Active allocs         |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| GPU reserved segments |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Non-releasable allocs |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Oversize allocations  |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Oversize GPU segments |       0    |       0    |       0    |       0    |
+|===========================================================================|
+
+Memory summary: |===========================================================================|
+|                  PyTorch CUDA memory summary, device ID 0                 |
+|---------------------------------------------------------------------------|
+|            CUDA OOMs: 0            |        cudaMalloc retries: 0         |
+|===========================================================================|
+|        Metric         | Cur Usage  | Peak Usage | Tot Alloc  | Tot Freed  |
+|---------------------------------------------------------------------------|
+| Allocated memory      |  15103 MiB |  15279 MiB |      0 B   |      0 B   |
+|       from large pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|       from small pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Active memory         |  15103 MiB |  15279 MiB |      0 B   |      0 B   |
+|       from large pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|       from small pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Requested memory      |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from large pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from small pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| GPU reserved memory   |  15872 MiB |  15872 MiB |      0 B   |      0 B   |
+|       from large pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|       from small pool |      0 MiB |      0 MiB |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Non-releasable memory |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from large pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|       from small pool |      0 B   |      0 B   |      0 B   |      0 B   |
+|---------------------------------------------------------------------------|
+| Allocations           |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Active allocs         |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| GPU reserved segments |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Non-releasable allocs |       0    |       0    |       0    |       0    |
+|       from large pool |       0    |       0    |       0    |       0    |
+|       from small pool |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Oversize allocations  |       0    |       0    |       0    |       0    |
+|---------------------------------------------------------------------------|
+| Oversize GPU segments |       0    |       0    |       0    |       0    |
+|===========================================================================|
+
+ERROR:root:Got an OOM, unloading all loaded models.
+Got an OOM, unloading all loaded models.
+INFO:root:Prompt executed in 09:39:02
+Prompt executed in 09:39:02
+INFO:root:got prompt
+got prompt
+WARNING:root:invalid prompt: {'type': 'missing_node_type', 'message': "Node 'LoadFramePackModel' not found. The custom node may not be installed.", 'details': "Node ID '#9'", 'extra_info': {'node_id': '9', 'class_type': 'LoadFramePackModel', 'node_title': 'LoadFramePackModel'}}
+invalid prompt: {'type': 'missing_node_type', 'message': "Node 'LoadFramePackModel' not found. The custom node may not be installed.", 'details': "Node ID '#9'", 'extra_info': {'node_id': '9', 'class_type': 'LoadFramePackModel', 'node_title': 'LoadFramePackModel'}}

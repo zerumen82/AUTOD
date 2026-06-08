@@ -17,10 +17,10 @@ def get_face_swapper():
             base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             model_128 = os.path.join(base_dir, 'models', 'inswapper_128.onnx')
             model_256 = os.path.join(base_dir, 'models', 'inswapper_256.onnx')
-            if os.path.exists(model_128):
-                model_path = model_128
-            else:
+            if os.path.exists(model_256):
                 model_path = model_256
+            else:
+                model_path = model_128
             # Detector GPU antes de inicializar
             try:
                 import torch

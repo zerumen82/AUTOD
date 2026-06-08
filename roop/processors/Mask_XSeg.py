@@ -103,19 +103,19 @@ class Mask_XSeg:
             result = ort_outs[0][0]
             result = np.clip(result, 0, 1.0)
             # SOLUCIÓN DEFINITIVA: Máscara directa sin inversión incorrecta
-            # Umbral optimizado para capturar área facial correcta
-            threshold = 0.3  # Umbral balanceado para área facial
+            # Umbral más permisivo para no perder área facial
+            threshold = 0.1
             result[result < threshold] = 0
             
             # Suavizar la máscara para transiciones naturales
-            result = cv2.GaussianBlur(result, (5, 5), 0)
+            result = cv2.GaussianBlur(result, (7, 7), 0)
             
             # Normalizar máscara a rango [0, 1]
             if np.max(result) > 0:
                 result = result / np.max(result)
             
-            # Eliminar píxeles muy débiles para evitar ruido
-            result[result < 0.1] = 0
+            # Eliminar solo píxeles extremadamente débiles
+            result[result < 0.05] = 0
             
             # NO INVERTIR - mantener como máscara de la cara directamente
             # La máscara debe indicar dónde está la cara (1) y dónde no (0)

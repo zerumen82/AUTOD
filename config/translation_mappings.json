@@ -1,0 +1,35 @@
+{
+  "mappings": [
+    {
+      "trigger": "morena de pelo",
+      "replacement": "brunette, dark hair"
+    },
+    {
+      "trigger": "morena",
+      "replacement": "brunette woman, tanned skin"
+    },
+    {
+      "trigger": "piel blanca",
+      "replacement": "pale skin, fair skin"
+    },
+    {
+      "trigger": "delgada",
+      "replacement": "slender, fit body"
+    },
+    {
+      "trigger": "ojos claros",
+      "replacement": "bright eyes, blue or green eyes"
+    },
+    {
+      "trigger": "piel clara",
+      "replacement": "fair skin, pale skin"
+    }
+  ],
+  "quality_fixups": [
+    {
+      "find": "white hair",
+      "replace": "white skin",
+      "condition": "pelo not in prompt"
+    }
+  ]
+}

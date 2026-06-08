@@ -180,6 +180,7 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
             effective_threshold = max(0.20, threshold * 0.5)
         
         try:
+            # 1. Intentar orientación original (fast path)
             faces = analizador.get(frame_rgb)
             if faces and len(faces) > 0:
                 valid_faces = []
@@ -187,16 +188,41 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
                     face_score = f.get('det_score', f.get('score', None))
                     if face_score is None:
                         face_score = 0.0
-                    
-                    # Aceptar caras con score sobre el umbral efectivo
                     if face_score >= effective_threshold:
                         valid_faces.append(f)
                 
                 if valid_faces:
                     converted = convert_faces_to_face_objects(valid_faces)
                     all_faces.extend(converted)
-                    # Filtrar duplicados
-                    all_faces = filter_duplicate_faces(all_faces)
+                    
+            # 2. Si no se detectaron caras en orientación original, probar rotaciones
+            #    para capturar perfiles/ángulos difíciles (slow path)
+            if not all_faces:
+                h, w = frame_rgb.shape[:2]
+                for angle in [90, 270]:
+                    try:
+                        if angle == 90:
+                            rotated = cv2.rotate(frame_rgb, cv2.ROTATE_90_CLOCKWISE)
+                        else:
+                            rotated = cv2.rotate(frame_rgb, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                        
+                        rot_faces = analizador.get(rotated)
+                        if rot_faces and len(rot_faces) > 0:
+                            valid_rot = []
+                            for f in rot_faces:
+                                fs = f.get('det_score', f.get('score', 0.0))
+                                if fs >= effective_threshold:
+                                    valid_rot.append(f)
+                            if valid_rot:
+                                converted_rot = convert_faces_to_face_objects(valid_rot)
+                                transformed = transform_faces_from_rotation(converted_rot, angle, w, h)
+                                all_faces.extend(transformed)
+                    except:
+                        pass
+            
+            # Filtrar duplicados si hay múltiples detecciones
+            if all_faces:
+                all_faces = filter_duplicate_faces(all_faces)
         except Exception as e:
             pass
 

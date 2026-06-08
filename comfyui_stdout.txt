@@ -1,0 +1,6 @@
+[33mModule 'diffusers' load failed. If you don't have it installed, do it:[0m
+[33mpip install diffusers[0m
+[34m[ComfyUI-Easy-Use] server: [0mv1.3.7 [92mLoaded[0m
+[34m[ComfyUI-Easy-Use] web root: [0mD:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\web_version/v2 [92mLoaded[0m
+prompt token count: tensor([10], device='cuda:0')
+prompt token count: tensor([32], device='cuda:0')

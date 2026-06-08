@@ -26,8 +26,12 @@ _original_print = builtins.print
 
 def custom_print(*args, **kwargs):
     """Custom print that captures output to buffer"""
-    # Call original print
-    _original_print(*args, **kwargs)
+    # Call original print (with encoding fallback for Windows console)
+    try:
+        _original_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        sanitized = [str(a).encode('ascii', 'replace').decode('ascii') for a in args]
+        _original_print(*sanitized, **kwargs)
     
     # Capture to buffer
     try:
