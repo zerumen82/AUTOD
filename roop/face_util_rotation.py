@@ -173,11 +173,11 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
         else:
             threshold = min_score
         
-        # Para detección de destino (target): usar umbral razonable para evitar ruido pero captar caras reales
+        # Para detección de destino (target): usar umbral permisivo para captar perfiles extremos
         if for_target:
-            effective_threshold = 0.20  # Reducido de 0.35 para ser más inclusivo con caras difíciles en fotos
+            effective_threshold = 0.10  # v5.11: Reducido de 0.20 para captar caras en perfiles extremos
         else:
-            effective_threshold = max(0.20, threshold * 0.5)
+            effective_threshold = max(0.10, threshold * 0.5)
         
         try:
             # 1. Intentar orientación original (fast path)
@@ -195,30 +195,29 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
                     converted = convert_faces_to_face_objects(valid_faces)
                     all_faces.extend(converted)
                     
-            # 2. Si no se detectaron caras en orientación original, probar rotaciones
-            #    para capturar perfiles/ángulos difíciles (slow path)
-            if not all_faces:
-                h, w = frame_rgb.shape[:2]
-                for angle in [90, 270]:
-                    try:
-                        if angle == 90:
-                            rotated = cv2.rotate(frame_rgb, cv2.ROTATE_90_CLOCKWISE)
-                        else:
-                            rotated = cv2.rotate(frame_rgb, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                        
-                        rot_faces = analizador.get(rotated)
-                        if rot_faces and len(rot_faces) > 0:
-                            valid_rot = []
-                            for f in rot_faces:
-                                fs = f.get('det_score', f.get('score', 0.0))
-                                if fs >= effective_threshold:
-                                    valid_rot.append(f)
-                            if valid_rot:
-                                converted_rot = convert_faces_to_face_objects(valid_rot)
-                                transformed = transform_faces_from_rotation(converted_rot, angle, w, h)
-                                all_faces.extend(transformed)
-                    except:
-                        pass
+            # 2. Probar rotaciones adicionales para capturar perfiles extremos
+            #    v5.11: siempre intentar rotaciones (no solo si original falló)
+            h, w = frame_rgb.shape[:2]
+            for angle in [90, 270]:
+                try:
+                    if angle == 90:
+                        rotated = cv2.rotate(frame_rgb, cv2.ROTATE_90_CLOCKWISE)
+                    else:
+                        rotated = cv2.rotate(frame_rgb, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                    
+                    rot_faces = analizador.get(rotated)
+                    if rot_faces and len(rot_faces) > 0:
+                        valid_rot = []
+                        for f in rot_faces:
+                            fs = f.get('det_score', f.get('score', 0.0))
+                            if fs >= effective_threshold:
+                                valid_rot.append(f)
+                        if valid_rot:
+                            converted_rot = convert_faces_to_face_objects(valid_rot)
+                            transformed = transform_faces_from_rotation(converted_rot, angle, w, h)
+                            all_faces.extend(transformed)
+                except:
+                    pass
             
             # Filtrar duplicados si hay múltiples detecciones
             if all_faces:

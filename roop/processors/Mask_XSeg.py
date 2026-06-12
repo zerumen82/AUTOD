@@ -1,5 +1,5 @@
 import threading
-
+import os
 import cv2
 import numpy as np
 import onnxruntime
@@ -12,79 +12,51 @@ THREAD_LOCK_CLIP = threading.Lock()
 
 
 class Mask_XSeg:
-    plugin_options: dict = None
+    """XSeg Masker - segmentación facial de alta precisión (v5.4)"""
 
-    model_xseg = None
+    def __init__(self):
+        self.model_xseg = None
+        self.devicename = None
 
-    processorname = "mask_xseg"
-    type = "mask"
+    def Initialize(self, params: dict):
+        self.devicename = params.get("devicename", "cpu")
+        model_path = resolve_relative_path("../models/xseg.onnx")
 
-    def Initialize(self, plugin_options: dict):
-        if self.plugin_options is not None:
-            if self.plugin_options["devicename"] != plugin_options["devicename"]:
-                self.Release()
+        if not os.path.exists(model_path):
+            print(f"[ERROR] Modelo XSeg no encontrado en: {model_path}")
+            return
 
-        self.plugin_options = plugin_options
-        if self.model_xseg is None:
-            model_path = resolve_relative_path("../models/xseg.onnx")
-            onnxruntime.set_default_logger_severity(3)
-            self.model_xseg = onnxruntime.InferenceSession(
-                model_path, None, providers=roop.globals.execution_providers
-            )
-            self.model_inputs = self.model_xseg.get_inputs()
-            self.model_outputs = self.model_xseg.get_outputs()
-
-            # replace Mac mps with cpu for the moment
-            self.devicename = self.plugin_options["devicename"].replace("mps", "cpu")
-
-    def validate_image(self, img):
-        """
-        CORRECCIÓN: Validación robusta de imagen antes del procesamiento
-        """
-        if img is None:
-            return False, None
-
-        if not isinstance(img, np.ndarray):
-            return False, None
-
-        if img.size == 0:
-            return False, None
-
-        if len(img.shape) < 2:
-            return False, None
-
-        # Verificar dimensiones válidas
-        height, width = img.shape[:2]
-        if width <= 0 or height <= 0:
-            return False, None
-
-        if width < 8 or height < 8:  # Imagen demasiado pequeña
-            return False, None
-
-        return True, img
-
-    def Run(self, img1, keywords: str) -> Frame:
-        """
-        CORRECCIÓN: Validación exhaustiva antes del resize para evitar el error de OpenCV
-        """
-        # Validar imagen de entrada
-        is_valid, validated_img = self.validate_image(img1)
-        if not is_valid:
-            print(
-                f"[ERROR] Mask_XSeg: imagen inválida para procesamiento - shape: {img1.shape if img1 is not None else 'None'}"
-            )
-            # Crear una máscara por defecto (imagen negra del tamaño esperado)
-            if img1 is not None and hasattr(img1, "shape"):
-                height, width = img1.shape[:2]
-            else:
-                height, width = 256, 256
-            return np.zeros((height, width), dtype=np.float32)
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        if self.devicename == "cpu":
+            providers = ["CPUExecutionProvider"]
 
         try:
-            # CORRECCIÓN: Redimensionar con validación
-            print(
-                f"[INFO] Mask_XSeg: redimensionando imagen de {validated_img.shape} a (256, 256)"
-            )
+            self.model_xseg = onnxruntime.InferenceSession(model_path, providers=providers)
+        except Exception as e:
+            print(f"[ERROR] Error cargando modelo XSeg: {e}")
+
+    def Run(self, img: Frame, masking_text: str = "") -> np.ndarray:
+        """
+        Genera una máscara de segmentación facial de 256x256.
+        """
+        if self.model_xseg is None or img is None:
+            # Si no hay modelo, devolver máscara blanca parcial (elipse genérica)
+            if img is not None:
+                h, w = img.shape[:2]
+                mask = np.zeros((h, w), dtype=np.float32)
+                cv2.ellipse(mask, (w // 2, h // 2), (int(w * 0.45), int(h * 0.50)), 0, 0, 360, 1.0, -1)
+                return mask
+            return np.zeros((256, 256), dtype=np.float32)
+
+        validated_img = None
+        try:
+            # Asegurar tamaño y formato para el modelo (256x256)
+            if isinstance(img, np.ndarray):
+                validated_img = img.copy()
+            else:
+                return np.zeros((256, 256), dtype=np.float32)
+
+            # Redimensionar con validación
             temp_frame = cv2.resize(validated_img, (256, 256), cv2.INTER_CUBIC)
 
             if temp_frame is None or temp_frame.size == 0:
@@ -92,35 +64,34 @@ class Mask_XSeg:
                 height, width = validated_img.shape[:2]
                 return np.zeros((height, width), dtype=np.float32)
 
-            temp_frame = temp_frame.astype("float32") / 255.0
-            temp_frame = temp_frame[None, ...]
+            # Normalizar: [0, 255] -> [-1, 1]
+            blob = temp_frame.astype(np.float32) / 127.5 - 1.0
+            
+            # v5.6.3: Asegurar forma NHWC [1, 256, 256, 3] para xseg.onnx
+            blob = np.expand_dims(blob, axis=0)
+            if blob.shape != (1, 256, 256, 3):
+                blob = blob.reshape(1, 256, 256, 3)
 
-            io_binding = self.model_xseg.io_binding()
-            io_binding.bind_cpu_input(self.model_inputs[0].name, temp_frame)
-            io_binding.bind_output(self.model_outputs[0].name, self.devicename)
-            self.model_xseg.run_with_iobinding(io_binding)
-            ort_outs = io_binding.copy_outputs_to_cpu()
-            result = ort_outs[0][0]
-            result = np.clip(result, 0, 1.0)
-            # SOLUCIÓN DEFINITIVA: Máscara directa sin inversión incorrecta
-            # Umbral más permisivo para no perder área facial
-            threshold = 0.1
-            result[result < threshold] = 0
+            # Inferencia
+            inputs = {self.model_xseg.get_inputs()[0].name: blob}
+            outputs = self.model_xseg.run(None, inputs)
             
-            # Suavizar la máscara para transiciones naturales
-            result = cv2.GaussianBlur(result, (7, 7), 0)
+            # Post-procesamiento
+            mask = outputs[0][0][0]  # El modelo devuelve [1, 1, 256, 256]
             
-            # Normalizar máscara a rango [0, 1]
-            if np.max(result) > 0:
-                result = result / np.max(result)
+            # Limpieza de máscara: Sigmoide manual simplificada
+            mask = np.clip(mask, 0, 1.0)
             
-            # Eliminar solo píxeles extremadamente débiles
+            # Redimensionar máscara al tamaño original de la cara alineada
+            height, width = validated_img.shape[:2]
+            result = cv2.resize(mask, (width, height), cv2.INTER_LINEAR)
+            
+            # Refinar bordes
             result[result < 0.05] = 0
             
             # NO INVERTIR - mantener como máscara de la cara directamente
             # La máscara debe indicar dónde está la cara (1) y dónde no (0)
             
-            print(f"[DEBUG] Mask_XSeg: máscara final - min={np.min(result):.3f}, max={np.max(result):.3f}, mean={np.mean(result):.3f}")
             return result
 
         except Exception as e:
@@ -133,5 +104,6 @@ class Mask_XSeg:
             return np.zeros((height, width), dtype=np.float32)
 
     def Release(self):
-        del self.model_xseg
-        self.model_xseg = None
+        if self.model_xseg:
+            del self.model_xseg
+            self.model_xseg = None

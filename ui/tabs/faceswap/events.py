@@ -1,5 +1,6 @@
 import gradio as gr
 import os
+import sys
 import cv2
 import numpy as np
 import time
@@ -14,6 +15,23 @@ import roop.face_util as face_util
 DETECTED_FACES_GALLERY_COLUMNS = 10
 is_deleting_input_face = False
 is_deleting_target_face = False
+
+def _write_console(msg: str):
+    for fd in (1, 2):
+        try:
+            os.write(fd, (msg + "\n").encode("utf-8", errors="replace"))
+            return
+        except Exception:
+            pass
+    try:
+        sys.__stdout__.write(msg + "\n")
+        sys.__stdout__.flush()
+        return
+    except Exception:
+        pass
+
+_log = _write_console
+_log("[TEST_CONSOLE] _write_console desde module-level de events.py OK")
 
 
 def _resolve_gallery_index(raw_index, total_items, columns=DETECTED_FACES_GALLERY_COLUMNS):
@@ -287,6 +305,7 @@ selected_target_face_idx = None
 
 def wire_events(ui_comp):
     """Conecta los componentes con la lógica"""
+    _log("[TEST_CONSOLE] wire_events() llamado - _write_console funciona desde aqui")
 
     # Warmup: precargar FaceAnalysis al iniciar la pestaña
     try:
@@ -494,6 +513,7 @@ def wire_events(ui_comp):
     
     # ARCHIVOS ORIGEN/DESTINO
     def on_src_changed(files):
+        _log(f"[TEST_CONSOLE] on_src_changed INICIO - {len(files)} archivo(s)")
         state.current_input_page = 0
         if not files: 
             roop.globals.INPUT_FACESETS, ui.globals.ui_input_thumbs = [], []
@@ -516,9 +536,22 @@ def wire_events(ui_comp):
                 ui.globals.ui_input_thumbs.append(util.convert_to_gradio(face_img, is_rgb=True))
         
         total_faces = len(ui.globals.ui_input_thumbs)
+        _log(f"[LOAD] Fuentes: {total_faces} caras en {len(files)} archivo(s)")
         return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total_faces, "input"))
     
-    ui_comp["bt_srcfiles"].change(fn=on_src_changed, inputs=[ui_comp["bt_srcfiles"]], outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
+    _src_processing = False
+    def _safe_on_src_changed(files):
+        nonlocal _src_processing
+        if _src_processing:
+            return
+        _src_processing = True
+        try:
+            return on_src_changed(files)
+        finally:
+            _src_processing = False
+
+    ui_comp["bt_srcfiles"].change(fn=_safe_on_src_changed, inputs=[ui_comp["bt_srcfiles"]], outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
+    ui_comp["bt_srcfiles"].upload(fn=_safe_on_src_changed, inputs=[ui_comp["bt_srcfiles"]], outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
 
     def on_dest_changed(files):
         state.current_target_page = 0
@@ -542,6 +575,7 @@ def wire_events(ui_comp):
         roop.globals.face_swap_mode = 'selected'
         first_entry = state.list_files_process[0]
         roop.globals.target_path = first_entry.filename
+        _log(f"[LOAD] Destino: {len(state.list_files_process)} archivo(s) - {os.path.basename(first_entry.filename)}")
         
         return (
             gr.update(maximum=first_entry.endframe, value=1), 

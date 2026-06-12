@@ -4,6 +4,7 @@ import cv2
 import insightface  
 import threading  
 import roop.globals  
+from roop.path_helper import get_root_path
 from roop.analyser import get_face_single, get_face_many  
   
 FACE_SWAPPER = None  
@@ -14,7 +15,7 @@ def get_face_swapper():
     with THREAD_LOCK:  
         if FACE_SWAPPER is None:  
             # Prioridad 128 (usa embedding ArcFace, compatible con INSwapper.get)
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            base_dir = get_root_path()
             model_128 = os.path.join(base_dir, 'models', 'inswapper_128.onnx')
             model_256 = os.path.join(base_dir, 'models', 'inswapper_256.onnx')
             if os.path.exists(model_256):

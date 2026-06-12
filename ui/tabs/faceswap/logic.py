@@ -373,8 +373,9 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
         yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin caras origen"))
         return
     
-    # Configurar parámetros
-    roop.globals.face_swap_mode = 'selected'
+    # Configurar parámetros (respetar modo ya cargado desde config/UI; no forzar selected_faces)
+    if not getattr(roop.globals, 'face_swap_mode', None):
+        roop.globals.face_swap_mode = 'selected_faces'
     roop.globals.selected_enhancer = enhancer if enhancer else "None"
     roop.globals.distance_threshold = face_distance
     roop.globals.blend_ratio = blend_ratio
@@ -383,7 +384,9 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
 
     # Verificar caras de destino para fotos (en video el fallback es automático)
     is_video_present = any(util.is_video(entry.filename) for entry in state.list_files_process)
-    if not is_video_present and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0):
+    if (not is_video_present
+            and roop.globals.face_swap_mode != 'all'
+            and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0)):
         error_msg = "[ERROR] ERROR: No hay caras de destino seleccionadas. En fotos, debes elegir al menos una cara para cambiar."
         print(f"[DIAGNÓSTICO] {error_msg}")
         gr.Error(error_msg)

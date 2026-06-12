@@ -11,7 +11,7 @@ TARGET_FACES = []    # Lista de caras de destino
 
 source_path = None
 target_path = None
-output_path = None
+output_path = 'output'
 target_folder_path = None
 
 frame_processors: List[str] = []
@@ -62,8 +62,8 @@ use_color_matching = True  # REACTIVADO para tono de piel del origen
 
 # Factor de blending del enhancer (0-1)
 # 0 = sin enhancer, 1 = enhancer completo
-# 0.3 para que el swap sea visible pero con calidad
-enhancer_blend_factor = 0.15
+# v5.4.9: 0.85 para máxima nitidez preservando realismo
+enhancer_blend_factor = 0.85
 
 # Ajuste de brillo (0-1)
 # 0.15 para no lavar demasiado la cara original

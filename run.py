@@ -59,25 +59,6 @@ def cleanup_old_temps_async():
             except Exception:
                 pass # Ignorar errores de archivos en uso
         return local_count
-        now = time.time()
-        for item in os.listdir(base_dir):
-            item_path = os.path.join(base_dir, item)
-            try:
-                age = now - os.path.getmtime(item_path)
-            except Exception:
-                continue
-            # Evitar borrar artefactos recientes que la app podría estar sirviendo.
-            if age < min_age_seconds:
-                continue
-            try:
-                if os.path.isdir(item_path):
-                    shutil.rmtree(item_path, ignore_errors=True)
-                else:
-                    os.remove(item_path)
-                local_count += 1
-            except Exception:
-                pass  # Ignorar errores de archivos en uso
-        return local_count
     
     # 1. Limpiar temporales de Gradio en C:\Users\...\AppData\Local\Temp\gradio
     try:
@@ -310,6 +291,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"  - PyTorch: NO DISPONIBLE ({e})")
         print(f"  - [INFO] Continuando sin PyTorch (usando ONNX Runtime)...")
+    
+    # LOG DE VERIFICACION
+    with open(r'D:\PROJECTS\AUTOAUTO\debug_swap.log', 'a') as _lf:
+        _lf.write("[RUNPY] ENTER step3 - about to import roop.core\n")
     
     print("\n[STEP 3] Lanzando interfaz Gradio...")
     try:

@@ -328,7 +328,13 @@ def batch_process_regular(
     from roop.ProcessMgr import ProcessMgr
     from roop.ProcessOptions import ProcessOptions
     
-    print(f"[DIAG] batch_process_regular() called. INPUT_FACESETS has {len(getattr(roop.globals, 'INPUT_FACESETS', []))} facesets")
+    input_facesets = getattr(roop.globals, 'INPUT_FACESETS', [])
+    total_source_faces = sum(len(fs.faces) for fs in input_facesets if hasattr(fs, 'faces') and fs.faces)
+    print(f"[LOAD] Fuentes: {len(input_facesets)} facesets, {total_source_faces} caras de origen")
+    
+    target_faces_data = getattr(roop.globals, 'TARGET_FACES', [])
+    if target_faces_data:
+        print(f"[LOAD] Destino: {len(target_faces_data)} cara(s) seleccionada(s)")
     
     total_files = len(list_files_process)
     if total_files == 0:
@@ -342,7 +348,7 @@ def batch_process_regular(
     process_mgr = ProcessMgr()
     
     # Configurar opciones de procesamiento
-    processor_options = {}
+    processor_options = {'face_swapper': {}}
     if mask_engine and mask_engine != "None":
         processor_options["masking"] = {"subtype": mask_engine}
     

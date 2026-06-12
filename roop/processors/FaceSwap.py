@@ -4,6 +4,7 @@ import insightface
 import cv2
 import inspect
 import roop.globals
+from roop.path_helper import get_root_path
 from typing import Any, Tuple, Optional, Dict
 from roop.types import Face, Frame
 
@@ -54,7 +55,6 @@ class FaceWarpEngine:
         triangles = tri_list.reshape(-1, 3, 2)
         
         warped = np.zeros_like(aimg_tgt)
-        count = 0
         for t in triangles:
             idxs = []
             for v in t:
@@ -71,81 +71,39 @@ class FaceWarpEngine:
             rx, ry, rw, rh = cv2.boundingRect(tgt_tri)
             if rw < 2 or rh < 2:
                 continue
-            
-            rx_f, ry_f = float(rx), float(ry)
-            tgt_offset = np.ascontiguousarray((tgt_tri - [rx_f, ry_f]).astype(np.float32))
-            src_offset = np.ascontiguousarray((src_tri - [rx_f, ry_f]).astype(np.float32))
+
+            h_s, w_s = aimg_src.shape[:2]
+            src_x1 = max(0, int(np.floor(np.min(src_tri[:, 0]))))
+            src_y1 = max(0, int(np.floor(np.min(src_tri[:, 1]))))
+            src_x2 = min(w_s, int(np.ceil(np.max(src_tri[:, 0]))))
+            src_y2 = min(h_s, int(np.ceil(np.max(src_tri[:, 1]))))
+            rw_s, rh_s = src_x2 - src_x1, src_y2 - src_y1
+            if rw_s < 2 or rh_s < 2:
+                continue
+
+            tgt_offset = np.ascontiguousarray((tgt_tri - [float(rx), float(ry)]).astype(np.float32))
+            src_offset = np.ascontiguousarray((src_tri - [float(src_x1), float(src_y1)]).astype(np.float32))
             
             warp_mat = cv2.getAffineTransform(src_offset, tgt_offset)
-            
-            src_roi = aimg_src[ry:ry+rh, rx:rx+rw]
-            if src_roi.size == 0 or src_roi.shape[0] < 2 or src_roi.shape[1] < 2:
-                continue
+            src_roi = aimg_src[src_y1:src_y1+rh_s, src_x1:src_x1+rw_s]
+            if src_roi.size == 0: continue
             
             warped_roi = cv2.warpAffine(src_roi, warp_mat, (rw, rh), None, cv2.INTER_LINEAR, cv2.BORDER_REFLECT_101)
-            
             mask = np.zeros((rh, rw), dtype=np.uint8)
             cv2.fillConvexPoly(mask, np.int32(tgt_offset), 255)
             
-            roi_old = warped[ry:ry+rh, rx:rx+rw].copy()
-            mask_3ch = np.stack([mask, mask, mask], axis=-1)
-            roi_new = np.where(mask_3ch > 0, warped_roi, roi_old)
-            warped[ry:ry+rh, rx:rx+rw] = roi_new
-            count += 1
+            warped[ry:ry+rh, rx:rx+rw] = cv2.bitwise_and(warped_roi, warped_roi, mask=mask) + \
+                                         cv2.bitwise_and(warped[ry:ry+rh, rx:rx+rw], warped[ry:ry+rh, rx:rx+rw], mask=cv2.bitwise_not(mask))
         
         return warped, M_tgt
 
 
-# Cache: detect once per face-type whether normed_embedding is writable (no setter = read-only)
-_writable_cache: dict[int, bool] = {}
-
-def _is_normed_embedding_writable(face) -> bool:
-    """
-    Duck-type detect: can this Face object accept a write to .normed_embedding?
-    insightface.Face  -> .normed_embedding is a read-only @property -> False
-    roop.*.Face        -> .normed_embedding is a plain attribute  -> True
-    Cached by class identity (type object id), not by name, so two Face classes
-    with the same __name__ cannot collide.
-    """
-    key = type(face)
-    if key not in _writable_cache:
-        try:
-            key.__setattr__(face, 'normed_embedding', None)
-        except AttributeError:
-            _writable_cache[key] = False
-        except Exception:
-            _writable_cache[key] = False
-        else:
-            _writable_cache[key] = True
-    return _writable_cache[key]
-
-
-def _normalize_source_embedding(source_face: Any) -> bool:
-    """
-    Normalize source_face.embedding into a unit-norm embedding, handling both
-    writable and read-only .normed_embedding (insightface.Face).
-
-    Returns True on success, False if embedding was absent or normalization failed.
-    Works with:
-      - roop.face_util.Face    (normed_embedding writable  -> sets both attrs)
-      - roop.types.Face        (normed_embedding writable  -> sets both attrs)
-      - insightface.Face       (normed_embedding wirter-only  -> only sets embedding so the property computes correctly)
-    """
-    import numpy as np
-    emb = getattr(source_face, 'embedding', None)
-    if emb is None:
-        return False
-    emb = np.array(emb, dtype=np.float32).flatten()
-    if emb.shape[0] > 512:
-        emb = emb[:512]
-    norm = np.linalg.norm(emb)
-    if norm <= 0:
-        return False
-    normalized = emb / norm
-    source_face.embedding = normalized
-    if _is_normed_embedding_writable(source_face):
-        source_face.normed_embedding = normalized
-    return True
+def _normalize_source_embedding(source_face: Face) -> None:
+    if hasattr(source_face, 'embedding') and source_face.embedding is not None:
+        emb = np.array(source_face.embedding, dtype=np.float32).flatten()
+        norm = np.linalg.norm(emb)
+        if norm > 0:
+            source_face.embedding = (emb / norm).reshape(1, -1)
 
 
 class FaceSwap:
@@ -154,32 +112,34 @@ class FaceSwap:
         self.model_path = None
         self.devicename = None
         self.is_256 = False
+        self.source_is_image = False
 
     def Initialize(self, options: dict) -> None:
         devnm = options.get('devicename', 'cpu')
         
-        # Lista de candidatos en orden de preferencia
+        root = get_root_path()
         candidates = [
-            os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_256.onnx')),
-            os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_128_facefusion.onnx')),
-            os.path.abspath(os.path.join(os.getcwd(), 'models', 'inswapper_128.onnx'))
+            os.path.abspath(os.path.join(root, 'models', 'inswapper_128_facefusion.onnx')),
+            os.path.abspath(os.path.join(root, 'models', 'inswapper_128.onnx')),
+            os.path.abspath(os.path.join(root, 'models', 'inswapper_256.onnx'))
         ]
         
         model_path = None
         for path in candidates:
             if os.path.exists(path):
-                # Verificar si el modelo es compatible con embeddings (rank 2) o requiere imagen (rank 4)
                 try:
                     import onnxruntime as ort
                     temp_sess = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
-                    source_input = next(i for i in temp_sess.get_inputs() if i.name == 'source')
-                    if len(source_input.shape) == 2: # [1, 512] -> Compatible
+                    inputs = temp_sess.get_inputs()
+                    source_input = next((i for i in inputs if i.name == 'source'), inputs[1])
+                    shape_len = len(source_input.shape)
+                    if shape_len == 2 or shape_len == 4:
                         model_path = path
+                        self.is_256 = '256' in os.path.basename(path)
+                        self.source_is_image = (shape_len == 4)
+                        print(f"[FaceSwap] Usando {os.path.basename(path)} (source shape={source_input.shape}, {'IMAGE' if self.source_is_image else 'EMBEDDING'})")
                         break
-                    else:
-                        print(f"[FaceSwap] Saltando {os.path.basename(path)}: requiere imagen como entrada, no compatible con ADN Maestro.")
-                except Exception as e:
-                    print(f"[FaceSwap] Error verificando {os.path.basename(path)}: {e}")
+                except Exception:
                     continue
 
         if model_path is None:
@@ -188,324 +148,169 @@ class FaceSwap:
 
         self.model_path = model_path
         self.devicename = devnm
-        self.is_256 = '256' in os.path.basename(model_path)
-        
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'cuda' in devnm else ['CPUExecutionProvider']
         
         try:
-            print(f"[FaceSwap] Cargando modelo compatible: {os.path.basename(model_path)} (Resolución {'256px' if self.is_256 else '128px'})")
-            
             from insightface.model_zoo.inswapper import INSwapper
-            
             self.model = INSwapper(model_file=model_path, session=None)
             self.model.session = ort.InferenceSession(model_path, providers=providers)
-            
-            print(f"[FaceSwap] Modelo inicializado correctamente")
-            
-            if type(self.model).__name__ != 'INSwapper':
-                print(f"[FaceSwap] ❌ ERROR: El modelo cargado no es INSwapper, es {type(self.model).__name__}")
-                self.model = None
+            print(f"[FaceSwap] Modelo {os.path.basename(model_path)} inicializado correctamente.")
         except Exception as e:
             print(f"[FaceSwap] Error crítico inicializando modelo: {e}")
             self.model = None
 
     def Run(self, source_face: Face, target_face: Face, temp_frame: Frame, paste_back: bool = True) -> Any:
         try:
-            if not isinstance(temp_frame, np.ndarray):
-                temp_frame = np.array(temp_frame)
-            
-            for face in (target_face, source_face):
-                for attr in ['kps', 'bbox', 'embedding']:
-                    val = getattr(face, attr, None)
-                    if val is not None and isinstance(val, (list, tuple)):
-                        try:
-                            setattr(face, attr, np.array(val, dtype=np.float32))
-                        except (AttributeError, TypeError):
-                            pass
-
-            # 1. Intentar primero con el MODELO IA (Máxima fidelidad)
-            if self.model is None or type(self.model).__name__ != 'INSwapper':
+            if self.model is None:
                 self.Initialize({"devicename": getattr(self, 'devicename', 'cpu')})
+            
+            # v5.22: Forzar conversión a numpy arrays para evitar errores de shape (list -> array)
+            for face in [source_face, target_face]:
+                if hasattr(face, 'kps') and isinstance(face.kps, (list, tuple)):
+                    face.kps = np.array(face.kps, dtype=np.float32)
+                if hasattr(face, 'bbox') and isinstance(face.bbox, (list, tuple)):
+                    face.bbox = np.array(face.bbox, dtype=np.float32)
             
             res_data = None
             if self.model is not None:
-                _normalize_source_embedding(source_face)
-                try:
-                    # Inswapper_128 soporta paste_back=False, Inswapper_256 (FF) puede variar
+                if self.source_is_image:
+                    if getattr(roop.globals, 'log_level', 'error') == 'debug':
+                        print(f"[FaceSwap] Usando pipeline 256px (IMAGE)")
                     try:
-                        res_data = self.model.get(temp_frame, target_face, source_face, paste_back=False)
-                    except TypeError:
-                        res_data = self.model.get(temp_frame, target_face, source_face)
-                except Exception as e:
-                    print(f"[FaceSwap] Error modelo IA: {e}")
+                        from insightface.utils import face_align
+                        src_img = getattr(source_face, 'face_img', getattr(source_face, 'face_img_ref', None))
+                        if src_img is not None:
+                            # v5.40: Revertir a Pipeline de 256px BGR 0-255 (Estándar Inswapper)
+                            src_kps = np.array(source_face.kps, dtype=np.float32)
+                            tgt_kps = np.array(target_face.kps, dtype=np.float32)
+                            
+                            # 1. Alinear (norm_crop2 devuelve BGR 0-255)
+                            aimg_src, _ = face_align.norm_crop2(src_img, src_kps, 256)
+                            aimg_tgt, M_tgt = face_align.norm_crop2(temp_frame, tgt_kps, 256)
+                            
+                            # 2. Preparar blobs [1, 3, 256, 256] BGR 0-255 (Sin normalización manual)
+                            blob_src = aimg_src.astype(np.float32)
+                            blob_tgt = aimg_tgt.astype(np.float32)
+                            
+                            # HWC -> NCHW
+                            blob_src = blob_src.transpose(2, 0, 1)[np.newaxis, ...]
+                            blob_tgt = blob_tgt.transpose(2, 0, 1)[np.newaxis, ...]
+                            
+                            # 3. Inferencia
+                            res = self.model.session.run(None, {
+                                self.model.input_names[0]: blob_tgt,
+                                self.model.input_names[1]: blob_src
+                            })[0]
+                            
+                            # 4. Des-normalizar salida (NCHW -> HWC)
+                            swapped_face = res[0].transpose(1, 2, 0)
+                            
+                            # v5.40: Detección robusta de escala de salida (0-1 vs 0-255)
+                            if swapped_face.max() < 2.0:
+                                swapped_face = (swapped_face * 255.0)
+                            
+                            swapped_face = swapped_face.clip(0, 255).astype(np.uint8)
+                            # NO convertir a BGR si ya viene del pipeline BGR
+                            # swapped_face = cv2.cvtColor(swapped_face, cv2.COLOR_RGB2BGR)
+                            
+                            res_data = (swapped_face, M_tgt)
+                        else:
+                            res_data = self._run_warp(temp_frame, target_face, source_face, paste_back=False)
+                    except Exception as e:
+                        print(f"[FaceSwap] Error pipeline 256px (v5.40): {e}", flush=True)
+                        res_data = self._run_warp(temp_frame, target_face, source_face, paste_back=False)
+                else:
+                    # v5.40: Pipeline manual para modelos 128px (embedding-based) BGR 0-255
+                    if getattr(roop.globals, 'log_level', 'error') == 'debug':
+                        print(f"[FaceSwap] Usando pipeline 128px (EMBEDDING)")
+                    try:
+                        from insightface.utils import face_align
+                        src_emb = getattr(source_face, 'embedding', None)
+                        if src_emb is not None:
+                            src_emb = np.array(src_emb, dtype=np.float32).flatten()
+                            src_emb = src_emb / np.linalg.norm(src_emb)
+                            tgt_kps = np.array(target_face.kps, dtype=np.float32)
+                            
+                            aimg_tgt, M_tgt = face_align.norm_crop2(temp_frame, tgt_kps, 128)
+                            
+                            # v5.41: Ambos modelos inswapper_128 esperan input [0,1] float32.
+                            # El wrapper INSwapper de insightface normaliza a [0,1] internamente,
+                            # pero nuestro pipeline bypassa el wrapper y usa raw ONNX session.
+                            # Si pasamos [0,255] las activaciones saturan → output blanco (>90% px >250).
+                            print("[FaceSwap] v5.41: normalizando input a [0,1]", flush=True)
+                            blob_tgt = aimg_tgt.astype(np.float32) / 255.0
+                            blob_tgt = blob_tgt.transpose(2, 0, 1)[np.newaxis, ...]
+                            blob_src = src_emb[np.newaxis, :]
+                            
+                            res = self.model.session.run(None, {
+                                self.model.input_names[0]: blob_tgt,
+                                self.model.input_names[1]: blob_src
+                            })[0]
+                            
+                            swapped_face = res[0].transpose(1, 2, 0)
+                            if swapped_face.max() < 2.0:
+                                swapped_face = (swapped_face * 255.0)
+                                
+                            swapped_face = swapped_face.clip(0, 255).astype(np.uint8)
+                            res_data = (swapped_face, M_tgt)
+                        else:
+                            res_data = self._run_warp(temp_frame, target_face, source_face, paste_back=False)
+                    except Exception as e:
+                        print(f"[FaceSwap] Error pipeline 128px (v5.40): {e}", flush=True)
+                        res_data = self._run_warp(temp_frame, target_face, source_face, paste_back=False)
 
-            # 2. FALLBACK: Si la IA falló, intentar Warp (solo si es necesario)
             if res_data is None:
-                print("[FaceSwap] Modelo IA falló o no disponible, intentando Fallback Warp...")
+                if getattr(roop.globals, 'log_level', 'error') == 'debug':
+                    print(f"[FaceSwap] ⚠️ Fallback a WARP GEOMÉTRICO (modelo falló o no disponible)")
                 res_data = self._run_warp(temp_frame, target_face, source_face, paste_back=False)
             
-            if res_data is None:
-                return None
+            if res_data is None: return None
             
-            # 3. POST-PROCESO: Normalizar a 256px para el resto del pipeline (v5.2)
             if isinstance(res_data, tuple):
                 swapped_face, M = res_data
-                out_h, out_w = swapped_face.shape[:2]
-                
-                if out_w != 256:
-                    scale = 256.0 / out_w
-                    swapped_face = cv2.resize(swapped_face, (256, 256), interpolation=cv2.INTER_CUBIC)
-                    # Escalar solo la parte de transformación, no la de traslación si es necesario, 
-                    # pero en matrices de 2x3 de insightface, multiplicar todo por el factor de escala
-                    # suele ser correcto porque la traslación también está en píxeles del crop.
+                if swapped_face.shape[1] != 256:
+                    scale = 256.0 / swapped_face.shape[1]
+                    swapped_face = cv2.resize(swapped_face, (256, 256), interpolation=cv2.INTER_LANCZOS4)
                     M = M * scale
-                
                 res_data = (swapped_face, M)
 
-            if not paste_back:
-                return res_data
-
+            if not paste_back: return res_data
             if isinstance(res_data, tuple):
-                swapped_face, M = res_data
-                return self.paste_back_robust(temp_frame, swapped_face, M)
-            else:
-                return res_data
+                return self.paste_back_robust(temp_frame, res_data[0], res_data[1])
+            return res_data
                 
         except Exception as e:
             print(f"[FaceSwap] Error en Run: {e}")
-            import traceback
-            traceback.print_exc()
             return None
 
     def _run_warp(self, temp_frame, target_face, source_face, paste_back=True):
-        """Landmark-based face warp using Delaunay triangulation for identity transfer"""
         try:
-            src_img_bgr = None
-            src_path = getattr(source_face, 'source_image', None)
-            if src_path and os.path.isfile(src_path):
-                src_full = cv2.imread(src_path)
-                if src_full is not None and src_full.size > 0:
-                    src_img_bgr = src_full
-            if src_img_bgr is None:
-                src_img = getattr(source_face, 'face_img_ref', None)
-                if src_img is None:
-                    src_img = getattr(source_face, 'face_img', None)
-                if src_img is not None:
-                    if src_img.shape[2] == 3:
-                        src_img_bgr = cv2.cvtColor(src_img, cv2.COLOR_RGB2BGR)
-                    elif src_img.shape[2] == 4:
-                        src_img_bgr = cv2.cvtColor(src_img, cv2.COLOR_RGBA2BGR)
-                    else:
-                        src_img_bgr = src_img.copy()
-            if src_img_bgr is None:
-                print("[FaceSwap] No source image available for warp")
-                return None
-
-            src_kps = np.array(source_face.kps, dtype=np.float32)
-            tgt_kps = np.array(target_face.kps, dtype=np.float32)
+            src_img = getattr(source_face, 'face_img_ref', getattr(source_face, 'face_img', None))
+            if src_img is None: return None
+            src_img_bgr = cv2.cvtColor(src_img, cv2.COLOR_RGB2BGR) if src_img.shape[2] >= 3 else src_img
             
-            src_106 = getattr(source_face, 'landmark_2d_106', None)
-            tgt_106 = getattr(target_face, 'landmark_2d_106', None)
-
             warped_face, M = FaceWarpEngine.warp_face(
-                src_img_bgr, temp_frame, src_kps, tgt_kps,
-                src_landmarks_106=src_106, tgt_landmarks_106=tgt_106
+                src_img_bgr, temp_frame, np.array(source_face.kps), np.array(target_face.kps)
             )
-
-            _dbg = os.path.join(os.path.dirname(__file__), '..', 'debug_swap')
-            os.makedirs(_dbg, exist_ok=True)
-            _fnum = getattr(FaceSwap, '_debug_warp', 0) + 1
-            FaceSwap._debug_warp = _fnum
-            if _fnum <= 3:
-                cv2.imwrite(os.path.join(_dbg, f'warp_result_f{_fnum}.png'), warped_face)
-
-            if not paste_back:
-                return warped_face, M
-
+            if not paste_back: return warped_face, M
             return self.paste_back_robust(temp_frame, warped_face, M)
-
-        except Exception as e:
-            print(f"[FaceSwap] _run_warp error: {e}")
-            import traceback as tb
-            tb.print_exc()
-            return None
+        except Exception: return None
 
     def paste_back_robust(self, target_img, source_face_img, M):
         try:
-            from roop.quality_enhancements import create_soft_mask, detect_foreground_occlusion, blend_with_poisson
-            
-            if source_face_img is None or target_img is None:
-                return target_img
-
-            M = np.asarray(M, dtype=np.float32)
-            if M.shape == (3, 3):
-                M = M[:2, :]
-            if M.shape != (2, 3):
-                return target_img
-
+            from roop.quality_enhancements import blend_with_poisson
             h, w = target_img.shape[:2]
             M_inv = cv2.invertAffineTransform(M)
+            warped_face = cv2.warpAffine(source_face_img, M_inv, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
             
-            # Warp de la cara swappeada al frame original (M: original->aligned, usar inversa)
-            warped_face = cv2.warpAffine(source_face_img, M_inv, (w, h), borderMode=cv2.BORDER_REPLICATE)
+            mask = np.zeros((source_face_img.shape[0], source_face_img.shape[1]), dtype=np.float32)
+            cv2.ellipse(mask, (128, 128), (95, 125), 0, 0, 360, 1.0, -1)
+            mask = cv2.GaussianBlur(mask, (15, 15), 0)
+            warped_mask = cv2.warpAffine(mask, M_inv, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
             
-            # Crear máscara para el pegado
-            bbox = [0, 0, source_face_img.shape[1], source_face_img.shape[0]]
-            pts = np.array([[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]], dtype=np.float32)
-            pts_warped = cv2.transform(pts.reshape(-1, 1, 2), M_inv)
-            
-            x_coords = pts_warped[:, 0, 0]
-            y_coords = pts_warped[:, 0, 1]
-            target_bbox = [np.min(x_coords), np.min(y_coords), np.max(x_coords), np.max(y_coords)]
-            
-            # Detección de oclusiones
-            face_w, face_h = source_face_img.shape[1], source_face_img.shape[0]
-            target_region_warped = cv2.warpAffine(target_img, M_inv, (face_w, face_h), borderMode=cv2.BORDER_REPLICATE)
-            occ_mask = detect_foreground_occlusion(source_face_img, target_region_warped)
-            
-            # Crear máscara suave (feather bajo para no afectar exterior)
-            mask = create_soft_mask(target_bbox, (h, w), feather=5, occlusion_mask=occ_mask)
-            
-            mask_3ch = cv2.merge([mask, mask, mask])
-            result = (warped_face * mask_3ch + target_img * (1 - mask_3ch)).astype(np.uint8)
-            
-            return result
-        except Exception as e:
-            print(f"[FaceSwap] Error en paste_back_robust: {e}")
-            return target_img
+            center = (int(np.mean(np.where(warped_mask > 0.5)[1])), int(np.mean(np.where(warped_mask > 0.5)[0])))
+            return blend_with_poisson(warped_face, target_img, warped_mask, center)
+        except Exception: return target_img
 
-
-# --- FUNCIONES DE PRESERVACIÓN DE BOCA ---
-
-def detect_mouth_open(target_face, landmarks_106, image) -> Tuple[bool, Optional[Dict], float]:
-    """Detecta boca abierta usando MouthDetector avanzado, con fallback a landmarks 106"""
-    try:
-        from roop.mouth_detector import get_mouth_detector
-        detector = get_mouth_detector()
-        if detector and detector.is_initialized:
-            x1, y1, x2, y2 = target_face.bbox
-            h, w = image.shape[:2]
-            pw, ph = int((x2-x1)*0.2), int((y2-y1)*0.2)
-            x1, y1 = max(0, int(x1-pw)), max(0, int(y1-ph))
-            x2, y2 = min(w, int(x2+pw)), min(h, int(y2+ph))
-
-            face_roi = image[y1:y2, x1:x2]
-            if face_roi.size == 0:
-                return False, None, 0.0
-
-            is_open, ratio, mouth_data = detector.detect_mouth_open(face_roi)
-
-            if mouth_data:
-                landmark_keys = {'upper_lip_top', 'upper_lip_bottom', 'lower_lip_top', 'lower_lip_bottom', 'mouth_left', 'mouth_right', 'upper_lip_left_curve', 'upper_lip_right_curve', 'lower_lip_left_curve', 'lower_lip_right_curve', 'mouth_center_top', 'mouth_center_bottom', 'upper_lip_center', 'lower_lip_center'}
-                for key, val in mouth_data.items():
-                    if key in landmark_keys and isinstance(val, tuple) and len(val) == 2:
-                        mouth_data[key] = (val[0] + x1, val[1] + y1)
-                mouth_data['roi_offset'] = (x1, y1)
-                mouth_data['roi_size'] = (face_roi.shape[1], face_roi.shape[0])
-                return is_open, mouth_data, ratio
-
-            # Fallback: MediaPipe no dio datos, usar landmarks_106 si están disponibles
-            if landmarks_106 is not None and len(landmarks_106) >= 68:
-                mouth_pts = landmarks_106[52:68]
-                if len(mouth_pts) >= 4:
-                    upper_y = min(p[1] for p in mouth_pts[:8])
-                    lower_y = max(p[1] for p in mouth_pts[8:])
-                    mouth_height = lower_y - upper_y
-                    face_height = y2 - y1
-                    if face_height > 0:
-                        ratio_est = mouth_height / face_height
-                        is_open_est = ratio_est > 0.035
-                        mouth_data = {
-                            'mouth_left': (int(mouth_pts[0][0]), int(mouth_pts[0][1])),
-                            'mouth_right': (int(mouth_pts[6][0]), int(mouth_pts[6][1])),
-                            'upper_lip_top': (int(mouth_pts[3][0]), int(upper_y)),
-                            'lower_lip_bottom': (int(mouth_pts[11][0]), int(lower_y)),
-                        }
-                        return is_open_est, mouth_data, ratio_est
-
-            return is_open, mouth_data, ratio
-    except Exception as e:
-        print(f"[MOUTH_DETECT] Error: {e}")
-    return False, None, 0.0
-
-
-def create_mouth_preservation_mask(image, mouth_data, blend_ratio=0.5) -> np.ndarray:
-    """Crea máscara suave para la boca con polígono detallado + elipse amplia (v5.4)"""
-    mask = np.zeros(image.shape[:2], dtype=np.float32)
-    if not mouth_data:
-        return mask
-
-    try:
-        # ========== PARTE 1: Polígono de precisión (existente) ==========
-        full_order = [
-            'mouth_left',
-            'upper_lip_left_curve',
-            'upper_lip_top',
-            'upper_lip_right_curve',
-            'mouth_right',
-            'lower_lip_right_curve',
-            'lower_lip_bottom',
-            'lower_lip_left_curve',
-        ]
-        
-        inner_order = [
-            'mouth_left',
-            'upper_lip_bottom',
-            'mouth_right',
-            'lower_lip_top'
-        ]
-
-        pts_full = [mouth_data[k] for key in full_order if (k := key) in mouth_data]
-        pts_inner = [mouth_data[k] for key in inner_order if (k := key) in mouth_data]
-
-        if len(pts_full) >= 3:
-            pts_full_arr = np.array(pts_full, dtype=np.int32)
-            cv2.fillPoly(mask, [pts_full_arr], 0.80)
-            if len(pts_inner) >= 3:
-                pts_inner_arr = np.array(pts_inner, dtype=np.int32)
-                cv2.fillPoly(mask, [pts_inner_arr], 1.0)
-
-            # Dilatación masiva para expandir la máscara más allá de los labios exactos
-            mask = cv2.dilate(mask, np.ones((15, 15), np.uint8), iterations=5)
-            mask = cv2.GaussianBlur(mask, (31, 31), 0)
-            mask = np.clip(mask, 0, 1.0)
-
-        # ========== PARTE 2: Elipse amplia centrada en la boca (NUEVO v5.4) ==========
-        # Calcular centro de la boca
-        cx, cy = 0, 0
-        if 'mouth_center_top' in mouth_data and 'mouth_center_bottom' in mouth_data:
-            cx_top, cy_top = mouth_data['mouth_center_top']
-            cx_bot, cy_bot = mouth_data['mouth_center_bottom']
-            cx = int((cx_top + cx_bot) / 2)
-            cy = int((cy_top + cy_bot) / 2)
-        elif 'mouth_left' in mouth_data and 'mouth_right' in mouth_data:
-            ml = mouth_data['mouth_left']
-            mr = mouth_data['mouth_right']
-            cx = int((ml[0] + mr[0]) / 2)
-            cy = int((ml[1] + mr[1]) / 2)
-
-        if cx > 0 and cy > 0:
-            if 'mouth_left' in mouth_data and 'mouth_right' in mouth_data:
-                mouth_w = abs(mouth_data['mouth_right'][0] - mouth_data['mouth_left'][0])
-            else:
-                mouth_w = 100
-            if 'upper_lip_top' in mouth_data and 'lower_lip_bottom' in mouth_data:
-                mouth_h = abs(mouth_data['lower_lip_bottom'][1] - mouth_data['upper_lip_top'][1])
-            else:
-                mouth_h = 50
-
-            # Radio amplio: 3.0x ancho de boca, 4.5x alto (cubre mejillas y mentón)
-            rx = max(int(mouth_w * 3.0), 130)
-            ry = max(int(mouth_h * 4.5), 110)
-
-            ellipse_mask = np.zeros(image.shape[:2], dtype=np.float32)
-            cv2.ellipse(ellipse_mask, (cx, cy), (rx, ry), 0, 0, 360, 1.0, -1)
-            ellipse_mask = cv2.GaussianBlur(ellipse_mask, (31, 31), 0)
-
-            # Combinar: máximo entre polígono expandido y elipse
-            mask = np.maximum(mask, ellipse_mask * 0.75)
-
-    except Exception as e:
-        print(f"[MOUTH_MASK] Error: {e}")
-
-    return mask * blend_ratio
+    def Release(self):
+        self.model = None
