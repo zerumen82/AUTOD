@@ -222,6 +222,16 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
             # Filtrar duplicados si hay múltiples detecciones
             if all_faces:
                 all_faces = filter_duplicate_faces(all_faces)
+            else:
+                # v5.50: Fallback a MediaPipe si RetinaFace no detectó nada (perfiles extremos)
+                if MEDIAPIPE_DETECTOR_AVAILABLE:
+                    try:
+                        mp_faces = get_all_faces_mediapipe(frame)
+                        if mp_faces:
+                            print(f"[FACE] MediaPipe fallback detectó {len(mp_faces)} cara(s) — RetinaFace no encontró")
+                            all_faces = mp_faces
+                    except Exception as e:
+                        pass
         except Exception as e:
             pass
 

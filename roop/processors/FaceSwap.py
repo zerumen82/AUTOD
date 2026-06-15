@@ -237,10 +237,17 @@ class FaceSwap:
                             # El wrapper INSwapper de insightface normaliza a [0,1] internamente,
                             # pero nuestro pipeline bypassa el wrapper y usa raw ONNX session.
                             # Si pasamos [0,255] las activaciones saturan → output blanco (>90% px >250).
-                            print("[FaceSwap] v5.41: normalizando input a [0,1]", flush=True)
-                            blob_tgt = aimg_tgt.astype(np.float32) / 255.0
+                            # v5.46: Convert target crop from BGR to RGB (model expects RGB) and normalize to [0,1]
+                            aimg_tgt_rgb = cv2.cvtColor(aimg_tgt, cv2.COLOR_BGR2RGB)
+                            blob_tgt = aimg_tgt_rgb.astype(np.float32) / 255.0
                             blob_tgt = blob_tgt.transpose(2, 0, 1)[np.newaxis, ...]
-                            blob_src = src_emb[np.newaxis, :]
+                            
+                            # v5.46: Apply emap projection matrix from the model to the source face embedding
+                            if hasattr(self.model, 'emap') and self.model.emap is not None:
+                                blob_src = np.dot(src_emb.reshape((1, -1)), self.model.emap)
+                                blob_src /= np.linalg.norm(blob_src)
+                            else:
+                                blob_src = src_emb[np.newaxis, :]
                             
                             res = self.model.session.run(None, {
                                 self.model.input_names[0]: blob_tgt,
@@ -252,6 +259,8 @@ class FaceSwap:
                                 swapped_face = (swapped_face * 255.0)
                                 
                             swapped_face = swapped_face.clip(0, 255).astype(np.uint8)
+                            # v5.46: Convert output RGB back to BGR for the rest of the pipeline
+                            swapped_face = cv2.cvtColor(swapped_face, cv2.COLOR_RGB2BGR)
                             res_data = (swapped_face, M_tgt)
                         else:
                             res_data = self._run_warp(temp_frame, target_face, source_face, paste_back=False)

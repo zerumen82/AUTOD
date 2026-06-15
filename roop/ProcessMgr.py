@@ -1227,8 +1227,8 @@ class ProcessMgr:
                                 best_rec_score = rec_score
                                 best_recognition = face
                         
-                        # v4.0: Mucho más estricto para evitar saltos a objetos aleatorios
-                        rec_threshold = 0.35 if lost_count < 10 else 0.45 
+                        # v5.48: Umbral más permisivo para re-adquirir perfiles
+                        rec_threshold = 0.25 if lost_count < 10 else 0.35 
 
                         if best_recognition and best_rec_score >= rec_threshold:
                             print(f"[TRACK] RE-ACQUIRED via Global Recognition (score={best_rec_score:.2f})")
@@ -1277,15 +1277,16 @@ class ProcessMgr:
                             dy = pred_y - old_center[1]
                             
                             # Dampen extreme displacements (likely wrong prediction)
-                            max_shift = 60 if lost_count < 5 else 25 # v5.2.3: Más restrictivo para evitar saltos
+                            # v5.53: max_shift aumentado 80/40→120/60 para capturar movimientos rápidos
+                            max_shift = 120 if lost_count < 5 else 60
                             if abs(dx) > max_shift:
                                 dx = max_shift if dx > 0 else -max_shift
                             if abs(dy) > max_shift:
                                 dy = max_shift if dy > 0 else -max_shift
                             
-                            # v5.2.3: Inercia suave en el desplazamiento (EMA)
-                            dx = dx * 0.70
-                            dy = dy * 0.70
+                            # v5.48: Inercia aumentada para mejor seguimiento de perfiles
+                            dx = dx * 0.85
+                            dy = dy * 0.85
                             
                             # Desplazar BBox y Keypoints
                             if hasattr(ghost_face, 'bbox'):
@@ -1583,16 +1584,16 @@ class ProcessMgr:
                             f_center = 0.98
                             kps_ema = 0.96
                         else:
-                            # v5.2.5: Perfiles usan MUCHO más smoothing para eliminar parpadeo de landmarks
+                            # v5.57: Perfiles con EMA más responsive para mejor tracking de giros rápidos
                             if velocity < 4:
                                 f_center = 0.85
-                                kps_ema = 0.80 if not is_profile else 0.45
+                                kps_ema = 0.80 if not is_profile else 0.60
                             elif velocity < 12:
                                 f_center = 0.90
-                                kps_ema = 0.85 if not is_profile else 0.55
+                                kps_ema = 0.85 if not is_profile else 0.70
                             else:
                                 f_center = 0.95
-                                kps_ema = 0.90 if not is_profile else 0.70
+                                kps_ema = 0.90 if not is_profile else 0.80
                         
                         f_size = 0.95
                     
@@ -1666,39 +1667,21 @@ class ProcessMgr:
             if x2 <= x1 or y2 <= y1:
                 return original_frame
 
+            # v5.54: Skip-swap para tracking pésimo — det_score < 0.35 + velocity > 50px
+            det_score = getattr(target_face, 'det_score', 1.0)
+            velocity = getattr(self, '_last_velocity', 0)
+            if det_score < 0.35 and velocity > 50:
+                if enable_temporal_smoothing and prev_frame_result is not None:
+                    print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
+                    return prev_frame_result
+                return original_frame
+
             # ============================================
-            # 1. ADN MAESTRO — Estabilización de identidad (v5.2)
+            # 1. 100% SOURCE EMBEDDING (v5.47: ADN Maestro eliminado)
             # ============================================
+            # El ADN Maestro diluía la identidad mezclando embeddings (hasta 50% master).
+            # Ahora usamos 100% del embedding source para máxima identidad.
             swap_source_face = source_face
-            master_sim = -1.0
-            if hasattr(self, 'master_source_embedding') and self.master_source_embedding is not None:
-                master_sim = self._calculate_similarity(source_face.embedding, self.master_source_embedding)
-            
-            # v5.42: ADN Maestro fortalecido — 40% Master (antes 20%) + umbral reducido a 0.40 (antes 0.60)
-            # para máxima identidad source incluso cuando la cara seleccionada no es óptima.
-            if master_sim > 0.40:
-                current_emb = np.array(source_face.embedding, dtype=np.float32)
-                master_emb = np.array(self.master_source_embedding, dtype=np.float32)
-                dna_mix = (master_emb * 0.40) + (current_emb * 0.60)
-                norm = np.linalg.norm(dna_mix)
-                if norm > 0:
-                    emb_norm = dna_mix / norm
-                    source_face['embedding'] = emb_norm
-                    source_face.embedding = emb_norm
-                    swap_source_face = source_face
-                    if call_num % 100 == 1:
-                        print(f"[IDENTITY] ADN MAESTRO v5.42 (40% Master + 60% Source, m_sim={master_sim:.2f})")
-            elif master_sim > 0.20:
-                # v5.42: Inyección suave incluso con similitud baja — 15% master para mantener identidad
-                current_emb = np.array(source_face.embedding, dtype=np.float32)
-                master_emb = np.array(self.master_source_embedding, dtype=np.float32)
-                dna_mix = (master_emb * 0.15) + (current_emb * 0.85)
-                norm = np.linalg.norm(dna_mix)
-                if norm > 0:
-                    emb_norm = dna_mix / norm
-                    source_face['embedding'] = emb_norm
-                    source_face.embedding = emb_norm
-                    swap_source_face = source_face
 
             # ============================================
             # 2. SWAP
@@ -1721,7 +1704,7 @@ class ProcessMgr:
             # v5.2.7: Guardar raw swap ANTES de GFPGAN para detección precisa de oclusiones
             raw_swapped_aligned = swapped_face_aligned.copy()
 
-            # v5.2.4: Estabilización de Matriz Afín (M-EMA) para eliminar jitter en perfiles
+            # v5.57: M-EMA adaptivo con menos smoothing en perfiles para tracking más rápido
             if M is not None and enable_temporal_smoothing:
                 m_attr = f'_m_ema_{video_basename}'
                 prev_m = getattr(self, m_attr, None)
@@ -1729,8 +1712,9 @@ class ProcessMgr:
                     # Detectar si hay un cambio brusco (escena nueva) para no suavizar
                     m_diff = np.max(np.abs(M - prev_m))
                     if m_diff < 15.0: # Umbral para jitter vs movimiento real
-                        # v5.2.4: EMA adaptativo para ultra-estabilidad
                         m_alpha = 0.70 if m_diff < 5.0 else 0.50
+                        if is_profile:
+                            m_alpha *= 0.7  # menos smoothing en perfiles = tracking más rápido
                         M = M * (1.0 - m_alpha) + prev_m * m_alpha
                 setattr(self, m_attr, M)
 
@@ -1748,8 +1732,8 @@ class ProcessMgr:
             
             use_enhancer = True # Forzar siempre ON
             selected_enhancer = "GFPGAN" # Forzar el mejor
-            # v5.38: Lee del slider UI (enhancer_blend_factor), default 0.30
-            enhancer_blend = getattr(roop.globals, "enhancer_blend_factor", 0.15)
+            # v5.57: enhancer_blend 0.80 para máxima identidad source (GFPGAN ~76% efectivo)
+            enhancer_blend = getattr(roop.globals, "enhancer_blend_factor", 0.80)
             preserve_mouth = True # Evitar borrar gestos
             
             enhancer_key = next((k for k in ["enhance_gfpgan", "enhance_codeformer", "enhance_restoreformer"] if k in self.processors), None)
@@ -1770,20 +1754,29 @@ class ProcessMgr:
                             if not hasattr(self, '_enhancer_ema'): self._enhancer_ema = {}
                             prev_enh = self._enhancer_ema.get(video_key)
                             if prev_enh is not None and prev_enh.shape == enhanced.shape:
-                                enh_ema_alpha = 0.25 # 25% nuevo + 75% previo = máxima estabilidad
+                                enh_ema_alpha = 0.50 # 50% nuevo + 50% previo = equilibrio estabilidad/responsividad
                                 enhanced = cv2.addWeighted(enhanced, enh_ema_alpha, prev_enh, 1.0 - enh_ema_alpha, 0)
                             self._enhancer_ema[video_key] = enhanced.copy()
                         
-                        # v5.0: Mezcla de mejora proporcional a la intensidad deseada
-                        swapped_face_aligned = cv2.addWeighted(enhanced, enhancer_blend, swapped_face_aligned, 1.0 - enhancer_blend, 0)
+                        # v5.57: Radial GFPGAN fade — centro 100% GFPGAN, bordes raw (elimina blur fuera de cara)
+                        h_f, w_f = enhanced.shape[:2]
+                        Y_f, X_f = np.ogrid[:h_f, :w_f]
+                        center_f = (w_f / 2, h_f / 2)
+                        dist_f = np.sqrt((X_f - center_f[0])**2 + (Y_f - center_f[1])**2)
+                        fade = 1.0 - 1.0 / (1.0 + np.exp(-0.10 * (dist_f - 60.0)))
+                        fade_3ch = np.stack([fade, fade, fade], axis=-1).astype(np.float32)
+                        alpha = enhancer_blend * fade_3ch
+                        blended_face = enhanced.astype(np.float32) * alpha + swapped_face_aligned.astype(np.float32) * (1.0 - alpha)
+                        swapped_face_aligned = np.clip(blended_face, 0, 255).astype(np.uint8)
                         
                         if call_num <= 3:
                             cv2.imwrite(os.path.join(debug_dir, f'02_after_enhancer_f{call_num}.png'), swapped_face_aligned)
                         
-                        # v5.38: Sharpening ELIMINADO (causaba artifacts + sombra gris)
-                        # v5.11 original: "sharpening eliminado por completo"
+                        # v5.57: Unsharp sigma 1.0 + amount 2.5 para máxima nitidez
+                        blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
+                        swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 2.5, blurred, -1.5, 0)
                         if call_num % 50 == 1:
-                            print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) aplicado (v5.38, sin sharpening)")
+                            print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.57)")
                 except Exception as e:
                     print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -1800,7 +1793,8 @@ class ProcessMgr:
                 reference_region = cv2.resize(reference_region, (w_align, h_align))
 
             # Estabilización de Brillo EMA
-            brightness_strength = 0.08
+            # v5.45: Brillo matching fortalecido 0.20→0.25 para mejor integración con color_match_strength 0.30/0.35
+            brightness_strength = 0.25
             if enable_temporal_smoothing and video_key:
                 if not hasattr(self, '_brightness_ema'): self._brightness_ema = {}
                 prev_bright = self._brightness_ema.get(video_key, 1.0)
@@ -1818,7 +1812,8 @@ class ProcessMgr:
 
             # Color Matching EMA
             # Perfiles: mínimo para no teñir la identidad con el tono del target
-            color_match_strength = 0.06 if is_profile else 0.08
+            # v5.43: Color matching fortalecido para eliminar bordes visibles de máscara
+            color_match_strength = 0.15 if is_profile else 0.20
             swapped_face_aligned = match_color_histogram(swapped_face_aligned, reference_region, blend_factor=color_match_strength)
             
             # Refuerzo de Identidad para perfiles (v4.9)
@@ -1826,12 +1821,16 @@ class ProcessMgr:
                 # Inyectar un poco más de la identidad maestra en el resultado final si es perfil
                 pass # La lógica ya está integrada en el swapper, aquí solo ajustamos color.
 
+            # v5.47: Color matching reducido para preservar identidad source (0.30/0.35→0.15/0.20)
+            color_match_strength = 0.20 if is_profile else 0.15
+            swapped_face_aligned = match_color_histogram(swapped_face_aligned, reference_region, blend_factor=color_match_strength)
+
             if enable_temporal_smoothing and video_key:
                 if not hasattr(self, '_color_ema'): self._color_ema = {}
                 prev_color = self._color_ema.get(video_key)
                 if prev_color is not None and prev_color.shape == swapped_face_aligned.shape:
-                    # v5.1: Reducir lag de color en alta intensidad (0.5 -> 0.8 actual)
-                    color_ema_alpha = 0.30 if user_blend >= 0.95 else 0.40
+                    # v5.47: Color EMA más rápido (0.60 nuevo / 0.70 anterior) para menos lag y más estabilidad
+                    color_ema_alpha = 0.60 if user_blend >= 0.95 else 0.70
                     swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, color_ema_alpha, prev_color, 1.0 - color_ema_alpha, 0)
                 self._color_ema[video_key] = swapped_face_aligned
 
@@ -1885,8 +1884,8 @@ class ProcessMgr:
                         # La máscara XSeg se genera sobre la cara alineada (calidad nativa 256x256)
                         xseg_mask = self.processors["mask_xseg"].Run(swapped_face_aligned, "")
                         if xseg_mask is not None and np.max(xseg_mask) > 0:
-                            # v5.42: Umbral subido a 0.30 para máscara XSeg más ajustada (menos área de fondo)
-                            xseg_thresh = 0.30
+                            # v5.45: Umbral bajado 0.40→0.25 para incluir más zona facial y evitar recorte elíptico visible
+                            xseg_thresh = 0.25
                             _, xseg_mask = cv2.threshold(xseg_mask, xseg_thresh, 1.0, cv2.THRESH_BINARY)
 
                             # v5.4.3: Atenuación superior reducida al 15% para ambos modos
@@ -1905,10 +1904,7 @@ class ProcessMgr:
                             # Warp de la máscara XSeg al espacio del frame
                             final_mask = cv2.warpAffine(xseg_mask, M_inv, (w_f, h_f), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
 
-                            # v5.42: DILATAR máscara reducida (~1% del ancho de cara) para no exceder la cara
-                            dsz = min(7, max(3, int(min(x2-x1, y2-y1) * 0.01)) | 1)
-                            dk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dsz, dsz))
-                            final_mask = cv2.dilate(final_mask, dk, iterations=1)
+                            # v5.52: Dilatación eliminada — causaba máscara fuera de la cara + blur elíptico visible
                     except Exception as e:
                         print(f"[MASK_ERR] XSeg falló: {e}")
 
@@ -1916,13 +1912,14 @@ class ProcessMgr:
                 if final_mask is None:
                     mask_align = np.zeros((h_align, w_align), dtype=np.float32)
                     if is_profile:
-                        # v5.42: Elipse de perfil más ajustada (55% ancho, 60% alto) para no exceder la cara
+                        # v5.53: Elipse perfil reducida 0.65/0.70→0.50/0.50 para minimizar blur fuera de cara
                         cv2.ellipse(mask_align, (w_align//2, h_align//2),
-                                    (int(w_align*0.55), int(h_align*0.60)), 0, 0, 360, 1.0, -1)
-                        mask_align = cv2.dilate(mask_align, np.ones((11, 11), np.uint8), iterations=5)
+                                    (int(w_align*0.50), int(h_align*0.50)), 0, 0, 360, 1.0, -1)
+                        mask_align = cv2.GaussianBlur(mask_align, (21, 21), 0)
                     else:
+                        # v5.53: Elipse frontal reducida 0.55/0.58→0.45/0.48 para eliminar blur elíptico
                         cv2.ellipse(mask_align, (w_align//2, h_align//2),
-                                    (int(w_align*0.42), int(h_align*0.45)), 0, 0, 360, 1.0, -1)
+                                    (int(w_align*0.45), int(h_align*0.48)), 0, 0, 360, 1.0, -1)
                     
                     # v5.4: Atenuación superior generosa en fallback (10%)
                     h_a, w_a = mask_align.shape[:2]
@@ -1946,10 +1943,22 @@ class ProcessMgr:
                     if call_num % 100 == 1:
                         print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f})")
 
-                # Feathering final — un solo blur suave
-                # v5.42: blur_sz mínimo 5 incluso a blend máximo para evitar bordes sharp
-                blur_sz = int(max(5, min(x2-x1, y2-y1) // 40)) | 1
+                # v5.57: GaussianBlur //30 + erosión 5×5 antes de blur + content feathering antes de truncation
+                blur_sz = int(max(7, min(x2-x1, y2-y1) // 30)) | 1
+                kernel_e = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                final_mask = cv2.erode(final_mask, kernel_e, iterations=1)
                 final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
+
+                # v5.57: Content feathering ANTES de tail truncation — tent opera en toda la transición gaussiana
+                content_blur_sz = int(max(31, blur_sz + 15)) | 1
+                tent = np.clip(1.0 - np.abs(final_mask - 0.5) * 2.0, 0, 1.0)
+                if np.max(tent) > 0.01:
+                    blurred_face = cv2.GaussianBlur(warped_face, (content_blur_sz, content_blur_sz), 0)
+                    tent_3ch = cv2.merge([tent, tent, tent])
+                    warped_face = (warped_face.astype(np.float32) * (1.0 - tent_3ch) + blurred_face.astype(np.float32) * tent_3ch).astype(np.uint8)
+
+                # v5.57: Tail truncation 0.10 + erosión 5×5 para máscara limpia
+                final_mask = np.clip((final_mask - 0.10) / (1.0 - 0.10), 0, 1.0)
             else:
                 # Fallback de emergencia
                 print("[WARNING] M es None, usando fallback de elipse directa")
@@ -2016,12 +2025,21 @@ class ProcessMgr:
                     # Mezcla temporal 50/50 para ocultar saltos de alineación en predicción
                     result_frame = cv2.addWeighted(result_frame, 0.5, prev_frame_result, 0.5, 0)
 
-            # v5.4: Estabilización temporal GENERAL — perfiles más agresiva (0.30) para eliminar parpadeo
+            # v5.50: EMA con congelamiento progresivo según calidad de tracking
             if enable_temporal_smoothing and prev_frame_result is not None:
                 if prev_frame_result.shape == result_frame.shape:
-                    alpha_prev = 0.30 if is_profile else 0.12
+                    det_score = getattr(target_face, 'det_score', 1.0)
+                    if det_score < 0.3:
+                        alpha_prev = 0.92  # casi congelar — solo 8% del swap nuevo
+                    elif det_score < 0.4:
+                        alpha_prev = 0.75  # casi congelar
+                    elif det_score < 0.6:
+                        alpha_prev = 0.40 if is_profile else 0.30
+                    else:
+                        alpha_prev = 0.25 if is_profile else 0.15
                     result_frame = cv2.addWeighted(result_frame, 1.0 - alpha_prev, prev_frame_result, alpha_prev, 0)
-
+                    if call_num % 50 == 1:
+                        print(f"[QUALITY] EMA v5.57 (det_score={det_score:.2f}, alpha_prev={alpha_prev:.2f})")
 
             if call_num <= 3:
                 cv2.imwrite(os.path.join(debug_dir, f'04_final_result_f{call_num}.png'), result_frame)
