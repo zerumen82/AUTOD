@@ -4,12 +4,18 @@
 - Eliminar blur elíptico fuera de cara, mejorar tracking de perfiles, aumentar nitidez y parecido de source.
 
 ## Constraints & Preferences
-- `inswapper_128_facefusion.onnx` (128→256px), XSeg Masker, GFPGAN Enhancer (blend=0.95), MediaPipe Face Mesh 468 landmarks, FFmpeg libx264 CRF 14.
+- `inswapper_128_facefusion.onnx` (128→256px), XSeg Masker, GFPGAN Enhancer (blend=0.70), MediaPipe Face Mesh 468 landmarks, FFmpeg libx264 CRF 14.
 - Modo `selected_faces`: 655 facesets origen, 1 destino (1280×720, 850 frames, 30 fps).
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.67 (current) — EMA refinements
+### v5.68 (current) — Identity Force
+- **Enhancer 0.95→0.70**: Menos GFPGAN = más identidad cruda del swap en el resultado final (30% raw swap vs 5% antes).
+- **DNA injection frontal 0.25→0.65**: Igualado al perfil, 65% embedding maestro (promedio mejores sources) para identidad consistente.
+- **DNA injection perfil 0.65→0.85**: 85% embedding maestro para perfiles extremos, máxima fidelidad rotacional.
+- **Objetivo**: Maximizar parecido a source incluso cuando source y target son personas distintas.
+
+### v5.67 — EMA refinements
 - **EMA menos conservador**: alpha_prev reducido 0.92→0.85 para det_score<0.3, permite 15% swap nuevo (vs 8%) en frames de baja calidad.
 
 ### v5.66 — safe refinements

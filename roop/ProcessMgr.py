@@ -1,5 +1,5 @@
 print("\n" + "="*60)
-print(">>> [TRUE-INTEGRATION] INTEGRACIÓN FÍSICA TOTAL (v5.66) <<<")
+print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.70 — DNA 1.0 + enhancer 0.70 + mouth 0.85 <<<")
 print(">>> (256px, Occlusion-Locked, Depth-Color, Hyper-Sharp, XSeg-PRO) <<<")
 print("="*60 + "\n")
 
@@ -155,7 +155,7 @@ def get_gender(face):
         return None
 
 class ProcessMgr:
-    """Gestor de procesamiento de face swapping v5.61"""
+    """Gestor de procesamiento de face swapping v5.70"""
     _swap_call_count = 0  # Contador global para debug
     
     def __init__(self, progress_callback=None):
@@ -232,21 +232,18 @@ class ProcessMgr:
                             self.source_embeddings_cache[id(face)] = unit_emb
                             all_embs_with_quality.append((unit_emb, quality))
         
-        # NUEVO: Calcular Embedding Maestro usando solo las mejores muestras (max 20)
-        # Esto evita diluir la identidad con cientos de muestras potencialmente peores
+        # v5.70: Master Embedding = mejor cara INDIVIDUAL (no promedio)
+        # Promediar 20 embeddings diluye rasgos distintivos → cara genérica.
+        # Una embedding real de la mejor foto preserva 100% de los rasgos del source.
         self.master_source_embedding = None
         if len(all_embs_with_quality) > 0:
-            # Ordenar por calidad descendente
             all_embs_with_quality.sort(key=lambda x: x[1], reverse=True)
-            # Tomar máximo 20 mejores (o todas si hay menos)
-            num_samples = min(20, len(all_embs_with_quality))
-            top_embs = [x[0] for x in all_embs_with_quality[:num_samples]]
-            
-            self.master_source_embedding = np.mean(top_embs, axis=0)
+            best_emb = all_embs_with_quality[0][0]
+            self.master_source_embedding = best_emb.copy()
             norm = np.linalg.norm(self.master_source_embedding)
             if norm > 0:
                 self.master_source_embedding /= norm
-            print(f"[IDENTITY] Creado Master Embedding desde {len(top_embs)} mejores muestras (total {len(all_embs_with_quality)})")
+            print(f"[IDENTITY] Master Embedding = mejor cara individual (quality={all_embs_with_quality[0][1]:.2f}, total {len(all_embs_with_quality)})")
         
         print(f"v5.60: {len(self.source_embeddings_cache)} embeddings cacheados")
 
@@ -1686,8 +1683,8 @@ class ProcessMgr:
             # Inyectar identidad frontal (Master) para estabilizar rasgos en ángulos difíciles
             swap_source_face = source_face
             if hasattr(self, 'master_source_embedding') and self.master_source_embedding is not None:
-                # v5.65: Inyección máxima (65%) en perfiles para fidelidad absoluta
-                dna_mix = 0.65 if is_profile else 0.25
+                # v5.69: Inyección absoluta (100% ambas) — embedding puro del master para identidad máxima
+                dna_mix = 1.0
                 if dna_mix > 0:
                     import copy
                     swap_source_face = copy.copy(source_face)
@@ -1745,8 +1742,8 @@ class ProcessMgr:
             
             use_enhancer = True # Forzar siempre ON
             selected_enhancer = "GFPGAN" # Forzar el mejor
-            # v5.65: enhancer_blend interno forzado a 0.95 para textura perfecta
-            enhancer_blend = 0.95
+            # v5.69: enhancer_blend 0.70 preserva identidad cruda del swap
+            enhancer_blend = 0.70
             preserve_mouth = True # Evitar borrar gestos
             
             enhancer_key = next((k for k in ["enhance_gfpgan", "enhance_codeformer", "enhance_restoreformer"] if k in self.processors), None)
@@ -1795,7 +1792,7 @@ class ProcessMgr:
                             blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
                             swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 6.8, blurred, -5.8, 0)
                             if call_num % 50 == 1:
-                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.65)")
+                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.70)")
                     except Exception as e:
                         print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -1982,7 +1979,7 @@ class ProcessMgr:
             # ============================================
             if mouth_open and mouth_region is not None:
                 # v5.65: Detección inteligente de objetos en boca (micros, comida, manos)
-                m_blend = 0.50
+                m_blend = 0.85
                 
                 try:
                     # Usar la oclusión detectada en la zona de la boca para subir el blend si hay objetos
@@ -1998,6 +1995,10 @@ class ProcessMgr:
                     pass
 
                 mouth_mask = create_mouth_preservation_mask(original_frame, mouth_region, blend_ratio=1.0)
+
+                # v5.69: Dilatar máscara de boca para proteger área completa de labios
+                mouth_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+                mouth_mask = cv2.dilate(mouth_mask, mouth_kernel, iterations=2)
 
                 # v5.2.3: Suavizado de boca más nítido (9x9) para no borrar el labio inferior
                 mouth_mask = cv2.GaussianBlur(mouth_mask, (15, 15), 0)
