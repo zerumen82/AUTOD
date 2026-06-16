@@ -76,6 +76,6 @@
 - enhancer_blend via slider (default 0.95) en ProcessMgr.py:1736
 
 ## Relevant Files
-- `roop/ProcessMgr.py`: Pipeline principal — v5.72 single-best revert + occlusion blur 31×31, v5.69 dna_mix=1.0, enhancer_blend 0.70, unsharp 6.8, mask elastic //75, profile EMA responsive
+- `roop/ProcessMgr.py`: Pipeline principal — v5.72 single-best revert + occlusion blur 31×31 + _SourceFaceWrap fix (evita copy.copy crash en InsightFace), v5.69 dna_mix=1.0, enhancer_blend 0.70, unsharp 6.8, mask elastic //75, profile EMA responsive
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
 - `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas

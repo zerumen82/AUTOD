@@ -1682,15 +1682,17 @@ class ProcessMgr:
             # Inyectar identidad frontal (Master) para estabilizar rasgos en ángulos difíciles
             swap_source_face = source_face
             if hasattr(self, 'master_source_embedding') and self.master_source_embedding is not None:
-                # v5.69: Inyección absoluta (100% ambas) — embedding puro del master para identidad máxima
+                # v5.72: Inyección directa de embedding — evita copy.copy() que falla en InsightFace
                 dna_mix = 1.0
                 if dna_mix > 0:
-                    import copy
-                    swap_source_face = copy.copy(source_face)
-                    mixed_emb = (1.0 - dna_mix) * np.array(source_face.embedding) + dna_mix * self.master_source_embedding
+                    mixed_emb = (1.0 - dna_mix) * np.array(source_face.embedding, dtype=np.float32) + dna_mix * self.master_source_embedding
                     norm = np.linalg.norm(mixed_emb)
                     if norm > 0:
-                        swap_source_face.embedding = (mixed_emb / norm).tolist()
+                        mixed_emb = mixed_emb / norm
+                    # Usar wrapper mínimo con solo embedding para evitar copy fallido
+                    class _SourceFaceWrap:
+                        embedding = mixed_emb.tolist()
+                    swap_source_face = _SourceFaceWrap()
 
             # ============================================
             # 2. SWAP
