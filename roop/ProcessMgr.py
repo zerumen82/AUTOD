@@ -232,22 +232,17 @@ class ProcessMgr:
                             self.source_embeddings_cache[id(face)] = unit_emb
                             all_embs_with_quality.append((unit_emb, quality))
         
-        # v5.71: Master Embedding = weighted blend top-3 (quality^3 weighting)
-        # Mejor cara ~80%, 2da ~15%, 3ra ~5% — enriquece identidad sin diluir
+        # v5.72: Master Embedding = mejor cara INDIVIDUAL (evita dilución del blend)
+        # Una embedding real preserva 100% de los rasgos del source
         self.master_source_embedding = None
         if len(all_embs_with_quality) > 0:
             all_embs_with_quality.sort(key=lambda x: x[1], reverse=True)
-            top_k = min(3, len(all_embs_with_quality))
-            weights = np.array([max(0.001, float(x[1])) ** 3 for x in all_embs_with_quality[:top_k]], dtype=np.float64)
-            weights /= weights.sum()
-            weighted_emb = np.zeros_like(all_embs_with_quality[0][0], dtype=np.float64)
-            for i in range(top_k):
-                weighted_emb += all_embs_with_quality[i][0].astype(np.float64) * weights[i]
-            self.master_source_embedding = weighted_emb.astype(np.float32)
+            best_emb = all_embs_with_quality[0][0]
+            self.master_source_embedding = best_emb.copy()
             norm = np.linalg.norm(self.master_source_embedding)
             if norm > 0:
                 self.master_source_embedding /= norm
-            print(f"[IDENTITY] Master Embedding = weighted blend top-{top_k} (weights: {[f'{w:.2f}' for w in weights]}, best_quality={all_embs_with_quality[0][1]:.2f})")
+            print(f"[IDENTITY] Master Embedding = mejor cara individual (quality={all_embs_with_quality[0][1]:.2f}, total {len(all_embs_with_quality)})")
         
         print(f"v5.60: {len(self.source_embeddings_cache)} embeddings cacheados")
 
@@ -1746,7 +1741,7 @@ class ProcessMgr:
             
             use_enhancer = True # Forzar siempre ON
             selected_enhancer = "GFPGAN" # Forzar el mejor
-            # v5.71: enhancer_blend 0.70, Master Embedding weighted top-3
+            # v5.72: enhancer_blend 0.70, Master Embedding single-best
             enhancer_blend = 0.70
             preserve_mouth = True # Evitar borrar gestos
             
@@ -1796,7 +1791,7 @@ class ProcessMgr:
                             blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
                             swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 6.8, blurred, -5.8, 0)
                             if call_num % 50 == 1:
-                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.71)")
+                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.72)")
                     except Exception as e:
                         print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -1946,14 +1941,15 @@ class ProcessMgr:
                         occ_mask_aligned = cv2.addWeighted(occ_mask_aligned, occ_ema_alpha, prev_occ, 1.0 - occ_ema_alpha, 0)
                     self._occ_mask_ema[video_key] = occ_mask_aligned.copy()
 
-                # v5.4.3: Fuerza de oclusión reducida a 0.50 para no destruir la máscara facial
-                occ_strength = (0.60 if is_profile else 0.50) 
+                # v5.72: Oclusión suavizada — blur post-warp para evitar rayas
+                occ_strength = (0.50 if is_profile else 0.40) 
                 
                 if np.max(occ_mask_aligned) > 0.1:
                     occ_mask_frame = cv2.warpAffine(occ_mask_aligned, M_inv, (w_f, h_f), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+                    occ_mask_frame = cv2.GaussianBlur(occ_mask_frame, (31, 31), 0)
                     final_mask = np.clip(final_mask - (occ_mask_frame * occ_strength), 0, 1.0)
                     if call_num % 100 == 1:
-                        print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f})")
+                        print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f}, blur=31)")
 
                 # v5.65: GaussianBlur //75 (bordes microscópicos) + erosión 5×5
                 blur_sz = int(max(5, min(x2-x1, y2-y1) // 75)) | 1

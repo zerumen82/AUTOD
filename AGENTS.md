@@ -9,7 +9,12 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.71 (current) — Embedding Ponderado Top-3
+### v5.72 (current) — Single-Best Revert + Occlusion Fix
+- **Master Embedding = mejor cara individual**: Revertido de v5.71 (weighted blend top-3) porque todas las top caras tenían quality ~5.59 → pesos iguales [0.34,0.33,0.33] → mismo problema de dilución que el promedio de 20. Ahora embedding real 100% pura.
+- **Oclusión suavizada**: Blur 31×31 post-warp + strength reducido (0.50→0.40 frontal, 0.60→0.50 perfil) para eliminar rayas.
+- **Boca verificada**: Impacto log 0.001 es esperado (media sobre frame completo); la preservación local funciona correctamente.
+
+### v5.71 — Embedding Ponderado Top-3 (REVERTED)
 - **Master Embedding = weighted blend top-3**: Calidad^3 weighting — mejor cara ~80%, 2da ~15%, 3ra ~5%. Enriquece identidad sin diluir (vs. promedio de 20 que diluía).
 - **Identidad refinada**: El decoder del inswapper recibe un embedding más rico que preserva la identidad de la mejor foto con aporte complementario de otras buenas fotos.
 - **Cero costo computacional**: Sin inferencia extra, solo cambio en cómo se calcula el embedding maestro.
@@ -62,8 +67,8 @@
 - enhancer_blend via slider (default 0.95) — respeta UI, no hardcode
 
 ## Next Steps
-- Testear v5.71 — verificar que el embedding ponderado top-3 mejora identidad vs v5.70 single-best
-- Si la identidad aún no es suficiente, considerar multi-source swap blending (3x swap por frame) o texture transfer post-swap
+- Testear v5.72 — single-best revert + occlusion suavizada deben dar mejor identidad sin rayas
+- Si identidad no es suficiente: multi-source swap blending (3x swap por frame) o cambiar modelo de swap
 
 ## Critical Context
 - Log v5.58: 434.07s (1.96 fps), enhancer 0.85, mask mean=0.059 ✅
@@ -71,6 +76,6 @@
 - enhancer_blend via slider (default 0.95) en ProcessMgr.py:1736
 
 ## Relevant Files
-- `roop/ProcessMgr.py`: Pipeline principal — v5.71 embedding ponderado top-3, v5.69 dna_mix=1.0, enhancer_blend 0.70, unsharp 6.8, mask elastic //75, profile EMA responsive
+- `roop/ProcessMgr.py`: Pipeline principal — v5.72 single-best revert + occlusion blur 31×31, v5.69 dna_mix=1.0, enhancer_blend 0.70, unsharp 6.8, mask elastic //75, profile EMA responsive
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
 - `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas
