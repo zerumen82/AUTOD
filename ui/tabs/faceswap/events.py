@@ -147,9 +147,9 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
                 if not hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references = {}
                 roop.globals.selected_face_references[video_key] = {'face_obj': face_obj, 'embedding': face_obj.embedding, 'bbox': face_obj.bbox}
             
-            gr.Info("✅ Cara añadida")
+            print("[UI] ✅ Cara añadida")
         else:
-            gr.Info("ℹ️ Ya está en Destino")
+            print("[UI] ℹ️ Ya está en Destino")
 
         # Actualizar feedback visual con caja verde
         entry = state.list_files_process[state.selected_preview_index]
@@ -183,7 +183,7 @@ def on_preview_click(evt: gr.SelectData, frame_num):
         state.CURRENT_DETECTED_FRAME = frame_idx
 
     if not state.SELECTION_FACES_DATA:
-        gr.Warning("⚠️ No se detectaron caras. Intenta buscar caras primero.")
+        print("[UI] ⚠️ No se detectaron caras.")
         return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     # 2. Buscar cara que coincida con las coordenadas del clic [x, y]
@@ -278,9 +278,9 @@ def on_preview_click(evt: gr.SelectData, frame_num):
             if not hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references = {}
             roop.globals.selected_face_references[video_key] = {'face_obj': face_obj, 'embedding': face_obj.embedding, 'bbox': face_obj.bbox}
             
-            gr.Info(f"✅ Cara añadida a Destino ({filename})")
+            print(f"[UI] ✅ Cara añadida a Destino ({filename})")
         else:
-            gr.Info("ℹ️ Esta cara ya está en la lista de Destino")
+            print("[UI] ℹ️ Esta cara ya está en la lista de Destino")
 
         total_faces = len(ui.globals.ui_target_thumbs)
         
@@ -477,7 +477,7 @@ def wire_events(ui_comp):
         
         if not detected_faces:
             print(f"[FACES] ⚠️ No se detectaron caras en frame {frame_idx}")
-            gr.Warning(f"⚠️ No se detectaron caras en frame {frame_idx}. Prueba con otro frame o imagen.")
+            print(f"[UI] ⚠️ No se detectaron caras en frame {frame_idx}.")
         
         thumbs = [_normalize_face_thumb(util.convert_to_gradio(f[1], is_rgb=True), 300) for f in detected_faces]
         
@@ -526,7 +526,7 @@ def wire_events(ui_comp):
             faces_data = logic.extract_face_images(f_path, is_source_face=True)
             if not faces_data:
                 print(f"[FACES] ⚠️ No se detectaron caras en: {os.path.basename(f_path)}")
-                gr.Warning(f"⚠️ No se detectaron caras en {os.path.basename(f_path)}")
+                print(f"[UI] ⚠️ No se detectaron caras en {os.path.basename(f_path)}")
             for face_obj, face_img in faces_data:
                 if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE: continue
                 from roop.types import FaceSet

@@ -387,9 +387,7 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
     if (not is_video_present
             and roop.globals.face_swap_mode != 'all'
             and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0)):
-        error_msg = "[ERROR] ERROR: No hay caras de destino seleccionadas. En fotos, debes elegir al menos una cara para cambiar."
-        print(f"[DIAGNÓSTICO] {error_msg}")
-        gr.Error(error_msg)
+        print("[ERROR] No hay caras de destino seleccionadas. En fotos, debes elegir al menos una cara para cambiar.")
         yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin selección"))
         return
     roop.globals.skip_audio = skip_audio
