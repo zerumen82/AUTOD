@@ -9,7 +9,14 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.65 (current) — source-true limit
+### v5.67 (current) — EMA refinements
+- **EMA menos conservador**: alpha_prev reducido 0.92→0.85 para det_score<0.3, permite 15% swap nuevo (vs 8%) en frames de baja calidad.
+
+### v5.66 — safe refinements
+- **Enhancer Skip on Profiles**: GFPGAN saltado en perfiles con det_score < 0.45 para evitar alucinaciones.
+- **Source Selection Weight**: Compromise weight 30.0→10.0 para que calidad compita con similitud y diversifique fuente seleccionada.
+
+### v5.65 — source-true limit
 - **Identity Locked**: Master DNA injection pushed to 65% (profiles) and 25% (frontal) + source selection weight at 30.0x for absolute resemblance.
 - **Micro-Textural Hyper**: Unsharp mask amount at 6.8 for extreme textural definition.
 - **Surgical-Pro Mask**: Mask blur factor reduced to //75 and internal feathering offset to 1px (Surgical-Seams) for perfect integration.

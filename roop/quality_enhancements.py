@@ -71,15 +71,31 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
         swp_lap = cv2.Laplacian(src_gray, cv2.CV_32F)
         tgt_lap = cv2.Laplacian(tgt_gray, cv2.CV_32F)
         
+        # v5.65: Detalle Laplaciano Optimizado (Diferencia de gradientes locales)
         diff_lap = np.clip(np.abs(tgt_lap) - np.abs(swp_lap) * 1.5, 0, 255)
-        lap_thresh = max(40, np.mean(diff_lap[diff_lap > 0]) * 0.5 if np.any(diff_lap > 0) else 40)
+        lap_thresh = max(35, np.mean(diff_lap[diff_lap > 0]) * 0.6 if np.any(diff_lap > 0) else 40)
         _, detail_mask = cv2.threshold(diff_lap.astype(np.uint8), lap_thresh, 255, cv2.THRESH_BINARY)
         
-        # Proteger ojos y boca de falsos positivos (cambios naturales de expresión)
+        # Proteger ojos de falsos positivos (cambios naturales de expresión)
         protect_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(protect_mask, (int(w * 0.35), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
         cv2.circle(protect_mask, (int(w * 0.65), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
-        cv2.ellipse(protect_mask, (w//2, int(h*0.68)), (int(w*0.20), int(h*0.12)), 0, 0, 360, 255, -1)
+        
+        # v5.65: Gestión inteligente de boca en oclusión
+        # Protegemos la boca de la máscara de oclusión (para no preservar la boca original por error)
+        # EXCEPTO si hay un objeto claro (micro, mano) detectado por LAB
+        mouth_area = np.zeros((h, w), dtype=np.uint8)
+        cv2.ellipse(mouth_area, (w//2, int(h*0.68)), (int(w*0.20), int(h*0.12)), 0, 0, 360, 255, -1)
+        
+        has_mouth_object = False
+        if 'object_mask' in locals():
+            mouth_occ_score = np.mean(cv2.bitwise_and(object_mask, mouth_area))
+            if mouth_occ_score > 5: # Objeto detectado
+                has_mouth_object = True
+        
+        if not has_mouth_object:
+            detail_mask = cv2.bitwise_and(detail_mask, cv2.bitwise_not(mouth_area))
+            
         detail_mask = cv2.bitwise_and(detail_mask, cv2.bitwise_not(protect_mask))
         
         occlusion = cv2.bitwise_or(occlusion, detail_mask)

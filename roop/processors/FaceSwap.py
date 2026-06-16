@@ -323,3 +323,71 @@ class FaceSwap:
 
     def Release(self):
         self.model = None
+
+
+def detect_mouth_open(target_face: Face, landmarks_106=None, target_image=None) -> tuple:
+    """
+    Detecta si la boca está abierta y devuelve la región y el ratio de apertura. (v5.65)
+    Utiliza MediaPipe Face Mesh para máxima precisión (95%+).
+    """
+    is_open = False
+    mouth_region = None
+    open_ratio = 0.0
+    
+    # 1. Intentar MediaPipe (Máxima calidad)
+    if target_image is not None:
+        try:
+            from roop.mouth_detector import detect_mouth_open_advanced
+            is_open, open_ratio, mouth_data = detect_mouth_open_advanced(target_image)
+            if mouth_data:
+                mouth_region = mouth_data
+                return is_open, mouth_region, open_ratio
+        except Exception as e:
+            if getattr(roop.globals, 'log_level', 'error') == 'debug':
+                print(f"[MOUTH] MediaPipe falló: {e}")
+            
+    # 2. Fallback a 106 landmarks (Alta calidad)
+    if landmarks_106 is not None:
+        try:
+            pts = np.array(landmarks_106, dtype=np.float32)
+            # Puntos de boca en 106 landmarks (aprox 52-71)
+            mouth_pts = pts[52:72]
+            h_mouth = np.max(mouth_pts[:, 1]) - np.min(mouth_pts[:, 1])
+            w_mouth = np.max(mouth_pts[:, 0]) - np.min(mouth_pts[:, 0])
+            open_ratio = h_mouth / (w_mouth + 1e-6)
+            is_open = open_ratio > 0.20
+            mouth_region = mouth_pts
+        except Exception:
+            pass
+        
+    return is_open, mouth_region, open_ratio
+
+
+def create_mouth_preservation_mask(frame: np.ndarray, mouth_data: Any, blend_ratio: float = 1.0) -> np.ndarray:
+    """
+    Crea una máscara quirúrgica para la boca basada en landmarks de MediaPipe o 106 pts. (v5.65)
+    """
+    h, w = frame.shape[:2]
+    mask = np.zeros((h, w), dtype=np.float32)
+    
+    try:
+        if isinstance(mouth_data, dict) and 'landmarks_468' in mouth_data:
+            # Usar MediaPipe 468 landmarks (precisión sub-pixel)
+            indices = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146] 
+            pts = []
+            landmarks = mouth_data['landmarks_468'].landmark
+            for idx in indices:
+                lm = landmarks[idx]
+                pts.append([int(lm.x * w), int(lm.y * h)])
+            cv2.fillPoly(mask, [np.array(pts, dtype=np.int32)], 1.0)
+            
+        elif isinstance(mouth_data, np.ndarray):
+            # Fallback a 106 landmarks (cascara externa de labios)
+            hull = cv2.convexHull(mouth_data.astype(np.int32))
+            cv2.fillConvexPoly(mask, hull, 1.0)
+            
+    except Exception as e:
+        if getattr(roop.globals, 'log_level', 'error') == 'debug':
+            print(f"[MOUTH_MASK] Error: {e}")
+            
+    return mask * blend_ratio

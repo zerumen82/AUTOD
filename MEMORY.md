@@ -15,10 +15,11 @@
     *   **Ghost Tracking:** Mejorada la inercia (EMA 0.70) para proyectar la cara cuando se pierde brevemente la visibilidad.
     *   **M-EMA:** Estabilización de la matriz afín para eliminar el "jitter" o temblor en los bordes.
 
-3.  **Protección de Oclusiones y Boca (v5.5):**
-    *   **Oclusión Avanzada:** Nueva detección de "objetos extraños" mediante diferencia LAB (>65) y detalle laplaciano optimizado.
-    *   **Mouth-Object Protection:** La preservación de boca ahora es inteligente; si detecta un objeto (comida, micro, mano), aumenta el `m_blend` (hasta 0.65) para proteger el objeto y no "swapear" sobre él.
-    *   **Skin-LAB Sensitivity:** Umbral reducido (30 -> 25) para captar manos y dedos con mayor precisión sobre el rostro.
+3.  **Oclusión y Boca (v5.65 - ¡NUEVO!):**
+    *   **Estabilización Temporal (EMA):** Máscara de oclusión ahora es estable en video (alpha 0.85), eliminando micro-parpadeos.
+    *   **Mouth-Object Protection:** Restauradas funciones de MediaPipe 468. Ahora detecta objetos (micros, manos) y sube la preservación hasta el 85% para proteger detalles originales.
+    *   **Laplaciano Optimizado:** Detección de detalle fino mejorada en `quality_enhancements.py` para mayor nitidez en bordes de oclusión.
+    *   **Smart m_blend:** Integración dinámica en `ProcessMgr.py` que ajusta la fuerza de restauración según la presencia de oclusiones locales.
 
 ### 📌 Pendiente Inmediato (Prioridad UI/UX)
 *   **Selección por Click:** Eliminar sliders y permitir pinchar directamente en la cara de la galería o el video.

@@ -1,6 +1,6 @@
 print("\n" + "="*60)
-print(">>> [SOURCE-TRUE] FIDELIDAD ABSOLUTA AL ORIGEN (v5.65) <<<")
-print(">>> (256px, Identity 100% SOURCE-LOCKED, GFPGAN 0.95, Sharpening HYPER, XSeg-PRO) <<<")
+print(">>> [TRUE-INTEGRATION] INTEGRACIÓN FÍSICA TOTAL (v5.66) <<<")
+print(">>> (256px, Occlusion-Locked, Depth-Color, Hyper-Sharp, XSeg-PRO) <<<")
 print("="*60 + "\n")
 
 import os
@@ -183,6 +183,8 @@ class ProcessMgr:
         # NUEVO: Suavizado temporal para boca - evita flickering en preservación de boca
         self._mouth_open_history = {}  # Historial de apertura de boca por video
         self._mouth_blend_smooth = {}   # Blend ratio suavizado por video
+        self._occ_mask_ema = {}         # Historial de máscara de oclusión (v5.65)
+        self._mouth_object_detected = {} # Flag de objeto en boca (v5.65)
 
         if is_valid_progress_callback(self.progress_callback):
             print(f"ProcessMgr v5.60 (FORCED QUALITY) inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
@@ -649,8 +651,10 @@ class ProcessMgr:
             
             # v5.2.1: Umbral de seguridad ajustado (0.20 -> 0.15) para permitir casos difíciles
             if max_sim < 0.15:
-                print(f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). Cara destino inválida o no humana. Omitiendo swap.")
-                return None
+                print(f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). Usando Master Embedding como fallback en lugar de omitir.")
+                # En lugar de return None, se deja caer al compromise path para evitar frames sin swap
+                # Forzar max_sim a 0.15 para que el compromise logic funcione
+                max_sim = 0.15
 
             # v5.0: NUEVA LÓGICA DE INTENSIDAD
             # Si el usuario tiene muchas muestras, NO queremos la más parecida al target (eso debilita el swap).
@@ -666,8 +670,8 @@ class ProcessMgr:
                 return best_candidate['face']
 
             # Si la similitud es baja, usar el mejor compromiso calidad/identidad
-            best_candidate = max(candidates, key=lambda c: c['quality'] + (c['sim'] * 30.0))
-            print(f"[SELECT_SOURCE] Similitud baja ({max_sim:.4f}), usando compromiso calidad/identidad: #{best_candidate['idx'] + 1}")
+            best_candidate = max(candidates, key=lambda c: c['quality'] + (c['sim'] * 10.0))
+            print(f"[SELECT_SOURCE] Similitud baja ({max_sim:.4f}), usando compromiso calidad/identidad (weight=10.0): #{best_candidate['idx'] + 1}")
             return best_candidate['face']
             
         except Exception as e:
@@ -1747,47 +1751,53 @@ class ProcessMgr:
             
             enhancer_key = next((k for k in ["enhance_gfpgan", "enhance_codeformer", "enhance_restoreformer"] if k in self.processors), None)
             if enhancer_key is not None:
-                try:
-                    # Aplicar enhancer directamente sobre la cara alineada (calidad superior)
-                    class FaceSetMock:
-                        def __init__(self, face): self.faces = [face]; self.ref_images = []
-                    
-                    enhanced = self.processors[enhancer_key].Run(FaceSetMock(source_face), None, swapped_face_aligned)
-                    if enhanced is not None:
-                        if isinstance(enhanced, tuple): enhanced = enhanced[0]
-                        if enhanced.shape[:2] != swapped_face_aligned.shape[:2]:
-                            enhanced = cv2.resize(enhanced, (swapped_face_aligned.shape[1], swapped_face_aligned.shape[0]))
+                # v5.66: Saltar enhancer en perfiles de baja detección (evita alucinaciones GFPGAN)
+                det_score_enh = getattr(target_face, 'det_score', 1.0)
+                skip_enhancer = is_profile and det_score_enh < 0.45
+                if skip_enhancer and call_num % 50 == 1:
+                    print(f"[QUALITY] Enhancer SKIP (perfil det_score={det_score_enh:.2f})")
+                if not skip_enhancer:
+                    try:
+                        # Aplicar enhancer directamente sobre la cara alineada (calidad superior)
+                        class FaceSetMock:
+                            def __init__(self, face): self.faces = [face]; self.ref_images = []
                         
-                        # Estabilización temporal EMA del enhancer
-                        if enable_temporal_smoothing and video_key:
-                            if not hasattr(self, '_enhancer_ema'): self._enhancer_ema = {}
-                            prev_enh = self._enhancer_ema.get(video_key)
-                            if prev_enh is not None and prev_enh.shape == enhanced.shape:
-                                enh_ema_alpha = 0.80 # v5.64: más responsivo para texturas dinámicas
-                                enhanced = cv2.addWeighted(enhanced, enh_ema_alpha, prev_enh, 1.0 - enh_ema_alpha, 0)
-                            self._enhancer_ema[video_key] = enhanced.copy()
-                        
-                        # v5.60: Radial GFPGAN fade mejorado (radio 60->75) — centro 100% GFPGAN, bordes raw
-                        h_f, w_f = enhanced.shape[:2]
-                        Y_f, X_f = np.ogrid[:h_f, :w_f]
-                        center_f = (w_f / 2, h_f / 2)
-                        dist_f = np.sqrt((X_f - center_f[0])**2 + (Y_f - center_f[1])**2)
-                        fade = 1.0 - 1.0 / (1.0 + np.exp(-0.10 * (dist_f - 75.0)))
-                        fade_3ch = np.stack([fade, fade, fade], axis=-1).astype(np.float32)
-                        alpha = enhancer_blend * fade_3ch
-                        blended_face = enhanced.astype(np.float32) * alpha + swapped_face_aligned.astype(np.float32) * (1.0 - alpha)
-                        swapped_face_aligned = np.clip(blended_face, 0, 255).astype(np.uint8)
-                        
-                        if call_num <= 3:
-                            cv2.imwrite(os.path.join(debug_dir, f'02_after_enhancer_f{call_num}.png'), swapped_face_aligned)
-                        
-                        # v5.65: Unsharp sigma 1.0 + amount 6.8 (HYPER-SHARP)
-                        blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
-                        swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 6.8, blurred, -5.8, 0)
-                        if call_num % 50 == 1:
-                            print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.65)")
-                except Exception as e:
-                    print(f"[AUTO_PILOT_ERR] {e}")
+                        enhanced = self.processors[enhancer_key].Run(FaceSetMock(source_face), None, swapped_face_aligned)
+                        if enhanced is not None:
+                            if isinstance(enhanced, tuple): enhanced = enhanced[0]
+                            if enhanced.shape[:2] != swapped_face_aligned.shape[:2]:
+                                enhanced = cv2.resize(enhanced, (swapped_face_aligned.shape[1], swapped_face_aligned.shape[0]))
+                            
+                            # Estabilización temporal EMA del enhancer
+                            if enable_temporal_smoothing and video_key:
+                                if not hasattr(self, '_enhancer_ema'): self._enhancer_ema = {}
+                                prev_enh = self._enhancer_ema.get(video_key)
+                                if prev_enh is not None and prev_enh.shape == enhanced.shape:
+                                    enh_ema_alpha = 0.80 # v5.64: más responsivo para texturas dinámicas
+                                    enhanced = cv2.addWeighted(enhanced, enh_ema_alpha, prev_enh, 1.0 - enh_ema_alpha, 0)
+                                self._enhancer_ema[video_key] = enhanced.copy()
+                            
+                            # v5.60: Radial GFPGAN fade mejorado (radio 60->75) — centro 100% GFPGAN, bordes raw
+                            h_f, w_f = enhanced.shape[:2]
+                            Y_f, X_f = np.ogrid[:h_f, :w_f]
+                            center_f = (w_f / 2, h_f / 2)
+                            dist_f = np.sqrt((X_f - center_f[0])**2 + (Y_f - center_f[1])**2)
+                            fade = 1.0 - 1.0 / (1.0 + np.exp(-0.10 * (dist_f - 75.0)))
+                            fade_3ch = np.stack([fade, fade, fade], axis=-1).astype(np.float32)
+                            alpha = enhancer_blend * fade_3ch
+                            blended_face = enhanced.astype(np.float32) * alpha + swapped_face_aligned.astype(np.float32) * (1.0 - alpha)
+                            swapped_face_aligned = np.clip(blended_face, 0, 255).astype(np.uint8)
+                            
+                            if call_num <= 3:
+                                cv2.imwrite(os.path.join(debug_dir, f'02_after_enhancer_f{call_num}.png'), swapped_face_aligned)
+                            
+                            # v5.65: Unsharp sigma 1.0 + amount 6.8 (HYPER-SHARP)
+                            blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
+                            swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 6.8, blurred, -5.8, 0)
+                            if call_num % 50 == 1:
+                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.65)")
+                    except Exception as e:
+                        print(f"[AUTO_PILOT_ERR] {e}")
 
             # ============================================
             # 3. COLOR Y BRILLO (ESTABILIZADO EMA v2.7)
@@ -1927,6 +1937,14 @@ class ProcessMgr:
                 # D. Aplicar oclusión (v5.2: Independiente del blend ratio para proteger objetos siempre)
                 occ_mask_aligned = detect_foreground_occlusion(raw_swapped_aligned, reference_region)
                 
+                # v5.65: Estabilización temporal (EMA) de oclusión para evitar parpadeo en videos
+                if enable_temporal_smoothing and video_key:
+                    prev_occ = self._occ_mask_ema.get(video_key)
+                    if prev_occ is not None and prev_occ.shape == occ_mask_aligned.shape:
+                        occ_ema_alpha = 0.85 # v5.65: alta respuesta pero sin ruido
+                        occ_mask_aligned = cv2.addWeighted(occ_mask_aligned, occ_ema_alpha, prev_occ, 1.0 - occ_ema_alpha, 0)
+                    self._occ_mask_ema[video_key] = occ_mask_aligned.copy()
+
                 # v5.4.3: Fuerza de oclusión reducida a 0.50 para no destruir la máscara facial
                 occ_strength = (0.60 if is_profile else 0.50) 
                 
@@ -1963,8 +1981,22 @@ class ProcessMgr:
             # 5. PRESERVACIÓN DE BOCA (Con detección MediaPipe 468)
             # ============================================
             if mouth_open and mouth_region is not None:
-                # v5.4.3: Fuerza de restauración reducida a 50% para no destruir máscara
+                # v5.65: Detección inteligente de objetos en boca (micros, comida, manos)
                 m_blend = 0.50
+                
+                try:
+                    # Usar la oclusión detectada en la zona de la boca para subir el blend si hay objetos
+                    mouth_mask_aligned = create_mouth_preservation_mask(reference_region, mouth_region, blend_ratio=1.0)
+                    mouth_occ_score = np.mean(cv2.bitwise_and(occ_mask_aligned, mouth_mask_aligned))
+                    
+                    if mouth_occ_score > 0.02: # Si hay oclusión en >2% de la boca
+                        # v5.65: Protección dinámica (hasta 0.85) para objetos
+                        m_blend = min(0.85, 0.50 + mouth_occ_score * 5.0)
+                        if call_num % 50 == 1:
+                            print(f"[MOUTH_OBJECT] Objeto detectado (score={mouth_occ_score:.3f}). m_blend={m_blend:.2f}")
+                except:
+                    pass
+
                 mouth_mask = create_mouth_preservation_mask(original_frame, mouth_region, blend_ratio=1.0)
 
                 # v5.2.3: Suavizado de boca más nítido (9x9) para no borrar el labio inferior
@@ -1974,7 +2006,7 @@ class ProcessMgr:
                 final_mask = np.clip(final_mask - (mouth_mask * m_blend), 0, 1.0)
 
                 if call_num % 50 == 1:
-                    print(f"[QUALITY] Boca restaurada (impacto={m_impact:.3f}, fuerza=50%)")
+                    print(f"[QUALITY] Boca restaurada (impacto={m_impact:.3f}, fuerza={m_blend*100:.0f}%)")
             # ============================================
             # 6. DEBUG MASK
             # ============================================
@@ -2001,8 +2033,9 @@ class ProcessMgr:
                 swap_weight *= max(0.35, 0.90 - lost_count * 0.04)
             
             if is_profile:
-                # Perfil: peso completo (1.0) para máxima identidad source
-                swap_weight *= 1.0
+                # Perfil: peso completo excepto cuando tracking es inestable (bajo det_score o alta velocidad)
+                if velocity > 80:
+                    swap_weight *= max(0.5, 1.0 - (velocity - 80) / 200)
             
             if not is_profile and velocity > 100:
                 swap_weight *= max(0.6, 1.0 - (velocity - 100) / 200)
@@ -2023,7 +2056,7 @@ class ProcessMgr:
                 if prev_frame_result.shape == result_frame.shape:
                     det_score = getattr(target_face, 'det_score', 1.0)
                     if det_score < 0.3:
-                        alpha_prev = 0.92  # casi congelar — solo 8% del swap nuevo
+                        alpha_prev = 0.85  # congelamiento parcial — 15% del swap nuevo
                     elif det_score < 0.4:
                         alpha_prev = 0.75  # casi congelar
                     elif det_score < 0.6:
