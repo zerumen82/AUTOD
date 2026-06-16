@@ -420,9 +420,7 @@ class ProcessMgr:
                         if best_match and max_sim > 0.10:
                             faces_to_process = [best_match]
                 
-                # Fallback: si no hay selección manual, elegir la principal
-                if not faces_to_process:
-                    faces_to_process = [max(valid_faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))]
+                # v5.72: Sin fallback — si no hay match de la cara seleccionada, se salta
 
             if not faces_to_process:
                 return frame
@@ -645,10 +643,12 @@ class ProcessMgr:
             # 2. Encontrar la mejor similitud
             max_sim = max(c['sim'] for c in candidates)
             
-            # v5.72: Sin fallback — si no hay cara similar, se salta el frame
+            # v5.2.1: Umbral de seguridad ajustado (0.20 -> 0.15) para permitir casos difíciles
             if max_sim < 0.15:
-                print(f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). Sin fallback, saltando frame.")
-                return None
+                print(f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). Usando Master Embedding como fallback en lugar de omitir.")
+                # En lugar de return None, se deja caer al compromise path para evitar frames sin swap
+                # Forzar max_sim a 0.15 para que el compromise logic funcione
+                max_sim = 0.15
 
             # v5.0: NUEVA LÓGICA DE INTENSIDAD
             # Si el usuario tiene muchas muestras, NO queremos la más parecida al target (eso debilita el swap).
