@@ -1,6 +1,6 @@
 print("\n" + "="*60)
-print(">>> [SMART-QUALITY] AJUSTES DE ALTA FIDELIDAD PREDEFINIDOS (v4.9.9) <<<")
-print(">>> (256px, Identity 92% FORCE, GFPGAN 0.85, Sharpening ULTRA, XSeg) <<<")
+print(">>> [SOURCE-TRUE] FIDELIDAD ABSOLUTA AL ORIGEN (v5.65) <<<")
+print(">>> (256px, Identity 100% SOURCE-LOCKED, GFPGAN 0.95, Sharpening HYPER, XSeg-PRO) <<<")
 print("="*60 + "\n")
 
 import os
@@ -155,7 +155,7 @@ def get_gender(face):
         return None
 
 class ProcessMgr:
-    """Gestor de procesamiento de face swapping v4.9"""
+    """Gestor de procesamiento de face swapping v5.61"""
     _swap_call_count = 0  # Contador global para debug
     
     def __init__(self, progress_callback=None):
@@ -185,9 +185,9 @@ class ProcessMgr:
         self._mouth_blend_smooth = {}   # Blend ratio suavizado por video
 
         if is_valid_progress_callback(self.progress_callback):
-            print(f"ProcessMgr v4.9 (FORCED QUALITY) inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
+            print(f"ProcessMgr v5.60 (FORCED QUALITY) inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
         else:
-            print(f"ProcessMgr v4.9 (FORCED QUALITY) inicializado SIN progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
+            print(f"ProcessMgr v5.60 (FORCED QUALITY) inicializado SIN progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
 
         self._initialize_processors()
 
@@ -204,7 +204,7 @@ class ProcessMgr:
         self._mouth_open_history.clear()
         self._mouth_blend_smooth.clear()
 
-        print(f"ProcessMgr v4.9 (FORCED QUALITY) inicializado: {len(self.input_facesets)} facesets, {len(self.target_faces)} target faces")
+        print(f"ProcessMgr v5.60 (FORCED QUALITY) inicializado: {len(self.input_facesets)} facesets, {len(self.target_faces)} target faces")
 
         if len(self.input_facesets) == 0:
             print("[WARNING] No hay facesets de origen cargados")
@@ -246,7 +246,7 @@ class ProcessMgr:
                 self.master_source_embedding /= norm
             print(f"[IDENTITY] Creado Master Embedding desde {len(top_embs)} mejores muestras (total {len(all_embs_with_quality)})")
         
-        print(f"v4.9: {len(self.source_embeddings_cache)} embeddings cacheados")
+        print(f"v5.60: {len(self.source_embeddings_cache)} embeddings cacheados")
 
     def _initialize_processors(self):
         try:
@@ -666,7 +666,7 @@ class ProcessMgr:
                 return best_candidate['face']
 
             # Si la similitud es baja, usar el mejor compromiso calidad/identidad
-            best_candidate = max(candidates, key=lambda c: c['quality'] + (c['sim'] * 5.0))
+            best_candidate = max(candidates, key=lambda c: c['quality'] + (c['sim'] * 30.0))
             print(f"[SELECT_SOURCE] Similitud baja ({max_sim:.4f}), usando compromiso calidad/identidad: #{best_candidate['idx'] + 1}")
             return best_candidate['face']
             
@@ -1579,21 +1579,21 @@ class ProcessMgr:
                         f_size = 1.0
                         kps_ema = 1.0
                     else:
-                        # v5.1: Allow more raw data if high intensity requested (less EMA lag)
+                        # v5.60: Allow more raw data if high intensity requested, but with some smoothing to avoid jitter
                         if user_blend >= 0.95:
-                            f_center = 0.98
-                            kps_ema = 0.96
+                            f_center = 0.95
+                            kps_ema = 0.92
                         else:
-                            # v5.57: Perfiles con EMA más responsive para mejor tracking de giros rápidos
+                            # v5.60: Perfiles con EMA más suavizado para evitar jitter (0.60->0.75, 0.70->0.82, 0.80->0.88)
                             if velocity < 4:
                                 f_center = 0.85
-                                kps_ema = 0.80 if not is_profile else 0.60
+                                kps_ema = 0.80 if not is_profile else 0.75
                             elif velocity < 12:
                                 f_center = 0.90
-                                kps_ema = 0.85 if not is_profile else 0.70
+                                kps_ema = 0.85 if not is_profile else 0.82
                             else:
                                 f_center = 0.95
-                                kps_ema = 0.90 if not is_profile else 0.80
+                                kps_ema = 0.90 if not is_profile else 0.88
                         
                         f_size = 0.95
                     
@@ -1667,21 +1667,30 @@ class ProcessMgr:
             if x2 <= x1 or y2 <= y1:
                 return original_frame
 
-            # v5.54: Skip-swap para tracking pésimo — det_score < 0.35 + velocity > 50px
+            # v5.59: Skip-swap solo para tracking extremadamente malo — det_score < 0.05 + velocity > 100px
             det_score = getattr(target_face, 'det_score', 1.0)
             velocity = getattr(self, '_last_velocity', 0)
-            if det_score < 0.35 and velocity > 50:
+            if det_score < 0.05 and velocity > 100:
                 if enable_temporal_smoothing and prev_frame_result is not None:
                     print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
                     return prev_frame_result
                 return original_frame
 
             # ============================================
-            # 1. 100% SOURCE EMBEDDING (v5.47: ADN Maestro eliminado)
+            # 1. IDENTITY INJECTION (v5.64: ADN Maestro GOD-MIX)
             # ============================================
-            # El ADN Maestro diluía la identidad mezclando embeddings (hasta 50% master).
-            # Ahora usamos 100% del embedding source para máxima identidad.
+            # Inyectar identidad frontal (Master) para estabilizar rasgos en ángulos difíciles
             swap_source_face = source_face
+            if hasattr(self, 'master_source_embedding') and self.master_source_embedding is not None:
+                # v5.65: Inyección máxima (65%) en perfiles para fidelidad absoluta
+                dna_mix = 0.65 if is_profile else 0.25
+                if dna_mix > 0:
+                    import copy
+                    swap_source_face = copy.copy(source_face)
+                    mixed_emb = (1.0 - dna_mix) * np.array(source_face.embedding) + dna_mix * self.master_source_embedding
+                    norm = np.linalg.norm(mixed_emb)
+                    if norm > 0:
+                        swap_source_face.embedding = (mixed_emb / norm).tolist()
 
             # ============================================
             # 2. SWAP
@@ -1714,7 +1723,7 @@ class ProcessMgr:
                     if m_diff < 15.0: # Umbral para jitter vs movimiento real
                         m_alpha = 0.70 if m_diff < 5.0 else 0.50
                         if is_profile:
-                            m_alpha *= 0.7  # menos smoothing en perfiles = tracking más rápido
+                            m_alpha *= 0.10  # v5.65: rigidity-pro en perfiles para seguimiento instantáneo
                         M = M * (1.0 - m_alpha) + prev_m * m_alpha
                 setattr(self, m_attr, M)
 
@@ -1732,8 +1741,8 @@ class ProcessMgr:
             
             use_enhancer = True # Forzar siempre ON
             selected_enhancer = "GFPGAN" # Forzar el mejor
-            # v5.57: enhancer_blend 0.80 para máxima identidad source (GFPGAN ~76% efectivo)
-            enhancer_blend = getattr(roop.globals, "enhancer_blend_factor", 0.80)
+            # v5.65: enhancer_blend interno forzado a 0.95 para textura perfecta
+            enhancer_blend = 0.95
             preserve_mouth = True # Evitar borrar gestos
             
             enhancer_key = next((k for k in ["enhance_gfpgan", "enhance_codeformer", "enhance_restoreformer"] if k in self.processors), None)
@@ -1754,16 +1763,16 @@ class ProcessMgr:
                             if not hasattr(self, '_enhancer_ema'): self._enhancer_ema = {}
                             prev_enh = self._enhancer_ema.get(video_key)
                             if prev_enh is not None and prev_enh.shape == enhanced.shape:
-                                enh_ema_alpha = 0.50 # 50% nuevo + 50% previo = equilibrio estabilidad/responsividad
+                                enh_ema_alpha = 0.80 # v5.64: más responsivo para texturas dinámicas
                                 enhanced = cv2.addWeighted(enhanced, enh_ema_alpha, prev_enh, 1.0 - enh_ema_alpha, 0)
                             self._enhancer_ema[video_key] = enhanced.copy()
                         
-                        # v5.57: Radial GFPGAN fade — centro 100% GFPGAN, bordes raw (elimina blur fuera de cara)
+                        # v5.60: Radial GFPGAN fade mejorado (radio 60->75) — centro 100% GFPGAN, bordes raw
                         h_f, w_f = enhanced.shape[:2]
                         Y_f, X_f = np.ogrid[:h_f, :w_f]
                         center_f = (w_f / 2, h_f / 2)
                         dist_f = np.sqrt((X_f - center_f[0])**2 + (Y_f - center_f[1])**2)
-                        fade = 1.0 - 1.0 / (1.0 + np.exp(-0.10 * (dist_f - 60.0)))
+                        fade = 1.0 - 1.0 / (1.0 + np.exp(-0.10 * (dist_f - 75.0)))
                         fade_3ch = np.stack([fade, fade, fade], axis=-1).astype(np.float32)
                         alpha = enhancer_blend * fade_3ch
                         blended_face = enhanced.astype(np.float32) * alpha + swapped_face_aligned.astype(np.float32) * (1.0 - alpha)
@@ -1772,11 +1781,11 @@ class ProcessMgr:
                         if call_num <= 3:
                             cv2.imwrite(os.path.join(debug_dir, f'02_after_enhancer_f{call_num}.png'), swapped_face_aligned)
                         
-                        # v5.57: Unsharp sigma 1.0 + amount 2.5 para máxima nitidez
+                        # v5.65: Unsharp sigma 1.0 + amount 6.8 (HYPER-SHARP)
                         blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
-                        swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 2.5, blurred, -1.5, 0)
+                        swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 6.8, blurred, -5.8, 0)
                         if call_num % 50 == 1:
-                            print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.57)")
+                            print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.65)")
                 except Exception as e:
                     print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -1810,27 +1819,16 @@ class ProcessMgr:
                 face_lab[:, :, 0] = np.clip(face_lab[:, :, 0] * adj, 0, 255)
                 swapped_face_aligned = cv2.cvtColor(face_lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
 
-            # Color Matching EMA
-            # Perfiles: mínimo para no teñir la identidad con el tono del target
-            # v5.43: Color matching fortalecido para eliminar bordes visibles de máscara
-            color_match_strength = 0.15 if is_profile else 0.20
-            swapped_face_aligned = match_color_histogram(swapped_face_aligned, reference_region, blend_factor=color_match_strength)
-            
-            # Refuerzo de Identidad para perfiles (v4.9)
-            if is_profile and hasattr(self, 'master_source_embedding'):
-                # Inyectar un poco más de la identidad maestra en el resultado final si es perfil
-                pass # La lógica ya está integrada en el swapper, aquí solo ajustamos color.
-
-            # v5.47: Color matching reducido para preservar identidad source (0.30/0.35→0.15/0.20)
-            color_match_strength = 0.20 if is_profile else 0.15
+            # v5.61: Color matching equilibrado (0.15 frontal, 0.25 perfil) para preservar parecido
+            color_match_strength = 0.25 if is_profile else 0.15
             swapped_face_aligned = match_color_histogram(swapped_face_aligned, reference_region, blend_factor=color_match_strength)
 
             if enable_temporal_smoothing and video_key:
                 if not hasattr(self, '_color_ema'): self._color_ema = {}
                 prev_color = self._color_ema.get(video_key)
                 if prev_color is not None and prev_color.shape == swapped_face_aligned.shape:
-                    # v5.47: Color EMA más rápido (0.60 nuevo / 0.70 anterior) para menos lag y más estabilidad
-                    color_ema_alpha = 0.60 if user_blend >= 0.95 else 0.70
+                    # v5.65: Color EMA instant-photon (0.95 nuevo) para cero lag lumínico
+                    color_ema_alpha = 0.95 if user_blend >= 0.95 else 0.88
                     swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, color_ema_alpha, prev_color, 1.0 - color_ema_alpha, 0)
                 self._color_ema[video_key] = swapped_face_aligned
 
@@ -1860,8 +1858,8 @@ class ProcessMgr:
                     print(f"[ALIGN_DEBUG] Frame {call_num}:")
                     print(f"[ALIGN_DEBUG]   M (2x3) = [{M[0,0]:.4f}, {M[0,1]:.4f}, {M[0,2]:.2f}; {M[1,0]:.4f}, {M[1,1]:.4f}, {M[1,2]:.2f}]")
                     print(f"[ALIGN_DEBUG]   M_inv (2x3) = [{M_inv[0,0]:.4f}, {M_inv[0,1]:.4f}, {M_inv[0,2]:.2f}; {M_inv[1,0]:.4f}, {M_inv[1,1]:.4f}, {M_inv[1,2]:.2f}]")
-                    print(f"[ALIGN_DEBUG]   target_face.kps = {target_face.kps.tolist() if hasattr(target_face.kps, 'tolist') else target_face.kps}")
-                    print(f"[ALIGN_DEBUG]   target_face.bbox = {target_face.bbox.tolist() if hasattr(target_face.bbox, 'tolist') else target_face.bbox}")
+                    print(f"[ALIGN_DEBUG]   target_face.kps = {target_face.kps}")
+                    print(f"[ALIGN_DEBUG]   target_face.bbox = {target_face.bbox}")
                     # Mapear las 4 esquinas de la cara alineada (128x128) al frame original
                     h_a, w_a = swapped_face_aligned.shape[:2]
                     corners = np.array([[0, 0], [w_a, 0], [w_a, h_a], [0, h_a]], dtype=np.float32)
@@ -1874,7 +1872,8 @@ class ProcessMgr:
                         print(f"[ALIGN_DEBUG]   warped_face non-zero bbox: x=[{xs.min()},{xs.max()}] y=[{ys.min()},{ys.max()}]")
                     else:
                         print(f"[ALIGN_DEBUG]   warped_face: ALL ZERO (warp falló)")
-                    print(f"[ALIGN_DEBUG]   swap_source_face embedding[:3] = {swap_source_face.embedding[:3].tolist()}")
+                    emb_log = list(swap_source_face.embedding[:3]) if isinstance(swap_source_face.embedding, list) else swap_source_face.embedding[:3].tolist()
+                    print(f"[ALIGN_DEBUG]   swap_source_face embedding[:3] = {emb_log}")
                     print(f"[ALIGN_DEBUG]   Frame size: {w_f}x{h_f}")
                 
                 # B. NUEVO: Generar máscara XSeg de alta precisión
@@ -1897,14 +1896,8 @@ class ProcessMgr:
                                 gradient_x[row, :] = (row / fade_h) ** 1.0
                             xseg_mask = xseg_mask * gradient_x
 
-                            # v5.4.3: Sin gamma (ya no es necesario con umbral reducido)
-                            
-                            # v5.4.3: Sin blur pre-warp — se hace después de dilatación en espacio frame
-                            
                             # Warp de la máscara XSeg al espacio del frame
                             final_mask = cv2.warpAffine(xseg_mask, M_inv, (w_f, h_f), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-
-                            # v5.52: Dilatación eliminada — causaba máscara fuera de la cara + blur elíptico visible
                     except Exception as e:
                         print(f"[MASK_ERR] XSeg falló: {e}")
 
@@ -1943,14 +1936,14 @@ class ProcessMgr:
                     if call_num % 100 == 1:
                         print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f})")
 
-                # v5.57: GaussianBlur //30 + erosión 5×5 antes de blur + content feathering antes de truncation
-                blur_sz = int(max(7, min(x2-x1, y2-y1) // 30)) | 1
+                # v5.65: GaussianBlur //75 (bordes microscópicos) + erosión 5×5
+                blur_sz = int(max(5, min(x2-x1, y2-y1) // 75)) | 1
                 kernel_e = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
                 final_mask = cv2.erode(final_mask, kernel_e, iterations=1)
                 final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
 
-                # v5.57: Content feathering ANTES de tail truncation — tent opera en toda la transición gaussiana
-                content_blur_sz = int(max(31, blur_sz + 15)) | 1
+                # v5.65: Content feathering "Surgical-Seams" (offset 1) para eliminar blur residual
+                content_blur_sz = int(max(31, blur_sz + 1)) | 1
                 tent = np.clip(1.0 - np.abs(final_mask - 0.5) * 2.0, 0, 1.0)
                 if np.max(tent) > 0.01:
                     blurred_face = cv2.GaussianBlur(warped_face, (content_blur_sz, content_blur_sz), 0)
@@ -2039,7 +2032,7 @@ class ProcessMgr:
                         alpha_prev = 0.25 if is_profile else 0.15
                     result_frame = cv2.addWeighted(result_frame, 1.0 - alpha_prev, prev_frame_result, alpha_prev, 0)
                     if call_num % 50 == 1:
-                        print(f"[QUALITY] EMA v5.57 (det_score={det_score:.2f}, alpha_prev={alpha_prev:.2f})")
+                        print(f"[QUALITY] EMA v5.59 (det_score={det_score:.2f}, alpha_prev={alpha_prev:.2f})")
 
             if call_num <= 3:
                 cv2.imwrite(os.path.join(debug_dir, f'04_final_result_f{call_num}.png'), result_frame)
