@@ -89,6 +89,10 @@ vcpkg
 # Temp files
 .autodeep_temp/
 
+# Debug output images
+debug_swap/*.png
+debug_swap/*.jpg
+
 # Gradio
 .gradio/
 

@@ -645,12 +645,10 @@ class ProcessMgr:
             # 2. Encontrar la mejor similitud
             max_sim = max(c['sim'] for c in candidates)
             
-            # v5.2.1: Umbral de seguridad ajustado (0.20 -> 0.15) para permitir casos difíciles
+            # v5.72: Sin fallback — si no hay cara similar, se salta el frame
             if max_sim < 0.15:
-                print(f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). Usando Master Embedding como fallback en lugar de omitir.")
-                # En lugar de return None, se deja caer al compromise path para evitar frames sin swap
-                # Forzar max_sim a 0.15 para que el compromise logic funcione
-                max_sim = 0.15
+                print(f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). Sin fallback, saltando frame.")
+                return None
 
             # v5.0: NUEVA LÓGICA DE INTENSIDAD
             # Si el usuario tiene muchas muestras, NO queremos la más parecida al target (eso debilita el swap).
@@ -1913,14 +1911,14 @@ class ProcessMgr:
                 if final_mask is None:
                     mask_align = np.zeros((h_align, w_align), dtype=np.float32)
                     if is_profile:
-                        # v5.53: Elipse perfil reducida 0.65/0.70→0.50/0.50 para minimizar blur fuera de cara
+                        # v5.72: Elipse perfil expandida 0.50→0.65 para mayor cobertura
                         cv2.ellipse(mask_align, (w_align//2, h_align//2),
-                                    (int(w_align*0.50), int(h_align*0.50)), 0, 0, 360, 1.0, -1)
+                                    (int(w_align*0.65), int(h_align*0.65)), 0, 0, 360, 1.0, -1)
                         mask_align = cv2.GaussianBlur(mask_align, (21, 21), 0)
                     else:
-                        # v5.53: Elipse frontal reducida 0.55/0.58→0.45/0.48 para eliminar blur elíptico
+                        # v5.72: Elipse frontal expandida 0.45/0.48→0.60/0.60 para mayor cobertura
                         cv2.ellipse(mask_align, (w_align//2, h_align//2),
-                                    (int(w_align*0.45), int(h_align*0.48)), 0, 0, 360, 1.0, -1)
+                                    (int(w_align*0.60), int(h_align*0.60)), 0, 0, 360, 1.0, -1)
                     
                     # v5.4: Atenuación superior generosa en fallback (10%)
                     h_a, w_a = mask_align.shape[:2]
