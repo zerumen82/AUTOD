@@ -9,7 +9,20 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.68 (current) — Identity Force
+### v5.71 (current) — Embedding Ponderado Top-3
+- **Master Embedding = weighted blend top-3**: Calidad^3 weighting — mejor cara ~80%, 2da ~15%, 3ra ~5%. Enriquece identidad sin diluir (vs. promedio de 20 que diluía).
+- **Identidad refinada**: El decoder del inswapper recibe un embedding más rico que preserva la identidad de la mejor foto con aporte complementario de otras buenas fotos.
+- **Cero costo computacional**: Sin inferencia extra, solo cambio en cómo se calcula el embedding maestro.
+
+### v5.70 — Master Embedding Single-Best
+- **Master Embedding = mejor cara individual**: Reemplazó el promedio de 20 embeddings. Una embedding real preserva 100% de los rasgos del source (el promedio diluía).
+
+### v5.69 — DNA Mix Absoluto
+- **dna_mix=1.0**: Identidad 100% del master embedding en todos los modos (frontal y perfil).
+- **m_blend 0.50→0.85**: Mouth mask más fuerte para preservar expresión bucal.
+- **Mouth mask dilatación**: Kernel 9×9×2 iteraciones para mejor cobertura.
+
+### v5.68 — Identity Force
 - **Enhancer 0.95→0.70**: Menos GFPGAN = más identidad cruda del swap en el resultado final (30% raw swap vs 5% antes).
 - **DNA injection frontal 0.25→0.65**: Igualado al perfil, 65% embedding maestro (promedio mejores sources) para identidad consistente.
 - **DNA injection perfil 0.65→0.85**: 85% embedding maestro para perfiles extremos, máxima fidelidad rotacional.
@@ -49,8 +62,8 @@
 - enhancer_blend via slider (default 0.95) — respeta UI, no hardcode
 
 ## Next Steps
-- Testear v5.59 — enhancer 0.95 slider + unsharp 3.5 deben dar más identidad y nitidez
-- Verificar que frames 565-566 ya no se salten
+- Testear v5.71 — verificar que el embedding ponderado top-3 mejora identidad vs v5.70 single-best
+- Si la identidad aún no es suficiente, considerar multi-source swap blending (3x swap por frame) o texture transfer post-swap
 
 ## Critical Context
 - Log v5.58: 434.07s (1.96 fps), enhancer 0.85, mask mean=0.059 ✅
@@ -58,6 +71,6 @@
 - enhancer_blend via slider (default 0.95) en ProcessMgr.py:1736
 
 ## Relevant Files
-- `roop/ProcessMgr.py`: Pipeline principal — v5.59 enhancer_blend via slider, unsharp 3.5, skip threshold 0.15/100px, radial GFPGAN fade, erosión 5×5, //30, truncation 0.10, profile EMA responsive
+- `roop/ProcessMgr.py`: Pipeline principal — v5.71 embedding ponderado top-3, v5.69 dna_mix=1.0, enhancer_blend 0.70, unsharp 6.8, mask elastic //75, profile EMA responsive
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
 - `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas

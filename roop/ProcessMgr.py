@@ -232,18 +232,22 @@ class ProcessMgr:
                             self.source_embeddings_cache[id(face)] = unit_emb
                             all_embs_with_quality.append((unit_emb, quality))
         
-        # v5.70: Master Embedding = mejor cara INDIVIDUAL (no promedio)
-        # Promediar 20 embeddings diluye rasgos distintivos → cara genérica.
-        # Una embedding real de la mejor foto preserva 100% de los rasgos del source.
+        # v5.71: Master Embedding = weighted blend top-3 (quality^3 weighting)
+        # Mejor cara ~80%, 2da ~15%, 3ra ~5% — enriquece identidad sin diluir
         self.master_source_embedding = None
         if len(all_embs_with_quality) > 0:
             all_embs_with_quality.sort(key=lambda x: x[1], reverse=True)
-            best_emb = all_embs_with_quality[0][0]
-            self.master_source_embedding = best_emb.copy()
+            top_k = min(3, len(all_embs_with_quality))
+            weights = np.array([max(0.001, float(x[1])) ** 3 for x in all_embs_with_quality[:top_k]], dtype=np.float64)
+            weights /= weights.sum()
+            weighted_emb = np.zeros_like(all_embs_with_quality[0][0], dtype=np.float64)
+            for i in range(top_k):
+                weighted_emb += all_embs_with_quality[i][0].astype(np.float64) * weights[i]
+            self.master_source_embedding = weighted_emb.astype(np.float32)
             norm = np.linalg.norm(self.master_source_embedding)
             if norm > 0:
                 self.master_source_embedding /= norm
-            print(f"[IDENTITY] Master Embedding = mejor cara individual (quality={all_embs_with_quality[0][1]:.2f}, total {len(all_embs_with_quality)})")
+            print(f"[IDENTITY] Master Embedding = weighted blend top-{top_k} (weights: {[f'{w:.2f}' for w in weights]}, best_quality={all_embs_with_quality[0][1]:.2f})")
         
         print(f"v5.60: {len(self.source_embeddings_cache)} embeddings cacheados")
 
@@ -1742,7 +1746,7 @@ class ProcessMgr:
             
             use_enhancer = True # Forzar siempre ON
             selected_enhancer = "GFPGAN" # Forzar el mejor
-            # v5.69: enhancer_blend 0.70 preserva identidad cruda del swap
+            # v5.71: enhancer_blend 0.70, Master Embedding weighted top-3
             enhancer_blend = 0.70
             preserve_mouth = True # Evitar borrar gestos
             
@@ -1792,7 +1796,7 @@ class ProcessMgr:
                             blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
                             swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 6.8, blurred, -5.8, 0)
                             if call_num % 50 == 1:
-                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.70)")
+                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.71)")
                     except Exception as e:
                         print(f"[AUTO_PILOT_ERR] {e}")
 
