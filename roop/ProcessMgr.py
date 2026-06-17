@@ -1951,9 +1951,12 @@ class ProcessMgr:
                     if call_num % 100 == 1:
                         print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f}, blur=31)")
 
-                # v5.65: GaussianBlur //75 (bordes microscópicos) + erosión 5×5
-                blur_sz = int(max(5, min(x2-x1, y2-y1) // 75)) | 1
-                kernel_e = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                # v5.74: Erosión adaptativa al tamaño de cara + blur proporcional
+                face_w = x2 - x1
+                face_h = y2 - y1
+                ekernel = max(3, min(face_w, face_h) // 32) | 1  # 3-5 para caras pequeñas, 7+ para grandes
+                blur_sz = int(max(3, min(face_w, face_h) // 75)) | 1
+                kernel_e = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ekernel, ekernel))
                 final_mask = cv2.erode(final_mask, kernel_e, iterations=1)
                 final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
 
@@ -1965,8 +1968,8 @@ class ProcessMgr:
                     tent_3ch = cv2.merge([tent, tent, tent])
                     warped_face = (warped_face.astype(np.float32) * (1.0 - tent_3ch) + blurred_face.astype(np.float32) * tent_3ch).astype(np.uint8)
 
-                # v5.73: Tail truncation 0.05 + erosión 5×5 para máscara limpia (más retención que 0.10)
-                final_mask = np.clip((final_mask - 0.05) / (1.0 - 0.05), 0, 1.0)
+                # v5.74: Tail truncation 0.03 (menos agresivo que 0.05) para no matar caras pequeñas
+                final_mask = np.clip((final_mask - 0.03) / (1.0 - 0.03), 0, 1.0)
             else:
                 # Fallback de emergencia
                 print("[WARNING] M es None, usando fallback de elipse directa")
@@ -2008,6 +2011,20 @@ class ProcessMgr:
 
                 if call_num % 50 == 1:
                     print(f"[QUALITY] Boca restaurada (impacto={m_impact:.3f}, fuerza={m_blend*100:.0f}%)")
+            # ============================================
+            # 5b. SAFETY FALLBACK: Si la máscara quedó en cero, regenerar elipse generosa
+            # ============================================
+            if final_mask.max() == 0:
+                print(f"[MASK_SAFETY] Frame {call_num}: máscara cero tras procesado. Regenerando elipse directa.")
+                h_f_s, w_f_s = original_frame.shape[:2]
+                cx_s, cy_s = (x1 + x2) // 2, (y1 + y2) // 2
+                rx_s = max(80, (x2 - x1) // 2 + 20)
+                ry_s = max(80, (y2 - y1) // 2 + 20)
+                final_mask = np.zeros((h_f_s, w_f_s), dtype=np.float32)
+                cv2.ellipse(final_mask, (cx_s, cy_s), (rx_s, ry_s), 0, 0, 360, 1.0, -1)
+                final_mask = cv2.GaussianBlur(final_mask, (31, 31), 0)
+                final_mask = np.clip((final_mask - 0.05) / (1.0 - 0.05), 0, 1.0)
+
             # ============================================
             # 6. DEBUG MASK
             # ============================================
