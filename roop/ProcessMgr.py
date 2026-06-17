@@ -1,5 +1,5 @@
 print("\n" + "="*60)
-print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.70 — DNA 1.0 + enhancer 0.70 + mouth 0.85 <<<")
+print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.73 — DNA 1.0 + enhancer 0.70 + mouth 0.70 <<<")
 print(">>> (256px, Occlusion-Locked, Depth-Color, Hyper-Sharp, XSeg-PRO) <<<")
 print("="*60 + "\n")
 
@@ -155,7 +155,7 @@ def get_gender(face):
         return None
 
 class ProcessMgr:
-    """Gestor de procesamiento de face swapping v5.70"""
+    """Gestor de procesamiento de face swapping v5.73"""
     _swap_call_count = 0  # Contador global para debug
     
     def __init__(self, progress_callback=None):
@@ -1787,11 +1787,11 @@ class ProcessMgr:
                             if call_num <= 3:
                                 cv2.imwrite(os.path.join(debug_dir, f'02_after_enhancer_f{call_num}.png'), swapped_face_aligned)
                             
-                            # v5.65: Unsharp sigma 1.0 + amount 6.8 (HYPER-SHARP)
+                            # v5.73: Unsharp sigma 1.0 + amount 2.5 (MODERATE)
                             blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
-                            swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 6.8, blurred, -5.8, 0)
+                            swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 2.5, blurred, -1.5, 0)
                             if call_num % 50 == 1:
-                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.72)")
+                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.73)")
                     except Exception as e:
                         print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -1911,14 +1911,14 @@ class ProcessMgr:
                 if final_mask is None:
                     mask_align = np.zeros((h_align, w_align), dtype=np.float32)
                     if is_profile:
-                        # v5.72: Elipse perfil expandida 0.50→0.65 para mayor cobertura
+                        # v5.73: Elipse perfil expandida 0.65→0.75 para mayor identidad source
                         cv2.ellipse(mask_align, (w_align//2, h_align//2),
-                                    (int(w_align*0.65), int(h_align*0.65)), 0, 0, 360, 1.0, -1)
+                                    (int(w_align*0.75), int(h_align*0.75)), 0, 0, 360, 1.0, -1)
                         mask_align = cv2.GaussianBlur(mask_align, (21, 21), 0)
                     else:
-                        # v5.72: Elipse frontal expandida 0.45/0.48→0.60/0.60 para mayor cobertura
+                        # v5.73: Elipse frontal expandida 0.60→0.70 para mayor identidad source
                         cv2.ellipse(mask_align, (w_align//2, h_align//2),
-                                    (int(w_align*0.60), int(h_align*0.60)), 0, 0, 360, 1.0, -1)
+                                    (int(w_align*0.70), int(h_align*0.70)), 0, 0, 360, 1.0, -1)
                     
                     # v5.4: Atenuación superior generosa en fallback (10%)
                     h_a, w_a = mask_align.shape[:2]
@@ -1965,8 +1965,8 @@ class ProcessMgr:
                     tent_3ch = cv2.merge([tent, tent, tent])
                     warped_face = (warped_face.astype(np.float32) * (1.0 - tent_3ch) + blurred_face.astype(np.float32) * tent_3ch).astype(np.uint8)
 
-                # v5.57: Tail truncation 0.10 + erosión 5×5 para máscara limpia
-                final_mask = np.clip((final_mask - 0.10) / (1.0 - 0.10), 0, 1.0)
+                # v5.73: Tail truncation 0.05 + erosión 5×5 para máscara limpia (más retención que 0.10)
+                final_mask = np.clip((final_mask - 0.05) / (1.0 - 0.05), 0, 1.0)
             else:
                 # Fallback de emergencia
                 print("[WARNING] M es None, usando fallback de elipse directa")
@@ -1979,7 +1979,7 @@ class ProcessMgr:
             # ============================================
             if mouth_open and mouth_region is not None:
                 # v5.65: Detección inteligente de objetos en boca (micros, comida, manos)
-                m_blend = 0.85
+                m_blend = 0.70
                 
                 try:
                     # Usar la oclusión detectada en la zona de la boca para subir el blend si hay objetos
@@ -1987,8 +1987,8 @@ class ProcessMgr:
                     mouth_occ_score = np.mean(cv2.bitwise_and(occ_mask_aligned, mouth_mask_aligned))
                     
                     if mouth_occ_score > 0.02: # Si hay oclusión en >2% de la boca
-                        # v5.65: Protección dinámica (hasta 0.85) para objetos
-                        m_blend = min(0.85, 0.50 + mouth_occ_score * 5.0)
+                        # v5.73: Protección dinámica (hasta 0.70) para objetos
+                        m_blend = min(0.70, 0.40 + mouth_occ_score * 5.0)
                         if call_num % 50 == 1:
                             print(f"[MOUTH_OBJECT] Objeto detectado (score={mouth_occ_score:.3f}). m_blend={m_blend:.2f}")
                 except:

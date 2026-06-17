@@ -9,7 +9,13 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.72 (current) — Single-Best Revert + Occlusion Fix
+### v5.73 (current) — Mouth blend reducido + máscara expandida + unsharp moderado
+- **m_blend 0.85→0.70**: Menos preservación de boca target = más identidad source visible en el área más expresiva de la cara. Base 0.70, dinámico hasta 0.70 (antes 0.85) con oclusión.
+- **Unsharp 6.8→2.5**: El upscale 128→256px del modelo inswapper ya introduce pixelación latente en close-ups; 5.8× neto de sharpening la amplificaba creando "pixela". Ahora 1.5× — suficiente nitidez sin halos.
+- **Máscara expandida**: Perfil 0.65→0.75, frontal 0.60→0.70 — más área facial del swap visible, más identidad source sin perder calidad.
+- **Tail truncation 0.10→0.05**: Retiene 5% más de máscara, menos recorte del swap en bordes de cara.
+
+### v5.72 — Single-Best Revert + Occlusion Fix
 - **Master Embedding = mejor cara individual**: Revertido de v5.71 (weighted blend top-3) porque todas las top caras tenían quality ~5.59 → pesos iguales [0.34,0.33,0.33] → mismo problema de dilución que el promedio de 20. Ahora embedding real 100% pura.
 - **Oclusión suavizada**: Blur 31×31 post-warp + strength reducido (0.50→0.40 frontal, 0.60→0.50 perfil) para eliminar rayas.
 - **Boca verificada**: Impacto log 0.001 es esperado (media sobre frame completo); la preservación local funciona correctamente.
@@ -58,24 +64,26 @@
 ### v5.63 — razor-fidelity refinements
 
 ### Known Issues
-- ~60% del video son perfiles → scores bajan a 0.37-0.54; M-EMA adaptivo + kps_EMA responsive mitigan parcialmente
-- Similitud source baja (0.111) — persona diferente al source; v5.59 slider default 0.95
-- Frames 565-566: ahora se swapean (skip solo si det_score < 0.15 AND vel > 100px)
+- ~60% de imágenes destino son perfiles → scores bajan a 0.15-0.22; M-EMA adaptivo + kps_EMA responsive mitigan parcialmente
+- 115 imágenes Grok (no video), modo selected_faces. Log: 2m01s, mask mean=0.010–0.111.
 
 ## Key Decisions
-- Skip threshold reducido para minimizar frames saltados; riesgo: frame con detección muy mala puede generar artefacto visible
+- **m_blend 0.85→0.70**: La boca es el área más expresiva; restaurarla al target al 85% tapaba identidad source. 70% es el sweet spot — suficiente para no perder calidad, máximo para identidad.
+- **Unsharp 6.8→2.5**: Priorizar identidad sin halos en close-ups. El sharpening extremo (5.8× neto) creaba pixelación; 1.5× da nitidez natural.
+- **Máscara expandida + tail truncation**: Cero costo computacional, ganancia directa de identidad visible.
 - enhancer_blend via slider (default 0.95) — respeta UI, no hardcode
 
 ## Next Steps
-- Testear v5.72 — single-best revert + occlusion suavizada deben dar mejor identidad sin rayas
-- Si identidad no es suficiente: multi-source swap blending (3x swap por frame) o cambiar modelo de swap
+- Testear v5.73 con m_blend 0.70 — debe dar más identidad source en boca sin perder calidad
+- Si aún no es suficiente: enhancer_blend 0.70→0.60 (más swap crudo, menos GFPGAN)
 
 ## Critical Context
-- Log v5.58: 434.07s (1.96 fps), enhancer 0.85, mask mean=0.059 ✅
-- Log v5.56: 430.96s (1.97 fps), enhancer 0.70, mask mean=0.059 ✅
+- Log v5.73 (115 imágenes Grok): 2m01s, enhancer 0.70, mask mean=0.010–0.111, unsharp 2.5, m_blend 0.70 ✅
+- `dna_mix=1.0` ya inyecta 100% Master Embedding — no hay más margen por ese lado.
+- `DEBUG_MASK mean` saltó de ~0.036 a ~0.111 en frames con cara grande (mask expansion efectiva).
 - enhancer_blend via slider (default 0.95) en ProcessMgr.py:1736
 
 ## Relevant Files
-- `roop/ProcessMgr.py`: Pipeline principal — v5.72 single-best revert + occlusion blur 31×31 + _SourceFaceWrap fix (evita copy.copy crash en InsightFace), v5.69 dna_mix=1.0, enhancer_blend 0.70, unsharp 6.8, mask elastic //75, profile EMA responsive
+- `roop/ProcessMgr.py`: Pipeline principal — v5.73 m_blend 0.70, unsharp 2.5, mask expandida 0.75/0.70, tail truncation 0.05, single-best embedding, dna_mix=1.0, enhancer_blend 0.70
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
 - `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas
