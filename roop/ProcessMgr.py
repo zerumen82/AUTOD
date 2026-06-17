@@ -1,5 +1,5 @@
 print("\n" + "="*60)
-print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.73 — DNA 1.0 + enhancer 0.70 + mouth 0.70 <<<")
+print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.75 — DNA 1.0 + enhancer 0.70 + mouth 0.70 <<<")
 print(">>> (256px, Occlusion-Locked, Depth-Color, Hyper-Sharp, XSeg-PRO) <<<")
 print("="*60 + "\n")
 
@@ -155,7 +155,7 @@ def get_gender(face):
         return None
 
 class ProcessMgr:
-    """Gestor de procesamiento de face swapping v5.73"""
+    """Gestor de procesamiento de face swapping v5.75"""
     _swap_call_count = 0  # Contador global para debug
     
     def __init__(self, progress_callback=None):
@@ -187,9 +187,9 @@ class ProcessMgr:
         self._mouth_object_detected = {} # Flag de objeto en boca (v5.65)
 
         if is_valid_progress_callback(self.progress_callback):
-            print(f"ProcessMgr v5.60 (FORCED QUALITY) inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
+            print(f"ProcessMgr v5.75 (FORCED QUALITY) inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
         else:
-            print(f"ProcessMgr v5.60 (FORCED QUALITY) inicializado SIN progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
+            print(f"ProcessMgr v5.75 (FORCED QUALITY) inicializado SIN progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
 
         self._initialize_processors()
 
@@ -206,7 +206,7 @@ class ProcessMgr:
         self._mouth_open_history.clear()
         self._mouth_blend_smooth.clear()
 
-        print(f"ProcessMgr v5.60 (FORCED QUALITY) inicializado: {len(self.input_facesets)} facesets, {len(self.target_faces)} target faces")
+        print(f"ProcessMgr v5.75 (FORCED QUALITY) inicializado: {len(self.input_facesets)} facesets, {len(self.target_faces)} target faces")
 
         if len(self.input_facesets) == 0:
             print("[WARNING] No hay facesets de origen cargados")
@@ -244,7 +244,7 @@ class ProcessMgr:
                 self.master_source_embedding /= norm
             print(f"[IDENTITY] Master Embedding = mejor cara individual (quality={all_embs_with_quality[0][1]:.2f}, total {len(all_embs_with_quality)})")
         
-        print(f"v5.60: {len(self.source_embeddings_cache)} embeddings cacheados")
+        print(f"v5.75: {len(self.source_embeddings_cache)} embeddings cacheados")
 
     def _initialize_processors(self):
         try:
@@ -1791,7 +1791,7 @@ class ProcessMgr:
                             blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
                             swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 2.5, blurred, -1.5, 0)
                             if call_num % 50 == 1:
-                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.73)")
+                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.75)")
                     except Exception as e:
                         print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -1893,13 +1893,13 @@ class ProcessMgr:
                             xseg_thresh = 0.25
                             _, xseg_mask = cv2.threshold(xseg_mask, xseg_thresh, 1.0, cv2.THRESH_BINARY)
 
-                            # v5.4.3: Atenuación superior reducida al 15% para ambos modos
+                            # v5.75: Atenuación superior reducida al 5% con curva más abrupta
                             h_x, w_x = xseg_mask.shape[:2]
-                            fade_pct = 0.15
+                            fade_pct = 0.05
                             gradient_x = np.ones((h_x, w_x), dtype=np.float32)
                             fade_h = int(h_x * fade_pct)
                             for row in range(fade_h):
-                                gradient_x[row, :] = (row / fade_h) ** 1.0
+                                gradient_x[row, :] = (row / fade_h) ** 2.0
                             xseg_mask = xseg_mask * gradient_x
 
                             # Warp de la máscara XSeg al espacio del frame
@@ -1920,12 +1920,12 @@ class ProcessMgr:
                         cv2.ellipse(mask_align, (w_align//2, h_align//2),
                                     (int(w_align*0.70), int(h_align*0.70)), 0, 0, 360, 1.0, -1)
                     
-                    # v5.4: Atenuación superior generosa en fallback (10%)
+                    # v5.75: Atenuación superior mínima en fallback (3%) con curva abrupta
                     h_a, w_a = mask_align.shape[:2]
                     grad_a = np.ones((h_a, w_a), dtype=np.float32)
-                    fade_ha = int(h_a * 0.10)
+                    fade_ha = int(h_a * 0.03)
                     for row in range(fade_ha):
-                        grad_a[row, :] = (row / fade_ha) ** 0.5
+                        grad_a[row, :] = (row / fade_ha) ** 2.0
                     mask_align = mask_align * grad_a
 
                     final_mask = cv2.warpAffine(mask_align, M_inv, (w_f, h_f), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
@@ -1951,7 +1951,7 @@ class ProcessMgr:
                     if call_num % 100 == 1:
                         print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f}, blur=31)")
 
-                # v5.74: Erosión adaptativa al tamaño de cara + blur proporcional
+                # v5.75: Erosión adaptativa al tamaño de cara + blur proporcional
                 face_w = x2 - x1
                 face_h = y2 - y1
                 ekernel = max(3, min(face_w, face_h) // 32) | 1  # 3-5 para caras pequeñas, 7+ para grandes
@@ -1968,8 +1968,8 @@ class ProcessMgr:
                     tent_3ch = cv2.merge([tent, tent, tent])
                     warped_face = (warped_face.astype(np.float32) * (1.0 - tent_3ch) + blurred_face.astype(np.float32) * tent_3ch).astype(np.uint8)
 
-                # v5.74: Tail truncation 0.03 (menos agresivo que 0.05) para no matar caras pequeñas
-                final_mask = np.clip((final_mask - 0.03) / (1.0 - 0.03), 0, 1.0)
+                # v5.75: Tail truncation mínimo 0.005 — solo elimina ruido, no mata caras pequeñas
+                final_mask = np.clip((final_mask - 0.005) / (1.0 - 0.005), 0, 1.0)
             else:
                 # Fallback de emergencia
                 print("[WARNING] M es None, usando fallback de elipse directa")
@@ -1978,7 +1978,24 @@ class ProcessMgr:
                 final_mask = create_soft_mask((x1, y1, x2, y2), (h_f, w_f), feather=40)
 
             # ============================================
-            # 5. PRESERVACIÓN DE BOCA (Con detección MediaPipe 468)
+            # 5b. SAFETY FALLBACK: Si la máscara quedó en cero (antes de mouth preservation),
+            # regenerar elipse generosa. Va AQUÍ porque mouth_preserve puede matar la máscara.
+            # ============================================
+            if final_mask.max() == 0:
+                print(f"[MASK_SAFETY] Frame {call_num}: máscara cero tras procesado. Regenerando elipse suave.")
+                h_f_s, w_f_s = original_frame.shape[:2]
+                cx_s, cy_s = (x1 + x2) // 2, (y1 + y2) // 2
+                rx_s = max(30, int((x2 - x1) // 2 * 1.1))
+                ry_s = max(30, int((y2 - y1) // 2 * 1.1))
+                final_mask = np.zeros((h_f_s, w_f_s), dtype=np.float32)
+                cv2.ellipse(final_mask, (cx_s, cy_s), (rx_s, ry_s), 0, 0, 360, 1.0, -1)
+                blur_size = max(31, int(min(rx_s, ry_s) * 0.3)) | 1
+                final_mask = cv2.GaussianBlur(final_mask, (blur_size, blur_size), 0)
+                final_mask = np.clip(final_mask, 0, 1.0)
+
+            # ============================================
+            # 5c. PRESERVACIÓN DE BOCA (Con detección MediaPipe 468)
+            # Corre DESPUÉS de safety para que la boca reduzca máscara pero nunca a cero.
             # ============================================
             if mouth_open and mouth_region is not None:
                 # v5.65: Detección inteligente de objetos en boca (micros, comida, manos)
@@ -2011,20 +2028,6 @@ class ProcessMgr:
 
                 if call_num % 50 == 1:
                     print(f"[QUALITY] Boca restaurada (impacto={m_impact:.3f}, fuerza={m_blend*100:.0f}%)")
-            # ============================================
-            # 5b. SAFETY FALLBACK: Si la máscara quedó en cero, regenerar elipse generosa
-            # ============================================
-            if final_mask.max() == 0:
-                print(f"[MASK_SAFETY] Frame {call_num}: máscara cero tras procesado. Regenerando elipse directa.")
-                h_f_s, w_f_s = original_frame.shape[:2]
-                cx_s, cy_s = (x1 + x2) // 2, (y1 + y2) // 2
-                rx_s = max(80, (x2 - x1) // 2 + 20)
-                ry_s = max(80, (y2 - y1) // 2 + 20)
-                final_mask = np.zeros((h_f_s, w_f_s), dtype=np.float32)
-                cv2.ellipse(final_mask, (cx_s, cy_s), (rx_s, ry_s), 0, 0, 360, 1.0, -1)
-                final_mask = cv2.GaussianBlur(final_mask, (31, 31), 0)
-                final_mask = np.clip((final_mask - 0.05) / (1.0 - 0.05), 0, 1.0)
-
             # ============================================
             # 6. DEBUG MASK
             # ============================================

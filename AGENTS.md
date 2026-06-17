@@ -9,11 +9,11 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.74 (current) — Mask safety + erosión adaptativa + tail truncation reducido
-- **Erosión adaptativa**: Antes kernel fijo 5×5 que mataba máscaras en caras pequeñas (~96×167px). Ahora escala con el tamaño de cara: 3×3 en caras chicas, 7+×7+ en grandes. Elimina mask_mean=0.000 en frames con cara pequeña.
-- **Tail truncation 0.05→0.03**: Retiene 2% más de máscara en bordes. Crítico para caras pequeñas donde el recorte era desproporcionado.
-- **Safety fallback**: Si `final_mask.max() == 0` tras todo el procesado (XSeg + elipse + erosión + truncation), regenera elipse generosa directamente en frame space. Garantiza que ninguna imagen quede sin swap visible.
-- **Diagnóstico v5.73**: Frame 2 (grok_image_1781548278454.jpg) tenía mask_mean=0.000 — cara de ~96×167px, erosión 5×5 + tail 0.05 borraban toda la máscara. Solucionado.
+### v5.75 (current) — Safety fallback BEFORE mouth preserve + mosaico fix + tail 0.005
+- **Safety fallback antes de mouth preserve**: Bug crítico: mouth preservation (restar `mouth_mask * 0.70` de final_mask) causaba que la máscara llegara a cero en bocas abiertas en caras pequeñas. El safety fallback (que iba DESPUÉS) sobreescribía toda la máscara, PERDIENDO la preservación de boca. Ahora safety va ANTES y mouth reduce sobre máscara garantizada no-cero. Soluciona 10/130 frames que perdían boca preservada.
+- **Safety ellipse radius 120→30**: Para cara de 63×82px, la elipse antes era 240×240 (4× la cara, creaba mosaico). Ahora ~68×70 (10% > bbox).
+- **Tail truncation 0.03→0.005**: 6× menos frames activan safety fallback. Solo elimina ruido, no mata caras pequeñas.
+- **Erosión adaptativa**: Kernel proporcional a `min(face_w, face_h) // 32 | 1`. 3×3 en caras chicas, 7+×7+ en grandes.
 
 ### v5.73 — Mouth blend reducido + máscara expandida + unsharp moderado
 - **m_blend 0.85→0.70**: Menos preservación de boca target = más identidad source visible en el área más expresiva de la cara. Base 0.70, dinámico hasta 0.70 (antes 0.85) con oclusión.
@@ -72,7 +72,7 @@
 ### Known Issues
 - ~60% de imágenes destino son perfiles → scores bajan a 0.15-0.22; M-EMA adaptivo + kps_EMA responsive mitigan parcialmente
 - 115 imágenes Grok (no video), modo selected_faces. Log: 2m01s, mask mean=0.010–0.111.
-- Frame 2 (cara ~96×167px): v5.73 daba mask_mean=0.000; v5.74 lo corrige con erosión 3×3 adaptativa + safety fallback.
+- Frame 2 (cara ~96×167px): v5.73 daba mask_mean=0.000; v5.75 lo corrige con erosión 3×3 adaptativa + safety fallback.
 
 ## Key Decisions
 - **m_blend 0.85→0.70**: La boca es el área más expresiva; restaurarla al target al 85% tapaba identidad source. 70% es el sweet spot — suficiente para no perder calidad, máximo para identidad.
@@ -94,6 +94,6 @@
 - enhancer_blend via slider (default 0.95) en ProcessMgr.py:1736
 
 ## Relevant Files
-- `roop/ProcessMgr.py`: Pipeline principal — v5.74 erosión adaptativa 3-7+, tail truncation 0.03, safety fallback elipse, m_blend 0.70, unsharp 2.5, mask expandida 0.75/0.70, single-best embedding, dna_mix=1.0, enhancer_blend 0.70
+- `roop/ProcessMgr.py`: Pipeline principal — v5.75 erosión adaptativa 3-7+, tail truncation 0.005, safety fallback ANTES de mouth preserve, m_blend 0.70, unsharp 2.5, mask expandida 0.75/0.70, single-best embedding, dna_mix=1.0, enhancer_blend 0.70
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
 - `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas
