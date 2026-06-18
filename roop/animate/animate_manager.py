@@ -102,10 +102,10 @@ class AnimateManager:
         print(f"[AnimateManager] Params: frames={base['frames']}, steps={base['steps']}, cfg={base['cfg']:.1f}")
         return base
 
-    def _get_semantic_analyzer(self):
+    def _get_semantic_analyzer(self, full_ai: bool = False):
         if not hasattr(self, 'semantic_analyzer') or self.semantic_analyzer is None:
-            from roop.img_editor.nlp.semantic_analyzer import SemanticIntentAnalyzer
-            self.semantic_analyzer = SemanticIntentAnalyzer()
+            from roop.img_editor.nlp.semantic_analyzer import get_semantic_analyzer
+            self.semantic_analyzer = get_semantic_analyzer(full_ai=full_ai)
         return self.semantic_analyzer
 
     def rewrite_prompt(self, prompt, image_context=""):

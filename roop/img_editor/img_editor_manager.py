@@ -32,10 +32,10 @@ class ImgEditorManager:
             self.EditingMode = EditingMode
         return self.prompt_analyzer
 
-    def _get_semantic_analyzer(self):
+    def _get_semantic_analyzer(self, full_ai: bool = False):
         if self.semantic_analyzer is None:
-            from roop.img_editor.nlp.semantic_analyzer import SemanticIntentAnalyzer
-            self.semantic_analyzer = SemanticIntentAnalyzer()
+            from roop.img_editor.nlp.semantic_analyzer import get_semantic_analyzer
+            self.semantic_analyzer = get_semantic_analyzer(full_ai=full_ai)
         return self.semantic_analyzer
 
     def _get_face_preserver(self):
@@ -55,10 +55,12 @@ class ImgEditorManager:
 
     def auto_detect_params(self, analysis: Dict, engine: str) -> Dict:
         """
-        Calcula parámetros dinámicos basados puramente en el análisis semántico.
-        Optimizado para velocidad en 8GB VRAM.
+        Calcula parámetros dinámicos basados puramente en el análisis semántico (embeddings).
+        Cero hardcode de palabras clave de usuario.
+        Optimizado para 8GB VRAM (LongCat Turbo etc).
         """
         magnitude = analysis.get("magnitude", 0.5)
+        has_quality = bool(analysis.get("has_quality_request", False))
         
         # Escalamiento lineal dinámico basado en magnitud (0.0 a 1.0)
         # Denoise: 0.20 (sutil) a 0.90 (radical)
@@ -74,11 +76,21 @@ class ImgEditorManager:
         guidance = 3.0 + (magnitude * 4.0)
 
         # Ajustes técnicos mínimos por motor (sin hardcoding semántico)
-        if engine == "longcat":
-            # LongCat es instructivo, requiere denoise alto para cambios notables
-            if magnitude > 0.5:
-                denoise = max(denoise, 0.75)
-            guidance = 3.5 # Valor óptimo para el modelo LongCat
+        if engine in ("longcat", "imagine"):
+            # Grok Imagine style (edit engine).
+            # Use dynamic magnitude from semantic analyzer.
+            # Higher base + stronger scaling to allow full body/clothing changes (undress etc) while keeping photo.
+            # Semantic + rewriter decide how much. Turbo forces full denoise anyway.
+            denoise = 0.58 + (magnitude * 0.42)
+            # For compound prompts (main change + "mejore calidad / improve color"), don't go to extreme denoise
+            # so the quality/color polish can actually show as improvement instead of heavy transformation.
+            if has_quality and magnitude > 0.6:
+                denoise = min(denoise, 0.82)
+            denoise = min(denoise, 0.98)
+            guidance = 2.8 if magnitude > 0.65 else 3.0
+            # More steps for high mag to allow better following
+            if magnitude > 0.6:
+                steps = max(steps, 26)
         elif engine == "longcat_full":
             steps = int(20 + (magnitude * 10))
             guidance = 4.5
@@ -89,6 +101,11 @@ class ImgEditorManager:
             guidance = min(guidance, 4.0)
         elif "klein" in engine or "abliterated" in engine:
             steps = min(steps, 20) # Balance velocidad/calidad
+        elif engine == "hart":
+            # HART es autoregresivo puro. Usa guidance alto y pasos limitados.
+            steps = min(8, max(4, steps))
+            guidance = 4.5
+            denoise = 1.0  # No aplica denoise real (generación)
 
         print(f"[ImgEditor] Dynamic Params: Mag={magnitude:.2f}, Denoise={denoise:.2f}, Steps={steps}, CFG={guidance:.1f}")
         
@@ -99,27 +116,72 @@ class ImgEditorManager:
             "mode": "img2img"
         }
 
-    def _compose_generation_prompt(self, user_prompt: str, img_context: str = "", engine: str = "") -> str:
+    def _light_score(self, prompt_l: str, texts: list) -> float:
+        """Ultra-light word overlap (same spirit as LightLocalIntentAnalyzer). Used for secondary signals like quality/color."""
+        p_words = set(w for w in prompt_l.split() if len(w) > 2)
+        if not p_words:
+            return 0.0
+        best = 0.0
+        for t in texts:
+            t_words = set(w for w in t.lower().split() if len(w) > 2)
+            if t_words:
+                overlap = len(p_words & t_words) / max(len(t_words), 1)
+                for pw in p_words:
+                    for tw in t_words:
+                        if pw in tw or tw in pw:
+                            overlap += 0.08
+                            break
+                best = max(best, overlap)
+        return min(1.0, best)
+
+    def _compose_generation_prompt(self, user_prompt: str, img_context: str = "", engine: str = "", magnitude: float = 0.5, has_quality_request: bool = False) -> str:
         user_prompt = (user_prompt or "").strip()
         img_context = (img_context or "").strip()
         
-        is_longcat = "longcat" in engine.lower()
+        is_longcat = engine in ("longcat", "longcat_full", "imagine") or "longcat" in engine.lower()
+        is_hart = engine == "hart"
 
         if is_longcat:
-            # PARA LONGCAT: Si hay una instrucción del usuario, usarla TAL CUAL (LongCat es instructivo)
-            # Si no hay prompt de usuario, usar el contexto de la imagen como fallback
+            # Grok Imagine style using the edit engine.
+            # General preservation instruction. Strength decided by semantic analyzer.
+            # Rewriter (when used) already gives clean focused instruction; we wrap minimally for high mag.
+            raw = (user_prompt or img_context or "").strip()
+
+            if magnitude > 0.75:
+                # Very high mag: let the user's instruction dominate, including big pose/body changes.
+                # Only protect the face identity; allow full transformation of pose, body, etc. as described.
+                preservation = "Edit this exact photo. Keep the face and identity. Transform the pose and body exactly as the instruction says, as strongly and completely as possible."
+                if has_quality_request:
+                    preservation += " Also improve colors, vibrance, sharpness, detail and overall photographic quality naturally."
+                base = f"Instruction: {raw}. {preservation}"
+            elif magnitude > 0.6:
+                # High mag: strong follow while protecting core likeness.
+                preservation = (
+                    "Edit this exact photo. Keep the face, identity, lighting, background and overall scene. "
+                    "Apply the requested change (including pose) exactly as described and as strongly as possible."
+                )
+                if has_quality_request:
+                    preservation += " Also enhance color, sharpness and image quality as part of the edit."
+                base = f"Instruction: {raw}. {preservation}"
+            else:
+                preservation = (
+                    "Edit this exact photo. Keep the face, identity, lighting, background and overall scene exactly the same. "
+                    "Apply the requested change to the subject (clothing, body, pose etc as needed)."
+                )
+                base = f"Instruction: {preservation} {raw}"
+            print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
+            return base
+        elif is_hart:
+            # HART autoregressive - prompt as provided (user or context)
             base = user_prompt if user_prompt else img_context
-            # Asegurar prefijo Instruction: si no lo tiene
-            if base and not base.lower().startswith("instruction:"):
-                base = f"Instruction: {base}"
-            print(f"[ImgEditor] LongCat Prompt: {base}")
+            print(f"[ImgEditor] HART Autoregressive Prompt: {base}")
+            return base
         elif img_context:
             base = f"{img_context}. {user_prompt}"
         else:
             base = user_prompt
 
-
-        if not is_longcat and base and not base.lower().startswith(("photo", "a photo", "a picture")):
+        if base and not base.lower().startswith(("photo", "a photo", "a picture")):
             # Eliminado prefijo hardcoded 'Photo of' para mayor fidelidad al prompt del LLM
             pass
 
@@ -255,7 +317,7 @@ class ImgEditorManager:
         face_preserve: bool = True,
         use_rewriter: bool = True,
         ref_metadata: dict = None,
-        engine: str = "flux_klein",
+        engine: str = "imagine",
         mask_image: Optional[Image.Image] = None,
         mask_mode: str = "global",
         mask_prompt: str = "",
@@ -281,21 +343,23 @@ class ImgEditorManager:
         elif engine == "qwen_edit":
             pass
 
-        img_description = ""
+        img_description = ""  # DELIBERADAMENTE vacío: no usamos descripciones generativas de imagen (evita alucinaciones). El análisis es texto-del-prompt + preservación fuerte.
 
-        # 2. Análisis semántico por EMBEDDINGS (IA Pura, Cero Hardcoding)
+        # 2. Análisis semántico LOCAL LIGERO (automático, sin que el usuario tenga que hacer nada)
+        # Siempre usa LightLocalIntentAnalyzer: 100% local, cero red, cero saturación.
+        # Esto hace que "Grok Imagine style" funcione out-of-the-box.
         try:
-            nlp = self._get_semantic_analyzer()
+            nlp = self._get_semantic_analyzer(full_ai=False)
             mag_suggested = nlp.get_magnitude(prompt)
             mask_target = nlp.detect_target(prompt)
             
             # Para detectar si es global, miramos si no hay un target claro o si el prompt es muy corto/genérico
             is_global = mask_target == "subject" and mag_suggested < 0.45
             
-            print(f"[ImgEditor] Semantic Analysis: Magnitude={mag_suggested:.2f}, Target={mask_target}")
+            print(f"[ImgEditor] Semantic Analysis (local ligero automático): Magnitude={mag_suggested:.2f}, Target={mask_target}")
         except Exception as e:
             print(f"[NLP] Error en análisis semántico: {e}. Usando fallback.")
-            mag_suggested = 0.5
+            mag_suggested = 0.58
             mask_target = "subject"
             is_global = True
 
@@ -306,24 +370,103 @@ class ImgEditorManager:
             "is_global": is_global
         }
 
+        # Early detection of secondary quality/color request (for compound prompts).
+        # Allows us to treat "desnude + mejore calidad" intelligently (strong main change, but moderated polish).
+        prompt_lower = (prompt or "").lower()
+        quality_anchors = [
+            "improving quality sharpness detail resolution clarity enhance",
+            "mejorar calidad nitidez detalle sharper mejorar color realzar calidad",
+            "better colors vibrant lighting higher detail photographic quality"
+        ]
+        has_quality_request = self._light_score(prompt_lower, quality_anchors) > 0.03
+        analysis["has_quality_request"] = has_quality_request
+
         # 3. Resolución de Parámetros basada en el Análisis
         params = self.auto_detect_params(analysis, engine)
         
-        prompt_enhanced = self._compose_generation_prompt(prompt, img_context=img_description, engine=engine)
+        prompt_enhanced = self._compose_generation_prompt(prompt, img_context=img_description, engine=engine, magnitude=mag_suggested, has_quality_request=has_quality_request)
         mask_target = str(analysis.get("mask_target", "subject")).lower()
         is_global = bool(analysis.get("is_global", False))
-
-        print(f"[ImgEditor] Target: {mask_target} (Global: {is_global})", flush=True)
-        print(f"[ImgEditor] Prompt final: {prompt_enhanced}", flush=True)
-        analysis["mask_target"] = mask_target
         
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
         if guidance_scale: params["guidance_scale"] = guidance_scale
         if denoise: params["denoise"] = denoise
 
+        # NOTE: Negative clothing logic moved after rewriter so it can adapt to whether the user is asking
+        # to ADD clothes (e.g. "ropa raída con mangas") or REMOVE them. No hardcoding of intents.
+
+        # For high mag, use rewriter to get a better, more detailed instruction (LLM understands intent better, no hardcode)
+        rewrote = False
+        if use_rewriter and mag_suggested > 0.6:
+            try:
+                from .prompt_rewriter import get_prompt_rewriter
+                re = get_prompt_rewriter()
+                r = re.rewrite(prompt, image_context="", mode="img2img")
+                if 'prompt' in r and r['prompt']:
+                    prompt = r['prompt']
+                    rewrote = True
+                    print(f"[ImgEditor] Used rewriter for high mag prompt: {prompt[:80]}...")
+                if 'mask_target' in r and r['mask_target']:
+                    mask_target = r['mask_target'].lower()
+                    analysis['mask_target'] = mask_target
+                    print(f"[ImgEditor] Rewriter set target: {mask_target}")
+                if 'magnitude' in r:
+                    mag_suggested = float(r['magnitude'])
+                    analysis['magnitude'] = mag_suggested
+            except Exception as e:
+                print(f"[ImgEditor] Rewriter failed for high mag, using original: {e}")
+
+        # Re-compose (and refresh params) using the (possibly rewriter-improved) prompt + updated mag.
+        # This ensures the final sent prompt contains the clean rewritten instruction (e.g. "completely naked...").
+        if rewrote:
+            # Re-evaluate quality signal on the (cleaner) rewritten prompt
+            prompt_lower = (prompt or "").lower()
+            quality_anchors = [
+                "improving quality sharpness detail resolution clarity enhance",
+                "mejorar calidad nitidez detalle sharper mejorar color realzar calidad",
+                "better colors vibrant lighting higher detail photographic quality"
+            ]
+            has_quality_request = self._light_score(prompt_lower, quality_anchors) > 0.03 or has_quality_request
+            analysis["has_quality_request"] = has_quality_request
+
+        if rewrote or mag_suggested != analysis.get("magnitude", mag_suggested):
+            params = self.auto_detect_params(analysis, engine)
+        prompt_enhanced = self._compose_generation_prompt(prompt, img_context=img_description, engine=engine, magnitude=mag_suggested, has_quality_request=has_quality_request)
+
+        # Refresh local views after possible rewriter + recompose
+        mask_target = str(analysis.get("mask_target", "subject")).lower()
+        is_global = bool(analysis.get("is_global", False))
+        mag_suggested = float(analysis.get("magnitude", mag_suggested))
+
+        # Use the early quality detection (or re-compute lightly after rewriter in case prompt changed)
+        prompt_lower = (prompt or "").lower()
+        quality_anchors = [
+            "improving quality sharpness detail resolution clarity enhance",
+            "mejorar calidad nitidez detalle sharper mejorar color realzar calidad",
+            "better colors vibrant lighting higher detail photographic quality"
+        ]
+        has_quality_request = bool(analysis.get("has_quality_request")) or (self._light_score(prompt_lower, quality_anchors) > 0.03)
+
+        # Final prints use post-rewriter values (the ones that actually go to the model)
+        print(f"[ImgEditor] Target: {mask_target} (Global: {is_global})", flush=True)
+        print(f"[ImgEditor] Prompt final: {prompt_enhanced}", flush=True)
+        if has_quality_request and mag_suggested > 0.6:
+            print(f"[ImgEditor] Compound prompt detected (main change + quality/color polish)")
+
+        # No automatic anti-clothing negative anymore.
+        # It was fighting requests like "ropa raída con mangas".
+        # Now we rely purely on the user's prompt + rewriter + "apply the change as strongly as possible".
+        # This way it adapts to ANY clothing request (add, modify, remove, specific style) without lists or hardcodes.
+        # The semantic + preservation text is enough to guide the model.
+
         final_mask = mask_image
         
-        if final_mask is None and not is_global:
+        # Para cambios fuertes de cuerpo (alta mag undress), saltamos la generación de máscara (ahorro de tiempo + edición global es mejor)
+        force_global = (mag_suggested > 0.6 and mask_target in ("subject", "clothes", "face"))
+        if force_global:
+            print("[ImgEditor] Alta magnitud undress/body change: usando edición global completa para cambio total del sujeto")
+            final_mask = None
+        elif final_mask is None and not is_global:
             try:
                 mask_query = mask_target
                 print(f"[ImgEditor] Intentando auto-máscara para: {mask_query}")
@@ -346,7 +489,7 @@ class ImgEditorManager:
             client = None
             version = None
             
-            if engine == "longcat":
+            if engine in ("longcat", "imagine"):
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                 if self.flux_klein_client is None: self.flux_klein_client = get_flux_edit_comfy_client()
                 client = self.flux_klein_client
@@ -381,6 +524,12 @@ class ImgEditorManager:
                 if self.flux_dev_abl_client is None: self.flux_dev_abl_client = get_flux_edit_comfy_client()
                 client = self.flux_dev_abl_client
                 version = "flux1-dev-Q2_K.gguf"
+            elif engine == "hart":
+                from roop.img_editor.hart_edit_comfy_client import get_hart_edit_comfy_client
+                if not hasattr(self, 'hart_client') or self.hart_client is None:
+                    self.hart_client = get_hart_edit_comfy_client()
+                client = self.hart_client
+                version = None  # HART usa su propio loader en subprocess
             else:
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                 if self.flux_klein_client is None: self.flux_klein_client = get_flux_edit_comfy_client()
@@ -388,37 +537,58 @@ class ImgEditorManager:
                 version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
 
             if client:
-                load_params = {"flux_version": version} if "qwen" not in engine else {"qwen_version": version}
-                success, msg = client.load(**load_params)
-                if not success:
-                    return None, msg, final_mask
-                
-                print(f"[ImgEditor] Enviando a ComfyUI ({engine}, version={version})...")
-                gen_params = {
-                    "image": img, "prompt": prompt_enhanced,
-                    "negative_prompt": negative_prompt,
-                    "num_inference_steps": params["num_inference_steps"],
-                    "guidance_scale": params["guidance_scale"],
-                    "seed": seed, "denoise": params["denoise"],
-                    "lora_name": lora_name,
-                    "lora_strength": lora_strength
-                }
-                if "qwen" not in engine:
-                    gen_params["mask_image"] = final_mask if mask_mode in ["manual", "global"] else None
-                
-                result_obj, msg = client.generate(**gen_params)
+                if engine == "hart":
+                    # === HART Autoregressive (no img2img, no máscara, no denoise) ===
+                    print(f"[ImgEditor] Generando con HART (autoregresivo) - prompt puro...")
+                    # HART ignora imagen de entrada; usamos el prompt enriquecido
+                    hart_prompt = prompt_enhanced or prompt
+                    # Intentar load (aunque HART lo hace en generate via subprocess)
+                    try:
+                        ok, load_msg = client.load()
+                        if not ok:
+                            return None, load_msg or "HART no disponible", final_mask
+                    except Exception:
+                        pass  # generate() maneja el spawn
+
+                    result_obj, msg = client.generate(
+                        prompt=hart_prompt,
+                        num_inference_steps=params.get("num_inference_steps", 8),
+                        guidance_scale=params.get("guidance_scale", 4.5),
+                    )
+                else:
+                    load_params = {"flux_version": version} if "qwen" not in engine else {"qwen_version": version}
+                    success, msg = client.load(**load_params)
+                    if not success:
+                        return None, msg, final_mask
+                    
+                    print(f"[ImgEditor] Enviando a ComfyUI ({engine}, version={version})...")
+                    gen_params = {
+                        "image": img, "prompt": prompt_enhanced,
+                        "negative_prompt": negative_prompt,
+                        "num_inference_steps": params["num_inference_steps"],
+                        "guidance_scale": params["guidance_scale"],
+                        "seed": seed, "denoise": params["denoise"],
+                        "lora_name": lora_name,
+                        "lora_strength": lora_strength
+                    }
+                    if "qwen" not in engine:
+                        gen_params["mask_image"] = final_mask if mask_mode in ["manual", "global"] else None
+                    
+                    result_obj, msg = client.generate(**gen_params)
                 if result_obj: 
                     result = result_obj.image
-                    if result.size != img.size:
+                    if result.size != img.size and engine != "hart":
                         result = result.resize(img.size, Image.LANCZOS)
                     
-                    if final_mask:
+                    if final_mask and engine != "hart":
                         result = self._apply_skin_tone_match(img, result, final_mask)
                         soft_mask = self._feather_mask(final_mask, amount=15)
                         orig_bg = img.copy()
                         result = Image.composite(result, orig_bg, soft_mask)
 
-            if result is not None and self._should_preserve_faces(face_preserve, analysis, prompt):
+            # For the "imagine" / LongCat engine we leave the face exactly as the model generated it.
+            # User preference: "dejarlo siempre como llegue" (no auto paste/correction).
+            if result is not None and engine not in ("imagine", "longcat", "longcat_full") and self._should_preserve_faces(face_preserve, analysis, prompt):
                 mask_target = analysis.get("mask_target", "subject")
                 preserve_override = analysis.get("preserve_face", True)
                 try:

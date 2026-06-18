@@ -174,7 +174,21 @@ def resilient_move(src, dst, copy_function=shutil.copy2):
     return original_move(src, dst, copy_function)
 
 def resilient_remove(path, *args, **kwargs):
-    """Parche para os.remove - solo acepta un argumento posicional."""
+    """Parche para os.remove - solo acepta un argumento posicional.
+    Hardened contra llamadas internas de HF/sentence-transformers que pueden pasar objetos raros.
+    """
+    # Defensa contra path inválido (ej: _NormalAccessor u otros internos de pathlib/os)
+    if path is None:
+        return
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        try:
+            path = str(path)
+        except Exception:
+            # No es un path válido, delegamos silenciosamente a original (o ignoramos)
+            try:
+                return original_remove(path, *args, **kwargs)
+            except Exception:
+                return
     for i in range(20):
         try:
             try: os.chmod(path, stat.S_IWRITE)

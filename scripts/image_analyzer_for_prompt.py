@@ -161,8 +161,9 @@ class ImageAnalyzer:
         result['dominant_colors'] = self._get_dominant_colors(img)
         result['image_quality'] = self._detect_quality(img)
 
-        # 3. GENERAR DESCRIPCIÓN NATURAL Y COMPLETA
-        result['suggested_prompt'] = self._generate_natural_description(result)
+        # 3. GENERAR METADATA ESTRUCTURADA (sin descripciones generativas libres que alucinen)
+        # Usar para "ANALIZAR" opcional o augment ligero. Enfocado en datos confiables de cara + CV.
+        result['suggested_prompt'] = self._generate_structured_suggestion(result)  # renombrado para claridad
 
         # 4. Keywords NSFW por nivel
         result['nsfw_keywords'] = self._get_nsfw_keywords('explicit')
@@ -249,55 +250,45 @@ class ImageAnalyzer:
             return 'low quality blurry'
 
     def _generate_natural_description(self, analysis: dict) -> str:
-        """Genera una DESCRIPCIÓN NATURAL para FLUX, concisa y descriptiva"""
+        """Genera sugerencia estructurada/segura (evita texto libre que alucine). Usar para ANALIZAR."""
+        # Mantener compatibilidad pero hacerla más estructurada y conservadora
         parts = []
 
-        # 1. Número de personas
-        n = analysis['num_people']
+        n = analysis.get('num_people', 0)
         if n == 0:
             parts.append('person')
         elif n == 1:
-            parts.append('a woman' if any(f.get('gender') == 'female' for f in analysis.get('faces', [])) else 'a man')
-        elif n == 2:
-            parts.append('two people, a man and a woman')
-        elif n <= 5:
-            genders = [f.get('gender', 'unknown') for f in analysis.get('faces', [])]
-            has_male = 'male' in genders
-            has_female = 'female' in genders
-            group_desc = []
-            if has_male:
-                group_desc.append('men')
-            if has_female:
-                group_desc.append('women')
-            parts.append(f'{n} people, {" and ".join(group_desc)}')
+            g = analysis.get('faces', [{}])[0].get('gender', 'person')
+            parts.append(f'a {g}' if g != 'unknown' else 'a person')
         else:
-            parts.append(f'a group of {n} people')
+            parts.append(f'{n} people')
 
-        # 2. Solo la primera persona como referencia (para mantener identidad)
-        if n > 0 and analysis['faces']:
-            first_face = analysis['faces'][0]
-            desc = []
-            if first_face.get('gender') != 'unknown':
-                desc.append(first_face['gender'])
-            if first_face.get('age_group') != 'unknown':
-                desc.append(first_face['age_group'])
-            if first_face.get('expression') and first_face['expression'] != 'neutral expression':
-                desc.append(first_face['expression'])
-            if desc:
-                parts.append(', '.join(desc) + ' person')
+        # Info confiable de cara (no inventar)
+        if analysis.get('faces'):
+            f0 = analysis['faces'][0]
+            if f0.get('age_group'):
+                parts.append(f0['age_group'])
+            if f0.get('expression') and f0['expression'] != 'neutral expression':
+                parts.append(f0['expression'])
 
-        # 3. Escena e iluminación
-        if analysis['scene'] != 'unknown':
+        # CV seguro
+        if analysis.get('scene') and analysis['scene'] != 'unknown':
             parts.append(analysis['scene'])
-        parts.append(analysis['lighting'])
-        parts.append(analysis['image_quality'])
+        if analysis.get('lighting'):
+            parts.append(analysis['lighting'])
+        if analysis.get('image_quality'):
+            parts.append(analysis['image_quality'])
 
-        # 4. Calidad general
-        parts.append('photorealistic')
-        parts.append('detailed')
-        parts.append('high resolution')
+        # Señales adicionales para ropa/cuerpo (si disponibles en extensiones futuras)
+        # Por ahora conservador: no agregar "nude" etc a menos que se derive de datos fiables.
+
+        parts.append('photorealistic, detailed')
 
         return ', '.join(parts)
+
+    def _generate_structured_suggestion(self, analysis: dict) -> str:
+        """Versión estructurada recomendada (sin descripciones generativas libres)."""
+        return self._generate_natural_description(analysis)
 
     def _get_nsfw_keywords(self, level: str = 'moderate') -> list:
         """Retorna lista de palabras NSFW según nivel"""

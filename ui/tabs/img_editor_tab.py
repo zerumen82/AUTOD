@@ -183,22 +183,24 @@ def create_img_editor_tab():
                     btn_analyze = gr.Button("🔍 ANALIZAR", size="sm", scale=1)
 
                 with gr.Accordion("⚙️ Opciones Avanzadas", open=False):
-                    use_ai = gr.Checkbox(label="🧠 Usa Inteligencia (IA)", value=True, info="Analiza la imagen y el prompt para mejores resultados (más lento)")
+                    use_ai = gr.Checkbox(label="🧠 Análisis inteligente", value=True, info="Por defecto activado. Análisis local ligero automático (sin cargar nada pesado, sin internet). El usuario solo sube foto y escribe la instrucción.")
                     
                     with gr.Row():
                         denoise = gr.Slider(minimum=0.0, maximum=1.0, step=0.05, value=0.0, label="Fuerza de Edición (0 = Auto)", info="0.2: Sutil, 0.6: Medio, 0.9: Radical")
 
                     engine = gr.Dropdown(
                         choices=[
-                            ("FLUX.2 Klein", "klein_base"),
+                            ("✨ Grok Imagine (default - edición fiel, sin censura)", "imagine"),
                             ("LongCat Image Edit Turbo", "longcat"),
                             ("LongCat Image Edit (Full, CFG=4.5)", "longcat_full"),
+                            ("HART (Autoregressive)", "hart"),
+                            ("FLUX.2 Klein", "klein_base"),
                             ("FLUX.1 Dev Q2", "flux_q2"),
                             ("OmniGen 2", "omnigen2"),
                             ("FLUX.1 Dev Abliterated", "flux_dev_abliterated"),
                             ("Qwen Image Edit", "qwen_edit")
                         ],
-                        value="longcat", label="Motor de Generación"
+                        value="imagine", label="Motor de Generación"
                     )
                     f_preserve = gr.Checkbox(label="💎 Preservar Rostro", value=True)
                     enhance_faces = gr.Checkbox(label="🌟 Mejorar Rostro (CodeFormer)", value=False, info="Post-procesa los rostros con CodeFormer para más realismo (usa VRAM)")

@@ -34,17 +34,81 @@ def clean_text(text: str) -> str:
     text = " ".join(text.split())
     return text
 
+def _local_translate(prompt: str) -> str:
+    """Traducción 100% local usando mappings + reglas básicas. Sin internet."""
+    if not prompt:
+        return prompt
+    p = clean_text(prompt)
+    data = load_mappings()
+    p_lower = p.lower()
+
+    # Aplicar mappings del config
+    for m in data.get("mappings", []):
+        if m["trigger"] in p_lower:
+            p = p.replace(m["trigger"], m["replacement"])
+
+    # Reglas básicas ES -> EN comunes para edición de imagen (sin hardcode agresivo)
+    replacements = [
+        ("desnudala", "completely undress her, make her fully naked"),
+        ("desnúdala", "completely undress her, make her fully naked"),
+        ("desnuda", "completely naked, no clothes, bare skin"),
+        ("descalza", "barefoot"),
+        ("debe ir descalza y desnuda", "must be completely barefoot and fully naked"),
+        ("descalza y desnuda", "barefoot and fully naked"),
+        ("ponle", "put on her"),
+        ("quítale", "remove from her"),
+        ("cámbiale", "change her"),
+        ("haz que", "make them"),
+        ("que estén", "have them"),
+        ("bailando", "dancing"),
+        ("corriendo", "running"),
+        ("caminando", "walking"),
+        ("sentados", "sitting"),
+        ("de rodillas", "kneeling"),
+        ("el fondo", "the background"),
+        ("la ropa", "the clothes"),
+        ("la cara", "the face"),
+        ("más realista", "more realistic"),
+        ("mejor calidad", "higher quality"),
+    ]
+    for es, en in replacements:
+        if es in p_lower:
+            p = p.replace(es, en) if es in p else p.replace(es.capitalize(), en)
+
+    return clean_text(p)
+
+
 def translate_prompt(prompt: str) -> str:
-    global _google_translator, _mymemory_translator
+    """Traducción. Prioriza modo local/offline. Solo usa Google si está disponible y NO en modo offline."""
     if not prompt or not any(c.isalpha() for c in prompt):
         return prompt
     
-    # Si el prompt es muy corto, no intentamos traducir con Google para evitar alucinaciones
     if len(prompt.strip()) < 4:
         return clean_text(prompt)
 
+    # Siempre preferir local primero (sin internet)
+    local = _local_translate(prompt)
+    if os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("AUTOAUTO_OFFLINE") == "1":
+        return local
+
     if GoogleTranslator is None or MyMemoryTranslator is None:
-        return prompt
+        return local
+
+    # Intentar externo solo si no estamos en offline y las libs existen (raro)
+    try:
+        data = load_mappings()
+        if _google_translator is None:
+            _google_translator = GoogleTranslator(source='auto', target='en')
+        translated = _google_translator.translate(prompt)
+        if translated and translated != prompt and not is_error(translated):
+            translated = clean_text(translated)
+            print(f"[Translate:Google] '{prompt[:40]}...' -> '{translated[:40]}...'")
+            return translated
+    except Exception:
+        pass
+
+    # Fallback final a local (sin internet)
+    return local
 
     def is_error(text: str) -> bool:
         """Detecta si el traductor devolvió un mensaje de error en vez de traducción"""

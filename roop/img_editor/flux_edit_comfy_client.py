@@ -44,6 +44,9 @@ class FluxEditComfyClient:
         if not self.is_available():
             return False, f"ComfyUI no responde en {comfy_url}. ¿Está iniciado?"
 
+        # Avoid re-checking and "reloading" logs if already loaded the same version
+        if self._loaded and getattr(self, '_flux_version', None) == flux_version:
+            return True, f"FLUX {flux_version} ya cargado (reutilizado)"
 
         clip_map = {
             "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),

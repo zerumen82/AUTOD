@@ -50,7 +50,7 @@ class PromptRewriter:
         self._init_llm()
 
     def _init_llm(self):
-        if self._llm is not None:
+        if self._llm is not None and self._llm != "heuristic":
             return
         try:
             from llama_cpp import Llama
@@ -124,7 +124,10 @@ class PromptRewriter:
                 pass
 
     def rewrite(self, prompt: str, image_context: str = "", mode: str = "img2img") -> Dict:
-        """Devuelve un diccionario con el análisis completo del LLM"""
+        """Devuelve un diccionario con el análisis completo del LLM.
+        NOTA: image_context debe ser metadata estructurada (no descripción generada por VLM) para evitar alucinaciones.
+        Por defecto en Imagine usamos solo texto del prompt + semantic ligero.
+        """
         if self._llm == "heuristic":
             return self._rewrite_heuristic(prompt)
         
@@ -168,12 +171,16 @@ class PromptRewriter:
         else:
             # Prompt para EDICIÓN (img2img)
             system_msg = (
-                "You are a professional image editor. Translate requests to English. If the user wants to remove or reveal something, the prompt should describe the result (e.g. 'desnuda' -> 'naked'). If adding, describe what to add.\n"
+                "You are a professional image editor. Translate requests to English. Handle compound instructions naturally (multiple requests in one prompt). For pose changes like 'a cuatro patas' or 'on all fours', use clear English like 'on all fours' or 'crouching on hands and knees'. For body/clothing changes, set high magnitude + mask_target 'subject' and full application. Keep preserve_face true. List all changes in the prompt.\n"
                 "Examples:\n"
                 "User: ponle gafas de sol\n"
                 "Assistant: {\"prompt\": \"add sunglasses\", \"magnitude\": 0.5, \"mask_target\": \"face\", \"preserve_face\": true, \"is_global\": false}\n"
-                "User: ponle un traje de payaso\n"
-                "Assistant: {\"prompt\": \"wear a clown costume\", \"magnitude\": 0.9, \"mask_target\": \"clothes\", \"preserve_face\": true, \"is_global\": false}\n"
+                "User: debe ir desnuda y descalza\n"
+                "Assistant: {\"prompt\": \"completely naked and barefoot, bare skin, no clothes\", \"magnitude\": 0.9, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": false}\n"
+                "User: debe estar a cuatro patas y completamente desnuda\n"
+                "Assistant: {\"prompt\": \"on all fours, completely naked, barefoot, bare skin, no clothes\", \"magnitude\": 0.9, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": false}\n"
+                "User: mejore el color, la calidad y que esté desnuda\n"
+                "Assistant: {\"prompt\": \"completely naked, barefoot, bare skin, no clothes, improved vibrant colors, higher sharpness, better detail and overall photographic quality, full body exposure\", \"magnitude\": 0.85, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": false}\n"
             )
 
         full_prompt = (
