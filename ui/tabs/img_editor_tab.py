@@ -27,7 +27,7 @@ def open_output_folder():
 _is_generating = False
 
 
-def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_val, lora_name, lora_strength, denoise_val):
+def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_val, denoise_val):
     global _is_generating
     
     if _is_generating:
@@ -65,8 +65,8 @@ def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_va
             face_preserve=f_preserve, use_rewriter=use_ai_val,
             engine=engine_val,
             enhance_faces=enhance_val,
-            lora_name=lora_name,
-            lora_strength=lora_strength,
+            lora_name=None,
+            lora_strength=None,
             denoise=denoise_val if denoise_val > 0 else None
         )
 
@@ -157,6 +157,11 @@ def create_img_editor_tab():
                 background: #0f172a !important;
                 border: 2px solid #22d3ee !important;
                 border-radius: 12px !important;
+                font-size: 20px !important;
+            }
+            .prompt-box-img textarea {
+                font-size: 20px !important;
+                line-height: 1.6 !important;
             }
         </style>
     """)
@@ -205,18 +210,6 @@ def create_img_editor_tab():
                     f_preserve = gr.Checkbox(label="💎 Preservar Rostro", value=True)
                     enhance_faces = gr.Checkbox(label="🌟 Mejorar Rostro (CodeFormer)", value=False, info="Post-procesa los rostros con CodeFormer para más realismo (usa VRAM)")
 
-                    with gr.Row():
-                        from ui.tabs.generation_tab import get_available_loras
-                        lora_dropdown = gr.Dropdown(
-                            choices=get_available_loras(),
-                            value="None",
-                            label="LoRA (Estilo/Personaje)"
-                        )
-                        lora_strength = gr.Slider(minimum=-2.0, maximum=2.0, step=0.05, value=1.0, label="Fuerza LoRA")
-                    
-                    bt_refresh_loras = gr.Button("🔄 Refrescar LoRAs", size="sm")
-                    bt_refresh_loras.click(fn=lambda: gr.update(choices=get_available_loras()), outputs=[lora_dropdown])
-
                 status = gr.HTML("<div style='text-align:center; color:#64748b; padding:10px;'>Listo</div>")
 
             # COLUMNA DE SALIDA
@@ -236,7 +229,7 @@ def create_img_editor_tab():
 
     gen_btn.click(
         on_generate,
-        [input_img, prompt, engine, f_preserve, use_ai, enhance_faces, lora_dropdown, lora_strength, denoise],
+        [input_img, prompt, engine, f_preserve, use_ai, enhance_faces, denoise],
         [output_img, status, mask_preview],
         concurrency_limit=None
     )

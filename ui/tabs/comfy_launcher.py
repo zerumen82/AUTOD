@@ -83,21 +83,73 @@ def is_port_in_use(port: int) -> bool:
     return False
 
 
+def _force_kill_pid(pid, use_tree=True):
+    """Force kill a PID and optionally its children tree. Windows-first, psutil preferred."""
+    if not pid:
+        return False
+    pid_str = str(pid)
+    killed = False
+    try:
+        import psutil
+        try:
+            parent = psutil.Process(int(pid))
+            children = parent.children(recursive=True)
+            for child in children:
+                try:
+                    child.kill()
+                except Exception:
+                    pass
+            psutil.wait_procs(children, timeout=3)
+            try:
+                parent.kill()
+            except Exception:
+                pass
+            parent.wait(timeout=3)
+            killed = True
+        except psutil.NoSuchProcess:
+            killed = True  # already gone
+        except Exception:
+            pass
+    except ImportError:
+        pass  # psutil not available, fallback below
+
+    if not killed and sys.platform == "win32":
+        try:
+            flag = "/T /F" if use_tree else "/F"
+            res = subprocess.run(
+                f"taskkill {flag} /PID {pid_str}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            killed = res.returncode == 0
+        except Exception:
+            pass
+
+    if sys.platform != "win32" and not killed:
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+            killed = True
+        except Exception:
+            try:
+                subprocess.run(f"kill -9 {pid_str}", shell=True, timeout=5)
+                killed = True
+            except Exception:
+                pass
+    return killed
+
+
 def kill_process_on_port(port: int) -> bool:
-    """Kill process running on port - Windows compatible with taskkill"""
-    import socket
+    """Kill process running on port - robust tree-kill using psutil or taskkill /T /F"""
     import subprocess
-    import os
-    import signal
     
     killed = False
     
-    # First, check if there's actually a LISTENING process on this port
     print(f"[ComfyLauncher] Verificando procesos en puerto {port}...")
     
     try:
         if sys.platform == "win32":
-            # Get ALL processes listening on the port
             result = subprocess.run(
                 f"netstat -ano | findstr :{port}",
                 shell=True,
@@ -111,7 +163,6 @@ def kill_process_on_port(port: int) -> bool:
             for line in result.stdout.split('\n'):
                 if 'LISTENING' in line:
                     parts = line.split()
-                    # PID is the last column in netstat -ano output
                     for part in reversed(parts):
                         if part.strip().isdigit():
                             pid = part.strip()
@@ -122,53 +173,18 @@ def kill_process_on_port(port: int) -> bool:
             
             if not listening_pids:
                 print(f"[ComfyLauncher] No hay proceso LISTENING en puerto {port}")
-                # Check if it's just a connection issue
                 if 'SYN_SENT' in result.stdout or 'SYN_RECEIVED' in result.stdout or 'ESTABLISHED' in result.stdout:
                     print(f"[ComfyLauncher] Puerto ocupado por conexión, no por servicio")
-                    # Try to close TIME_WAIT or established connections
-                    try:
-                        subprocess.run(
-                            f"for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{port} ^| findstr ESTABLISHED') do @for /f \"tokens=2\" %b in ('echo %a') do @for /f \"tokens=5\" %c in ('echo %b') do @taskkill /F /PID %c",
-                            shell=True,
-                            timeout=10
-                        )
-                    except:
-                        pass
                 return False
             
-            # Kill all listening processes
             for pid in listening_pids:
-                if pid == '0':  # Skip system processes
+                if pid == '0':
                     continue
-                print(f"[ComfyLauncher] Matando PID: {pid}")
-                try:
-                    # First try graceful termination
-                    kill_result = subprocess.run(
-                        f"taskkill /PID {pid}",
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
-                    if kill_result.returncode != 0:
-                        # Force kill
-                        kill_result = subprocess.run(
-                            f"taskkill /F /PID {pid}",
-                            shell=True,
-                            capture_output=True,
-                            text=True,
-                            timeout=10
-                        )
-                    print(f"[ComfyLauncher] taskkill result: {kill_result.returncode}")
-                    if kill_result.returncode == 0:
-                        killed = True
-                except Exception as e:
-                    print(f"[ComfyLauncher] Error matando {pid}: {e}")
-                    
-                # Give it time to terminate
-                time.sleep(1)
+                print(f"[ComfyLauncher] Matando PID (tree): {pid}")
+                if _force_kill_pid(pid, use_tree=True):
+                    killed = True
+                time.sleep(0.5)
         else:
-            # Unix/Linux method
             result = subprocess.run(
                 f"lsof -ti:{port}",
                 shell=True,
@@ -180,14 +196,13 @@ def kill_process_on_port(port: int) -> bool:
                 pids = result.stdout.strip().split('\n')
                 for pid in pids:
                     if pid.strip().isdigit():
-                        subprocess.run(f"kill -9 {pid}", shell=True, timeout=5)
-                        killed = True
+                        if _force_kill_pid(pid.strip(), use_tree=True):
+                            killed = True
     except Exception as e:
-        print(f"[ComfyLauncher] Error general: {e}")
+        print(f"[ComfyLauncher] Error general en kill_process_on_port: {e}")
     
-    # Verify port is free
     if killed:
-        time.sleep(2)
+        time.sleep(1.5)
         if not is_port_in_use(port):
             print(f"[ComfyLauncher] OK Puerto {port} liberado exitosamente")
         else:
@@ -297,7 +312,12 @@ def start(
         python_exe = COMFYUI_PYTHON if os.path.exists(COMFYUI_PYTHON) else sys.executable
         
         vram_gb = get_vram_gb()
-        vram_mode = "--normalvram"
+        if vram_gb <= 8:
+            # --normalvram: mantiene el modelo de difusión en GPU, solo offloadea VAE/CLIP.
+            # Para Q4_K_S (~5.6GB) cabe sobrado en 8GB, evitando el swap por paso de --lowvram.
+            vram_mode = "--normalvram"
+        else:
+            vram_mode = "--normalvram"
         print(f"[ComfyLauncher] VRAM detectada: {vram_gb}GB → usando {vram_mode}")
         cmd = [python_exe, "-u", exe, "--port", str(port), vram_mode]
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
@@ -425,36 +445,107 @@ def start(
     return True, "ComfyUI debe iniciarse manualmente", port
 
 
+def _find_orphan_comfy_pids():
+    """Find any python processes that look like they are running ComfyUI (by cmdline)."""
+    pids = []
+    try:
+        if sys.platform == "win32":
+            # Get full command line to match ComfyUI specifically
+            for exe in ('python.exe', 'pythonw.exe'):
+                try:
+                    res = subprocess.run(
+                        f'wmic process where "name=\'{exe}\'" get ProcessId,CommandLine /format:csv',
+                        shell=True, capture_output=True, text=True, timeout=8
+                    )
+                    for line in (res.stdout or "").splitlines():
+                        low = line.lower()
+                        if 'comfy' in low or 'ui\\tob\\comfyui' in low.replace('/', '\\') or '\\comfyui\\' in low or 'main.py' in low:
+                            # last field is usually PID in csv output from wmic
+                            parts = [p.strip().strip('"') for p in line.split(',')]
+                            for p in reversed(parts):
+                                if p.isdigit() and int(p) > 4:
+                                    pids.append(p)
+                                    break
+                except Exception:
+                    continue
+        else:
+            res = subprocess.run("ps aux | grep -i 'comfy\\|main.py' | grep -v grep", shell=True, capture_output=True, text=True, timeout=5)
+            for line in res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) > 1 and parts[1].isdigit():
+                    pids.append(parts[1])
+    except Exception:
+        pass
+    return list(set(pids))
+
+
+def _sweep_orphans():
+    """Last resort: kill known orphan ComfyUI python processes."""
+    orphans = _find_orphan_comfy_pids()
+    if not orphans:
+        return 0
+    count = 0
+    for pid in orphans:
+        # Conservative: only kill if we also have reason to believe it's Comfy (port check or we just do force since stop is only on exit)
+        # To be safer we always try on exit sweep because only our launcher starts it this way.
+        if _force_kill_pid(pid, use_tree=True):
+            count += 1
+            print(f"[ComfyLauncher] Orphan sweep killed PID {pid}")
+    return count
+
+
 def stop() -> Tuple[bool, str]:
-    """Stop ComfyUI - Force kill with taskkill - DEBUG VERSION"""
+    """Stop ComfyUI - robust tree-kill + orphan sweep. Always cleans tracked + port + orphans."""
     global comfy_process, COMFYUI_PORT
     
     print(f"\n[DEBUG] stop() llamado - COMFYUI_PORT={COMFYUI_PORT}")
     
-    # Track what we do
     actions = []
+    killed_any = False
     
-    # Step 1: Kill tracked process if exists
+    # Step 1: Kill the tracked Popen (and its whole tree)
+    tracked_pid = None
     if comfy_process:
-        print(f"[DEBUG] Hay proceso tracked: {comfy_process.pid}")
         try:
-            pid = comfy_process.pid
-            print(f"[ComfyLauncher] Terminando proceso tracked PID: {pid}")
-            comfy_process.terminate()
+            tracked_pid = comfy_process.pid
+            print(f"[DEBUG] Hay proceso tracked: {tracked_pid}")
+            print(f"[ComfyLauncher] Terminando proceso tracked PID (tree): {tracked_pid}")
+            
+            # Graceful attempt + close pipes (prevents pipe read blocks)
             try:
-                comfy_process.wait(timeout=5)
-                actions.append(f"Proceso {pid} terminado gracefully")
+                comfy_process.terminate()
+            except Exception:
+                pass
+            try:
+                comfy_process.wait(timeout=2)
             except subprocess.TimeoutExpired:
+                pass
+            
+            # Close stdout pipe used by log thread to release resources
+            try:
+                if getattr(comfy_process, 'stdout', None):
+                    comfy_process.stdout.close()
+                if getattr(comfy_process, 'stderr', None):
+                    comfy_process.stderr.close()
+            except Exception:
+                pass
+            
+            # Force tree kill (psutil or taskkill /T /F)
+            if _force_kill_pid(tracked_pid, use_tree=True):
+                actions.append(f"tracked {tracked_pid} tree-killed")
+                killed_any = True
+            
+            try:
                 comfy_process.kill()
-                actions.append(f"Proceso {pid} matado (kill)")
-            comfy_process = None
+            except Exception:
+                pass
         except Exception as e:
-            actions.append(f"Error con proceso tracked: {e}")
+            actions.append(f"Error tracked: {e}")
+        finally:
+            comfy_process = None
     
-    # Step 2: Check if we have a known port
+    # Step 2: Determine port to clean
     current_port = COMFYUI_PORT
-    
-    # Step 3: If no known port, scan default ports for LISTENING processes
     if not current_port:
         print(f"[DEBUG] No hay puerto conocido, escaneando...")
         for p in DEFAULT_PORTS:
@@ -463,45 +554,44 @@ def stop() -> Tuple[bool, str]:
                 print(f"[DEBUG] Encontrado LISTENING en puerto {p}")
                 break
     
-    # Step 4: Only try to kill if we found a LISTENING process
+    # Step 3: Kill whatever is listening (tree kill)
     if current_port:
         print(f"[DEBUG] Puerto a liberar: {current_port}")
-        
-        # Double check it's still listening
-        if not is_port_in_use(current_port):
-            print(f"[DEBUG] Puerto {current_port} ya no tiene LISTENING - no hay nada que matar")
-            COMFYUI_PORT = None
-            if actions:
-                print(f"[ComfyLauncher] Acciones: {', '.join(actions)}")
-                return True, f"ComfyUI detenido: {', '.join(actions[:2])}"
-            return False, "No hay proceso LISTENING en puertos ComfyUI"
-        
-        print(f"[ComfyLauncher] Puerto {current_port} ocupado, intentando liberar...")
-        killed = kill_process_on_port(current_port)
-        
-        if not killed:
-            print(f"[DEBUG] kill_process_on_port retornó False")
-        
-        if killed:
-            time.sleep(2)
-            # Verify
+        if is_port_in_use(current_port):
+            print(f"[ComfyLauncher] Puerto {current_port} ocupado, intentando liberar (tree)...")
+            if kill_process_on_port(current_port):
+                killed_any = True
+                actions.append(f"port {current_port} freed")
+            time.sleep(1)
             if is_port_in_use(current_port):
                 print(f"[ComfyLauncher] ⚠ Puerto {current_port} aún ocupado después de kill")
-                COMFYUI_PORT = None
             else:
                 print(f"[ComfyLauncher] ✓ Puerto {current_port} liberado")
-                COMFYUI_PORT = None
-                actions.append("Puerto liberado")
+        else:
+            print(f"[DEBUG] Puerto {current_port} ya no tiene LISTENING")
+        COMFYUI_PORT = None
     else:
-        print(f"[DEBUG] No se encontró ningún puerto LISTENING")
+        print(f"[DEBUG] No se encontró puerto LISTENING")
     
-    if actions:
-        print(f"[ComfyLauncher] Acciones: {', '.join(actions)}")
-        return True, f"ComfyUI detenido: {', '.join(actions[:2])}"
+    # Step 4: Final orphan sweep (catches cases where port var was None or multiple)
+    try:
+        swept = _sweep_orphans()
+        if swept > 0:
+            killed_any = True
+            actions.append(f"swept {swept} orphan(s)")
+    except Exception as e:
+        print(f"[ComfyLauncher] Sweep error: {e}")
     
-    print(f"[DEBUG] No había nada que detener")
     COMFYUI_PORT = None
-    return False, "No se encontró proceso en puertos ComfyUI"
+    comfy_process = None
+    
+    if actions or killed_any:
+        msg = f"ComfyUI detenido: {'; '.join(actions) if actions else 'tree-killed'}"
+        print(f"[ComfyLauncher] Acciones: {actions}")
+        return True, msg
+    
+    print(f"[DEBUG] No había nada que detener (o ya estaba limpio)")
+    return False, "No se encontró proceso en puertos ComfyUI (o ya limpio)"
 
 
 def restart() -> Tuple[bool, str]:

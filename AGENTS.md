@@ -208,6 +208,45 @@ Todo ágil (light default), local, sin censura, sin hardcoding, defaults automá
 
 Actualizado en Agents.md.
 
+## Generate Tab (Puro txt2img ultra realista) - 2026-06
+
+### Goal
+Pestaña GENERAR para texto puro (sin foto de referencia) ultra realista, hiperdetallada, sigue CUALQUIER prompt (incluyendo explícito/NSFW), estilo Grok Imagine pero para generación libre.
+
+### Hardware Constraints
+- RTX 3060 Ti 8GB VRAM
+- Recomendado: modelos GGUF Q4 (Flux dev / Krea) para balance calidad/velocidad/VRAM.
+- Evitar LongCat para puro gen (es edit-oriented, peor follow en text-only).
+
+### Default Recomendado (basado en research 2026)
+- **flux_dev_abliterated** (T8 Q4_K_M o flux1-dev-Q4_K.gguf ya instalados): Mejor para ultra realista en 8GB.
+  - Pasos: 25 (dev GGUF eficiente, no necesita 40+).
+  - CFG: 3.5 (vía FluxGuidance).
+  - Sampler: euler_ancestral + simple.
+  - SIN CENSURA: abliterated, rewriter preserva "nudity", "explicit", "cualquier acción". Negative solo calidad (lowres, blurry...).
+  - Workflow: pure T2I (DualCLIP + CLIPTextEncode + EmptyLatent) diferenciado de Image Editor.
+
+- LongCat Full como opción secundaria (rápido pero no óptimo para puro realista).
+
+### Flujo Simple
+- Prompt (cualquier cosa) + forma (Horizontal/Vertical/Personalizado).
+- GENERAR: rewriter txt2img (Grok Imagine style: literal + enrich quality al final) + params auto + modelo puro.
+- No hardcode, no censura, usa rewriter para seguir instrucciones.
+
+### Key Decisions
+- **Pure T2I path para default**: no nodos de edición (EmptyImage + QwenEdit) que degradan follow en text-only.
+- **SIN CENSURA por diseño**: modelo abliterated, prompt tal cual (sin soften), rewriter system explicita "clothing or nudity", "explicit".
+- **Velocidad en 8GB**: Q4 GGUF + 25 steps (research: ~20-25 ideal para dev en low VRAM, calidad ultra real sin lag).
+- **Rewriter**: mismo que Imagine pero modo txt2img diferenciado (no preservation de foto).
+
+### Verification
+- Default = flux_dev_abliterated.
+- Prompts explícitos (e.g. "a cuatro patas completamente desnuda...") deben seguir exactamente, sin censura.
+- Calidad: fotoreal, detalles piel, luces, anatomía.
+- Tiempo aceptable en 8GB.
+
+Actualizado basado en web research para hardware + énfasis SIN CENSURA.
+
 Prueba y reporta. Si sigue no perfecto, el próximo log guiará el siguiente ajuste (workflow).
 
 ### Revisión completa del flujo (ImgEditor "imagine" / LongCat) y qué mejoraría yo primero (orden priorizado, sin hardcodes)

@@ -88,9 +88,11 @@ find_free_port = find_available_port
 def cleanup_comfyui():
     from ui.tabs.comfy_launcher import stop
     try:
-        stop()
-    except:
-        pass
+        print("[CLEANUP] atexit: limpiando ComfyUI...")
+        success, msg = stop()
+        print(f"[CLEANUP] {msg}")
+    except Exception as e:
+        print(f"[CLEANUP] Error (ignorado): {e}")
 
 
 def check_comfy_status():

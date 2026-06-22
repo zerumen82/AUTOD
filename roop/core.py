@@ -287,16 +287,7 @@ def run():
         webview.start(debug=False, func=None)
         
         print("[EXIT] Ventana cerrada")
-        
-        # Limpiar ComfyUI sin matar todos los procesos python del sistema.
-        # El kill global puede terminar Gradio/Uvicorn a mitad de respuesta HTTP.
-        print("[CORE] Limpiando procesos ComfyUI...")
-        try:
-            from ui.tabs.comfy_launcher import stop
-            success, msg = stop()
-            print(f"[CORE] {msg}")
-        except Exception as e:
-            print(f"[CORE] Error en cleanup: {e}")
+        cleanup_comfyui()
         
     except ImportError as e:
         print(f"[ERROR] Pywebview no instalado: {e}")
