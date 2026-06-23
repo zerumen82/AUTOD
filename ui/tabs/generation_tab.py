@@ -7,13 +7,13 @@ import threading
 import time
 
 from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client, get_installed_generation_engines
-from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices
+from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices, get_compatible_dropdown_choices, preview_modifiers
 from roop.img_editor.comfy_progress import build_generation_progress_html, format_duration
 
-def _build_modifiers(image_style: str, shot_framing: str) -> dict:
+def _build_modifiers(image_style: str, shot_framing: str, lighting: str = "auto") -> dict:
     return {
         "image_type": image_style or "auto",
-        "lighting": "auto",
+        "lighting": lighting or "auto",
         "skin_finish": "auto",
         "framing": shot_framing or "auto",
         "color_grade": "auto",
@@ -53,7 +53,7 @@ def _success_status_html(res) -> str:
     return status
 
 
-def on_generate_image(prompt, width, height, engine_val, image_style, shot_framing):
+def on_generate_image(prompt, width, height, engine_val, image_style, shot_framing, lighting):
     client = get_flux_gen_client()
     if not client.is_available():
         yield None, "<div style='text-align:center;color:#ef4444;padding:10px;'>❌ ComfyUI no está activo.</div>"
@@ -83,7 +83,7 @@ def on_generate_image(prompt, width, height, engine_val, image_style, shot_frami
                 prompt=(prompt or "").strip(),
                 width=width,
                 height=height,
-                prompt_modifiers=_build_modifiers(image_style, shot_framing),
+                prompt_modifiers=_build_modifiers(image_style, shot_framing, lighting),
                 progress_callback=progress_callback,
             )
 
@@ -171,7 +171,7 @@ def generation_tab():
     with gr.Column(elem_classes=["gen-tab-container"]):
         with gr.Group(elem_classes=["gen-tab-header"]):
             gr.Markdown("## 🚀 GENERAR")
-            gr.Markdown("_Escribe en español. Elige estilo y plano si quieres (Automático = sin cambios)._")
+            gr.Markdown("_Escribe en español. Por defecto fotorreal — Automático en estilo también aplica calidad photoreal en modelos NSFW._")
 
         prompt = gr.Textbox(
             label="Prompt",
@@ -183,14 +183,21 @@ def generation_tab():
         with gr.Row():
             image_style = gr.Dropdown(
                 choices=get_dropdown_choices("image_type"),
-                value="auto",
+                value="photoreal",
                 label="Tipo de imagen",
+            )
+            lighting = gr.Dropdown(
+                choices=get_dropdown_choices("lighting"),
+                value="natural",
+                label="Iluminación",
             )
             shot_framing = gr.Dropdown(
                 choices=get_dropdown_choices("framing"),
                 value="auto",
                 label="Plano / encuadre",
             )
+
+        modifier_preview = gr.HTML("")
 
         with gr.Row():
             orientation = gr.Radio(
@@ -222,11 +229,28 @@ def generation_tab():
 
     orientation.change(fn=handle_shape, inputs=[orientation], outputs=[width, height])
 
+    def _on_style_change(style, light, frame):
+        l_choices, l_safe = get_compatible_dropdown_choices(style, "lighting", light)
+        f_choices, f_safe = get_compatible_dropdown_choices(style, "framing", frame)
+        preview = preview_modifiers(style, l_safe, "auto", f_safe, "auto")
+        return gr.update(choices=l_choices, value=l_safe), gr.update(choices=f_choices, value=f_safe), preview
+
+    def _on_modifiers_change(style, light, frame):
+        return preview_modifiers(style, light, "auto", frame, "auto")
+
+    image_style.change(
+        fn=_on_style_change,
+        inputs=[image_style, lighting, shot_framing],
+        outputs=[lighting, shot_framing, modifier_preview],
+    )
+    lighting.change(fn=_on_modifiers_change, inputs=[image_style, lighting, shot_framing], outputs=[modifier_preview])
+    shot_framing.change(fn=_on_modifiers_change, inputs=[image_style, lighting, shot_framing], outputs=[modifier_preview])
+
     bt_open_folder.click(fn=open_generation_folder)
 
     gen_btn.click(
         fn=on_generate_image,
-        inputs=[prompt, width, height, engine_model, image_style, shot_framing],
+        inputs=[prompt, width, height, engine_model, image_style, shot_framing, lighting],
         outputs=[output_img, status_html],
         concurrency_limit=None,
     )

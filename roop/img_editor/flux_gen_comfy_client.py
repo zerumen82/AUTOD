@@ -241,6 +241,7 @@ class FluxGenComfyClient:
         lora_strength: float,
         conf: Dict,
         prompt_en: str = "",
+        image_type: str = "auto",
     ) -> Tuple[List[Tuple[str, float]], str, str]:
         """Apila LoRAs automáticamente según escena del prompt (sin UI)."""
         from roop.img_editor.gen_lora_resolver import resolve_scene_loras, format_lora_log
@@ -256,7 +257,9 @@ class FluxGenComfyClient:
         if requested == "None" or not (self._is_sdxl and conf.get("explicit", False)):
             return [], "", ""
 
-        picks, boost = resolve_scene_loras(prompt_en, self._alias, base_strength=auto_strength)
+        picks, boost = resolve_scene_loras(
+            prompt_en, self._alias, base_strength=auto_strength, image_type=image_type,
+        )
         log = format_lora_log(picks) if picks else ""
         if picks:
             print(f"[GenFlux] Auto LoRAs: {log}")
@@ -458,6 +461,12 @@ class FluxGenComfyClient:
             modifiers = dict(prompt_modifiers or {})
             if not modifiers.get("image_type"):
                 modifiers["image_type"] = image_type or "auto"
+            from roop.img_editor.gen_prompt_modifiers import resolve_effective_image_type
+            effective_type = resolve_effective_image_type(
+                modifiers.get("image_type", "auto") or "auto",
+                self._alias,
+                self._model_configs,
+            )
             final_prompt, suffix, image_type = assemble_generation_prompt(
                 self._alias,
                 translated,
@@ -465,6 +474,7 @@ class FluxGenComfyClient:
                 self._model_configs,
                 is_sdxl=self._is_sdxl,
             )
+            image_type = effective_type
 
             if self._is_longcat:
                 final_prompt = f"Instruction: {final_prompt}"
@@ -483,7 +493,11 @@ class FluxGenComfyClient:
             from roop.img_editor.gen_prompt_modifiers import _model_explicit
             is_explicit = _model_explicit(self._alias, self._model_configs) or bool(conf.get("explicit"))
 
-            p = {"steps": steps, "cfg": cfg, "neg": neg, "translated": translated, "suffix": suffix, "adult": adult_intent}
+            p = {
+                "steps": steps, "cfg": cfg, "neg": neg,
+                "translated": translated, "suffix": suffix, "adult": adult_intent,
+                "effective_image_type": image_type,
+            }
 
             print(f"[GenFlux] [Smart] modelo={self._alias} steps={steps} cfg={cfg} sampler={sampler_name} scheduler={scheduler} tipo={image_type} explicit={is_explicit}")
             print(f"[GenFlux] [1/4] Usuario: {user_text}")
@@ -568,6 +582,7 @@ class FluxGenComfyClient:
         user_translated = ""
         mod_suffix_used = (modifier_suffix or "").strip()
         adult_intent = False
+        ai_params: Dict = {}
         if use_ai and not _skip_rewrite:
             mods = prompt_modifiers or {
                 "image_type": image_type or "auto",
@@ -594,8 +609,19 @@ class FluxGenComfyClient:
                 current_neg = f"{neg_conf}, {negative_prompt}" if negative_prompt else neg_conf
 
         prompt_for_loras = user_translated or final_prompt or prompt
+        effective_lora_type = "auto"
+        if use_ai and not _skip_rewrite:
+            effective_lora_type = ai_params.get("effective_image_type", "auto")
+        elif prompt_modifiers:
+            from roop.img_editor.gen_prompt_modifiers import resolve_effective_image_type
+            effective_lora_type = resolve_effective_image_type(
+                (prompt_modifiers or {}).get("image_type", "auto"),
+                self._alias,
+                self._model_configs,
+            )
         lora_stack, lora_boost, lora_log = self._resolve_lora_stack(
             lora_name, lora_strength, conf, prompt_en=prompt_for_loras,
+            image_type=effective_lora_type,
         )
         if lora_boost and lora_boost.lower() not in (final_prompt or "").lower():
             final_prompt = f"{final_prompt}, {lora_boost}"

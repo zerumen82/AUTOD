@@ -370,7 +370,10 @@ def assemble_generation_prompt(
     """Monta prompt: prefijo mínimo → escena usuario (primero) → estilo → extras.
     Recorta por presupuesto CLIP (~77 tokens) sin tocar el texto del usuario."""
     style_frag, extras_joined, extra_list, image_type = _split_style_and_extras(modifiers)
+    image_type = resolve_effective_image_type(image_type, model_alias, model_configs)
     has_style = image_type != "auto"
+    if (modifiers.get("image_type") or "auto") == "auto" and image_type == "photoreal" and not style_frag:
+        style_frag = _fragment("image_type", "photoreal")
     suffix_display = ", ".join(x for x in [style_frag, extras_joined] if x)
 
     prefix = get_effective_prefix(
@@ -456,6 +459,20 @@ def _model_explicit(model_alias: str, model_configs: Dict) -> bool:
     return bool(conf.get("explicit", False))
 
 
+def resolve_effective_image_type(
+    image_type: str,
+    model_alias: str,
+    model_configs: Dict,
+) -> str:
+    """Auto en modelos explicit → fotorreal por defecto (mejor calidad sin tocar UI)."""
+    it = (image_type or "auto").strip() or "auto"
+    if it != "auto":
+        return it
+    if _model_explicit(model_alias, model_configs):
+        return "photoreal"
+    return "auto"
+
+
 def _dedupe_comma_list(text: str) -> str:
     seen = set()
     out: List[str] = []
@@ -492,7 +509,11 @@ def get_effective_negative(
 
     neg = _dedupe_comma_list((base_negative or "").strip())
     mods = modifiers or {}
-    image_type = mods.get("image_type", "auto") or "auto"
+    image_type = resolve_effective_image_type(
+        mods.get("image_type", "auto") or "auto",
+        model_alias,
+        model_configs or {},
+    )
     conf = (model_configs or {}).get(model_alias, {})
     is_explicit = bool(conf.get("explicit", False))
 

@@ -140,6 +140,7 @@ def resolve_scene_loras(
     prompt_en: str,
     model_alias: str,
     base_strength: float = 0.55,
+    image_type: str = "auto",
 ) -> Tuple[List[LoraPick], str]:
     """
     Devuelve lista de LoRAs a apilar y texto boost opcional para el prompt.
@@ -193,7 +194,22 @@ def resolve_scene_loras(
             continue
         scored.append((score, entry))
 
+    photoreal_modes = frozenset({"photoreal", "amateur_street", "smartphone"})
+    want_realism = (image_type in photoreal_modes) or any(
+        t in prompt_l for t in ("photorealistic", "raw photo", "realistic", "skin texture", "film grain")
+    )
+
     scored.sort(key=lambda x: (-x[0], -x[1].get("strength", 0)))
+    if want_realism:
+        for entry in SCENE_LORA_CATALOG:
+            if entry.get("label") != "Realism skin":
+                continue
+            fname = entry["file"]
+            if not _lora_exists(fname) or fname.lower() in used_files or not _is_sdxl_lora(fname):
+                continue
+            scored.insert(0, (99, entry))
+            break
+
     for _score, entry in scored[:MAX_SCENE_LORAS]:
         fname = entry["file"]
         picks.append((fname, float(entry["strength"]), entry.get("label", fname)))

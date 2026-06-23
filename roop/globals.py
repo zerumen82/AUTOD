@@ -33,7 +33,7 @@ execution_providers: List[str] = ["CUDAExecutionProvider", "CPUExecutionProvider
 execution_threads = None
 headless = None
 log_level = "error"
-selected_enhancer = None
+selected_enhancer = 'GFPGAN'
 face_swap_mode = None
 flip_faces = None
 face_rotation_correction = None
@@ -52,7 +52,7 @@ default_det_size = True  # Usar tamaño de detector por defecto - más rápido
 face_match_embedding_threshold = 0.25  # ESTRICTO - solo usar caras muy similares
 face_match_bbox_iou_threshold = 0.50   # Muy estricto para mejor coincidencia
 show_face_area = False  # Variable para mostrar área de cara en preview
-use_enhancer = False  # Desactivado por defecto para velocidad real-time (CodeFormer ~1.2 FPS, muy lento)
+use_enhancer = True  # GFPGAN activo por defecto: calidad + identidad source
 blend_mode = 'seamless'  # Mejor integración visual que Poisson
 use_color_correction = True  # REACTIVADO para preservar cara origen (source face)
 use_color_matching = True  # REACTIVADO para tono de piel del origen
@@ -62,8 +62,8 @@ use_color_matching = True  # REACTIVADO para tono de piel del origen
 
 # Factor de blending del enhancer (0-1)
 # 0 = sin enhancer, 1 = enhancer completo
-# v5.4.9: 0.85 para máxima nitidez preservando realismo
-enhancer_blend_factor = 0.85
+# 0.92 = máximo parecido source (GFPGAN mix ~8%) con nitidez
+enhancer_blend_factor = 0.92
 
 # Ajuste de brillo (0-1)
 # 0.15 para no lavar demasiado la cara original
@@ -71,7 +71,7 @@ brightness_strength = 0.15
 
 # Matching de color (0-1)
 # 0.10 para preservar mejor el origen (source face)
-color_match_strength = 0.10
+color_match_strength = 0.08
 # GFPGAN preserva mejor la identidad en face swap
 # CodeFormer suaviza demasiado perdiendo rasgos faciales
 default_enhancer = 'GFPGAN'  # GFPGAN para mejor preservación de identidad
@@ -126,7 +126,6 @@ use_mediapipe_detector = True
 no_face_action = 0
 
 processing = False
-use_enhancer = True # Activado por defecto para máxima calidad en swaps
 
 
 def apply_conservative_defaults():
@@ -140,7 +139,7 @@ def apply_conservative_defaults():
     if CFG is not None:
         try:
             blend_ratio = getattr(CFG, 'face_swap_blend_ratio', 1.0)
-            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.35)
+            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.20)
             face_swap_mode = getattr(CFG, 'face_swap_mode', 'selected_faces')
             CONSERVATIVE_MODE = getattr(CFG, 'conservative_mode', False)
 
@@ -156,7 +155,7 @@ def apply_conservative_defaults():
             print(f"   [OK] Execution providers: {execution_providers}")
         except:
             blend_ratio = 1.0
-            distance_threshold = 0.35
+            distance_threshold = 0.20
             face_swap_mode = "selected_faces"
             execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             print("[CONFIG] CONFIGURACION OPTIMIZADA POR DEFECTO:")
@@ -166,7 +165,7 @@ def apply_conservative_defaults():
             print(f"   [OK] Execution providers: {execution_providers}")
     else:
         blend_ratio = 1.0
-        distance_threshold = 0.35
+        distance_threshold = 0.20
         face_swap_mode = "selected_faces"
         execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
@@ -186,7 +185,7 @@ def apply_config_from_file():
     if CFG is not None:
         try:
             blend_ratio = getattr(CFG, 'face_swap_blend_ratio', 1.0)
-            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.35)
+            distance_threshold = getattr(CFG, 'face_swap_distance_threshold', 0.20)
             face_swap_mode = getattr(CFG, 'face_swap_mode', 'selected_faces')
             
             # Optimización de Hardware (VRAM)

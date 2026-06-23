@@ -7,6 +7,7 @@ from PIL import Image
 from dataclasses import dataclass
 
 from roop.comfy_workflows import get_comfyui_url
+from roop.img_editor.comfy_progress import wait_for_comfy_image
 
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -137,6 +138,7 @@ class FluxEditComfyClient:
         mask_image: Optional[Image.Image] = None,
         lora_name: Optional[str] = None,
         lora_strength: float = 1.0,
+        progress_callback=None,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
@@ -282,46 +284,37 @@ class FluxEditComfyClient:
         if not pid:
             return None, "ComfyUI no devolvió prompt_id"
 
-        last_progress = 0
-        while True:
-            elapsed = time.time() - t0
-            r = requests.get(f"{comfy_url}/history/{pid}")
-            if r.status_code == 200 and pid in r.json():
-                hist = r.json()[pid]
-                if "outputs" in hist and "10" in hist["outputs"] and hist["outputs"]["10"].get("images"):
-                    img_data = hist["outputs"]["10"]["images"][0]
-                    res = requests.get(f"{comfy_url}/view?filename={img_data['filename']}")
-                    if res.status_code == 200:
-                        elapsed = time.time() - t0
-                        pil_img = Image.open(io.BytesIO(res.content)).convert("RGB")
-                        arr = np.array(pil_img.convert("RGB"))
-                        std = arr.std()
-                        mean = arr.mean()
-                        print(f"[FluxClient] Generación completa. Estadísticas de imagen: std={std:.2f}, mean={mean:.2f}")
-                        
-                        # Imagen gris detectada (falla de VRAM en Flux GGUF)
-                        # Umbral más estricto: std < 1.0 (casi color sólido)
-                        if self._is_probable_gray_failure(pil_img):
-                            print(f"[FluxClient] ADVERTENCIA: Imagen gris detectada (std={std:.1f}, mean={mean:.1f}).")
-                            print("[FluxClient] Esto suele indicar falta de VRAM o error de VAE.")
-                            return None, "ComfyUI devolvió una imagen casi gris/uniforme. Revisa VRAM, VAE y workflow del motor seleccionado."
-                        return GenResult(image=pil_img, time_taken=elapsed), f"OK ({elapsed:.0f}s)"
-                status = hist.get("status", {})
-                if isinstance(status, dict) and status.get("status_str") == "error":
-                    error_info = status.get("messages", "Error desconocido en ComfyUI")
-                    return None, f"ComfyUI error: {error_info}"
-                if hist.get("status") == "failed":
-                    error_info = hist.get("error", "Error desconocido en ComfyUI")
-                    return None, f"ComfyUI error: {error_info}"
-                if "outputs" in hist and not hist["outputs"]:
-                    if int(elapsed) > last_progress:
-                        print(f"[FluxClient] ⏳ {int(elapsed)}s esperando...", flush=True)
-                        last_progress = int(elapsed)
+        def _on_progress(prog):
+            if progress_callback:
+                progress_callback(prog)
+            elif int(prog.get("elapsed") or 0) % 15 == 0 and prog.get("phase"):
+                print(f"[FluxClient] {prog.get('phase')} ({int(prog.get('elapsed') or 0)}s)", flush=True)
 
+        img_meta, wait_msg = wait_for_comfy_image(
+            comfy_url,
+            pid,
+            timeout=3600,
+            steps_hint=num_inference_steps,
+            progress_callback=_on_progress,
+        )
+        if img_meta is None:
+            return None, wait_msg
 
-            if elapsed > 3600:
-                return None, f"Timeout 60min - ComfyUI no completó la generación"
-            time.sleep(1)
+        res = requests.get(f"{comfy_url}/view?filename={img_meta['filename']}", timeout=30)
+        if res.status_code != 200:
+            return None, f"Error descargando imagen: {res.status_code}"
+
+        elapsed = time.time() - t0
+        pil_img = Image.open(io.BytesIO(res.content)).convert("RGB")
+        arr = np.array(pil_img.convert("RGB"))
+        std = arr.std()
+        mean = arr.mean()
+        print(f"[FluxClient] Generación completa. std={std:.2f}, mean={mean:.2f}")
+
+        if self._is_probable_gray_failure(pil_img):
+            print(f"[FluxClient] Imagen gris detectada (std={std:.1f}, mean={mean:.1f}).")
+            return None, "ComfyUI devolvió una imagen casi gris/uniforme. Revisa VRAM, VAE y workflow del motor seleccionado."
+        return GenResult(image=pil_img, time_taken=elapsed), f"OK ({elapsed:.0f}s)"
 
 _client = None
 def get_flux_edit_comfy_client() -> FluxEditComfyClient:

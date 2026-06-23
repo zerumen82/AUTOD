@@ -15,13 +15,8 @@ def faceswap_tab():
     logic.load_folder_history()
     logic.cleanup_temp_files()
     
-    # 2. Configurar parámetros de calidad por defecto (High Fidelity)
-    roop.globals.blend_ratio = 1.0
-    roop.globals.distance_threshold = 0.25  # Más estricto para mayor parecido
-    roop.globals.face_swap_mode = 'selected_faces'
-    roop.globals.selected_enhancer = 'GFPGAN'  # Forzar GFPGAN para máxima calidad
-    roop.globals.use_enhancer = True
-    # enhancer_blend_factor usa el valor por defecto de globals.py (0.3)
+    # 2. Defaults óptimos: calidad GFPGAN + máximo parecido source
+    logic.apply_optimal_faceswap_defaults()
     
     # 3. Construir la UI
     ui_components = faceswap_ui.build_faceswap_ui()

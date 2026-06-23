@@ -62,10 +62,10 @@ class LocalImagineService:
         self,
         image: Image.Image,
         instruction: str,
-        face_preserve: bool = True,
         enhance_faces: bool = False,
         num_steps: Optional[int] = None,
         guidance: Optional[float] = None,
+        quality_mode: bool = False,
     ) -> Tuple[Optional[Image.Image], str]:
         """
         Edición / generación estilo Imagine.
@@ -73,7 +73,6 @@ class LocalImagineService:
         Args:
             image: Imagen de entrada (referencia visual)
             instruction: Instrucción natural ("undress her", "ponle ropa cyberpunk", etc)
-            face_preserve: Intentar preservar identidad facial (usa FacePreserver)
             ...
 
         Returns:
@@ -82,18 +81,19 @@ class LocalImagineService:
         if image is None:
             return None, "No se proporcionó imagen"
 
+        quality_mode = bool(quality_mode)
         instruction = (instruction or "").strip()
-        if not instruction:
-            return None, "Instrucción vacía"
+        if not quality_mode and not instruction:
+            return None, "Instrucción vacía (o activa quality_mode)"
 
-        # Traducción al estilo Imagine (Google + fallbacks)
-        prompt = translate_prompt(instruction)
-
-        # Para LongCat usamos un prefijo especial observado en logs ("Instruction: ...")
-        if self.engine in ("longcat", "longcat_full"):
-            final_prompt = f"Instruction: {prompt}"
+        if quality_mode:
+            final_prompt = ""
         else:
-            final_prompt = prompt
+            prompt = translate_prompt(instruction)
+            if self.engine in ("longcat", "longcat_full"):
+                final_prompt = f"Instruction: {prompt}"
+            else:
+                final_prompt = prompt
 
         mgr = self._get_manager()
 
@@ -104,11 +104,11 @@ class LocalImagineService:
                 image=image,
                 prompt=final_prompt,
                 engine=self.engine,
-                face_preserve=face_preserve,
-                use_rewriter=True,
+                use_rewriter=not quality_mode,
                 enhance_faces=enhance_faces,
                 num_inference_steps=num_steps,
                 guidance_scale=guidance,
+                quality_mode=quality_mode,
             )
             if result:
                 return result, f"[Imagine Local - {self.engine}] {msg}"
@@ -139,7 +139,6 @@ class LocalImagineService:
             image=placeholder,
             prompt=f"Instruction: {prompt}" if "longcat" in self.engine else prompt,
             engine="hart",
-            face_preserve=False,
             use_rewriter=False,
         )
         return result, msg

@@ -307,6 +307,8 @@ def wire_events(ui_comp):
     """Conecta los componentes con la lógica"""
     _log("[TEST_CONSOLE] wire_events() llamado - _write_console funciona desde aqui")
 
+    logic.apply_optimal_faceswap_defaults()
+
     # Warmup: precargar FaceAnalysis al iniciar la pestaña
     try:
         _warmup_face_analyser_async()
@@ -695,8 +697,13 @@ def on_target_page_change(delta):
 
 async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer):
     from ui.tabs.faceswap.logic import start_swap
-    # Configurar enhancer_blend_factor en globals antes del procesamiento
     roop.globals.enhancer_blend_factor = enhancer_blend
+    roop.globals.blend_ratio = blend
+    roop.globals.distance_threshold = dist
+    roop.globals.selected_enhancer = enhancer or 'GFPGAN'
+    roop.globals.use_enhancer = enhancer not in (None, "", "None")
+    roop.globals.autorotate_faces = auto_rot
+    roop.globals.temporal_smoothing = temp_smooth
     gen = start_swap(enhancer=enhancer, keep_frames=False, wait_after_extraction=False, skip_audio=False, face_distance=dist, blend_ratio=blend, blend_mode="blend", selected_mask_engine="None", processing_method="Inswapper 128", no_face_action="skip", vr_mode=False, use_single_source_all=False, autorotate=auto_rot, temporal_smoothing=temp_smooth, num_swap_steps=1, imagemask=None)
     for value in gen:
         yield value

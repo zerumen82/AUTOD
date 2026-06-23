@@ -4,7 +4,7 @@
     "explicit": true,
     "nsfw_tags": "rating_explicit",
     "multi_subject": true,
-    "steps": 30,
+    "steps": 32,
     "cfg": 5.0,
     "auto_lora_candidates": ["nsfw-xl-2.1.safetensors", "NsfwPovAllInOneLoraSdxl-000009.safetensors"],
     "auto_lora_strength": 0.55,
@@ -28,7 +28,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, comic, illustration, 3d render, cgi, oversaturated, low quality, worst quality, monochrome, ugly, deformed, disfigured",
     "prefix": "realistic, sharp focus, highly detailed skin, ",
-    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, "
+    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
   },
   "talmendo_xl": {
     "name": "TalmendoXL V1.1",
@@ -43,7 +44,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, comic, illustration, 3d render, cgi, low quality, deformed, disfigured",
     "prefix": "realistic, sharp focus, ",
-    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, "
+    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
   },
   "lazy_nsfw": {
     "name": "Realistic Lazy Mix",
@@ -58,7 +60,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
     "prefix": "realistic, sharp focus, ",
-    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, "
+    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
   },
   "nova_nsfw": {
     "name": "Nova Illustrous",
@@ -71,9 +74,10 @@
     "auto_lora_strength": 0.45,
     "sampler": "dpmpp_sde_gpu",
     "scheduler": "karras",
-    "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, 3d render, oversaturated, floating penis, disembodied penis, detached penis, penis only, genitals only, floating limbs, disembodied body parts, solo, alone, single person",
-    "prefix": "masterpiece, best quality, ",
-    "prefix_compact": "realistic, sharp focus, "
+    "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, illustration, 3d render, oversaturated, floating penis, disembodied penis, detached penis, penis only, genitals only, floating limbs, disembodied body parts, solo, alone, single person, plastic skin, doll",
+    "prefix": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy, natural proportions"
   },
   "realvis_xl": {
     "name": "RealVisXL V5.0 Lightning",
@@ -99,7 +103,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, comic, illustration, 3d render, cgi, oversaturated, low quality, worst quality, deformed, disfigured",
     "prefix": "photorealistic, RAW photo, realistic, sharp focus, ",
-    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, "
+    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
   },
   "juggernaut_xl": {
     "name": "Juggernaut XL Ragnarok",
@@ -114,7 +119,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, comic, illustration, 3d render, cgi, low quality, deformed, disfigured",
     "prefix": "photorealistic, RAW photo, realistic, sharp focus, ",
-    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, "
+    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
   },
   "cyberrealistic_pony": {
     "name": "CyberRealistic Pony v1.8",
@@ -129,7 +135,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, score_6, score_5, score_4, cartoon, anime, manga, comic, illustration, 3d render, cgi, low quality, deformed, disfigured",
     "prefix": "score_9, score_8_up, score_7_up, rating_explicit, ",
-    "prefix_compact": "score_9, score_8_up, score_7_up, rating_explicit, "
+    "prefix_compact": "score_9, score_8_up, score_7_up, rating_explicit, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
   },
   "helloworld_xl": {
     "name": "HelloWorld XL 7.0",
@@ -144,7 +151,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, 3d render, cgi, low quality, deformed, disfigured",
     "prefix": "photorealistic, RAW photo, realistic, sharp focus, ",
-    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, "
+    "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
   },
   "realism_engine": {
     "name": "Realism Engine Reprise V4",

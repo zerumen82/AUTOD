@@ -18,6 +18,21 @@ import roop.face_util as face_util
 # Funciones de Utilidad y Lógica
 # ============================================================
 
+def apply_optimal_faceswap_defaults():
+    """Calidad + parecido source sin tocar ajustes expertos."""
+    roop.globals.blend_ratio = 1.0
+    roop.globals.distance_threshold = 0.20
+    roop.globals.face_swap_mode = 'selected_faces'
+    roop.globals.selected_enhancer = 'GFPGAN'
+    roop.globals.use_enhancer = True
+    roop.globals.enhancer_blend_factor = 0.92
+    roop.globals.color_match_strength = 0.08
+    roop.globals.brightness_strength = 0.15
+    roop.globals.autorotate_faces = True
+    roop.globals.temporal_smoothing = True
+    roop.globals.preserve_mouth_expression = True
+
+
 def get_metrics_html(percent, processed, total, time_elapsed, time_remaining, status):
     """Genera HTML de métricas profesional para FaceSwap"""
     bar_color = "linear-gradient(90deg, #3b82f6, #10b981)" if status != "Error" else "linear-gradient(90deg, #ef4444, #f59e0b)"
@@ -377,6 +392,7 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
     if not getattr(roop.globals, 'face_swap_mode', None):
         roop.globals.face_swap_mode = 'selected_faces'
     roop.globals.selected_enhancer = enhancer if enhancer else "None"
+    roop.globals.use_enhancer = enhancer not in (None, "", "None")
     roop.globals.distance_threshold = face_distance
     roop.globals.blend_ratio = blend_ratio
     roop.globals.blend_mode = blend_mode

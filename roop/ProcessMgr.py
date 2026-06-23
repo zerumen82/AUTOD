@@ -1,5 +1,5 @@
 print("\n" + "="*60)
-print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.75 — DNA 1.0 + enhancer 0.70 + mouth 0.70 <<<")
+print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.77 — close-up source boost + mouth composite <<<")
 print(">>> (256px, Occlusion-Locked, Depth-Color, Hyper-Sharp, XSeg-PRO) <<<")
 print("="*60 + "\n")
 
@@ -375,18 +375,9 @@ class ProcessMgr:
                         lf.write(f"[PROC_FRAME] SIN valid_faces - return frame\n")
                     return frame
 
-            # ============================================
-            # MODO SMART-QUALITY v4.9.6: AJUSTES BLINDADOS
-            # ============================================
-            # Respetamos la selección de cara del usuario (UI)
-            # pero forzamos la máxima calidad en el procesamiento
+            # Calidad/identidad: globals + _process_face_swap_v21 (enhancer_blend_factor, GFPGAN, etc.)
             face_swap_mode = getattr(self.options, 'face_swap_mode', 'selected')
-            use_enhancer = True # Forzar siempre ON
-            enhancer_blend = 0.85 # Parecido máximo
-            preserve_mouth = True # Gestos naturales
-            color_match_strength = 0.50 
-            identity_dna_injection = 0.95
-            
+
             video_path = getattr(self.options, 'current_video_path', None) or file_path
             is_real_video = getattr(self.options, 'current_video_path', None) is not None
             self._current_video_key = f"video_{os.path.basename(video_path)}" if video_path else "frame"
@@ -1497,6 +1488,51 @@ class ProcessMgr:
         # v5.1: Relaxed y_ratio (0.30 -> 0.45) to avoid false profile detection on tilted faces
         return eye_ratio < 0.22 or eye_y_ratio > 0.45
 
+    @staticmethod
+    def _source_identity_params(is_profile: bool = False, is_closeup: bool = False):
+        """
+        Mapea ajustes UI/globals hacia máximo parecido source.
+        Slider enhancer alto (0.85-0.95) = poca mezcla GFPGAN = más identidad cruda del swap.
+        """
+        ui_identity = float(getattr(roop.globals, 'enhancer_blend_factor', 0.92))
+        gfpgan_mix = float(np.clip(1.0 - ui_identity, 0.08, 0.55))
+        if is_closeup:
+            gfpgan_mix = min(gfpgan_mix, 0.32)
+        base_cm = float(getattr(roop.globals, 'color_match_strength', 0.10))
+        color_match = min(0.16, base_cm * 1.25) if is_profile else base_cm
+        if is_closeup:
+            color_match *= 0.65
+        brightness = float(getattr(roop.globals, 'brightness_strength', 0.15))
+        return gfpgan_mix, color_match, brightness
+
+    @staticmethod
+    def _is_closeup_face(bbox, frame_shape) -> bool:
+        """Primer plano: cara ocupa mucho del frame (close-up / talking head)."""
+        try:
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            fh, fw = frame_shape[:2]
+            face_h = max(1, y2 - y1)
+            face_w = max(1, x2 - x1)
+            area_ratio = (face_h * face_w) / float(max(1, fh * fw))
+            return area_ratio > 0.07 or face_h / float(fh) > 0.20
+        except Exception:
+            return False
+
+    @staticmethod
+    def _masked_temporal_blend(current, previous, mask, alpha):
+        """Mezcla temporal solo dentro de la máscara facial (evita blur en todo el frame)."""
+        if previous is None or alpha <= 0.001:
+            return current
+        if previous.shape != current.shape:
+            return current
+        alpha = float(np.clip(alpha, 0.0, 0.55))
+        m = np.clip(mask.astype(np.float32), 0.0, 1.0)
+        if m.max() < 0.01:
+            return current
+        m3 = cv2.merge([m, m, m])
+        blended = current.astype(np.float32) * (1.0 - alpha) + previous.astype(np.float32) * alpha
+        return (current.astype(np.float32) * (1.0 - m3) + blended * m3).astype(np.uint8)
+
     def _process_face_swap_v21(self, source_face, target_face, result_frame, original_frame, enable_temporal_smoothing=False):
         ProcessMgr._swap_call_count += 1
         call_num = ProcessMgr._swap_call_count
@@ -1631,6 +1667,9 @@ class ProcessMgr:
             mouth_region = None
             mouth_open_ratio = 0.0
 
+            bx1, by1, bx2, by2 = target_face.bbox
+            is_closeup = self._is_closeup_face(target_face.bbox, original_frame.shape)
+
             if preserve_mouth:
                 try:
                     from roop.processors.FaceSwap import detect_mouth_open, create_mouth_preservation_mask
@@ -1638,22 +1677,35 @@ class ProcessMgr:
                     mouth_open = False
                 else:
                     landmarks_106 = getattr(target_face, 'landmark_106', None)
-                    mouth_open, mouth_region, mouth_open_ratio = detect_mouth_open(target_face, landmarks_106, result_frame)
+                    # MediaPipe más fiable en crop facial (especialmente primeros planos)
+                    mouth_probe = original_frame
+                    if is_closeup:
+                        pad = int(max(12, (by2 - by1) * 0.15))
+                        cx1, cy1 = max(0, int(bx1) - pad), max(0, int(by1) - pad)
+                        cx2, cy2 = min(original_frame.shape[1], int(bx2) + pad), min(original_frame.shape[0], int(by2) + pad)
+                        if cx2 > cx1 and cy2 > cy1:
+                            mouth_probe = original_frame[cy1:cy2, cx1:cx2]
+                    mouth_open, mouth_region, mouth_open_ratio = detect_mouth_open(
+                        target_face, landmarks_106, mouth_probe,
+                    )
                     
                     # Histeresis temporal para evitar parpadeo de apertura/cierre
                     video_key = getattr(self, '_current_video_key', 'default')
                     if not hasattr(self, '_mouth_state_history'): self._mouth_state_history = {}
                     prev_state = self._mouth_state_history.get(video_key, False)
                     
-                    # v5.3: Umbral dinámico con histeresis — preservar boca incluso con apertura leve
-                    thresh = 0.30 if is_profile else (0.05 if prev_state else 0.15)
+                    # v5.77: Umbral más sensible en close-up (habla / micro-movimientos labiales)
+                    if is_closeup:
+                        thresh = 0.24 if is_profile else (0.06 if prev_state else 0.09)
+                    else:
+                        thresh = 0.30 if is_profile else (0.05 if prev_state else 0.15)
                     if is_profile:
                         mouth_open_ratio = min(mouth_open_ratio, 0.5)
                     mouth_open = mouth_open_ratio > thresh
                     self._mouth_state_history[video_key] = mouth_open
                     
                     if mouth_open:
-                        print(f"[MOUTH_PRESERVE] Frame {call_num}: Boca abierta (ratio={mouth_open_ratio:.2f})")
+                        print(f"[MOUTH_PRESERVE] Frame {call_num}: Boca activa (ratio={mouth_open_ratio:.2f}, closeup={is_closeup})")
 
             # ============================================
             # 5. COORDENADAS FINALES (v3.5)
@@ -1668,10 +1720,18 @@ class ProcessMgr:
             # v5.59: Skip-swap solo para tracking extremadamente malo — det_score < 0.05 + velocity > 100px
             det_score = getattr(target_face, 'det_score', 1.0)
             velocity = getattr(self, '_last_velocity', 0)
+            is_ghost = getattr(target_face, 'is_ghost', False)
+            lost_count = getattr(self, f'_tracking_lost_count_{video_basename}', 0)
+
+            # Tracking muy perdido: no hacer swap fantasma (evita cara borrosa fuera de sitio)
+            if is_ghost and lost_count >= 10:
+                if call_num % 30 == 1:
+                    print(f"[TRACK] Frame {call_num}: ghost lost={lost_count} → frame original sin swap")
+                return original_frame
+
             if det_score < 0.05 and velocity > 100:
-                if enable_temporal_smoothing and prev_frame_result is not None:
+                if call_num % 30 == 1:
                     print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
-                    return prev_frame_result
                 return original_frame
 
             # ============================================
@@ -1699,8 +1759,6 @@ class ProcessMgr:
             if res_data is None:
                 with open(os.path.join(os.path.dirname(__file__), '..', 'debug_swap.log'), 'a') as lf:
                     lf.write(f"[SWAP_FAIL] Frame {call_num}: FaceSwap devolvió None\n")
-                if enable_temporal_smoothing and prev_frame_result is not None:
-                    return prev_frame_result
                 return original_frame
             
             # res_data puede ser (swapped_face, M) o solo swapped_face
@@ -1739,14 +1797,22 @@ class ProcessMgr:
             # v5.0: Respetar el Blend Ratio del usuario (UI) para la intensidad total
             user_blend = getattr(self.options, 'blend_ratio', 1.0)
             
-            use_enhancer = True # Forzar siempre ON
-            selected_enhancer = "GFPGAN" # Forzar el mejor
-            # v5.72: enhancer_blend 0.70, Master Embedding single-best
-            enhancer_blend = 0.70
-            preserve_mouth = True # Evitar borrar gestos
+            use_enhancer = getattr(roop.globals, 'use_enhancer', True)
+            selected_enhancer = getattr(roop.globals, 'selected_enhancer', 'GFPGAN') or 'GFPGAN'
+            gfpgan_mix, color_match_strength, brightness_strength = self._source_identity_params(
+                is_profile=is_profile, is_closeup=is_closeup,
+            )
+            preserve_mouth = getattr(roop.globals, 'preserve_mouth_expression', True)
             
-            enhancer_key = next((k for k in ["enhance_gfpgan", "enhance_codeformer", "enhance_restoreformer"] if k in self.processors), None)
-            if enhancer_key is not None:
+            enh_map = {
+                "GFPGAN": "enhance_gfpgan",
+                "CodeFormer": "enhance_codeformer",
+                "Restoreformer++": "enhance_restoreformer",
+            }
+            enhancer_key = enh_map.get(selected_enhancer)
+            if enhancer_key and enhancer_key not in self.processors:
+                enhancer_key = next((k for k in ["enhance_gfpgan", "enhance_codeformer", "enhance_restoreformer"] if k in self.processors), None)
+            if use_enhancer and enhancer_key is not None:
                 # v5.66: Saltar enhancer en perfiles de baja detección (evita alucinaciones GFPGAN)
                 det_score_enh = getattr(target_face, 'det_score', 1.0)
                 skip_enhancer = is_profile and det_score_enh < 0.45
@@ -1773,25 +1839,26 @@ class ProcessMgr:
                                     enhanced = cv2.addWeighted(enhanced, enh_ema_alpha, prev_enh, 1.0 - enh_ema_alpha, 0)
                                 self._enhancer_ema[video_key] = enhanced.copy()
                             
-                            # v5.60: Radial GFPGAN fade mejorado (radio 60->75) — centro 100% GFPGAN, bordes raw
+                            # v5.77: GFPGAN solo en núcleo; bordes y centro priorizan swap crudo (source)
                             h_f, w_f = enhanced.shape[:2]
                             Y_f, X_f = np.ogrid[:h_f, :w_f]
                             center_f = (w_f / 2, h_f / 2)
                             dist_f = np.sqrt((X_f - center_f[0])**2 + (Y_f - center_f[1])**2)
-                            fade = 1.0 - 1.0 / (1.0 + np.exp(-0.10 * (dist_f - 75.0)))
+                            fade_radius = 52 if is_closeup else 58
+                            fade = 1.0 - 1.0 / (1.0 + np.exp(-0.12 * (dist_f - fade_radius)))
                             fade_3ch = np.stack([fade, fade, fade], axis=-1).astype(np.float32)
-                            alpha = enhancer_blend * fade_3ch
+                            alpha = gfpgan_mix * fade_3ch
                             blended_face = enhanced.astype(np.float32) * alpha + swapped_face_aligned.astype(np.float32) * (1.0 - alpha)
                             swapped_face_aligned = np.clip(blended_face, 0, 255).astype(np.uint8)
                             
                             if call_num <= 3:
                                 cv2.imwrite(os.path.join(debug_dir, f'02_after_enhancer_f{call_num}.png'), swapped_face_aligned)
                             
-                            # v5.73: Unsharp sigma 1.0 + amount 2.5 (MODERATE)
+                            unsharp_amt = 1.8 if is_closeup else 2.0
                             blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), 1.0)
-                            swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, 2.5, blurred, -1.5, 0)
+                            swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, unsharp_amt, blurred, -(unsharp_amt - 1.0), 0)
                             if call_num % 50 == 1:
-                                print(f"[QUALITY] Enhancer ({enhancer_blend:.2f}) + unsharp mask (v5.75)")
+                                print(f"[QUALITY] Source-first GFPGAN mix={gfpgan_mix:.2f} color={color_match_strength:.2f} unsharp={unsharp_amt:.1f}")
                     except Exception as e:
                         print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -1807,9 +1874,7 @@ class ProcessMgr:
                 reference_region = original_frame[y1:y2, x1:x2].copy()
                 reference_region = cv2.resize(reference_region, (w_align, h_align))
 
-            # Estabilización de Brillo EMA
-            # v5.45: Brillo matching fortalecido 0.20→0.25 para mejor integración con color_match_strength 0.30/0.35
-            brightness_strength = 0.25
+            # Estabilización de Brillo EMA (baja = más tono del swap/source)
             if enable_temporal_smoothing and video_key:
                 if not hasattr(self, '_brightness_ema'): self._brightness_ema = {}
                 prev_bright = self._brightness_ema.get(video_key, 1.0)
@@ -1825,16 +1890,15 @@ class ProcessMgr:
                 face_lab[:, :, 0] = np.clip(face_lab[:, :, 0] * adj, 0, 255)
                 swapped_face_aligned = cv2.cvtColor(face_lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
 
-            # v5.61: Color matching equilibrado (0.15 frontal, 0.25 perfil) para preservar parecido
-            color_match_strength = 0.25 if is_profile else 0.15
             swapped_face_aligned = match_color_histogram(swapped_face_aligned, reference_region, blend_factor=color_match_strength)
 
             if enable_temporal_smoothing and video_key:
                 if not hasattr(self, '_color_ema'): self._color_ema = {}
                 prev_color = self._color_ema.get(video_key)
                 if prev_color is not None and prev_color.shape == swapped_face_aligned.shape:
-                    # v5.65: Color EMA instant-photon (0.95 nuevo) para cero lag lumínico
-                    color_ema_alpha = 0.95 if user_blend >= 0.95 else 0.88
+                    # Menos EMA de color = menos tirón hacia frames target anteriores
+                    ui_identity = float(getattr(roop.globals, 'enhancer_blend_factor', 0.92))
+                    color_ema_alpha = 0.72 if ui_identity >= 0.85 else 0.80
                     swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, color_ema_alpha, prev_color, 1.0 - color_ema_alpha, 0)
                 self._color_ema[video_key] = swapped_face_aligned
 
@@ -2043,7 +2107,6 @@ class ProcessMgr:
             
             # Atenuación por perfil, velocidad o "ghosting"
             velocity = getattr(self, '_last_velocity', 0)
-            is_ghost = getattr(target_face, 'is_ghost', False)
             
             # v5.1.4: Bloquear swap_weight a 1.0 si el usuario lo pide (máxima potencia)
             swap_weight = 1.0 if user_blend >= 0.98 else user_blend
@@ -2066,27 +2129,25 @@ class ProcessMgr:
             result_frame = (warped_face.astype(np.float32) * mask_3ch + 
                            original_frame.astype(np.float32) * (1.0 - mask_3ch)).astype(np.uint8)
 
-            # v5.2.3: Estabilización de GHOST (Si el tracking falla, mezclar con el frame anterior)
-            if is_ghost and enable_temporal_smoothing and prev_frame_result is not None:
-                if prev_frame_result.shape == result_frame.shape:
-                    # Mezcla temporal 50/50 para ocultar saltos de alineación en predicción
-                    result_frame = cv2.addWeighted(result_frame, 0.5, prev_frame_result, 0.5, 0)
-
-            # v5.50: EMA con congelamiento progresivo según calidad de tracking
+            # v5.76: Suavizado temporal SOLO en máscara facial (nunca en todo el frame)
             if enable_temporal_smoothing and prev_frame_result is not None:
                 if prev_frame_result.shape == result_frame.shape:
                     det_score = getattr(target_face, 'det_score', 1.0)
-                    if det_score < 0.3:
-                        alpha_prev = 0.85  # congelamiento parcial — 15% del swap nuevo
+                    if is_ghost:
+                        alpha_prev = min(0.20, 0.08 + lost_count * 0.01)
+                    elif det_score < 0.3:
+                        alpha_prev = 0.35
                     elif det_score < 0.4:
-                        alpha_prev = 0.75  # casi congelar
+                        alpha_prev = 0.28
                     elif det_score < 0.6:
-                        alpha_prev = 0.40 if is_profile else 0.30
+                        alpha_prev = 0.22 if is_profile else 0.18
                     else:
-                        alpha_prev = 0.25 if is_profile else 0.15
-                    result_frame = cv2.addWeighted(result_frame, 1.0 - alpha_prev, prev_frame_result, alpha_prev, 0)
+                        alpha_prev = 0.15 if is_profile else 0.10
+                    result_frame = self._masked_temporal_blend(
+                        result_frame, prev_frame_result, final_mask, alpha_prev,
+                    )
                     if call_num % 50 == 1:
-                        print(f"[QUALITY] EMA v5.59 (det_score={det_score:.2f}, alpha_prev={alpha_prev:.2f})")
+                        print(f"[QUALITY] EMA masked v5.76 (ghost={is_ghost}, det={det_score:.2f}, alpha={alpha_prev:.2f})")
 
             if call_num <= 3:
                 cv2.imwrite(os.path.join(debug_dir, f'04_final_result_f{call_num}.png'), result_frame)
