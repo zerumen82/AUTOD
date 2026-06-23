@@ -46,31 +46,41 @@ def _progress_html_from_prog(prog: dict, detail: str = "") -> str:
     )
 
 
-def preview_semantic(user_prompt, engine_val, quality_mode_val):
+ENHANCE_TIER_LABELS = {
+    "hd": "HD (~1920px lado largo, 2×)",
+    "4k": "4K (~3840px, multi-upscale)",
+    "8k": "8K (~7680px máx., multi-upscale)",
+}
+
+
+def preview_semantic(user_prompt, engine_val, quality_mode_val, enhance_tier_val):
     """Preview ligero: magnitud, target y params estimados (sin vision models)."""
     try:
         mgr = get_img_editor_manager()
         engine_val = engine_val or "imagine"
 
         if quality_mode_val:
+            tier = (enhance_tier_val or "hd").lower()
             analysis = {
                 "magnitude": 0.35,
                 "mask_target": "subject",
                 "is_global": True,
                 "quality_only": True,
+                "enhance_tier": tier,
             }
             params = mgr.auto_detect_params(analysis, engine_val)
+            tier_label = ENHANCE_TIER_LABELS.get(tier, tier)
             return f"""
             <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px;font-size:12px;">
-                <div style="color:#22d3ee;font-weight:bold;margin-bottom:8px;">Modo mejora de calidad</div>
+                <div style="color:#22d3ee;font-weight:bold;margin-bottom:8px;">Modo solo mejorar imagen</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;color:#cbd5e1;">
-                    <div><span style="color:#64748b;">Motor:</span> <b>LongCat Full + ESRGAN 2x + nitidez</b></div>
-                    <div><span style="color:#64748b;">Modo:</span> <b>Solo calidad (preserva todo)</b></div>
-                    <div><span style="color:#64748b;">Denoise:</span> <b>{params['denoise']:.2f}</b></div>
+                    <div><span style="color:#64748b;">Nivel:</span> <b>{tier_label}</b></div>
+                    <div><span style="color:#64748b;">Motor:</span> <b>LongCat Full + ESRGAN + nitidez</b></div>
+                    <div><span style="color:#64748b;">Post:</span> <b>Desposterizar + ultra realista</b></div>
                     <div><span style="color:#64748b;">Pasos:</span> <b>{params['num_inference_steps']}</b></div>
                 </div>
                 <div style="color:#94a3b8;margin-top:8px;font-size:11px;">
-                    Sin instrucción de usuario — mejora fotográfica automática (nitidez, textura, color).
+                    Opción UI explícita — no lee palabras del prompt. Sube la foto, elige nivel y TRANSFORMAR.
                 </div>
             </div>
             """
@@ -90,7 +100,7 @@ def preview_semantic(user_prompt, engine_val, quality_mode_val):
             "quality_only": False,
         }
         params = mgr.auto_detect_params(analysis, engine_val)
-        longcat_mode = "LongCat Full (auto)" if (engine_val == "imagine" and mag >= 0.68) else (
+        longcat_mode = "LongCat Full (auto)" if (engine_val == "imagine" and mag >= 0.62) else (
             "LongCat Turbo" if engine_val in ("imagine", "longcat") else engine_val
         )
         edit_mode = "Global" if mag > 0.6 else ("Máscara ropa" if target in ("clothes", "subject") and mag >= 0.45 else "Máscara/parcial")
@@ -119,11 +129,12 @@ def preview_semantic(user_prompt, engine_val, quality_mode_val):
 
 
 def on_quality_mode_change(enabled):
-    """Deshabilita prompt y análisis semántico cuando el modo calidad está activo."""
+    """Modo solo-mejorar: desactiva prompt/análisis; activa selector de nivel."""
     if enabled:
         return (
-            gr.update(interactive=False, placeholder="Desactivado — modo mejora de calidad activo"),
+            gr.update(interactive=False, placeholder="Desactivado — activaste «Solo mejorar imagen»"),
             gr.update(interactive=False, value=False),
+            gr.update(interactive=True),
         )
     return (
         gr.update(
@@ -131,10 +142,11 @@ def on_quality_mode_change(enabled):
             placeholder="Ej: desnuda y descalza, que estén bailando, cambia el fondo...",
         ),
         gr.update(interactive=True),
+        gr.update(interactive=False),
     )
 
 
-def on_generate(img_data, p_text, engine_val, use_ai_val, enhance_val, denoise_val, upscale_val, quality_mode_val):
+def on_generate(img_data, p_text, engine_val, use_ai_val, enhance_val, denoise_val, upscale_val, quality_mode_val, enhance_tier_val):
     global _is_generating
 
     if _is_generating:
@@ -144,7 +156,7 @@ def on_generate(img_data, p_text, engine_val, use_ai_val, enhance_val, denoise_v
     quality_mode_val = bool(quality_mode_val)
     p_text = (p_text or "").strip()
     if not quality_mode_val and not p_text:
-        yield None, "Escribe un prompt o activa «Modo mejora de calidad»", None
+        yield None, "Escribe un prompt o activa «Solo mejorar imagen» (upscale / ultra realista)", None
         return
     if img_data is None:
         yield None, "Sube una imagen", None
@@ -178,7 +190,8 @@ def on_generate(img_data, p_text, engine_val, use_ai_val, enhance_val, denoise_v
         global _is_generating
         try:
             _is_generating = True
-            progress_callback({"phase": "Analizando instrucción", "progress": 0.02, "elapsed": 0})
+            phase = "Mejorando imagen" if quality_mode_val else "Analizando instrucción"
+            progress_callback({"phase": phase, "progress": 0.02, "elapsed": 0})
 
             res_img, msg, mask_img = mgr.generate_intelligent(
                 image=img,
@@ -188,11 +201,12 @@ def on_generate(img_data, p_text, engine_val, use_ai_val, enhance_val, denoise_v
                 engine=engine_val,
                 enhance_faces=enhance_val,
                 lora_name=None,
-                lora_strength=None,
+                lora_strength=1.0,
                 denoise=denoise_val if denoise_val > 0 else None,
                 progress_callback=progress_callback,
                 auto_upscale=upscale_val,
                 quality_mode=quality_mode_val,
+                enhance_tier=enhance_tier_val or "hd",
             )
 
             if res_img:
@@ -285,11 +299,23 @@ def create_img_editor_tab():
             with gr.Column(scale=1):
                 input_img = gr.Image(label="Imagen de Entrada", type="pil", height=480)
 
-                quality_mode = gr.Checkbox(
-                    label="✨ Modo mejora de calidad",
-                    value=False,
-                    info="Mejora nitidez, textura y realismo sin instrucción. Desactiva el prompt.",
-                )
+                with gr.Group():
+                    quality_mode = gr.Checkbox(
+                        label="🖼️ Solo mejorar imagen (upscale + ultra realista)",
+                        value=False,
+                        info="Sin instrucción: desposterizar, nitidez, textura y realismo. Opción UI — no usa palabras del prompt.",
+                    )
+                    enhance_tier = gr.Dropdown(
+                        choices=[
+                            ("HD — 2× + nitidez (~1920px)", "hd"),
+                            ("4K — ~4× upscale + detalle", "4k"),
+                            ("8K — máximo upscale posible", "8k"),
+                        ],
+                        value="hd",
+                        label="Nivel de mejora",
+                        interactive=False,
+                        info="Activo cuando marcas «Solo mejorar imagen». En 8GB, 8K puede tardar más.",
+                    )
 
                 prompt = gr.Textbox(
                     label="¿Qué quieres cambiar?",
@@ -317,7 +343,7 @@ def create_img_editor_tab():
                         )
                     engine = gr.Dropdown(
                         choices=[
-                            ("✨ Grok Imagine (Turbo rápido; Full auto si mag≥0.68)", "imagine"),
+                            ("✨ Grok Imagine (Turbo rápido; Full auto si mag≥0.62)", "imagine"),
                             ("LongCat Turbo (rápido, ~1-2 min)", "longcat"),
                             ("LongCat Full (mejor instrucción, ~3-5 min)", "longcat_full"),
                             ("HART (Autoregressive)", "hart"),
@@ -331,9 +357,9 @@ def create_img_editor_tab():
                         label="Motor de Generación",
                     )
                     upscale_auto = gr.Checkbox(
-                        label="📐 Upscale 2× + nitidez post-edición",
-                        value=True,
-                        info="ESRGAN x2 + sharpen opcional tras ediciones normales. En modo calidad siempre activo.",
+                        label="📐 Upscale 2× tras edición con instrucción",
+                        value=False,
+                        info="Solo para ediciones normales (con prompt). «Solo mejorar imagen» ya incluye upscale según nivel.",
                     )
                     enhance_faces = gr.Checkbox(
                         label="🌟 Mejorar textura facial (CodeFormer suave)",
@@ -360,22 +386,23 @@ def create_img_editor_tab():
     quality_mode.change(
         on_quality_mode_change,
         inputs=[quality_mode],
-        outputs=[prompt, use_ai],
+        outputs=[prompt, use_ai, enhance_tier],
     )
 
     gen_btn.click(
         on_generate,
-        [input_img, prompt, engine, use_ai, enhance_faces, denoise, upscale_auto, quality_mode],
+        [input_img, prompt, engine, use_ai, enhance_faces, denoise, upscale_auto, quality_mode, enhance_tier],
         [output_img, status, mask_preview],
         concurrency_limit=None,
     )
 
-    btn_preview.click(preview_semantic, [prompt, engine, quality_mode], [status])
+    btn_preview.click(preview_semantic, [prompt, engine, quality_mode, enhance_tier], [status])
 
     return {
         "input_img": input_img,
         "prompt": prompt,
         "quality_mode": quality_mode,
+        "enhance_tier": enhance_tier,
         "gen_btn": gen_btn,
         "output_img": output_img,
         "status": status,

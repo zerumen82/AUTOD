@@ -66,6 +66,7 @@ class LocalImagineService:
         num_steps: Optional[int] = None,
         guidance: Optional[float] = None,
         quality_mode: bool = False,
+        enhance_tier: str = "hd",
     ) -> Tuple[Optional[Image.Image], str]:
         """
         Edición / generación estilo Imagine.
@@ -109,6 +110,7 @@ class LocalImagineService:
                 num_inference_steps=num_steps,
                 guidance_scale=guidance,
                 quality_mode=quality_mode,
+                enhance_tier=enhance_tier,
             )
             if result:
                 return result, f"[Imagine Local - {self.engine}] {msg}"

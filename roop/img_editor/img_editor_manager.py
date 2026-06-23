@@ -63,10 +63,11 @@ class ImgEditorManager:
         has_quality = bool(analysis.get("has_quality_request", False))
 
         if quality_only:
+            tier = str(analysis.get("enhance_tier", "hd")).lower()
             denoise = 0.30
-            steps = 32
+            steps = {"hd": 32, "4k": 34, "8k": 36}.get(tier, 32)
             guidance = 3.8
-            print(f"[ImgEditor] Modo CALIDAD (denoise bajo, preserva foto): denoise={denoise:.2f}")
+            print(f"[ImgEditor] Modo MEJORA UI tier={tier} (denoise bajo, preserva foto): denoise={denoise:.2f}")
             return {
                 "denoise": denoise,
                 "num_inference_steps": steps,
@@ -151,6 +152,7 @@ class ImgEditorManager:
         magnitude: float = 0.5,
         quality_only: bool = False,
         has_quality_request: bool = False,
+        enhance_tier: str = "hd",
     ) -> str:
         user_prompt = (user_prompt or "").strip()
         img_context = (img_context or "").strip()
@@ -161,14 +163,22 @@ class ImgEditorManager:
         if is_longcat:
             raw = (user_prompt or img_context or "").strip()
             if quality_only:
+                tier = (enhance_tier or "hd").lower()
+                detail = (
+                    "maximum micro-detail, pore-level skin texture, and print-ready clarity."
+                    if tier == "8k"
+                    else "high micro-detail, crisp edges, and print-ready clarity."
+                    if tier == "4k"
+                    else "sharp focus, natural colors, and hyperrealistic DSLR detail."
+                )
                 base = (
                     "Instruction: Edit this exact photo. "
                     "Keep identical composition, people, poses, clothing, background and scene. "
-                    "Only enhance photographic quality: ultra realistic RAW photograph, sharp focus, "
-                    "remove blur and noise, detailed skin texture and pores, natural colors, "
-                    "cinematic clarity, hyperrealistic DSLR detail."
+                    "Only enhance photographic quality: ultra realistic RAW photograph, "
+                    "remove blur, noise and pixelation, detailed skin texture, "
+                    f"cinematic clarity, {detail}"
                 )
-                print(f"[ImgEditor] Imagine/LongCat Prompt (UI quality mode): {base}")
+                print(f"[ImgEditor] Imagine/LongCat Prompt (UI enhance tier={tier}): {base}")
                 return base
 
             if magnitude > 0.75:
@@ -336,8 +346,9 @@ class ImgEditorManager:
         lora_strength: float = 1.0,
         denoise: float = None,
         progress_callback=None,
-        auto_upscale: bool = True,
+        auto_upscale: bool = False,
         quality_mode: bool = False,
+        enhance_tier: str = "hd",
     ) -> Tuple[Optional[Image.Image], str, Optional[Image.Image]]:
 
         if isinstance(image, Image.Image):
@@ -347,10 +358,13 @@ class ImgEditorManager:
 
         from roop.img_editor.prompt_translator import translate_prompt
         quality_only = bool(quality_mode)
+        enhance_tier = (enhance_tier or "hd").lower()
+        if enhance_tier not in ("hd", "4k", "8k"):
+            enhance_tier = "hd"
         if quality_only:
             prompt = ""
             use_rewriter = False
-            print("[ImgEditor] Modo mejora de calidad (UI) — prompt ignorado")
+            print(f"[ImgEditor] Modo mejora imagen (UI tier={enhance_tier}) — sin instrucción de prompt")
         else:
             prompt = translate_prompt((prompt or "").strip())
         negative_prompt = (negative_prompt or "").strip()
@@ -401,18 +415,14 @@ class ImgEditorManager:
             "is_global": is_global,
             "quality_only": quality_only,
             "has_quality_request": has_quality_request,
+            "enhance_tier": enhance_tier,
         }
 
         # 3. Resolución de Parámetros basada en el Análisis
         params = self.auto_detect_params(analysis, engine)
-        
-        prompt_enhanced = self._compose_generation_prompt(
-            prompt, img_context=img_description, engine=engine, magnitude=mag_suggested,
-            quality_only=quality_only, has_quality_request=has_quality_request,
-        )
         mask_target = str(analysis.get("mask_target", "subject")).lower()
         is_global = bool(analysis.get("is_global", False))
-        
+
         if num_inference_steps: params["num_inference_steps"] = num_inference_steps
         if guidance_scale: params["guidance_scale"] = guidance_scale
         if denoise: params["denoise"] = denoise
@@ -429,6 +439,7 @@ class ImgEditorManager:
         prompt_enhanced = self._compose_generation_prompt(
             prompt, img_context=img_description, engine=engine, magnitude=mag_suggested,
             quality_only=quality_only, has_quality_request=has_quality_request,
+            enhance_tier=enhance_tier,
         )
 
         mask_target = str(analysis.get("mask_target", "subject")).lower()
@@ -438,7 +449,7 @@ class ImgEditorManager:
         print(f"[ImgEditor] Target: {mask_target} (Global: {is_global})", flush=True)
         print(f"[ImgEditor] Prompt final: {prompt_enhanced}", flush=True)
         if quality_only:
-            print("[ImgEditor] Pipeline: LongCat Full (denoise bajo) + post upscale/nitidez")
+            print(f"[ImgEditor] Pipeline: LongCat Full + post-proceso tier={enhance_tier}")
         elif has_quality_request and mag_suggested > 0.6:
             print("[ImgEditor] Compound prompt detected (main change + quality/color polish)")
 
@@ -500,9 +511,9 @@ class ImgEditorManager:
                 if self.flux_klein_client is None: self.flux_klein_client = get_flux_edit_comfy_client()
                 client = self.flux_klein_client
                 # Full: mejor seguimiento de instrucción (CFG/denoise reales). Turbo: más rápido en 8GB.
-                if quality_only or (engine == "imagine" and mag_suggested >= 0.68):
+                if quality_only or (engine == "imagine" and mag_suggested >= 0.62):
                     version = "LongCat-Image-Edit-Q4_K_S.gguf"
-                    reason = "modo calidad (UI)" if quality_only else f"mag={mag_suggested:.2f}"
+                    reason = "modo calidad (UI)" if quality_only else f"mag={mag_suggested:.2f} (auto Full)"
                     print(f"[ImgEditor] {reason} → LongCat Full (denoise real, no Turbo)")
                 else:
                     version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
@@ -611,9 +622,11 @@ class ImgEditorManager:
                     result, fin_note = finisher.finish(
                         result,
                         upscale=True if quality_only else auto_upscale,
+                        enhance_tier=enhance_tier if quality_only else "hd",
                         sharpen_image=True,
                         denoise=quality_only,
                         ultra=quality_only,
+                        depixelize_image=quality_only,
                     )
                     msg = f"{msg} | {fin_note}" if fin_note else msg
                     print(f"[ImgEditor] Post-calidad: {fin_note}")

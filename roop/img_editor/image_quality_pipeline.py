@@ -39,19 +39,21 @@ class ImageQualityFinisher:
     def _bgr_to_pil(frame: np.ndarray) -> Image.Image:
         return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-    def _choose_scale(self, w: int, h: int, requested: int = 0) -> int:
+    TIER_MAX_SIDE = {"hd": 1920, "4k": 3840, "8k": 7680}
+
+    def _choose_scale(self, w: int, h: int, requested: int = 0, force: bool = False) -> int:
         if requested in (2, 4):
             return requested
+        if force:
+            return 2
         pixels = w * h
         if pixels >= 1_600_000:
             return 0
-        if max(w, h) >= 1400:
-            return 2
         return 2
 
-    def upscale(self, image: Image.Image, scale: int = 0) -> Tuple[Image.Image, str]:
+    def upscale(self, image: Image.Image, scale: int = 0, force: bool = False) -> Tuple[Image.Image, str]:
         w, h = image.size
-        use_scale = self._choose_scale(w, h, scale)
+        use_scale = self._choose_scale(w, h, scale, force=force)
         if use_scale == 0:
             return image, "upscale omitido (imagen ya grande)"
 
@@ -85,10 +87,54 @@ class ImageQualityFinisher:
         return Image.fromarray(cv2.cvtColor(np.clip(sharp, 0, 255).astype(np.uint8), cv2.COLOR_BGR2RGB))
 
     @staticmethod
-    def light_denoise(image: Image.Image) -> Image.Image:
+    def light_denoise(image: Image.Image, strength: str = "normal") -> Image.Image:
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
-        den = cv2.fastNlMeansDenoisingColored(bgr, None, 4, 4, 7, 21)
+        h = 6 if strength == "ultra" else 4
+        h_color = 6 if strength == "ultra" else 4
+        den = cv2.fastNlMeansDenoisingColored(bgr, None, h, h_color, 7, 21)
         return Image.fromarray(cv2.cvtColor(den, cv2.COLOR_BGR2RGB))
+
+    @staticmethod
+    def depixelize(image: Image.Image, tier: str = "hd") -> Image.Image:
+        """Suaviza bloques/pixelación preservando bordes (sin leer el prompt)."""
+        bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        if tier == "8k":
+            d, sc, ss = 11, 90, 90
+        elif tier == "4k":
+            d, sc, ss = 9, 70, 70
+        else:
+            d, sc, ss = 7, 55, 55
+        smooth = cv2.bilateralFilter(bgr, d, sc, ss)
+        return Image.fromarray(cv2.cvtColor(smooth, cv2.COLOR_BGR2RGB))
+
+    def upscale_to_tier(self, image: Image.Image, tier: str = "hd") -> Tuple[Image.Image, str]:
+        tier = (tier or "hd").lower()
+        target_side = self.TIER_MAX_SIDE.get(tier, 1920)
+        w, h = image.size
+        max_side = max(w, h)
+
+        if max_side >= int(target_side * 0.92):
+            return image, f"ya ~{tier.upper()} ({w}×{h})"
+
+        out = image
+        notes = []
+        max_passes = {"hd": 1, "4k": 2, "8k": 3}.get(tier, 1)
+
+        for i in range(max_passes):
+            if max(out.size) >= target_side:
+                break
+            out, up_note = self.upscale(out, scale=2, force=True)
+            notes.append(up_note or f"pass{i + 1}")
+
+        ow, oh = out.size
+        ms = max(ow, oh)
+        if ms > target_side:
+            ratio = target_side / float(ms)
+            nw, nh = max(1, int(ow * ratio)), max(1, int(oh * ratio))
+            out = out.resize((nw, nh), Image.LANCZOS)
+            notes.append(f"cap {tier}")
+
+        return out, f"upscale {tier.upper()} ({' → '.join(notes)})"
 
     def finish(
         self,
@@ -96,26 +142,37 @@ class ImageQualityFinisher:
         *,
         upscale: bool = True,
         upscale_scale: int = 0,
+        enhance_tier: str = "hd",
         sharpen_image: bool = True,
         denoise: bool = True,
         ultra: bool = False,
+        depixelize_image: bool = False,
     ) -> Tuple[Image.Image, str]:
         notes = []
         out = image
+        tier = (enhance_tier or "hd").lower()
+        ultra = ultra or tier in ("4k", "8k")
 
         if denoise:
-            out = self.light_denoise(out)
+            out = self.light_denoise(out, strength="ultra" if ultra else "normal")
             notes.append("denoise")
 
+        if depixelize_image or ultra:
+            out = self.depixelize(out, tier=tier)
+            notes.append("desposterizar")
+
         if upscale:
-            out, up_note = self.upscale(out, upscale_scale)
+            if ultra and tier in self.TIER_MAX_SIDE:
+                out, up_note = self.upscale_to_tier(out, tier)
+            else:
+                out, up_note = self.upscale(out, upscale_scale, force=bool(upscale_scale))
             if up_note:
                 notes.append(up_note)
 
         if sharpen_image:
-            amt = 1.55 if ultra else 1.35
+            amt = {"hd": 1.45, "4k": 1.58, "8k": 1.68}.get(tier, 1.55 if ultra else 1.35)
             out = self.sharpen(out, amount=amt)
-            notes.append("sharpen")
+            notes.append("nitidez")
 
         return out, " + ".join(notes) if notes else "sin post-proceso"
 
