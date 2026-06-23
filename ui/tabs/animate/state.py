@@ -2,7 +2,7 @@ import os
 import torch
 
 # Variables de estado para animación
-is_animating = False
+is_animating = False  # reset on app start; worker sets True/False per job
 current_video_path = None
 _animation_thread = None
 

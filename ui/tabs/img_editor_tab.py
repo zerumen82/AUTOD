@@ -110,7 +110,7 @@ def preview_semantic(user_prompt, engine_val, quality_mode_val):
                 Traducción: {translated[:120]}{'…' if len(translated) > 120 else ''}
             </div>
             <div style="color:#64748b;margin-top:6px;font-size:10px;">
-                Sin FacePreserver — LongCat mantiene parecido vía foto ref. Full (mag≥0.68) sigue mejor las instrucciones fuertes.
+                LongCat mantiene parecido vía foto ref. Full (mag≥0.68) para instrucciones fuertes. Sin FacePreserver ni rewriter LLM.
             </div>
         </div>
         """
@@ -119,7 +119,7 @@ def preview_semantic(user_prompt, engine_val, quality_mode_val):
 
 
 def on_quality_mode_change(enabled):
-    """Deshabilita prompt y rewriter cuando el modo calidad está activo."""
+    """Deshabilita prompt y análisis semántico cuando el modo calidad está activo."""
     if enabled:
         return (
             gr.update(interactive=False, placeholder="Desactivado — modo mejora de calidad activo"),
@@ -183,7 +183,8 @@ def on_generate(img_data, p_text, engine_val, use_ai_val, enhance_val, denoise_v
             res_img, msg, mask_img = mgr.generate_intelligent(
                 image=img,
                 prompt=p_text,
-                use_rewriter=use_ai_val,
+                use_rewriter=False,
+                use_semantic=use_ai_val,
                 engine=engine_val,
                 enhance_faces=enhance_val,
                 lora_name=None,
@@ -304,9 +305,9 @@ def create_img_editor_tab():
                 with gr.Accordion("⚙️ Opciones Avanzadas", open=False):
                     gr.Markdown("*Defaults optimizados — sube foto, escribe instrucción y TRANSFORMAR.*")
                     use_ai = gr.Checkbox(
-                        label="🧠 Análisis inteligente + rewriter",
+                        label="🧠 Análisis semántico local (auto params)",
                         value=True,
-                        info="Análisis local ligero. Rewriter LLM en instrucciones fuertes (mag>0.6).",
+                        info="Magnitud/target/denoise automáticos. Sin rewriter LLM.",
                     )
                     with gr.Row():
                         denoise = gr.Slider(

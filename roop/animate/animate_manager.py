@@ -88,10 +88,10 @@ class AnimateManager:
                 if base["frames"] > 81:
                     base["frames"] = 81
             elif engine == "framepack":
-                # Forzar 121 frames para 5 segundos a 24fps
-                base["frames"] = 121
-                if base["steps"] > 35:
-                    base["steps"] = 35
+                if base["frames"] > 49:
+                    base["frames"] = 49
+                if base["steps"] > 25:
+                    base["steps"] = 25
             else:
                 if base["frames"] > 33:
                     base["frames"] = 33
@@ -289,7 +289,7 @@ class AnimateManager:
     def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=33, fps=16,
                        face_stabilize=False, mask_image=None, mask_mode="global", mask_prompt="",
                        progress_callback=None, steps=None, cfg=None, autoregressive_chunks=1,
-                       lora_name=None, lora_strength=1.0):
+                       lora_name=None, lora_strength=1.0, add_mmaudio=False, audio_prompt=""):
         t0 = time.time()
         if image.mode != "RGB":
             image = image.convert("RGB")
@@ -324,7 +324,8 @@ class AnimateManager:
                     image_pil=image, prompt=final_prompt,
                     output_path=output_path, model="framepack",
                     frames=p["frames"], fps=p["fps"],
-                    steps=p["steps"], cfg=p["cfg"]
+                    steps=p["steps"], cfg=p["cfg"],
+                    progress_callback=progress_callback,
                 )
             elif engine == "wan_video" and autoregressive_chunks > 1:
                 print(f"[AnimateManager] Autoregressive mode: {autoregressive_chunks} chunks x {p['frames']} frames")
@@ -349,7 +350,8 @@ class AnimateManager:
                         output_path=chunk_path, model=engine,
                         frames=p["frames"], fps=p["fps"],
                         steps=p["steps"], cfg=p["cfg"],
-                        lora_name=lora_name, lora_strength=lora_strength
+                        lora_name=lora_name, lora_strength=lora_strength,
+                        progress_callback=progress_callback,
                     )
                     if not ok or not os.path.exists(chunk_path):
                         elapsed = time.time() - t0
@@ -375,14 +377,28 @@ class AnimateManager:
                     output_path=output_path, model=engine,
                     frames=p["frames"], fps=p["fps"],
                     steps=p["steps"], cfg=p["cfg"],
-                    lora_name=lora_name, lora_strength=lora_strength
+                    lora_name=lora_name, lora_strength=lora_strength,
+                    progress_callback=progress_callback,
                 )
             if ok and os.path.exists(output_path):
                 if face_stabilize:
                     self._emit_progress(progress_callback, "Estabilizando rostro...")
                     output_path = self.apply_face_stabilize(output_path, image)
+                audio_note = ""
+                if add_mmaudio:
+                    from roop.animate.mmaudio_client import add_audio_to_video, get_status_message
+                    if not get_status_message(check_comfy=True).startswith("MMAudio listo"):
+                        self._emit_progress(progress_callback, get_status_message(check_comfy=True))
+                    output_path, audio_msg = add_audio_to_video(
+                        output_path,
+                        sound_prompt=audio_prompt,
+                        motion_prompt=final_prompt,
+                        progress_callback=progress_callback,
+                    )
+                    if audio_msg:
+                        audio_note = f" | {audio_msg}"
                 elapsed = time.time() - t0
-                return output_path, f"OK ({elapsed:.0f}s)"
+                return output_path, f"OK ({elapsed:.0f}s){audio_note}"
             elapsed = time.time() - t0
             return None, f"Error en generación tras {elapsed:.0f}s"
         except Exception as e:

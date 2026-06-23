@@ -25,7 +25,7 @@ def apply_optimal_faceswap_defaults():
     roop.globals.face_swap_mode = 'selected_faces'
     roop.globals.selected_enhancer = 'GFPGAN'
     roop.globals.use_enhancer = True
-    roop.globals.enhancer_blend_factor = 0.92
+    roop.globals.enhancer_blend_factor = 0.94
     roop.globals.color_match_strength = 0.08
     roop.globals.brightness_strength = 0.15
     roop.globals.autorotate_faces = True

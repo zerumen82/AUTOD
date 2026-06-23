@@ -63,7 +63,8 @@ def suggest_motion_prompt(image):
         return "cinematic motion, natural flowing movement"
 
 
-def generate_grok_animation(image, prompt, stabilize=False, progress_callback=None, lora_name=None, lora_strength=1.0):
+def generate_grok_animation(image, prompt, stabilize=False, progress_callback=None, lora_name=None, lora_strength=1.0,
+                            add_mmaudio=False, audio_prompt=""):
     try:
         manager = get_animate_manager()
 
@@ -82,7 +83,9 @@ def generate_grok_animation(image, prompt, stabilize=False, progress_callback=No
             mask_prompt="",
             progress_callback=progress_callback,
             lora_name=lora_name,
-            lora_strength=lora_strength
+            lora_strength=lora_strength,
+            add_mmaudio=add_mmaudio,
+            audio_prompt=audio_prompt,
         )
 
         if video_path and os.path.exists(video_path):

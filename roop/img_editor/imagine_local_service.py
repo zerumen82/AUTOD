@@ -104,7 +104,7 @@ class LocalImagineService:
                 image=image,
                 prompt=final_prompt,
                 engine=self.engine,
-                use_rewriter=not quality_mode,
+                use_rewriter=False,
                 enhance_faces=enhance_faces,
                 num_inference_steps=num_steps,
                 guidance_scale=guidance,

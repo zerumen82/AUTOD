@@ -222,7 +222,7 @@ def build_faceswap_ui():
                         face_distance = gr.Slider(0.01, 1.0, value=0.20, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
                         blend_ratio = gr.Slider(0.0, 1.0, value=1.0, step=0.01, label="🎨 Mezcla de Piel (1.0 = máximo parecido source)")
                     with gr.Row():
-                        enhancer_blend = gr.Slider(0.0, 1.0, value=0.92, step=0.01, label="👤 Parecido Source (0.92 = óptimo, menos GFPGAN)")
+                        enhancer_blend = gr.Slider(0.0, 1.0, value=0.94, step=0.01, label="👤 Parecido Source (0.94 = máximo, menos GFPGAN)")
                     with gr.Row():
                         enhancer = gr.Dropdown(
                             choices=["None", "CodeFormer", "GFPGAN", "Restoreformer++"],

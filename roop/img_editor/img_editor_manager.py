@@ -60,6 +60,7 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         quality_only = bool(analysis.get("quality_only", False))
+        has_quality = bool(analysis.get("has_quality_request", False))
 
         if quality_only:
             denoise = 0.30
@@ -93,6 +94,8 @@ class ImgEditorManager:
             # Higher base + stronger scaling to allow full body/clothing changes (undress etc) while keeping photo.
             # Semantic + rewriter decide how much. Turbo forces full denoise anyway.
             denoise = 0.58 + (magnitude * 0.42)
+            if has_quality and magnitude > 0.6:
+                denoise = min(denoise, 0.82)
             denoise = min(denoise, 0.98)
             guidance = 2.8 if magnitude > 0.65 else 3.0
             # More steps for high mag to allow better following
@@ -123,6 +126,23 @@ class ImgEditorManager:
             "mode": "img2img"
         }
 
+    def _light_score(self, prompt_l: str, texts: list) -> float:
+        p_words = set(w for w in prompt_l.split() if len(w) > 2)
+        if not p_words:
+            return 0.0
+        best = 0.0
+        for t in texts:
+            t_words = set(w for w in t.lower().split() if len(w) > 2)
+            if t_words:
+                overlap = len(p_words & t_words) / max(len(t_words), 1)
+                for pw in p_words:
+                    for tw in t_words:
+                        if pw in tw or tw in pw:
+                            overlap += 0.08
+                            break
+                best = max(best, overlap)
+        return min(1.0, best)
+
     def _compose_generation_prompt(
         self,
         user_prompt: str,
@@ -130,6 +150,7 @@ class ImgEditorManager:
         engine: str = "",
         magnitude: float = 0.5,
         quality_only: bool = False,
+        has_quality_request: bool = False,
     ) -> str:
         user_prompt = (user_prompt or "").strip()
         img_context = (img_context or "").strip()
@@ -150,25 +171,26 @@ class ImgEditorManager:
                 print(f"[ImgEditor] Imagine/LongCat Prompt (UI quality mode): {base}")
                 return base
 
-            likeness = (
-                "Keep the same person, facial likeness, body proportions, camera angle, lighting and scene as the reference photo. "
-            )
             if magnitude > 0.75:
                 preservation = (
-                    f"Edit this exact photo. {likeness}"
-                    "Apply the instruction exactly as described, as strongly and completely as possible."
+                    "Edit this exact photo. Keep the face and identity. "
+                    "Transform the pose and body exactly as the instruction says, as strongly and completely as possible."
                 )
+                if has_quality_request:
+                    preservation += " Also improve colors, vibrance, sharpness, detail and overall photographic quality naturally."
                 base = f"Instruction: {raw}. {preservation}"
             elif magnitude > 0.6:
                 preservation = (
-                    f"Edit this exact photo. {likeness}"
+                    "Edit this exact photo. Keep the face, identity, lighting, background and overall scene. "
                     "Apply the requested change (including pose, clothing or body) exactly as described and as strongly as possible."
                 )
+                if has_quality_request:
+                    preservation += " Also enhance color, sharpness and image quality as part of the edit."
                 base = f"Instruction: {raw}. {preservation}"
             else:
                 preservation = (
-                    f"Edit this exact photo. {likeness}"
-                    "Apply only the requested change to the subject."
+                    "Edit this exact photo. Keep the face, identity, lighting, background and overall scene exactly the same. "
+                    "Apply the requested change to the subject (clothing, body, pose etc as needed)."
                 )
                 base = f"Instruction: {preservation} {raw}"
             print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
@@ -302,7 +324,8 @@ class ImgEditorManager:
         num_inference_steps: int = None,
         guidance_scale: float = None,
         seed: int = None,
-        use_rewriter: bool = True,
+        use_rewriter: bool = False,
+        use_semantic: bool = True,
         ref_metadata: dict = None,
         engine: str = "imagine",
         mask_image: Optional[Image.Image] = None,
@@ -345,7 +368,7 @@ class ImgEditorManager:
             mag_suggested = 0.35
             mask_target = "subject"
             is_global = True
-        else:
+        elif use_semantic:
             try:
                 nlp = self._get_semantic_analyzer(full_ai=False)
                 mag_suggested = nlp.get_magnitude(prompt)
@@ -357,6 +380,19 @@ class ImgEditorManager:
                 mag_suggested = 0.58
                 mask_target = "subject"
                 is_global = True
+        else:
+            mag_suggested = 0.58
+            mask_target = "subject"
+            is_global = True
+            print("[ImgEditor] Análisis semántico desactivado — params por defecto")
+
+        quality_anchors = [
+            "improve quality sharpness detail resolution clarity enhance deblur upscale",
+            "mejorar calidad nitidez detalle sharper mejorar color realzar ultra realista hiperrealista",
+            "better colors vibrant lighting higher detail photographic quality",
+        ]
+        prompt_lower = prompt.lower()
+        has_quality_request = self._light_score(prompt_lower, quality_anchors) > 0.03
 
         analysis = {
             "prompt": prompt,
@@ -364,6 +400,7 @@ class ImgEditorManager:
             "mask_target": mask_target,
             "is_global": is_global,
             "quality_only": quality_only,
+            "has_quality_request": has_quality_request,
         }
 
         # 3. Resolución de Parámetros basada en el Análisis
@@ -371,7 +408,7 @@ class ImgEditorManager:
         
         prompt_enhanced = self._compose_generation_prompt(
             prompt, img_context=img_description, engine=engine, magnitude=mag_suggested,
-            quality_only=quality_only,
+            quality_only=quality_only, has_quality_request=has_quality_request,
         )
         mask_target = str(analysis.get("mask_target", "subject")).lower()
         is_global = bool(analysis.get("is_global", False))
@@ -386,40 +423,14 @@ class ImgEditorManager:
                 "pixelated, washed out, oversmoothed, plastic skin"
             )
 
-        # NOTE: Negative clothing logic moved after rewriter so it can adapt to whether the user is asking
-        # to ADD clothes (e.g. "ropa raída con mangas") or REMOVE them. No hardcoding of intents.
+        has_quality_request = bool(analysis.get("has_quality_request")) or (self._light_score(prompt_lower, quality_anchors) > 0.03)
+        analysis["has_quality_request"] = has_quality_request
 
-        # For high mag, use rewriter to get a better, more detailed instruction (LLM understands intent better, no hardcode)
-        rewrote = False
-        if use_rewriter and mag_suggested > 0.6 and not quality_only:
-            try:
-                from .prompt_rewriter import get_prompt_rewriter
-                re = get_prompt_rewriter()
-                r = re.rewrite(prompt, image_context="", mode="img2img")
-                if 'prompt' in r and r['prompt']:
-                    prompt = r['prompt']
-                    rewrote = True
-                    print(f"[ImgEditor] Used rewriter for high mag prompt: {prompt[:80]}...")
-                if 'mask_target' in r and r['mask_target']:
-                    mask_target = r['mask_target'].lower()
-                    analysis['mask_target'] = mask_target
-                    print(f"[ImgEditor] Rewriter set target: {mask_target}")
-                if 'magnitude' in r:
-                    mag_suggested = float(r['magnitude'])
-                    analysis['magnitude'] = mag_suggested
-            except Exception as e:
-                print(f"[ImgEditor] Rewriter failed for high mag, using original: {e}")
-
-        # Re-compose (and refresh params) using the (possibly rewriter-improved) prompt + updated mag.
-        # This ensures the final sent prompt contains the clean rewritten instruction (e.g. "completely naked...").
-        if rewrote or mag_suggested != analysis.get("magnitude", mag_suggested):
-            params = self.auto_detect_params(analysis, engine)
         prompt_enhanced = self._compose_generation_prompt(
             prompt, img_context=img_description, engine=engine, magnitude=mag_suggested,
-            quality_only=quality_only,
+            quality_only=quality_only, has_quality_request=has_quality_request,
         )
 
-        # Refresh local views after possible rewriter + recompose
         mask_target = str(analysis.get("mask_target", "subject")).lower()
         is_global = bool(analysis.get("is_global", False))
         mag_suggested = float(analysis.get("magnitude", mag_suggested))
@@ -428,10 +439,12 @@ class ImgEditorManager:
         print(f"[ImgEditor] Prompt final: {prompt_enhanced}", flush=True)
         if quality_only:
             print("[ImgEditor] Pipeline: LongCat Full (denoise bajo) + post upscale/nitidez")
+        elif has_quality_request and mag_suggested > 0.6:
+            print("[ImgEditor] Compound prompt detected (main change + quality/color polish)")
 
         # No automatic anti-clothing negative anymore.
         # It was fighting requests like "ropa raída con mangas".
-        # Now we rely purely on the user's prompt + rewriter + "apply the change as strongly as possible".
+        # Prompt del usuario + análisis semántico local + preservación mag-dependent.
         # This way it adapts to ANY clothing request (add, modify, remove, specific style) without lists or hardcodes.
         # The semantic + preservation text is enough to guide the model.
 

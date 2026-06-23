@@ -72,6 +72,28 @@ def build_animate_ui():
                     info="Aplica restauración facial frame a frame al final (alarga el proceso)"
                 )
 
+                add_mmaudio = gr.Checkbox(
+                    label="🔊 Añadir audio (MMAudio)",
+                    value=False,
+                    info="Genera sonido ambiente sincronizado al vídeo tras la animación (requiere ComfyUI-MMAudio)"
+                )
+
+                audio_prompt = gr.Textbox(
+                    label="Descripción del sonido (opcional)",
+                    placeholder="Ej: viento suave, pasos, ambiente de fiesta, olas del mar...",
+                    lines=2,
+                    visible=False,
+                )
+
+                def _toggle_audio_prompt(enabled):
+                    return gr.update(visible=bool(enabled))
+
+                add_mmaudio.change(
+                    fn=_toggle_audio_prompt,
+                    inputs=[add_mmaudio],
+                    outputs=[audio_prompt],
+                )
+
                 progress_html = gr.HTML(
                     "<div style='text-align:center; color:#8b5cf6; padding:10px; font-weight:bold;'>Listo</div>"
                 )
@@ -92,4 +114,6 @@ def build_animate_ui():
         "stabilize": stabilize,
         "lora_name": lora_name,
         "lora_strength": lora_strength,
+        "add_mmaudio": add_mmaudio,
+        "audio_prompt": audio_prompt,
     }
