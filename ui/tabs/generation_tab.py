@@ -9,6 +9,21 @@ import time
 from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client, get_installed_generation_engines
 from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices, get_compatible_dropdown_choices, preview_modifiers
 from roop.img_editor.comfy_progress import build_generation_progress_html, format_duration
+from roop.output_paths import get_generation_output_dir
+from ui.job_cancel import (
+    SCOPE_GENERATION,
+    btn_idle,
+    btn_running,
+    cancel_status_html,
+    clear as clear_cancel,
+    is_cancelled,
+    request as request_cancel,
+)
+
+
+def on_cancel_generation():
+    request_cancel(SCOPE_GENERATION, interrupt_comfy=True)
+    return cancel_status_html(), *btn_idle()
 
 def _build_modifiers(image_style: str, shot_framing: str, lighting: str = "auto") -> dict:
     return {
@@ -54,9 +69,10 @@ def _success_status_html(res) -> str:
 
 
 def on_generate_image(prompt, width, height, engine_val, image_style, shot_framing, lighting):
+    clear_cancel(SCOPE_GENERATION)
     client = get_flux_gen_client()
     if not client.is_available():
-        yield None, "<div style='text-align:center;color:#ef4444;padding:10px;'>❌ ComfyUI no está activo.</div>"
+        yield None, "<div style='text-align:center;color:#ef4444;padding:10px;'>❌ ComfyUI no está activo.</div>", *btn_idle()
         return
 
     updates = queue.Queue()
@@ -79,21 +95,32 @@ def on_generate_image(prompt, width, height, engine_val, image_style, shot_frami
                 "elapsed": 0,
             })
 
+            if is_cancelled(SCOPE_GENERATION):
+                result["error"] = "Cancelado"
+                return
+
             res, msg = client.generate_ai(
                 prompt=(prompt or "").strip(),
                 width=width,
                 height=height,
                 prompt_modifiers=_build_modifiers(image_style, shot_framing, lighting),
                 progress_callback=progress_callback,
+                cancel_check=lambda: is_cancelled(SCOPE_GENERATION),
             )
 
+            if is_cancelled(SCOPE_GENERATION):
+                result["error"] = "Cancelado"
+                return
+
             if res:
-                output_dir = os.path.abspath("output/generation")
-                os.makedirs(output_dir, exist_ok=True)
+                output_dir = get_generation_output_dir()
                 out_path = os.path.join(output_dir, f"gen_{int(time.time())}.png")
                 res.image.save(out_path)
+                print(f"[GenFlux] Imagen guardada: {out_path}")
                 result["image"] = res.image
-                result["status"] = _success_status_html(res)
+                status = _success_status_html(res)
+                status += f"<div style='text-align:center;color:#64748b;font-size:11px;'>Guardado en {output_dir}</div>"
+                result["status"] = status
             else:
                 result["error"] = f"❌ {msg}"
         except Exception as e:
@@ -106,27 +133,43 @@ def on_generate_image(prompt, width, height, engine_val, image_style, shot_frami
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
 
-    yield None, build_generation_progress_html(phase="Iniciando", detail="Conectando con ComfyUI…")
+    try:
+        yield None, build_generation_progress_html(phase="Iniciando", detail="Conectando con ComfyUI…"), *btn_running()
 
-    while True:
-        item = updates.get()
-        if item is None:
-            break
-        yield None, item
+        while True:
+            if is_cancelled(SCOPE_GENERATION):
+                break
+            try:
+                item = updates.get(timeout=0.35)
+            except queue.Empty:
+                yield gr.skip(), gr.skip(), gr.skip(), gr.skip()
+                continue
+            if item is None:
+                break
+            yield None, item, gr.skip(), gr.skip()
 
-    if result["error"]:
-        yield None, f"<div style='text-align:center;color:#ef4444;padding:10px;'>{result['error']}</div>"
-        return
+        if is_cancelled(SCOPE_GENERATION):
+            yield None, cancel_status_html(), *btn_idle()
+            return
 
-    yield result["image"], result["status"]
+        if result["error"]:
+            err = result["error"]
+            if err == "Cancelado":
+                yield None, cancel_status_html(), *btn_idle()
+            else:
+                yield None, f"<div style='text-align:center;color:#ef4444;padding:10px;'>{err}</div>", *btn_idle()
+            return
+
+        yield result["image"], result["status"], *btn_idle()
+    finally:
+        clear_cancel(SCOPE_GENERATION)
 
 
 def open_generation_folder():
     import subprocess
     import sys
 
-    path = os.path.abspath("output/generation")
-    os.makedirs(path, exist_ok=True)
+    path = get_generation_output_dir()
     try:
         if sys.platform == "win32":
             os.startfile(path)
@@ -216,7 +259,9 @@ def generation_tab():
         width = gr.Slider(minimum=512, maximum=1536, step=64, value=1152, visible=False)
         height = gr.Slider(minimum=512, maximum=1536, step=64, value=768, visible=False)
 
-        gen_btn = gr.Button("GENERAR", variant="primary", size="lg")
+        with gr.Row():
+            gen_btn = gr.Button("GENERAR", variant="primary", size="lg", scale=3)
+            btn_cancel = gr.Button("⏹ CANCELAR", variant="stop", interactive=False, scale=1)
 
         status_html = gr.HTML("<div style='text-align:center;color:#64748b;padding:10px;'>Listo</div>")
         output_img = gr.Image(label="Resultado", height=600)
@@ -248,16 +293,19 @@ def generation_tab():
 
     bt_open_folder.click(fn=open_generation_folder)
 
-    gen_btn.click(
+    gen_event = gen_btn.click(
         fn=on_generate_image,
         inputs=[prompt, width, height, engine_model, image_style, shot_framing, lighting],
-        outputs=[output_img, status_html],
-        concurrency_limit=None,
+        outputs=[output_img, status_html, gen_btn, btn_cancel],
     )
+
+    btn_cancel.click(fn=on_cancel_generation, outputs=[status_html, gen_btn, btn_cancel], queue=False)
+    btn_cancel.click(fn=None, cancels=[gen_event], queue=False)
 
     return {
         "prompt": prompt,
         "gen_btn": gen_btn,
+        "btn_cancel": btn_cancel,
         "output_img": output_img,
         "status": status_html,
     }

@@ -7,6 +7,7 @@ import roop.globals
 
 from roop.comfy_workflows import get_comfyui_url
 from roop.utils import get_vram_gb
+from roop.output_paths import get_animate_output_dir
 
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,6 +88,8 @@ class AnimateManager:
             if engine == "wan_video":
                 if base["frames"] > 81:
                     base["frames"] = 81
+                if base["steps"] > 28:
+                    base["steps"] = 28
             elif engine == "framepack":
                 if base["frames"] > 49:
                     base["frames"] = 49
@@ -113,18 +116,46 @@ class AnimateManager:
         from roop.img_editor.prompt_translator import translate_prompt
         translated = translate_prompt(prompt)
 
+        mag = 0.5
+        self._last_speech_intensity = 0.0
         try:
             nlp = self._get_semantic_analyzer()
             mag = nlp.get_magnitude(translated)
+            if hasattr(nlp, "get_axis_scores"):
+                axes = nlp.get_axis_scores(translated)
+                pose_score = float(axes.get("pose", 0.0))
+                if pose_score > 0.08:
+                    mag = max(mag, 0.70 + pose_score * 0.15)
             self._last_magnitude = mag
-            print(f"[AnimateManager] Semantic Analysis: Magnitude={mag:.2f}")
+            if hasattr(nlp, "get_speech_intensity"):
+                self._last_speech_intensity = float(nlp.get_speech_intensity(translated))
+            print(
+                f"[AnimateManager] Semantic: Magnitude={mag:.2f}, "
+                f"Speech={self._last_speech_intensity:.2f}"
+            )
         except Exception as e:
             print(f"[AnimateManager] NLP Error: {e}. Fallback to 0.5")
             self._last_magnitude = 0.5
 
-        print(f"[AnimateManager] Prompt: {translated[:80]}...")
+        composed = self._compose_motion_prompt(translated, mag=mag)
+        print(f"[AnimateManager] Motion prompt: {composed[:120]}...")
         self._last_user_motion_prompt = translated
-        return translated
+        self._last_user_prompt_raw = prompt
+        return composed
+
+    def _compose_motion_prompt(self, user_prompt: str, mag: float = 0.5) -> str:
+        raw = (user_prompt or "natural motion").strip()
+        if mag > 0.65:
+            return (
+                f"Instruction: Animate this exact photograph. "
+                f"Follow this action and motion completely and obviously: {raw}. "
+                f"Natural cinematic movement, obey the instruction as strongly as possible."
+            )
+        return (
+            f"Instruction: Animate this exact photograph. "
+            f"Apply this motion naturally: {raw}. "
+            f"Smooth realistic movement while keeping the scene coherent."
+        )
 
     def _split_motion_clauses(self, prompt):
         prompt = (prompt or "").strip()
@@ -289,7 +320,8 @@ class AnimateManager:
     def generate_video(self, image, prompt, engine="wan_video", motion_bucket=127, frames=33, fps=16,
                        face_stabilize=False, mask_image=None, mask_mode="global", mask_prompt="",
                        progress_callback=None, steps=None, cfg=None, autoregressive_chunks=1,
-                       lora_name=None, lora_strength=1.0, add_mmaudio=False, audio_prompt=""):
+                       lora_name=None, lora_strength=1.0, add_mmaudio=False, audio_prompt="",
+                       cancel_check=None):
         t0 = time.time()
         if image.mode != "RGB":
             image = image.convert("RGB")
@@ -310,8 +342,7 @@ class AnimateManager:
         img_path = os.path.join(temp_dir, f"anim_in_{int(t0)}.png")
         image.save(img_path)
 
-        output_path = os.path.abspath(f"output/animations/video_{int(t0)}.mp4")
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_path = os.path.join(get_animate_output_dir(), f"video_{int(t0)}.mp4")
 
         try:
             from animate_photo import AnimatePhoto
@@ -326,12 +357,16 @@ class AnimateManager:
                     frames=p["frames"], fps=p["fps"],
                     steps=p["steps"], cfg=p["cfg"],
                     progress_callback=progress_callback,
+                    cancel_check=cancel_check,
                 )
             elif engine == "wan_video" and autoregressive_chunks > 1:
                 print(f"[AnimateManager] Autoregressive mode: {autoregressive_chunks} chunks x {p['frames']} frames")
                 chunk_paths = []
                 current_image = image
                 for chunk_index in range(autoregressive_chunks):
+                    if cancel_check and cancel_check():
+                        elapsed = time.time() - t0
+                        return None, f"Cancelado tras {elapsed:.0f}s"
                     chunk_path = output_path.replace(".mp4", f"_chunk{chunk_index + 1:02d}.mp4")
                     chunk_prompt = self._build_autoregressive_chunk_prompt(
                         final_prompt,
@@ -352,7 +387,11 @@ class AnimateManager:
                         steps=p["steps"], cfg=p["cfg"],
                         lora_name=lora_name, lora_strength=lora_strength,
                         progress_callback=progress_callback,
+                        cancel_check=cancel_check,
                     )
+                    if cancel_check and cancel_check():
+                        elapsed = time.time() - t0
+                        return None, f"Cancelado tras {elapsed:.0f}s"
                     if not ok or not os.path.exists(chunk_path):
                         elapsed = time.time() - t0
                         return None, f"Error en chunk AR {chunk_index + 1}/{autoregressive_chunks} tras {elapsed:.0f}s"
@@ -379,6 +418,7 @@ class AnimateManager:
                     steps=p["steps"], cfg=p["cfg"],
                     lora_name=lora_name, lora_strength=lora_strength,
                     progress_callback=progress_callback,
+                    cancel_check=cancel_check,
                 )
             if ok and os.path.exists(output_path):
                 if face_stabilize:
@@ -386,13 +426,14 @@ class AnimateManager:
                     output_path = self.apply_face_stabilize(output_path, image)
                 audio_note = ""
                 if add_mmaudio:
-                    from roop.animate.mmaudio_client import add_audio_to_video, get_status_message
-                    if not get_status_message(check_comfy=True).startswith("MMAudio listo"):
-                        self._emit_progress(progress_callback, get_status_message(check_comfy=True))
-                    output_path, audio_msg = add_audio_to_video(
+                    from roop.animate.audio_pipeline import apply_animate_audio
+                    speech_i = getattr(self, "_last_speech_intensity", 0.0)
+                    user_raw = getattr(self, "_last_user_prompt_raw", prompt)
+                    output_path, audio_msg = apply_animate_audio(
                         output_path,
-                        sound_prompt=audio_prompt,
+                        user_prompt=audio_prompt or user_raw,
                         motion_prompt=final_prompt,
+                        speech_intensity=speech_i,
                         progress_callback=progress_callback,
                     )
                     if audio_msg:

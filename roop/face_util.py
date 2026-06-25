@@ -70,9 +70,13 @@ def _initialize_face_analyser_cpu():
             download=True,
             providers=['CPUExecutionProvider'],
         )
-        analyser_instance.prepare(ctx_id=-1, det_size=DETECTION_SIZE)
+        analyser_instance.prepare(
+            ctx_id=-1,
+            det_size=DETECTION_SIZE,
+            det_thresh=0.1,
+        )
 
-        print("[SUCCESS] FaceAnalysis CPU inicializado")
+        print("[SUCCESS] FaceAnalysis CPU inicializado (thresh=0.1)")
         return analyser_instance
 
     except Exception as e:

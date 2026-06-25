@@ -67,6 +67,7 @@ class LocalImagineService:
         guidance: Optional[float] = None,
         quality_mode: bool = False,
         enhance_tier: str = "hd",
+        use_rewriter: bool = False,
     ) -> Tuple[Optional[Image.Image], str]:
         """
         Edición / generación estilo Imagine.
@@ -74,7 +75,7 @@ class LocalImagineService:
         Args:
             image: Imagen de entrada (referencia visual)
             instruction: Instrucción natural ("undress her", "ponle ropa cyberpunk", etc)
-            ...
+            use_rewriter: Si True, usa LLM rewriter para expandir/mejorar instrucción
 
         Returns:
             (imagen_resultado, mensaje)
@@ -105,7 +106,7 @@ class LocalImagineService:
                 image=image,
                 prompt=final_prompt,
                 engine=self.engine,
-                use_rewriter=False,
+                use_rewriter=use_rewriter,
                 enhance_faces=enhance_faces,
                 num_inference_steps=num_steps,
                 guidance_scale=guidance,

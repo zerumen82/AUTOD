@@ -227,13 +227,10 @@ class FacePreserver:
 
                                         t_mean = np.mean(target_face_sample, axis=(0, 1))
                                         s_mean = np.mean(src_f, axis=(0, 1))
-                                        scale = np.clip(t_mean / (s_mean + 1e-6), 0.60, 1.45)
-                                        matched = src_f * scale
-
                                         t_std = np.std(target_face_sample, axis=(0, 1))
                                         s_std = np.std(src_f, axis=(0, 1))
                                         std_scale = np.clip(t_std / (s_std + 1e-6), 0.55, 1.55)
-                                        matched = (matched - s_mean) * std_scale + t_mean
+                                        matched = (src_f - s_mean) * std_scale + t_mean
                                         source_resized = np.clip(matched, 0, 255).astype(np.uint8)
 
                                         # Even more generous mask when pasting to keep the face looking full size
@@ -299,48 +296,6 @@ class FacePreserver:
     def _face_swap(self, original: Image.Image, generated: Image.Image) -> Image.Image:
         # Este método ahora es redundante pero lo mantenemos por compatibilidad básica
         return self.preserve_faces(original, generated, method="swap")
-    
-    def _preserve_best_face(self, original: Image.Image, generated: Image.Image) -> Image.Image:
-        """
-        Preserva el rostro mas similar del original en la imagen generada.
-        
-        Args:
-            original: Imagen original
-            generated: Imagen generada
-            
-        Returns:
-            Imagen con rostro preservado
-        """
-        try:
-            orig_faces = self.detect_faces(original)
-            gen_faces = self.detect_faces(generated)
-            if len(gen_faces) == 0:
-                return generated
-            
-            # Encontrar el rostro generado con mayor similitud a cualquier rostro original
-            best_match = None
-            best_score = -1
-            
-            for gen_face in gen_faces:
-                for orig_face in orig_faces:
-                    score = self.compare_faces(
-                        orig_face.get("embedding"),
-                        gen_face.get("embedding")
-                    )
-                    if score > best_score:
-                        best_score = score
-                        best_match = gen_face
-            
-            if best_match is not None and best_score > 0.5:
-                # El rostro mas similar es suficientemente bueno
-                return generated
-            else:
-                # Intentar face swap con el mejor rostro original
-                return self._face_swap(original, generated)
-                
-        except Exception as e:
-            print(f"[FacePreserver] Error en preserve best face: {e}")
-            return generated
     
     def extract_face_embeddings(self, image: Image.Image) -> Optional[np.ndarray]:
         """

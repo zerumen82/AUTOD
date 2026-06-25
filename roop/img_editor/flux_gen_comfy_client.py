@@ -768,6 +768,7 @@ class FluxGenComfyClient:
                 pid,
                 steps_hint=actual_steps,
                 progress_callback=_comfy_cb,
+                cancel_check=kwargs.get("cancel_check"),
             )
             if not img_meta:
                 return None, wait_msg
@@ -778,8 +779,16 @@ class FluxGenComfyClient:
                 f"&type={img_meta.get('type', 'output')}",
                 timeout=60,
             )
+            out_img = Image.open(io.BytesIO(res.content)).convert("RGB")
+            try:
+                from roop.img_editor.hyperreal_polish import polish_result_image
+                out_img, polish_note, _ = polish_result_image(out_img, tier="hd")
+                if polish_note and "omitido" not in polish_note:
+                    print(f"[GenFlux] Post-acabado: {polish_note}")
+            except Exception as e:
+                print(f"[GenFlux] Post-acabado omitido: {e}")
             return GenResult(
-                image=Image.open(io.BytesIO(res.content)).convert("RGB"),
+                image=out_img,
                 final_prompt=final_prompt,
                 user_translated=user_translated,
                 modifier_suffix=mod_suffix_used,

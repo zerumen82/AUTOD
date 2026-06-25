@@ -536,7 +536,7 @@ class AnimatePhoto:
 
     def animate_image(self, image_pil=None, prompt="", output_path="output.mp4",
                       model="wan_video", frames=33, fps=16, steps=25, cfg=5.5, timeout=1800, t2v_mode=False,
-                      lora_name=None, lora_strength=1.0, progress_callback=None):
+                      lora_name=None, lora_strength=1.0, progress_callback=None, cancel_check=None):
         if not self.check_comfyui_status():
             print("[AnimatePhoto] ComfyUI no responde en /system_stats")
             return False
@@ -611,6 +611,14 @@ class AnimatePhoto:
         poll_timeout = 30 if model == "framepack" else 10
         _notify("ComfyUI procesando... (la primera vez puede tardar varios minutos)")
         while True:
+            if cancel_check and cancel_check():
+                print("[AnimatePhoto] Cancelado por el usuario.")
+                try:
+                    requests.post(f"{self.base}/interrupt", timeout=5)
+                    requests.post(f"{self.base}/queue", json={"delete": [pid]}, timeout=5)
+                except Exception:
+                    pass
+                return False
             if time.time() > hard_deadline:
                 print(f"[AnimatePhoto] Timeout global de {timeout}s alcanzado. Abortando.")
                 try:

@@ -1612,7 +1612,8 @@ class ProcessMgr:
 
     @staticmethod
     def _hold_previous_face_region(current_frame, prev_frame, bbox, blend=0.88):
-        """Mantiene el último swap en la región facial cuando el tracking falla (evita parpadeos)."""
+        """Mantiene el último swap en la región facial cuando el tracking falla (evita parpadeos).
+        v5.80: Feathering en bordes + color match para evitar rectángulo visible."""
         if prev_frame is None or bbox is None or current_frame is None:
             return current_frame
         try:
@@ -1622,14 +1623,25 @@ class ProcessMgr:
             x2, y2 = min(current_frame.shape[1], x2), min(current_frame.shape[0], y2)
             if x2 <= x1 or y2 <= y1:
                 return current_frame
-            curr_roi = result[y1:y2, x1:x2]
-            prev_roi = prev_frame[y1:y2, x1:x2]
+            h, w = y2 - y1, x2 - x1
+            curr_roi = result[y1:y2, x1:x2].astype(np.float32)
+            prev_roi = prev_frame[y1:y2, x1:x2].astype(np.float32)
             if curr_roi.shape != prev_roi.shape:
                 return current_frame
             mix = float(np.clip(blend, 0.5, 0.95))
-            result[y1:y2, x1:x2] = (
-                curr_roi.astype(np.float32) * (1.0 - mix) + prev_roi.astype(np.float32) * mix
-            ).astype(np.uint8)
+
+            # v5.80: Color match del prev_roi al curr_roi para reducir diferencia de tono
+            prev_matched = match_color_histogram(prev_roi, curr_roi, blend_factor=0.35)
+
+            # v5.80: Feathering progresivo — bordes priorizan frame actual, centro prioriza blend
+            Y, X = np.ogrid[:h, :w]
+            dist_to_edge = np.minimum(np.minimum(X, w - 1 - X), np.minimum(Y, h - 1 - Y))
+            feather_px = max(8, min(h, w) // 10)
+            soft_mask = np.clip(dist_to_edge / feather_px, 0, 1)
+            soft_3ch = cv2.merge([soft_mask, soft_mask, soft_mask])
+
+            blended = curr_roi * (1.0 - mix) + prev_matched * mix
+            result[y1:y2, x1:x2] = (curr_roi * (1.0 - soft_3ch) + blended * soft_3ch).astype(np.uint8)
             return result
         except Exception:
             return current_frame
@@ -1838,6 +1850,10 @@ class ProcessMgr:
             
             if x2 <= x1 or y2 <= y1:
                 return original_frame
+
+            face_w = x2 - x1
+            face_h = y2 - y1
+            is_small_face = min(face_w, face_h) < 120
 
             # v5.59: Skip-swap solo para tracking extremadamente malo — det_score < 0.05 + velocity > 100px
             det_score = getattr(target_face, 'det_score', 1.0)
@@ -2063,7 +2079,11 @@ class ProcessMgr:
                 
                 # B. NUEVO: Generar máscara XSeg de alta precisión
                 final_mask = None
-                if "mask_xseg" in self.processors:
+                # v5.79: Caras pequeñas saltan XSeg (máscara muy reducida → mosaico)
+                skip_xseg = is_small_face
+                if skip_xseg and call_num <= 3:
+                    print(f"[MASK_SMALL] Frame {call_num}: cara {face_w}x{face_h} <120px → elipse (evita mosaico)")
+                if "mask_xseg" in self.processors and not skip_xseg:
                     try:
                         # La máscara XSeg se genera sobre la cara alineada (calidad nativa 256x256)
                         xseg_mask = self.processors["mask_xseg"].Run(swapped_face_aligned, "")
@@ -2120,8 +2140,8 @@ class ProcessMgr:
                         occ_mask_aligned = cv2.addWeighted(occ_mask_aligned, occ_ema_alpha, prev_occ, 1.0 - occ_ema_alpha, 0)
                     self._occ_mask_ema[video_key] = occ_mask_aligned.copy()
 
-                # v5.78: Oclusión más suave en perfil (evita máscara cero)
-                occ_strength = (0.36 if is_profile else 0.40)
+                # v5.79: Oclusión adaptativa — más suave en caras pequeñas
+                occ_strength = (0.20 if is_small_face else (0.36 if is_profile else 0.40))
                 
                 if np.max(occ_mask_aligned) > 0.1:
                     occ_mask_frame = cv2.warpAffine(occ_mask_aligned, M_inv, (w_f, h_f), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
@@ -2131,8 +2151,6 @@ class ProcessMgr:
                         print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f}, blur=31)")
 
                 # v5.78: Erosión adaptativa — más suave en perfil / boca abierta
-                face_w = x2 - x1
-                face_h = y2 - y1
                 ekernel = max(3, min(face_w, face_h) // 32) | 1
                 if is_profile:
                     ekernel = max(3, ekernel - 2)
@@ -2163,7 +2181,7 @@ class ProcessMgr:
             mask_before_mouth = final_mask.copy() if final_mask is not None else None
 
             # ============================================
-            # 5c. PRESERVACIÓN DE BOCA — con suelo de máscara (v5.78)
+            # 5c. PRESERVACIÓN DE BOCA — con suelo de máscara (v5.79)
             # ============================================
             if mouth_open and mouth_region is not None and mask_before_mouth is not None:
                 if is_profile:
@@ -2172,6 +2190,9 @@ class ProcessMgr:
                     m_blend = 0.52 if mouth_open_ratio > 0.55 else 0.58
                 else:
                     m_blend = 0.62
+                # v5.79: Reducir preservación en caras pequeñas para evitar máscara cero
+                if is_small_face:
+                    m_blend *= 0.55
                 
                 try:
                     mouth_mask_aligned = create_mouth_preservation_mask(reference_region, mouth_region, blend_ratio=1.0)
@@ -2204,19 +2225,32 @@ class ProcessMgr:
                     print(f"[QUALITY] Boca restaurada (impacto={m_impact:.3f}, fuerza={m_blend*100:.0f}%)")
 
             # ============================================
-            # 5b. SAFETY FALLBACK — solo si la máscara sigue en cero
+            # 5b. SAFETY FALLBACK — si máscara < 0.30 regenera para evitar ghost/mosaic (v5.80)
             # ============================================
-            if final_mask is not None and final_mask.max() == 0:
+            if final_mask is not None and final_mask.max() < 0.30:
                 if mask_before_mouth is not None and mask_before_mouth.max() > 0:
-                    final_mask = cv2.GaussianBlur(mask_before_mouth, (21, 21), 0) * 0.82
-                    final_mask = np.clip(final_mask, 0.12, 1.0)
+                    # v5.80: Blur más grande y transición suave en lugar de clip duro a 0.12
+                    final_mask = cv2.GaussianBlur(mask_before_mouth, (31, 31), 0)
+                    final_mask = np.clip(final_mask * 0.85, 0.06, 1.0)
                     print(f"[MASK_RECOVER] Frame {call_num}: recuperada desde pre-boca (max={final_mask.max():.3f})")
                 else:
-                    print(f"[MASK_SAFETY] Frame {call_num}: máscara cero tras procesado. Regenerando elipse suave.")
+                    print(f"[MASK_SAFETY] Frame {call_num}: máscara <0.30. Regenerando elipse suave.")
                     h_f_s, w_f_s = original_frame.shape[:2]
-                    cx_s, cy_s = (x1 + x2) // 2, (y1 + y2) // 2
-                    rx_s = max(30, int((x2 - x1) // 2 * 1.1))
-                    ry_s = max(30, int((y2 - y1) // 2 * 1.1))
+                    # v5.80: Usar M_inv para posicionar elipse donde está warped_face real
+                    if M is not None:
+                        h_a_f, w_a_f = swapped_face_aligned.shape[:2]
+                        corners = np.array([[0, 0], [w_a_f, 0], [w_a_f, h_a_f], [0, h_a_f]], dtype=np.float32)
+                        corners_w = cv2.transform(corners.reshape(-1, 1, 2), M_inv).reshape(-1, 2)
+                        cx_s = int(np.mean(corners_w[:, 0]))
+                        cy_s = int(np.mean(corners_w[:, 1]))
+                        face_w_s = int(np.max(corners_w[:, 0]) - np.min(corners_w[:, 0]))
+                        face_h_s = int(np.max(corners_w[:, 1]) - np.min(corners_w[:, 1]))
+                        rx_s = max(30, int(face_w_s // 2 * 1.15))
+                        ry_s = max(30, int(face_h_s // 2 * 1.15))
+                    else:
+                        cx_s, cy_s = (x1 + x2) // 2, (y1 + y2) // 2
+                        rx_s = max(30, int((x2 - x1) // 2 * 1.2))
+                        ry_s = max(30, int((y2 - y1) // 2 * 1.2))
                     final_mask = np.zeros((h_f_s, w_f_s), dtype=np.float32)
                     cv2.ellipse(final_mask, (cx_s, cy_s), (rx_s, ry_s), 0, 0, 360, 1.0, -1)
                     blur_size = max(31, int(min(rx_s, ry_s) * 0.3)) | 1

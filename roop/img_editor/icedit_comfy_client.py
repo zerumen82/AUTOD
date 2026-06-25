@@ -21,6 +21,20 @@ class GenResult:
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
+def _crop_icedit_diptych(image: Image.Image) -> Image.Image:
+    """ICEdit genera diptych: izquierda=original, derecha=editado. Quedarse con la derecha."""
+    w, h = image.size
+    if w < 64 or h < 64:
+        return image
+    half = w // 2
+    if half < 32:
+        return image
+    cropped = image.crop((half, 0, w, h))
+    print(f"[ICEdit] Panel derecho: {w}x{h} → {cropped.size[0]}x{h}", flush=True)
+    return cropped
+
+
 class ICEditComfyClient:
     def __init__(self):
         self._loaded = False
@@ -32,17 +46,32 @@ class ICEditComfyClient:
         except:
             return False
     
+    def _resolve_flux_fill(self, base: str) -> str:
+        for name in (
+            "flux1-fill-dev-q4_k_m.gguf",
+            "flux1-fill-dev-Q4_K.gguf",
+            "ggml-model-Q4_K_M.gguf",
+        ):
+            path = os.path.join(base, "diffusion_models", name)
+            if os.path.exists(path):
+                return path
+        return os.path.join(base, "diffusion_models", "flux1-fill-dev-q4_k_m.gguf")
+
+    def _resolve_t5(self, base: str) -> str:
+        for name in ("t5xxl_fp8.safetensors", "t5xxl_fp8_e4m3fn.safetensors"):
+            path = os.path.join(base, "text_encoders", name)
+            if os.path.exists(path):
+                return path
+        return os.path.join(base, "text_encoders", "t5xxl_fp8.safetensors")
+
     def get_model_paths(self) -> dict:
         """Rutas de modelos para FLUX Fill Dev"""
         base = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
-        
+
         return {
-            # FLUX Fill Dev GGUF (gpustack)
-            "flux_gguf": os.path.join(base, "diffusion_models", "flux1-fill-dev-q4_k_m.gguf"),
-            
-            # Text encoders (NO-GGUF, safetensors)
+            "flux_gguf": self._resolve_flux_fill(base),
             "clip_l": os.path.join(base, "text_encoders", "clip_l.safetensors"),
-            "t5": os.path.join(base, "text_encoders", "t5xxl_fp8.safetensors"),
+            "t5": self._resolve_t5(base),
             
             # ICEdit LoRA
             "lora": os.path.join(base, "loras", "ICEdit-normal-LoRA.safetensors"),
@@ -254,12 +283,12 @@ class ICEditComfyClient:
                                     )
                                     if vr.status_code == 200:
                                         elapsed = time.time() - t0
+                                        out = _crop_icedit_diptych(
+                                            Image.open(io.BytesIO(vr.content)).convert("RGB")
+                                        )
                                         print(f"[ICEdit] OK en {elapsed:.1f}s", flush=True)
                                         return (
-                                            GenResult(
-                                                image=Image.open(io.BytesIO(vr.content)),
-                                                time_taken=elapsed
-                                            ),
+                                            GenResult(image=out, time_taken=elapsed),
                                             f"OK ({elapsed:.1f}s)"
                                         )
             

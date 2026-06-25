@@ -681,8 +681,20 @@ def wire_events(ui_comp):
     ui_comp["enhancer_blend"].change(fn=lambda v: setattr(roop.globals, 'enhancer_blend_factor', v), inputs=[ui_comp["enhancer_blend"]])
 
     # PROCESAMIENTO
-    ui_comp["bt_start"].click(fn=on_start_process, inputs=[ui_comp["fake_preview"], ui_comp["autorotate"], ui_comp["smoothing"], ui_comp["face_distance"], ui_comp["blend_ratio"], ui_comp["enhancer_blend"], ui_comp["enhancer"]], outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]])
-    ui_comp["bt_stop"].click(fn=on_stop_process, outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]])
+    start_event = ui_comp["bt_start"].click(
+        fn=on_start_process,
+        inputs=[
+            ui_comp["fake_preview"], ui_comp["autorotate"], ui_comp["smoothing"],
+            ui_comp["face_distance"], ui_comp["blend_ratio"], ui_comp["enhancer_blend"], ui_comp["enhancer"],
+        ],
+        outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]],
+    )
+    ui_comp["bt_stop"].click(
+        fn=on_stop_process,
+        outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]],
+        queue=False,
+    )
+    ui_comp["bt_stop"].click(fn=None, cancels=[start_event], queue=False)
     if "bt_open_output" in ui_comp: ui_comp["bt_open_output"].click(fn=lambda: ui.globals.open_output_folder())
 
 def on_input_page_change(delta):
@@ -697,6 +709,10 @@ def on_target_page_change(delta):
 
 async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer):
     from ui.tabs.faceswap.logic import start_swap
+    from ui.job_cancel import clear as clear_cancel, SCOPE_FACESWAP
+    clear_cancel(SCOPE_FACESWAP)
+    import roop.globals
+    roop.globals.processing = True
     roop.globals.enhancer_blend_factor = enhancer_blend
     roop.globals.blend_ratio = blend
     roop.globals.distance_threshold = dist
@@ -710,4 +726,6 @@ async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enh
 
 def on_stop_process():
     from ui.tabs.faceswap.logic import stop_swap
+    from ui.job_cancel import request as request_cancel, SCOPE_FACESWAP
+    request_cancel(SCOPE_FACESWAP)
     return stop_swap()

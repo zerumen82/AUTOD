@@ -84,30 +84,80 @@ class Frame_Upscale():
         return tile_frames, pad_width, pad_height
 
 
+    @staticmethod
+    def _tile_blend_mask(h: int, w: int, feather: int) -> np.ndarray:
+        f = max(6, min(int(feather), h // 2, w // 2))
+        ramp = 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, f, dtype=np.float32))
+        mask_y = np.ones(h, dtype=np.float32)
+        mask_x = np.ones(w, dtype=np.float32)
+        mask_y[:f] *= ramp
+        mask_y[-f:] *= ramp[::-1]
+        mask_x[:f] *= ramp
+        mask_x[-f:] *= ramp[::-1]
+        return mask_y[:, None] * mask_x[None, :]
+
     def merge_tile_frames(self, tile_frames, temp_width : int, temp_height : int, pad_width : int, pad_height : int, size) -> Frame:
-        merge_frame = np.zeros((pad_height, pad_width, 3)).astype(np.uint8)
         tile_width = tile_frames[0].shape[1] - 2 * size[2]
-        tiles_per_row = min(pad_width // tile_width, len(tile_frames))
+        tiles_per_row = max(1, min(pad_width // max(tile_width, 1), len(tile_frames)))
+        first_core = tile_frames[0][size[2]:-size[2], size[2]:-size[2]]
+        th, tw = first_core.shape[:2]
+        feather = max(32, min(th, tw) // 3, size[2] * 14)
+
+        acc = np.zeros((pad_height, pad_width, 3), dtype=np.float64)
+        weight = np.zeros((pad_height, pad_width), dtype=np.float64)
 
         for index, tile_frame in enumerate(tile_frames):
-            tile_frame = tile_frame[size[2]:-size[2], size[2]:-size[2]]
+            core = tile_frame[size[2]:-size[2], size[2]:-size[2]]
+            th, tw = core.shape[:2]
             row_index = index // tiles_per_row
             col_index = index % tiles_per_row
-            top = row_index * tile_frame.shape[0]
-            bottom = top + tile_frame.shape[0]
-            left = col_index * tile_frame.shape[1]
-            right = left + tile_frame.shape[1]
-            merge_frame[top:bottom, left:right, :] = tile_frame
-        merge_frame = merge_frame[size[1] : size[1] + temp_height, size[1]: size[1] + temp_width, :]
+            top = row_index * th
+            left = col_index * tw
+            bottom = top + th
+            right = left + tw
+            mask = self._tile_blend_mask(th, tw, feather)
+            acc[top:bottom, left:right, :] += core.astype(np.float64) * mask[..., None]
+            weight[top:bottom, left:right] += mask
+
+        weight = np.maximum(weight, 1e-6)
+        merge_frame = (acc / weight[..., None]).clip(0, 255).astype(np.uint8)
+        merge_frame = merge_frame[size[1]: size[1] + temp_height, size[1]: size[1] + temp_width, :]
         return merge_frame
 
 
+    @staticmethod
+    def _pick_tile_size(temp_height: int, temp_width: int, scale: int = 2) -> tuple:
+        """
+        Tiles según escala del modelo y VRAM.
+        x4 (LSDIR/ESRGAN): tiles pequeños — 512px input → 2048px out cuelga en 8GB.
+        x2: tiles más grandes = menos costuras.
+        """
+        max_dim = max(temp_height, temp_width)
+        if scale >= 4:
+            # ~120px núcleo → ~480px salida por tile (seguro en RTX 3060 Ti 8GB)
+            return (128, 8, 6)
+        if max_dim >= 1200:
+            return (384, 14, 12)
+        if max_dim >= 640:
+            return (256, 12, 10)
+        return (128, 8, 4)
+
     def Run(self, temp_frame: Frame) -> Frame:
-        size = (128, 8, 2)
         temp_height, temp_width = temp_frame.shape[:2]
+        scale = int(getattr(self, "scale", 2) or 2)
+        size = self._pick_tile_size(temp_height, temp_width, scale=scale)
         upscale_tile_frames, pad_width, pad_height = self.create_tile_frames(temp_frame, size)
+        total = len(upscale_tile_frames)
+        label = self.prev_type or "upscale"
+        print(
+            f"[Frame_Upscale] {label} {scale}x — {temp_width}×{temp_height}, "
+            f"{total} tile(s), tile={size[0]}px",
+            flush=True,
+        )
 
         for index, tile_frame in enumerate(upscale_tile_frames):
+            if index == 0 or (index + 1) % max(1, total // 8) == 0 or index + 1 == total:
+                print(f"[Frame_Upscale] Progreso {index + 1}/{total}", flush=True)
             tile_frame = self.prepare_tile_frame(tile_frame)
             with self.THREAD_LOCK_UPSCALE:
                 self.io_binding.bind_cpu_input(self.model_inputs[0].name, tile_frame)

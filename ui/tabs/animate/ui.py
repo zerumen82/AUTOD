@@ -1,12 +1,11 @@
-import os
 import gradio as gr
-from animate_photo import AnimatePhoto
+from roop.output_paths import get_animate_output_dir
 
 
 def open_animations_folder():
-    path = os.path.abspath("output/animations")
-    os.makedirs(path, exist_ok=True)
+    path = get_animate_output_dir()
     try:
+        import os
         os.startfile(path)
     except Exception as e:
         print(f"[UI] No se pudo abrir la carpeta: {e}")
@@ -25,81 +24,50 @@ def build_animate_ui():
 
     with gr.Column(elem_classes=["animate-container"]):
         with gr.Group(elem_classes=["animate-header"]):
-            gr.Markdown("## 🎬 ANIMATE IMAGE AI")
-            gr.Markdown("_Da vida a tus fotos con IA._")
+            gr.Markdown("## 🎬 ANIMATE IMAGE")
+            gr.Markdown("_Sube foto + escribe qué debe pasar (~6s). Audio ambiente y voz en español automáticos._")
 
         with gr.Row():
             with gr.Column(scale=1):
                 input_img = gr.Image(label="Imagen de Entrada", type="pil", height=480)
 
                 prompt = gr.Textbox(
-                    label="¿Qué movimiento quieres?",
-                    placeholder="Ej: el viento sopla su cabello, mira a la cámara y sonríe...",
+                    label="¿Qué debe pasar?",
+                    placeholder="Ej: deben ponerse a bailar, viento en el pelo, que diga hola a cámara...",
                     lines=3,
                     elem_classes=["prompt-box-anim"]
                 )
 
-                with gr.Accordion("🎨 Ajustes de Estilo (LoRA)", open=False):
+                with gr.Row():
+                    btn_animate = gr.Button(
+                        "🎬 ANIMAR",
+                        variant="primary",
+                        elem_classes=["btn-animate-main"],
+                        scale=3,
+                    )
+                    btn_cancel = gr.Button("⏹ CANCELAR", variant="stop", interactive=False, scale=1)
+
+                with gr.Accordion("⚙️ Avanzado (opcional)", open=False):
+                    gr.Markdown("*Defaults automáticos — no hace falta abrir esto.*")
+                    from animate_photo import AnimatePhoto
                     animator = AnimatePhoto()
                     lora_list = ["None"] + animator.get_available_loras()
-                    
                     lora_name = gr.Dropdown(
-                        label="Seleccionar LoRA",
+                        label="LoRA WanVideo",
                         choices=lora_list,
                         value="None",
-                        info="Aplica un estilo específico (motor WanVideo)"
                     )
-                    
                     lora_strength = gr.Slider(
                         label="Intensidad LoRA",
-                        minimum=0.0,
-                        maximum=2.0,
-                        step=0.05,
-                        value=1.0
+                        minimum=0.0, maximum=2.0, step=0.05, value=1.0,
                     )
-
-                with gr.Row():
-                    btn_suggest = gr.Button("🪄 SUGERIR", size="sm", variant="secondary", scale=1)
-                    btn_animate = gr.Button(
-                        "🎬 GENERAR ANIMACIÓN", variant="primary",
-                        elem_classes=["btn-animate-main"],
-                        scale=3
-                    )
-
-                stabilize = gr.Checkbox(
-                    label="💠 Estabilizar rostro (post-proceso)",
-                    value=False,
-                    info="Aplica restauración facial frame a frame al final (alarga el proceso)"
-                )
-
-                add_mmaudio = gr.Checkbox(
-                    label="🔊 Añadir audio (MMAudio)",
-                    value=False,
-                    info="Genera sonido ambiente sincronizado al vídeo tras la animación (requiere ComfyUI-MMAudio)"
-                )
-
-                audio_prompt = gr.Textbox(
-                    label="Descripción del sonido (opcional)",
-                    placeholder="Ej: viento suave, pasos, ambiente de fiesta, olas del mar...",
-                    lines=2,
-                    visible=False,
-                )
-
-                def _toggle_audio_prompt(enabled):
-                    return gr.update(visible=bool(enabled))
-
-                add_mmaudio.change(
-                    fn=_toggle_audio_prompt,
-                    inputs=[add_mmaudio],
-                    outputs=[audio_prompt],
-                )
 
                 progress_html = gr.HTML(
                     "<div style='text-align:center; color:#8b5cf6; padding:10px; font-weight:bold;'>Listo</div>"
                 )
 
             with gr.Column(scale=1):
-                video_output = gr.Video(label="", height=520)
+                video_output = gr.Video(label="Resultado (~6 segundos)", height=520)
                 with gr.Row():
                     bt_open_folder = gr.Button("📂 ABRIR SALIDA")
                     bt_open_folder.click(fn=open_animations_folder)
@@ -108,12 +76,9 @@ def build_animate_ui():
         "input_img": input_img,
         "prompt": prompt,
         "btn_animate": btn_animate,
-        "btn_suggest": btn_suggest,
+        "btn_cancel": btn_cancel,
         "video_output": video_output,
         "progress_html": progress_html,
-        "stabilize": stabilize,
         "lora_name": lora_name,
         "lora_strength": lora_strength,
-        "add_mmaudio": add_mmaudio,
-        "audio_prompt": audio_prompt,
     }

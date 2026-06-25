@@ -85,6 +85,17 @@ class FluxEditComfyClient:
             self._is_gguf_clip = False
             self._clip_name2 = None
             self._is_longcat_turbo = False
+        elif flux_version in (
+            "ggml-model-Q4_K_M.gguf",
+            "flux1-fill-dev-q4_k_m.gguf",
+            "flux1-fill-dev-Q4_K.gguf",
+        ) or "fill" in flux_version.lower():
+            clip_name = "clip_l.safetensors"
+            clip_name2 = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
+            clip_type = "flux"
+            self._dual_clip = True
+            self._clip_name2 = clip_name2
+            self._is_longcat_turbo = False
         else:
             clip_name, clip_type = clip_map[flux_version]
             if clip_name.endswith(".gguf"):
@@ -139,6 +150,8 @@ class FluxEditComfyClient:
         lora_name: Optional[str] = None,
         lora_strength: float = 1.0,
         progress_callback=None,
+        reference_latents_method: str = "index_timestep_zero",
+        grow_mask_by: int = 4,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
@@ -222,7 +235,13 @@ class FluxEditComfyClient:
                 "class_type": "TextEncodeQwenImageEditPlus",
                 "inputs": {"clip": last_clip, "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
             }
-            wf["11"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index_timestep_zero"}}
+            ref_method = reference_latents_method or "index_timestep_zero"
+            if ref_method not in ("offset", "index", "uxo/uno", "index_timestep_zero"):
+                ref_method = "index_timestep_zero"
+            wf["11"] = {
+                "class_type": "FluxKontextMultiReferenceLatentMethod",
+                "inputs": {"conditioning": ["6", 0], "reference_latents_method": ref_method},
+            }
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
             positive_input = ["11", 0]
             negative_input = ["7", 0]
@@ -260,17 +279,24 @@ class FluxEditComfyClient:
             if is_longcat:
                 wf["19"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["14", 0]}}
             wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["19", 0] if is_longcat else ["14", 0], "channel": "red"}}
-            wf["5"] = {"class_type": "VAEEncodeForInpaint", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0], "mask": ["15", 0], "grow_mask_by": 4}}
+            wf["5"] = {
+                "class_type": "VAEEncodeForInpaint",
+                "inputs": {
+                    "pixels": ["16", 0] if is_longcat else ["1", 0],
+                    "vae": ["4", 0],
+                    "mask": ["15", 0],
+                    "grow_mask_by": max(0, int(grow_mask_by)),
+                },
+            }
         else:
             wf["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0]}}
 
         if is_longcat:
             print(
                 "[FluxClient] LongCat edit workflow: "
-                f"cfg={wf['8']['inputs']['cfg']}, "
-                f"model={wf['8']['inputs']['model']}, "
-                f"positive={wf['8']['inputs']['positive']}, "
-                f"negative={wf['8']['inputs']['negative']}, "
+                f"cfg={wf['8']['inputs']['cfg']}, denoise={actual_denoise:.2f}, "
+                f"ref={ref_method}, "
+                f"mask={'inpaint' if mname else 'global'}, "
                 f"nodes={sorted(wf.keys(), key=int)}",
                 flush=True,
             )
@@ -296,6 +322,7 @@ class FluxEditComfyClient:
             timeout=3600,
             steps_hint=num_inference_steps,
             progress_callback=_on_progress,
+            cancel_check=kwargs.get("cancel_check"),
         )
         if img_meta is None:
             return None, wait_msg

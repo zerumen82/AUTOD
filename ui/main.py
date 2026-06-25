@@ -280,7 +280,8 @@ def main():
     available_port = find_available_port()
     demo = create_ui()
     # Habilitado - necesario para el funcionamiento de los botones
-    demo.queue()
+    # Varios workers evitan que una edición larga (8K, LongCat…) congele toda la UI.
+    demo.queue(default_concurrency_limit=8)
     
     # Intentar lanzar en el puerto disponible
     css = """

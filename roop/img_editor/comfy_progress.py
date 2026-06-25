@@ -72,6 +72,7 @@ def wait_for_comfy_image(
     poll_interval: float = 1.0,
     steps_hint: int = 0,
     progress_callback: Optional[ProgressCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     """Espera hasta que /history tenga imágenes. Devuelve (img_meta, mensaje)."""
     t0 = time.time()
@@ -79,6 +80,14 @@ def wait_for_comfy_image(
     last_phase = ""
 
     while True:
+        if cancel_check and cancel_check():
+            try:
+                requests.post(f"{base_url}/interrupt", timeout=5)
+                requests.post(f"{base_url}/queue", json={"delete": [prompt_id]}, timeout=5)
+            except Exception:
+                pass
+            return None, "Cancelado"
+
         elapsed = time.time() - t0
         if elapsed > timeout:
             try:

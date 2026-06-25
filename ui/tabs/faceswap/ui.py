@@ -231,7 +231,7 @@ def build_faceswap_ui():
 
                 with gr.Row():
                     bt_start = gr.Button("🚀 INICIAR PROCESAMIENTO", variant="primary", elem_classes=["btn-faceswap-main"], scale=2)
-                    bt_stop = gr.Button("⏹️", variant="stop", interactive=False)
+                    bt_stop = gr.Button("⏹ CANCELAR", variant="stop", interactive=False, scale=1)
                     bt_open_output = gr.Button("📂", variant="secondary")
                 
                 metrics_display = gr.HTML(logic.get_metrics_html(0, 0, 0, "00:00", "--:--", "Listo"))
