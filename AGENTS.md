@@ -314,6 +314,16 @@ Prueba con la imagen de prueba + el prompt. Si sigue no del todo o cara mala, p�
 - Todo el flujo Imagine es ahora **local por defecto** (light analyzer + local translate + preservation prompt).
 - Usuario no hace nada: los defaults de UI + backend garantizan el comportamiento deseado.
 
+### REFIXIN — LongCat reference_latents_method (2026-06-30)
+El cuello de botella para cambios extremos (undress, body transform) era `FluxKontextMultiReferenceLatentMethod` con `index_timestep_zero` — ponía timestep=0 para los tokens de referencia, forzando máxima preservación.
+- `index_timestep_zero`: timestep=0 en ref → **máxima preservación** (default antiguo, frenaba cambios)
+- `offset`: mismo timestep que ruido → **menos preservación**, más follow del prompt
+- `index`: similar a offset
+- `uxo`: preservación mínima
+- El HEAD ya pasa `ref="offset"` para: body transform, force_global, mag≥0.62, structural add.
+- Para mag≥0.62 usa LongCat Full automáticamente (`LongCat-Image-Edit-Q4_K_S.gguf`).
+- **Default UI**: `imagine` (LongCat Turbo). Para extremos salta a Full + offset solo.
+
 ### Revisión completa del flujo (ImgEditor Imagine) y mejoras propuestas/implementadas (a cualquier nivel, sin hardcoding)
 **Flujo actual (de código y logs):**
 1. Imagen + prompt natural.
