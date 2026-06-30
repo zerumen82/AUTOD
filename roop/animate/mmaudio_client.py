@@ -6,6 +6,8 @@ import requests
 import cv2
 from typing import Callable, Optional, Tuple
 
+_CANCELLED = "__cancelled__"
+
 from roop.comfy_workflows import get_comfyui_url
 from roop.utils import get_ffmpeg_path, get_vram_gb
 
@@ -180,9 +182,26 @@ def _copy_video_to_comfy_input(video_path: str) -> str:
     return dest_name
 
 
-def _wait_for_audio(base_url: str, prompt_id: str, timeout: int = 900) -> Optional[dict]:
+def _interrupt_comfy(base_url: str, prompt_id: Optional[str] = None):
+    try:
+        requests.post(f"{base_url.rstrip('/')}/interrupt", timeout=3)
+        if prompt_id:
+            requests.post(f"{base_url.rstrip('/')}/queue", json={"delete": [prompt_id]}, timeout=3)
+    except Exception:
+        pass
+
+
+def _wait_for_audio(
+    base_url: str,
+    prompt_id: str,
+    timeout: int = 900,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> Optional[dict]:
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if cancel_check and cancel_check():
+            _interrupt_comfy(base_url, prompt_id)
+            return None
         try:
             r = requests.get(f"{base_url}/history/{prompt_id}", timeout=30)
             if r.status_code != 200 or prompt_id not in r.json():
@@ -273,9 +292,13 @@ def add_audio_to_video(
     sound_prompt: str = "",
     motion_prompt: str = "",
     progress_callback: Optional[Callable[[str], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[Optional[str], str]:
     if not video_path or not os.path.exists(video_path):
         return None, "Video no encontrado para MMAudio"
+
+    if cancel_check and cancel_check():
+        return video_path, _CANCELLED
 
     status = get_status_message(check_comfy=True)
     if not is_available(check_comfy=True):
@@ -291,6 +314,8 @@ def add_audio_to_video(
     print(f"[MMAudio] duration={duration:.2f}s prompt={prompt[:120]}")
 
     try:
+        if cancel_check and cancel_check():
+            return video_path, _CANCELLED
         video_filename = _copy_video_to_comfy_input(video_path)
         workflow = _build_workflow(video_filename, duration, prompt, seed)
         r = requests.post(f"{base}/prompt", json={"prompt": workflow}, timeout=60)
@@ -302,7 +327,9 @@ def add_audio_to_video(
         if not prompt_id:
             return video_path, "Audio omitido: ComfyUI no devolvió prompt_id"
 
-        audio_meta = _wait_for_audio(base, prompt_id)
+        audio_meta = _wait_for_audio(base, prompt_id, cancel_check=cancel_check)
+        if cancel_check and cancel_check():
+            return video_path, _CANCELLED
         if not audio_meta:
             return video_path, "Audio omitido: MMAudio no generó archivo de audio"
 
@@ -310,6 +337,8 @@ def add_audio_to_video(
         if not _download_comfy_file(base, audio_meta, temp_audio):
             return video_path, "Audio omitido: no se pudo descargar el audio generado"
 
+        if cancel_check and cancel_check():
+            return video_path, _CANCELLED
         if progress_callback:
             progress_callback("Mezclando audio con el vídeo...")
         muxed = _mux_audio(video_path, temp_audio)

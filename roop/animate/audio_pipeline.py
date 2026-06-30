@@ -10,16 +10,29 @@ from typing import Callable, Optional, Tuple
 
 from roop.utils import get_ffmpeg_path
 
+_CANCELLED = "__cancelled__"
+
+_DIALOGUE_PATTERNS = (
+    r'["\']([^"\']{2,})["\']',
+    r'(?:que\s+)?(?:diga|digan|digas|dice|dicen|habla|hablan|cuente|cuenten)\s+(?:que\s+)?["\']?([^"\',.;]{2,})',
+    r'(?:saying|says|speak(?:ing)?|tell(?:s|ing)?)\s+(?:to\s+(?:the\s+)?camera\s+)?["\']?([^"\',.;]{2,})',
+    r'(?:dice|dicen)\s+(.+?)\s+a\s+c[aá]mara',
+)
+
 
 def extract_speech_text(prompt: str) -> str:
-    """Extrae texto hablable: comillas primero, si no el prompt limpio."""
+    """Extrae solo el fragmento hablable (comillas o patrones de diálogo), no el prompt de movimiento."""
     prompt = (prompt or "").strip()
     if not prompt:
         return ""
-    quoted = re.findall(r'["\']([^"\']{2,})["\']', prompt)
-    if quoted:
-        return quoted[0].strip()
-    return prompt.strip()
+
+    for pattern in _DIALOGUE_PATTERNS:
+        match = re.search(pattern, prompt, flags=re.IGNORECASE)
+        if match:
+            text = (match.group(1) or "").strip(" \"'.,;")
+            if len(text) >= 2:
+                return text
+    return ""
 
 
 def mux_audio_track(video_path: str, audio_path: str, *, mix_existing: bool = False) -> Optional[str]:
@@ -80,7 +93,10 @@ def add_spanish_speech(
     video_path: str,
     speech_text: str,
     progress_callback: Optional[Callable[[str], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[str, str]:
+    if cancel_check and cancel_check():
+        return video_path, _CANCELLED
     if not speech_text or not os.path.exists(video_path):
         return video_path, ""
 
@@ -94,7 +110,11 @@ def add_spanish_speech(
 
     wav_path = os.path.join(tempfile.gettempdir(), f"animate_tts_{int(os.path.getmtime(video_path))}.wav")
     try:
+        if cancel_check and cancel_check():
+            return video_path, _CANCELLED
         out = generate_audio(speech_text, "Español", output_path=wav_path)
+        if cancel_check and cancel_check():
+            return video_path, _CANCELLED
         if not out or not os.path.isfile(out):
             return video_path, "voz omitida (XTTS falló)"
         has_audio = False
@@ -123,8 +143,12 @@ def apply_animate_audio(
     motion_prompt: str,
     speech_intensity: float = 0.0,
     progress_callback: Optional[Callable[[str], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[str, str]:
     """Ambiente automático + voz español si el análisis detecta diálogo."""
+    if cancel_check and cancel_check():
+        return video_path, _CANCELLED
+
     notes = []
     out = video_path
 
@@ -141,17 +165,33 @@ def apply_animate_audio(
             sound_prompt=ambient_prompt,
             motion_prompt=motion_prompt,
             progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
+        if mm_msg == _CANCELLED:
+            return out, _CANCELLED
         if mm_msg and "omitido" not in mm_msg.lower():
             notes.append("ambiente")
     else:
         notes.append(get_status_message(check_comfy=True))
 
+    if cancel_check and cancel_check():
+        return out, _CANCELLED
+
     if want_speech:
         speech_text = extract_speech_text(user_prompt or motion_prompt)
         if speech_text:
-            out, speech_note = add_spanish_speech(out, speech_text, progress_callback=progress_callback)
+            out, speech_note = add_spanish_speech(
+                out, speech_text,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+            )
+            if speech_note == _CANCELLED:
+                return out, _CANCELLED
             if speech_note and "omitida" not in speech_note:
                 notes.append(speech_note)
 
     return out, " + ".join(n for n in notes if n) or "sin audio"
+
+
+def is_audio_cancelled(message: str) -> bool:
+    return message == _CANCELLED

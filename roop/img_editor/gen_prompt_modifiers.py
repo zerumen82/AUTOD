@@ -14,60 +14,6 @@ AMATEUR_IMAGE_TYPES = frozenset({"amateur_street", "smartphone"})
 CLIP_TOKEN_BUDGET = 76
 CLIP_SCENE_RESERVE = 40
 
-# Señales de alucinación frecuentes del rewriter 0.5B en captions txt2img
-_REWRITER_HALLUCINATION_MARKERS = frozenset({
-    "chisling", "chowing down", "blue skin", "light blue skin",
-    "walking on a dusty street", "with legs in",
-})
-
-_CONTRADICTORY_HAIR_PAIRS = (
-    (("dark hair", "brown hair", "castaño"), ("blonde", "blond", "white hair")),
-)
-
-# Fallback si prefix_compact está vacío en modelos explicit (evita prompt solo con escena)
-# NOTA: los tags NSFW los lee del config (nsfw_tags) — cada modelo especifica los suyos
-EXPLICIT_SDXL_PREFIX = "photorealistic, RAW photo, realistic, film grain, detailed skin texture, sharp focus, natural lighting, realistic anatomy, "
-
-# Prefijo fallback para FLUX explicit
-EXPLICIT_FLUX_PREFIX = ""
-
-SDXL_ANTI_STYLIZE_NEGATIVE = (
-    "anime, manga, cartoon, comic, illustration, cel shaded, stylized, "
-    "digital art, concept art, painting, drawing, sketch, 2d, toon, "
-    "3d render, cgi, render, overrendered, oversaturated, "
-    "plastic skin, doll, figurine, airbrushed, waxy skin, smooth skin, "
-    "flawless skin, video game, flat shading, painterly, artistic"
-)
-
-SDXL_MULTI_SUBJECT_NEGATIVE = (
-    "solo, alone, single person, 1girl solo, 1boy solo, portrait solo, only one person"
-)
-
-SDXL_ANTI_DISMEMBERED_NEGATIVE = (
-    "floating penis, disembodied penis, detached penis, penis only, cock only, "
-    "genitals only, severed penis, floating cock, disconnected genitals, "
-    "penis without body, penis in air, isolated genitals, floating limbs, "
-    "disembodied body parts, body parts floating, cropped penis, extra penis, "
-    "duplicate penis, headless penis, torso missing, missing body"
-)
-
-# Señales generales en prompt EN (no hardcode por frase del usuario)
-_ANATOMY_INTEGRITY_ANCHORS = (
-    "penis", "cock", "oral", "blowjob", "sucking", "deepthroat", "fellatio",
-    "threesome", "two men", "another man", "second man", "mmf", "cuckold",
-    "stranger", "man with", "men", "male",
-)
-
-SDXL_ANATOMY_INTEGRITY_POSITIVE = (
-    "full bodies visible, complete anatomy, penis attached to male body, "
-    "all subjects fully visible, connected bodies, proper human proportions"
-)
-
-SDXL_ANTI_CENSOR_NEGATIVE = (
-    "censored, sfw, clothed, covered, mosaic censoring, bar censor, "
-    "blurry crotch, pixelated, cropped, underwear, bra, panties"
-)
-
 PHOTOREAL_IMAGE_TYPES = frozenset({"photoreal", "amateur_street", "smartphone"})
 USER_SCENE_WEIGHT = 1.6
 LONG_SCENE_WORDS = 24
@@ -186,7 +132,9 @@ _INCOMPAT: Dict[str, Dict[str, frozenset]] = {
 
 
 def rewriter_caption_trustworthy(base_en: str, rewritten_en: str) -> bool:
-    """True si el caption del rewriter no contradice ni inventa sobre la traducción base."""
+    """True si el caption del rewriter mantiene solapamiento semántico con la traducción base."""
+    from roop.img_editor.gen_prompt_config import get_rewriter_config
+
     base = (base_en or "").strip()
     rewritten = (rewritten_en or "").strip()
     if not base or not rewritten:
@@ -194,22 +142,13 @@ def rewriter_caption_trustworthy(base_en: str, rewritten_en: str) -> bool:
     if len(rewritten) < max(12, len(base) * 0.35):
         return False
 
-    rw_lower = rewritten.lower()
-    if any(marker in rw_lower for marker in _REWRITER_HALLUCINATION_MARKERS):
-        return False
-
-    for group_a, group_b in _CONTRADICTORY_HAIR_PAIRS:
-        has_a = any(term in rw_lower for term in group_a)
-        has_b = any(term in rw_lower for term in group_b)
-        if has_a and has_b:
-            return False
-
+    min_ratio = float(get_rewriter_config().get("min_overlap_ratio", 0.28))
     base_words = {w for w in re.findall(r"[a-z]{3,}", base.lower()) if len(w) >= 3}
-    rw_words = {w for w in re.findall(r"[a-z]{3,}", rw_lower) if len(w) >= 3}
+    rw_words = {w for w in re.findall(r"[a-z]{3,}", rewritten.lower()) if len(w) >= 3}
     if not base_words:
         return True
     overlap = len(base_words & rw_words) / len(base_words)
-    return overlap >= 0.28
+    return overlap >= min_ratio
 
 
 def get_dropdown_choices(category: str) -> List[Tuple[str, str]]:
@@ -304,9 +243,16 @@ def get_effective_prefix(
     nsfw_tags = (conf.get("nsfw_tags") or "").strip()
 
     if not is_sdxl:
-        if is_explicit and nsfw_tags:
-            return nsfw_tags + ", "
-        return ""
+        compact = (conf.get("prefix_compact") or "").strip()
+        if compact:
+            prefix = compact if compact.endswith(", ") else f"{compact}, "
+        elif is_explicit and nsfw_tags:
+            prefix = nsfw_tags + ", "
+        else:
+            prefix = ""
+        if is_explicit and nsfw_tags and nsfw_tags.lower() not in prefix.lower():
+            prefix = f"{nsfw_tags}, {prefix}" if prefix else f"{nsfw_tags}, "
+        return prefix
 
     # --- SDXL ---
     if has_style_modifier and image_type in PHOTOREAL_IMAGE_TYPES:
@@ -320,8 +266,11 @@ def get_effective_prefix(
 
     if not prefix.strip():
         if is_explicit:
-            base = EXPLICIT_SDXL_PREFIX
-            return (nsfw_tags + ", " + base) if nsfw_tags else base
+            from roop.img_editor.gen_prompt_config import get_prompt_extras
+            base = (get_prompt_extras().get("explicit_sdxl_prefix_fallback") or "").strip()
+            if base and not base.endswith(", "):
+                base = f"{base}, " if base.endswith(",") else f"{base}, "
+            return (nsfw_tags + ", " + base) if nsfw_tags and base else (nsfw_tags + ", " if nsfw_tags else base)
         return prefix
 
     # Inyectar nsfw_tags al inicio si explicit y no están ya en el prefix
@@ -353,13 +302,6 @@ def _split_style_and_extras(
     return style_frag, ", ".join(extra_frags), extra_frags, image_type
 
 
-def scene_needs_anatomy_integrity(prompt_en: str) -> bool:
-    """Escenas con genitales y/o varias personas → exigir anatomía conectada."""
-    pl = f" {(prompt_en or '').lower()} "
-    hits = sum(1 for tag in _ANATOMY_INTEGRITY_ANCHORS if tag in pl)
-    return hits >= 2
-
-
 def assemble_generation_prompt(
     model_alias: str,
     translated: str,
@@ -372,8 +314,6 @@ def assemble_generation_prompt(
     style_frag, extras_joined, extra_list, image_type = _split_style_and_extras(modifiers)
     image_type = resolve_effective_image_type(image_type, model_alias, model_configs)
     has_style = image_type != "auto"
-    if (modifiers.get("image_type") or "auto") == "auto" and image_type == "photoreal" and not style_frag:
-        style_frag = _fragment("image_type", "photoreal")
     suffix_display = ", ".join(x for x in [style_frag, extras_joined] if x)
 
     prefix = get_effective_prefix(
@@ -393,29 +333,40 @@ def assemble_generation_prompt(
     if photoreal_tail and not photoreal_tail.endswith(","):
         photoreal_tail = f"{photoreal_tail}, "
 
+    from roop.img_editor.gen_semantic import scene_needs_anatomy_integrity
+    from roop.img_editor.gen_prompt_config import get_prompt_extras, get_gen_thresholds
+
+    extras_cfg = get_prompt_extras()
     tail_parts: List[str] = []
-    if is_sdxl and _model_explicit(model_alias, model_configs) and scene_needs_anatomy_integrity(scene):
-        tail_parts.append(SDXL_ANATOMY_INTEGRITY_POSITIVE)
-    if photoreal_tail:
+    if (
+        is_sdxl
+        and _model_explicit(model_alias, model_configs)
+        and scene_needs_anatomy_integrity(scene)
+        and extras_cfg.get("anatomy_integrity_positive")
+    ):
+        tail_parts.append(extras_cfg["anatomy_integrity_positive"])
+    if photoreal_tail and image_type in PHOTOREAL_IMAGE_TYPES:
         tail_parts.append(photoreal_tail.rstrip(", ").strip())
     if style_frag and style_frag.lower() not in prefix.lower():
         tail_parts.append(style_frag)
     if extras_joined:
         tail_parts.extend(extra_list)
 
+    max_tail = int(get_gen_thresholds().get("flux_max_tail_parts", 5))
+    if not is_sdxl and image_type in PHOTOREAL_IMAGE_TYPES and len(tail_parts) > max_tail:
+        trimmed = [style_frag] if style_frag else []
+        for part in tail_parts:
+            if part not in trimmed:
+                trimmed.append(part)
+        tail_parts = trimmed[:max_tail]
+
     if scene_words >= LONG_SCENE_WORDS and len(tail_parts) > 3:
-        # Keep photoreal base + style + all key realism helpers. Prioritize everything photoreal/RAW/gritty for better realism on long rewriter outputs. Keep as many as possible.
         keep = []
-        if photoreal_tail:
-            pparts = [p.strip() for p in photoreal_tail.rstrip(", ").strip().split(",") if p.strip()]
-            keep.extend(pparts)
-        if style_frag and style_frag not in keep:
+        if style_frag:
             keep.append(style_frag)
-        for extra in tail_parts:
-            lower = extra.lower()
-            if any(k in lower for k in ["raw", "street", "photo", "film", "grain", "skin", "pore", "anatomy", "gritty", "candid", "natural", "sweaty"]):
-                if extra not in keep:
-                    keep.append(extra)
+        for part in tail_parts:
+            if part not in keep:
+                keep.append(part)
         tail_parts = keep[:8]
 
     body_parts: List[str] = []
@@ -428,22 +379,14 @@ def assemble_generation_prompt(
 
     est = _estimate_clip_tokens(final)
     if is_sdxl and est > CLIP_TOKEN_BUDGET:
-        # Keep prefix + scene + style + as many photoreal descriptors as fit (general for all photoreal models). Prioritize film grain, pores, anatomy, gritty, raw, candid etc. Never drop realism terms first.
-        core_parts = []
-        if style_frag:
-            core_parts.append(style_frag)
+        core_parts = [style_frag] if style_frag else []
         if photoreal_tail:
-            parts = [p.strip() for p in photoreal_tail.rstrip(", ").strip().split(",") if p.strip()]
-            for p in parts:
-                lower = p.lower()
-                if any(k in lower for k in ["raw", "street", "photo", "film", "grain", "skin", "pore", "texture", "anatomy", "proportion", "gritty", "candid", "lighting", "focus", "depth", "urban", "sweaty", "real"]):
-                    if p not in core_parts:
-                        core_parts.append(p)
-            for p in parts:
-                if p not in core_parts:
+            for p in photoreal_tail.rstrip(", ").split(","):
+                p = p.strip()
+                if p and p not in core_parts:
                     core_parts.append(p)
-                    if len(core_parts) >= 6:
-                        break
+                if len(core_parts) >= 6:
+                    break
         core_tail = ", " + ", ".join(core_parts[:6]) if core_parts else ""
         final = f"{prefix}{weighted_scene}{core_tail}" if prefix else f"{weighted_scene}{core_tail}"
         est = _estimate_clip_tokens(final)
@@ -464,13 +407,8 @@ def resolve_effective_image_type(
     model_alias: str,
     model_configs: Dict,
 ) -> str:
-    """Auto en modelos explicit → fotorreal por defecto (mejor calidad sin tocar UI)."""
-    it = (image_type or "auto").strip() or "auto"
-    if it != "auto":
-        return it
-    if _model_explicit(model_alias, model_configs):
-        return "photoreal"
-    return "auto"
+    """Solo lo que el usuario elige en UI — sin forzar estilo por modelo."""
+    return (image_type or "auto").strip() or "auto"
 
 
 def _dedupe_comma_list(text: str) -> str:
@@ -503,6 +441,7 @@ def get_effective_negative(
     modifiers: Dict[str, str] = None,
     model_configs: Dict = None,
     prompt_en: str = "",
+    is_sdxl: bool = True,
 ) -> str:
     """Refuerza negativo según config del modelo + reglas generales (anti-censor, anti-stylize para photoreal).
     Los términos específicos de cada modelo (scores, anti-illustrated fuertes, etc.) van en su negative_prompt del JSON."""
@@ -517,19 +456,32 @@ def get_effective_negative(
     conf = (model_configs or {}).get(model_alias, {})
     is_explicit = bool(conf.get("explicit", False))
 
-    needs_anatomy = scene_needs_anatomy_integrity(prompt_en)
-    if is_explicit and (conf.get("multi_subject", True) or needs_anatomy):
-        neg = _prepend_negative_tokens(neg, SDXL_MULTI_SUBJECT_NEGATIVE)
+    from roop.img_editor.gen_semantic import scene_needs_anatomy_integrity, is_multi_person_scene
+    from roop.img_editor.gen_prompt_config import get_prompt_extras
 
-    if is_explicit and needs_anatomy:
-        neg = _prepend_negative_tokens(neg, SDXL_ANTI_DISMEMBERED_NEGATIVE)
+    extras_cfg = get_prompt_extras()
+    needs_anatomy = scene_needs_anatomy_integrity(prompt_en)
+    multi_person = is_multi_person_scene(prompt_en)
+
+    if is_sdxl and is_explicit and (multi_person or needs_anatomy):
+        block = extras_cfg.get("multi_subject_negative", "")
+        if block:
+            neg = _prepend_negative_tokens(neg, block)
+
+    if is_sdxl and is_explicit and needs_anatomy:
+        block = extras_cfg.get("anti_dismembered_negative", "")
+        if block:
+            neg = _prepend_negative_tokens(neg, block)
 
     if is_explicit:
-        neg = _prepend_negative_tokens(neg, SDXL_ANTI_CENSOR_NEGATIVE)
+        block = extras_cfg.get("anti_censor_negative", "")
+        if block:
+            neg = _prepend_negative_tokens(neg, block)
 
-    # Anti-estilizado general para modelos photoreal / explicit SDXL (los términos específicos van en el negative_prompt del config del modelo)
     if image_type in PHOTOREAL_IMAGE_TYPES:
-        neg = _merge_negative_tokens(neg, SDXL_ANTI_STYLIZE_NEGATIVE)
+        block = extras_cfg.get("anti_stylize_negative", "")
+        if block:
+            neg = _merge_negative_tokens(neg, block)
 
     return neg
 

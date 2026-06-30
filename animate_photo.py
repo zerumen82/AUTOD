@@ -4,11 +4,11 @@ from typing import Optional
 from PIL import Image
 from safetensors import safe_open
 from roop.utils import get_vram_gb
+from roop.comfy_workflows import get_comfyui_url
 
 def get_project_root():
     return os.path.dirname(os.path.abspath(__file__))
 
-COMFY_URL = "http://127.0.0.1:8188"
 MODELS_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
 
 
@@ -32,7 +32,10 @@ def _get_vae_channels(vae_path):
 
 class AnimatePhoto:
     def __init__(self):
-        self.base = COMFY_URL.rstrip("/")
+        self._refresh_base()
+
+    def _refresh_base(self):
+        self.base = get_comfyui_url().rstrip("/")
 
     def _post(self, endpoint, **kw):
         r = requests.post(f"{self.base}{endpoint}", **kw, timeout=120)
@@ -51,11 +54,150 @@ class AnimatePhoto:
         return fname
 
     def check_comfyui_status(self, timeout=10):
+        self._refresh_base()
         try:
             r = requests.get(f"{self.base}/system_stats", timeout=timeout)
             return r.status_code == 200
         except:
             return False
+
+    def _find_wan_model(self):
+        vram_gb = get_vram_gb()
+        prefer_5b = vram_gb <= 8
+        if prefer_5b:
+            return (
+                self._find_model("diffusion_models", ["ti2v", "5b", "fp8"], extensions=(".safetensors",))
+                or self._find_model("diffusion_models", ["wan2_2", "ti2v", "5b"], extensions=(".safetensors",))
+                or self._find_model("diffusion_models", ["wan2.2", "ti2v", "5b"], extensions=(".safetensors",))
+                or self._find_model("unet", ["wan2.2", "ti2v", "5b"], extensions=(".gguf",))
+                or self._find_model("unet", ["ti2v", "5b"], extensions=(".gguf",))
+                or self._find_model("unet", ["wan2.2", "ti2v"], extensions=(".gguf",))
+                or self._find_model("unet", ["ti2v"], extensions=(".gguf",))
+                or self._find_model("diffusion_models", ["ti2v", "5b"])
+                or self._find_model("diffusion_models", ["wan2_2", "ti2v", "5b"])
+                or self._find_model("diffusion_models", ["wan2.2", "ti2v", "5b"])
+                or self._find_model("unet", ["wan2.2", "i2v"], extensions=(".gguf",))
+                or self._find_model("unet", ["i2v"], extensions=(".gguf",))
+                or self._find_model("diffusion_models", ["wan2.2"])
+                or self._find_model("diffusion_models", ["wan2_2"])
+                or self._find_model("diffusion_models", ["wan2.1"])
+                or self._find_model("diffusion_models", ["wan"])
+            )
+        return (
+            self._find_model("unet", ["wan2.2", "i2v"], extensions=(".gguf",))
+            or self._find_model("unet", ["wan2.2", "ti2v"], extensions=(".gguf",))
+            or self._find_model("unet", ["ti2v"], extensions=(".gguf",))
+            or self._find_model("unet", ["i2v"], extensions=(".gguf",))
+            or self._find_model("diffusion_models", ["wan2.2"])
+            or self._find_model("diffusion_models", ["wan2_2"])
+            or self._find_model("diffusion_models", ["wan2.1"])
+            or self._find_model("diffusion_models", ["wan2_1"])
+            or self._find_model("diffusion_models", ["wan"])
+        )
+
+    def _validate_wan_prerequisites(self):
+        wan_model = self._find_wan_model()
+        if wan_model:
+            return True
+        print(
+            "[AnimatePhoto] ERROR: No se encontró modelo Wan (wan2.1/wan2.2) "
+            "en ui/tob/ComfyUI/models/diffusion_models/ ni unet/"
+        )
+        print("[AnimatePhoto] Ejecuta scripts/download_animate_models.ps1 o instala un GGUF/safetensors Wan.")
+        return False
+
+    @staticmethod
+    def _extract_history_error(hist, status=None):
+        parts = []
+        status = status if status is not None else hist.get("status")
+        if isinstance(status, dict):
+            for msg in status.get("messages") or []:
+                if isinstance(msg, (list, tuple)) and len(msg) >= 2:
+                    parts.append(str(msg[1]))
+            if status.get("status_str"):
+                parts.append(str(status["status_str"]))
+        parts.append(hist.get("error_message") or hist.get("status_str") or "")
+        for nid, err in (hist.get("errors") or {}).items():
+            parts.append(f"nodo {nid}: {err}")
+        for node_out in hist.get("outputs", {}).values():
+            for err in node_out.get("errors") or []:
+                if isinstance(err, dict):
+                    parts.append(str(err.get("message") or err))
+                else:
+                    parts.append(str(err))
+        return " | ".join(p for p in parts if p) or "Error desconocido en ComfyUI"
+
+    def _history_has_failed(self, hist):
+        status = hist.get("status")
+        if isinstance(status, dict):
+            status_str = (status.get("status_str") or "").lower()
+            if status_str in ("error", "failed"):
+                return True, self._extract_history_error(hist, status)
+            if status.get("completed") and not hist.get("outputs"):
+                for msg in status.get("messages") or []:
+                    if isinstance(msg, (list, tuple)) and len(msg) >= 2 and msg[0] == "execution_error":
+                        return True, self._extract_history_error(hist, status)
+        elif isinstance(status, str) and status.lower() in ("failed", "error"):
+            return True, self._extract_history_error(hist, status)
+        for node_out in hist.get("outputs", {}).values():
+            if node_out.get("errors"):
+                return True, self._extract_history_error(hist, status)
+        return False, ""
+
+    @staticmethod
+    def _is_video_output_file(filename):
+        name = (filename or "").lower()
+        return name.startswith("wananim") or name.startswith("framepack") or name.endswith(".mp4")
+
+    def _download_output_video(self, file_meta, output_path):
+        filename = file_meta.get("filename", "") if isinstance(file_meta, dict) else ""
+        if not filename or not self._is_video_output_file(filename):
+            return False
+        try:
+            r = requests.get(
+                f"{self.base}/view",
+                params={
+                    "filename": filename,
+                    "subfolder": file_meta.get("subfolder", ""),
+                    "type": file_meta.get("type", "output"),
+                },
+                timeout=120,
+            )
+        except Exception as e:
+            print(f"[AnimatePhoto] Error descargando {filename}: {e}")
+            return False
+        if r.status_code != 200:
+            print(f"[AnimatePhoto] Descarga fallida ({r.status_code}) para {filename}")
+            return False
+        if not r.content:
+            print(f"[AnimatePhoto] Archivo vacío desde ComfyUI: {filename}")
+            return False
+        with open(output_path, "wb") as fw:
+            fw.write(r.content)
+        if os.path.getsize(output_path) <= 0:
+            print(f"[AnimatePhoto] Vídeo guardado vacío: {output_path}")
+            return False
+        return True
+
+    def _try_save_history_video(self, hist, output_path):
+        outputs = hist.get("outputs") or {}
+        if not outputs:
+            return False, False
+
+        saw_candidate = False
+        for node_out in outputs.values():
+            files = node_out.get("gifs", []) or node_out.get("videos", []) or node_out.get("images", [])
+            for file_meta in files:
+                if not isinstance(file_meta, dict):
+                    continue
+                filename = file_meta.get("filename", "")
+                if not self._is_video_output_file(filename):
+                    continue
+                saw_candidate = True
+                if self._download_output_video(file_meta, output_path):
+                    return True, False
+
+        return False, saw_candidate
 
     def _find_model(self, subdir, patterns, extensions=(".gguf", ".safetensors")):
         base = os.path.join(MODELS_DIR, subdir)
@@ -137,40 +279,7 @@ class AnimatePhoto:
             "still image, no movement, low resolution, watermark, text"
         )
 
-        vram_gb = get_vram_gb()
-        prefer_5b = vram_gb <= 8
-        if prefer_5b:
-            # Preferir 5B (TI2V) en GPUs con ≤8GB VRAM
-            wan_model = (
-                self._find_model("diffusion_models", ["ti2v", "5b", "fp8"], extensions=(".safetensors",))
-                or self._find_model("diffusion_models", ["wan2_2", "ti2v", "5b"], extensions=(".safetensors",))
-                or self._find_model("diffusion_models", ["wan2.2", "ti2v", "5b"], extensions=(".safetensors",))
-                or self._find_model("unet", ["wan2.2", "ti2v", "5b"], extensions=(".gguf",))
-                or self._find_model("unet", ["ti2v", "5b"], extensions=(".gguf",))
-                or self._find_model("unet", ["wan2.2", "ti2v"], extensions=(".gguf",))
-                or self._find_model("unet", ["ti2v"], extensions=(".gguf",))
-                or self._find_model("diffusion_models", ["ti2v", "5b"])
-                or self._find_model("diffusion_models", ["wan2_2", "ti2v", "5b"])
-                or self._find_model("diffusion_models", ["wan2.2", "ti2v", "5b"])
-                or self._find_model("unet", ["wan2.2", "i2v"], extensions=(".gguf",))
-                or self._find_model("unet", ["i2v"], extensions=(".gguf",))
-                or self._find_model("diffusion_models", ["wan2.2"])
-                or self._find_model("diffusion_models", ["wan2_2"])
-                or self._find_model("diffusion_models", ["wan2.1"])
-                or self._find_model("diffusion_models", ["wan"])
-            )
-        else:
-            wan_model = (
-                self._find_model("unet", ["wan2.2", "i2v"], extensions=(".gguf",))
-                or self._find_model("unet", ["wan2.2", "ti2v"], extensions=(".gguf",))
-                or self._find_model("unet", ["ti2v"], extensions=(".gguf",))
-                or self._find_model("unet", ["i2v"], extensions=(".gguf",))
-                or self._find_model("diffusion_models", ["wan2.2"])
-                or self._find_model("diffusion_models", ["wan2_2"])
-                or self._find_model("diffusion_models", ["wan2.1"])
-                or self._find_model("diffusion_models", ["wan2_1"])
-                or self._find_model("diffusion_models", ["wan"])
-            )
+        wan_model = self._find_wan_model()
 
         vae_extensions = (".gguf", ".safetensors", ".pth")
         is_14b_model = "14b" in (wan_model or "").lower()
@@ -537,6 +646,7 @@ class AnimatePhoto:
     def animate_image(self, image_pil=None, prompt="", output_path="output.mp4",
                       model="wan_video", frames=33, fps=16, steps=25, cfg=5.5, timeout=1800, t2v_mode=False,
                       lora_name=None, lora_strength=1.0, progress_callback=None, cancel_check=None):
+        self._refresh_base()
         if not self.check_comfyui_status():
             print("[AnimatePhoto] ComfyUI no responde en /system_stats")
             return False
@@ -576,6 +686,10 @@ class AnimatePhoto:
                 tempfile.gettempdir(), f"anim_analyze_{int(time.time())}.png"
             )
             image_pil.save(analysis_image_path)
+
+        use_wan = model != "framepack"
+        if use_wan and not self._validate_wan_prerequisites():
+            return False
 
         if model == "framepack":
             self._ensure_framepack_models()
@@ -652,40 +766,33 @@ class AnimatePhoto:
                 continue
             if r.status_code == 200 and pid in r.json():
                 hist = r.json()[pid]
-                if hist.get("status") == "failed":
-                    error_info = hist.get("status_str") or hist.get("error_message") or "Error desconocido"
-                    node_errors = hist.get("errors", {})
-                    if node_errors:
-                        for nid, err in node_errors.items():
-                            error_info += f" | nodo {nid}: {err}"
+                failed, error_info = self._history_has_failed(hist)
+                if failed:
                     print(f"[AnimatePhoto] ComfyUI error: {error_info}")
                     return False
-                if "outputs" in hist and hist["outputs"]:
-                    for node_id, node_out in hist["outputs"].items():
-                        files = node_out.get("gifs", []) or node_out.get("videos", []) or node_out.get("images", [])
-                        for f in files:
-                            filename = f.get("filename", "") if isinstance(f, dict) else ""
-                            if isinstance(f, dict) and (filename.startswith("WanAnim") or filename.startswith("FramePack") or filename.lower().endswith(".mp4")):
-                                r2 = requests.get(
-                                    f"{self.base}/view",
-                                    params={
-                                        "filename": filename,
-                                        "subfolder": f.get("subfolder", ""),
-                                        "type": f.get("type", "output")
-                                    }
-                                )
-                                if r2.status_code == 200:
-                                    with open(output_path, "wb") as fw:
-                                        fw.write(r2.content)
+                status = hist.get("status")
+                if isinstance(status, dict) and status.get("completed") and not hist.get("outputs"):
+                    print("[AnimatePhoto] ComfyUI terminó sin outputs (posible fallo de generación).")
+                    return False
+                saved, saw_video = self._try_save_history_video(hist, output_path)
+                if saved:
+                    if analysis_image_path and os.path.exists(analysis_image_path):
+                        try:
+                            os.remove(analysis_image_path)
+                        except OSError:
+                            pass
 
-                                    if analysis_image_path and os.path.exists(analysis_image_path):
-                                        try:
-                                            os.remove(analysis_image_path)
-                                        except OSError:
-                                            pass
+                    elapsed = time.time() - t0
+                    print(f"[AnimatePhoto] Hecho en {elapsed:.0f}s")
+                    _notify(f"Listo en {elapsed:.0f}s")
+                    return True
 
-                                    elapsed = time.time() - t0
-                                    print(f"[AnimatePhoto] Hecho en {elapsed:.0f}s")
-                                    _notify(f"Listo en {elapsed:.0f}s")
-                                    return True
+                status = hist.get("status")
+                job_done = isinstance(status, dict) and status.get("completed")
+                if job_done and saw_video:
+                    print("[AnimatePhoto] ComfyUI generó vídeo pero la descarga falló.")
+                    return False
+                if job_done and not saw_video:
+                    print("[AnimatePhoto] ComfyUI terminó sin archivo de vídeo en outputs.")
+                    return False
             time.sleep(2)

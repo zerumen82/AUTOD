@@ -10,6 +10,8 @@ from PIL import Image
 def polish_result_image(
     image: Image.Image,
     tier: str = "hd",
+    *,
+    fast: bool = False,
 ) -> Tuple[Image.Image, str, Optional[Dict]]:
     """
     Refuerza detalle/nitidez/textura según scores de analyze_image().
@@ -33,32 +35,41 @@ def polish_result_image(
     already_at_tier = max_side >= int(tier_target * 0.92)
 
     need = max(restore, poster * 0.85)
-    if need < 0.12 and sharp > 0.68:
+    if fast and need < 0.22 and sharp > 0.55:
+        return image, "acabado rápido omitido", analysis
+    if need < 0.08 and sharp > 0.72:
         return image, "acabado omitido (imagen ya limpia)", analysis
 
     out = image
     boost = float(profile.get("detail_boost_blend", 0.12)) * _lerp(0.55, 0.85, need)
     boost = max(0.08, min(0.30, boost))
+    if fast:
+        boost = min(boost, 0.12)
     if already_at_tier:
         boost = min(boost, 0.14)
-    use_clahe = poster < 0.35 and max(out.size) <= 3200
+    use_clahe = poster < 0.35 and max(out.size) <= 3200 and not fast
     if boost > 0.09:
         out = finisher.detail_boost(out, blend=boost, use_clahe=use_clahe)
 
     sharpen = float(profile.get("sharpen", 1.12))
     amt = sharpen * _lerp(0.88, 1.0, need)
     amt = max(1.05, min(1.32, amt))
+    if fast:
+        amt = min(amt, 1.08)
     if amt > 1.04:
         out = finisher.sharpen(out, amount=amt)
 
     notes = []
+    if fast:
+        notes.append("rápido")
     if boost > 0.09:
         notes.append(f"detalle {boost:.0%}")
     if amt > 1.04:
         notes.append(f"nitidez {amt:.2f}")
 
     if (
-        not already_at_tier
+        not fast
+        and not already_at_tier
         and poster > 0.22
         and float(profile.get("texture_blend", 0)) > 0
     ):

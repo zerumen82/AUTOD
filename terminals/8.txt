@@ -1,0 +1,54 @@
+---
+pid: 15400
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "D:\\PROJECTS\\AUTOAUTO\\venv\\Scripts\\python.exe -u -c \"
+import os, time, sys
+from PIL import Image
+from roop.animate.animate_manager import get_animate_manager
+
+img = Image.open('assets/_icon_test.png').convert('RGB')
+mgr = get_animate_manager()
+print('[TEST] FramePack autoregresivo (latent_window=9)...', flush=True)
+t0=time.time()
+path, msg = mgr.generate_video(
+    image=img,
+    prompt='gentle subtle motion, soft light flicker',
+    engine='framepack',
+    frames=33,
+    fps=12,
+    steps=15,
+    cfg=6.0,
+    autoregressive_chunks=1,
+    progress_callback=lambda m: print(f'  > {m}', flush=True)
+)
+print(f'[TEST] path={path}', flush=True)
+print(f'[TEST] msg={msg}', flush=True)
+print(f'[TEST] exists={bool(path and os.path.exists(path))}', flush=True)
+if path and os.path.exists(path):
+    print(f'[TEST] size={os.path.getsize(path)}', flush=True)
+print(f'[TEST] elapsed={time.time()-t0:.0f}s', flush=True)
+sys.exit(0 if path and os.path.exists(path) else 1)
+\""
+started_at: 2026-06-23T09:05:51.113Z
+running_for_ms: 7105010  
+---
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.2 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[TEST] FramePack autoregresivo (latent_window=9)...
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[AnimateManager] Semantic Analysis: Magnitude=0.77
+[AnimateManager] Prompt: gentle subtle motion, soft light flicker...
+[AnimateManager] VRAM baja (8GB). Ajustando frames=121, steps=15.
+[AnimateManager] Params: frames=121, steps=15, cfg=6.0
+[AnimateManager] Engine=framepack Frames=121 FPS=12 Steps=15 CFG=6.0 LoRA=None
+  > Generando animación con FramePack...
+[AnimatePhoto] Resized: 256x256 -> 384x384, frames=49, steps=15, cfg=6.0
+[FramePack] Config: duration=4.1s, window=9, steps=15, cfg=6.0, guidance=6.0, fp8=True, gpu_mem=4.0GB
+[AnimatePhoto] ComfyUI sin respuesta (1/3). Reintentando...
+[TEST] path=None
+[TEST] msg=Error: HTTPConnectionPool(host='127.0.0.1', port=8188): Max retries exceeded with url: /history/e6301c9d-e608-415a-9e5c-ddc1d4edead6 (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000025E40134AF0>: Failed to establish a new connection: [WinError 10061] No se puede establecer una conexión ya que el equipo de destino denegó expresamente dicha conexión'))
+[TEST] exists=False
+[TEST] elapsed=2667s

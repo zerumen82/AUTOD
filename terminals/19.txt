@@ -1,0 +1,18 @@
+---
+pid: 17212
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "$env:PYTHONPATH = \"D:\\PROJECTS\\AUTOAUTO\"; python -c \"from roop.img_editor.hyperreal_polish import polish_result_image; from PIL import Image; img=Image.open('img_editor/edit_1782368164.png'); o,n,a=polish_result_image(img,'8k'); print(n); print(a['scores'].get('restore'), a['scores'].get('poster'))\""
+started_at: 2026-06-25T07:41:44.812Z
+running_for_ms: 7189994  
+---
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.2 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[QualityFinisher] Análisis adaptativo tier=8K 3980×3000: plan=restaurar route=naturalidad-global poster=0.80 rest=1.00 nit=0.21 up=0.43 | tiles=omit tex=42% dep=71% sharpen=1.48
+[QualityFinisher] Recuperación textura — 2228×1679
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py:148: UserWarning: Specified provider 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecutionProvider'
+  warnings.warn(
+acabado adaptativo (detalle 30%, nitidez 1.32, textura ESRGAN (20%))
+1.0 0.799

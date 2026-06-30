@@ -1,0 +1,116 @@
+---
+pid: 26392
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "cd D:\\PROJECTS\\AUTOAUTO && python -c \"
+import sys; sys.path.insert(0,'.')
+from ui.tabs.comfy_launcher import start, is_comfyui_running
+import time
+if not is_comfyui_running():
+    ok,msg,port=start(port=8188, directly_run=True)
+    print('start',ok,msg,port)
+    for i in range(180):
+        if is_comfyui_running():
+            print('ready',i+1); break
+        time.sleep(1)
+    else:
+        print('timeout')
+else:
+    print('already running')
+\""
+started_at: 2026-06-23T14:14:26.550Z
+running_for_ms: 25375006 
+---
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.2 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[ComfyLauncher] Usando venv de ComfyUI (RECOMENDADO): D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8188: no hay LISTENING, saltando
+[DEBUG] Verificando puerto 8189...
+[DEBUG] Checking port 8189...
+[DEBUG] Puerto 8189: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8189: no hay LISTENING, saltando
+[DEBUG] No se encontró ComfyUI en puertos [8188, 8189]
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8188: no hay LISTENING, saltando
+[DEBUG] Verificando puerto 8189...
+[DEBUG] Checking port 8189...
+[DEBUG] Puerto 8189: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8189: no hay LISTENING, saltando
+[DEBUG] No se encontró ComfyUI en puertos [8188, 8189]
+
+[ComfyLauncher] ========================================
+[ComfyLauncher] INICIANDO ComfyUI en puerto 8188
+[ComfyLauncher] ========================================
+
+[ComfyLauncher] Puerto establecido: 8188
+[ComfyLauncher] VRAM detectada: 8GB → usando --normalvram
+[ComfyLauncher] Ejecutando: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe -u D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py --port 8188 --normalvram
+[ComfyLauncher] Directorio: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI
+[ComfyLauncher] Python: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[ComfyLauncher] ---------------------------------------
+[ComfyLauncher] Proceso creado (PID: 14760)
+
+[ComfyLauncher] Esperando respuesta de ComfyUI...
+[ComfyUI] Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+[ComfyUI] Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+[ComfyUI] Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+[ComfyUI] 
+[ComfyUI] Prestartup times for custom nodes:
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+[ComfyUI] 
+[ComfyUI] WARNING: You need pytorch with cu130 or higher to use optimized CUDA operations.
+[ComfyUI] Found comfy_kitchen backend eager: {'available': True, 'disabled': False, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8', 'scaled_mm_nvfp4']}
+[ComfyUI] Found comfy_kitchen backend cuda: {'available': True, 'disabled': True, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8']}
+[ComfyUI] Found comfy_kitchen backend triton: {'available': False, 'disabled': True, 'unavailable_reason': "ImportError: No module named 'triton'", 'capabilities': []}
+[ComfyUI] Checkpoint files will always be loaded safely.
+[ComfyUI] Total VRAM 8192 MB, total RAM 32713 MB
+[ComfyUI] pytorch version: 2.6.0+cu124
+[ComfyUI] Set vram state to: NORMAL_VRAM
+[ComfyUI] Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+[ComfyUI] Using async weight offloading with 2 streams
+[ComfyUI] Enabled pinned memory 13085.0
+[ComfyUI] Using pytorch attention
+[ComfyUI] Unsupported Pytorch detected. DynamicVRAM support requires Pytorch version 2.8 or later. Falling back to legacy ModelPatcher. VRAM estimates may be unreliable especially on Windows
+[ComfyUI] Python version: 3.10.6 (tags/v3.10.6:9c7b4bd, Aug  1 2022, 21:53:49) [MSC v.1932 64 bit (AMD64)]
+[ComfyUI] ComfyUI version: 0.19.0
+[ComfyUI] comfy-aimdo version: 0.2.12
+[ComfyUI] comfy-kitchen version: 0.2.8
+[ComfyUI] ComfyUI frontend version: 1.42.10
+[ComfyUI] [Prompt Server] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\comfyui_frontend_package\static
+[ComfyUI] Asset seeder disabled
+[ComfyUI] ComfyUI-GGUF: Partial torch compile only, consider updating pytorch
+[ComfyUI] Warning: Could not load sageattention: No module named 'triton'
+[ComfyUI] sageattention package is not installed, sageattention will not be available
+[ComfyUI] 
+[ComfyUI] Import times for custom nodes:
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+[ComfyUI]    0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+[ComfyUI]    0.2 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-FramePackWrapper
+[ComfyUI]    3.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+[ComfyUI]   10.5 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio
+[ComfyUI]   26.3 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+[ComfyUI] 
+[ComfyUI] Context impl SQLiteImpl.
+[ComfyUI] Will assume non-transactional DDL.
+[ComfyUI] Starting server
+[ComfyUI] 
+[ComfyUI] To see the GUI go to: http://127.0.0.1:8188
+
+[ComfyLauncher] OK ComfyUI INICIADO (tiempo: 277.8s)
+[ComfyLauncher] URL: http://127.0.0.1:8188
+[ComfyLauncher] ========================================
+
+start True ComfyUI iniciado 8188
+ready 1

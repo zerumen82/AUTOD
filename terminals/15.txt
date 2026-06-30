@@ -1,0 +1,150 @@
+---
+pid: 29588
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "cd D:\\PROJECTS\\AUTOAUTO && python -c \"
+import sys; sys.path.insert(0,'.')
+from tools.test_structural_global import run_e2e_test
+import requests
+ok=requests.get('http://127.0.0.1:8188/system_stats',timeout=3).status_code==200
+print('comfy',ok)
+if ok:
+ run_e2e_test('testdata/test_person.jpg','quita a todas las personas de la foto','debug_test')
+\""
+started_at: 2026-06-23T14:22:03.413Z
+running_for_ms: 24519998 
+---
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.2 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+comfy True
+
+======================================================================
+PHASE 2 — Generación e2e (ComfyUI + LongCat)
+======================================================================
+[ComfyLauncher] Usando venv de ComfyUI (RECOMENDADO): D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: socket conectado exitosamente (127.0.0.1) - retornar True
+[DEBUG] Haciendo request HTTP a puerto 8188...
+[DEBUG] HTTP response: 200
+[ComfyLauncher] ✓ ComfyUI detectado en puerto 8188
+Prompt: 'quita a todas las personas de la foto'
+Image: testdata/test_person.jpg (1024x768)
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Semantic: Magnitude=0.74, Target=subject, Structural=0.35, Bias=remove
+[ImgEditor] Structural bias=remove: denoise=0.96, steps=30, ref=offset
+[ImgEditor] Dynamic Params: Mag=0.74, Denoise=0.96, Steps=30, CFG=2.2
+[ImgEditor] Imagine/LongCat Prompt: Instruction: remove all the people from the photo. Edit this exact photo. Keep the same environment, lighting, camera angle and scene style. Completely remove the specified people from the image with no visible trace, ghosting, silhouette or leftover body parts. Fill the area naturally with coherent background. Also improve colors, sharpness and photographic quality naturally.
+[ImgEditor] Target: subject (Global: True)
+[ImgEditor] Prompt final: Instruction: remove all the people from the photo. Edit this exact photo. Keep the same environment, lighting, camera angle and scene style. Completely remove the specified people from the image with no visible trace, ghosting, silhouette or leftover body parts. Fill the area naturally with coherent background. Also improve colors, sharpness and photographic quality naturally.
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py:148: UserWarning: Specified provider 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecutionProvider'
+  warnings.warn(
+C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\insightface\utils\transform.py:68: FutureWarning: `rcond` parameter will change to the default of machine precision times ``max(M, N)`` where M and N are the input matrix dimensions.
+To use the future default and silence this warning we advise to pass `rcond=None`, to keep using the old, explicitly pass `rcond=-1`.
+  P = np.linalg.lstsq(X_homo, Y)[0].T # Affine matrix. 3 x 4
+INFO:roop.img_editor.clothing_segmenter:[ClothingSegmenter] Cargando CLIPSeg LOCAL (Fix Windows)...
+INFO:roop.img_editor.clothing_segmenter:[ClothingSegmenter] ✅ CLIPSeg cargado localmente en cpu
+[ImgEditor] Compound prompt detected (main change + quality/color polish)
+[INFO] GPU detectada - Usando CUDA para FaceAnalysis
+[INFO] Inicializando FaceAnalysis con providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\1k3d68.onnx landmark_3d_68 ['None', 3, 192, 192] 0.0 1.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\2d106det.onnx landmark_2d_106 ['None', 3, 192, 192] 0.0 1.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\det_10g.onnx detection [1, 3, '?', '?'] 127.5 128.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\genderage.onnx genderage ['None', 3, 96, 96] 0.0 1.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: D:\PROJECTS\AUTOAUTO\models\buffalo_l\w600k_r50.onnx recognition ['None', 3, 112, 112] 127.5 127.5
+set det-size: (1024, 1024)
+[SUCCESS] [OK] FaceAnalysis inicializado con CUDAExecutionProvider (det_size=1024x1024, thresh=0.5)
+[ImgEditor] InsightFace persona falló: too many values to unpack (expected 2)
+[ImgEditor] Máscara persona vía CLIPSeg (CPU)
+[ImgEditor] Structural remove: inpaint persona + denoise alto + ref index
+[ImgEditor] Iniciando generación con motor: imagine
+[ImgEditor] mag=0.74 (auto Full) → LongCat Full (denoise real, no Turbo)
+[ImgEditor] Enviando a ComfyUI (imagine, version=LongCat-Image-Edit-Q4_K_S.gguf)...
+[FluxClient] LongCat edit workflow: cfg=2.2, denoise=0.96, ref=offset, mask=inpaint, nodes=['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '14', '15', '16', '19']
+[FluxClient] En cola ComfyUI (0s)
+[FluxClient] Cargando modelo (15s)
+[FluxClient] Cargando modelo (30s)
+[FluxClient] Cargando modelo (45s)
+[FluxClient] Cargando modelo (60s)
+[FluxClient] Cargando modelo (75s)
+[FluxClient] Preparando generación (90s)
+[FluxClient] Preparando generación (105s)
+[FluxClient] Preparando generación (120s)
+[FluxClient] Preparando generación (135s)
+[FluxClient] Preparando generación (150s)
+[FluxClient] Preparando generación (390s)
+[FluxClient] Preparando generación (405s)
+[FluxClient] Preparando generación (420s)
+[FluxClient] Preparando generación (435s)
+[FluxClient] Preparando generación (450s)
+[FluxClient] Preparando generación (465s)
+[FluxClient] Preparando generación (690s)
+[FluxClient] Preparando generación (705s)
+[FluxClient] Preparando generación (720s)
+[FluxClient] Preparando generación (735s)
+[FluxClient] Preparando generación (750s)
+[FluxClient] Preparando generación (765s)
+[FluxClient] Preparando generación (780s)
+[FluxClient] Preparando generación (1020s)
+[FluxClient] Preparando generación (1035s)
+[FluxClient] Preparando generación (1050s)
+[FluxClient] Preparando generación (1065s)
+[FluxClient] Preparando generación (1080s)
+[FluxClient] Preparando generación (1095s)
+[FluxClient] Preparando generación (1335s)
+[FluxClient] Preparando generación (1350s)
+[FluxClient] Preparando generación (1365s)
+[FluxClient] Preparando generación (1380s)
+[FluxClient] Preparando generación (1395s)
+[FluxClient] Preparando generación (1410s)
+[FluxClient] Preparando generación (1515s)
+[FluxClient] Preparando generación (1530s)
+[FluxClient] Preparando generación (1545s)
+[FluxClient] Preparando generación (1560s)
+[FluxClient] Preparando generación (1710s)
+[FluxClient] Preparando generación (1725s)
+[FluxClient] Preparando generación (1830s)
+[FluxClient] Preparando generación (1845s)
+[FluxClient] Preparando generación (1860s)
+[FluxClient] Preparando generación (1875s)
+[FluxClient] Preparando generación (1965s)
+[FluxClient] Preparando generación (1980s)
+[FluxClient] Preparando generación (1995s)
+[FluxClient] Preparando generación (2010s)
+[FluxClient] Preparando generación (2025s)
+[FluxClient] Preparando generación (2175s)
+[FluxClient] Preparando generación (2190s)
+[FluxClient] Preparando generación (2325s)
+[FluxClient] Preparando generación (2445s)
+[FluxClient] Preparando generación (2460s)
+[FluxClient] Preparando generación (2475s)
+[FluxClient] Preparando generación (2625s)
+[FluxClient] Preparando generación (2640s)
+[FluxClient] Preparando generación (2655s)
+[FluxClient] Preparando generación (2670s)
+[FluxClient] Preparando generación (2820s)
+[FluxClient] Preparando generación (2835s)
+[FluxClient] Preparando generación (2850s)
+[FluxClient] Preparando generación (2865s)
+[FluxClient] Preparando generación (2880s)
+[FluxClient] Preparando generación (3000s)
+[FluxClient] Preparando generación (3015s)
+[FluxClient] Preparando generación (3030s)
+[FluxClient] Preparando generación (3045s)
+[FluxClient] Preparando generación (3240s)
+[FluxClient] Preparando generación (3255s)
+[FluxClient] Preparando generación (3270s)
+[FluxClient] Preparando generación (3285s)
+[FluxClient] Preparando generación (3525s)
+[FluxClient] Preparando generación (3540s)
+[FluxClient] Preparando generación (3555s)
+[FluxClient] Preparando generación (3570s)
+FAIL e2e (3621s): Timeout (3600s)

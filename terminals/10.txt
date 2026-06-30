@@ -1,0 +1,20 @@
+---
+pid: 13996
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "D:\\PROJECTS\\AUTOAUTO\\venv\\Scripts\\python.exe -c \"
+with open(r'D:\\PROJECTS\\AUTOAUTO\\terminals\\7.txt','r',encoding='utf-8',errors='ignore') as f:
+    lines=f.readlines()
+for line in lines[-8:]:
+    print(line.rstrip()[:200])
+\""
+started_at: 2026-06-23T09:27:08.399Z
+running_for_ms: 5810012  
+---
+CLIP/text encoder model load device: cuda:0, offload device: cpu, current: cpu, dtype: torch.float16
+Requested to load HunyuanVideoClipModel_
+loaded partially; 5660.68 MB usable, 5100.32 MB loaded, 9450.53 MB offloaded, 560.00 MB buffer reserved, lowvram patches: 0
+loaded partially; 5660.68 MB usable, 5100.32 MB loaded, 9450.53 MB offloaded, 560.00 MB buffer reserved, lowvram patches: 0
+[ComfyUI-Easy-Use] server: v1.3.7 Loaded
+[ComfyUI-Easy-Use] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\web_version/v2 Loaded
+Using accelerate to load and assign model weights to device...
+Loading transformer parameters to cpu:   0%|          | 0/1274 [00:00<?, ?it/s]Loading transformer parameters to cpu:   0%|          | 1/1274 [00:01<21:55,  1.03s/it]Loading transformer parameters to 

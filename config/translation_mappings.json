@@ -65,10 +65,38 @@
     [" mejor", " better"],
     [" una", " a"],
     [" un", " a"],
-    [" y ", " and "]
+    [" y ", " and "],
+    [" moreturbando", " masturbating"],
+    [" masturbando", " masturbating"],
+    [" masturba", " masturbate"],
+    [" masturbacion", " masturbation"],
+    ["follando", "fucking"],
+    ["follame", "fuck me"],
+    ["follar", "fuck"],
+    ["chupando", "sucking"],
+    ["chupame", "suck me"],
+    ["chupar", "suck"],
+    ["sexo", "having sex"],
+    ["teniendo sexo", "having sex"],
+    ["hacer el amor", "make love"],
+    ["penetrando", "penetrating"],
+    ["penetrame", "penetrate me"],
+    ["corriendose", "cumming, orgasm"],
+    ["eyaculando", "ejaculating"],
+    ["oral", "oral sex"],
+    ["mamando", "sucking"],
+    ["culos", "ass, butt"],
+    ["culo", "ass"],
+    ["tetas", "tits, breasts"],
+    ["pechos", "breasts"],
+    ["abierta de piernas", "with legs spread open"],
+    ["a cuatro patas", "on all fours"],
+    ["perrito", "doggy style"],
+    ["misionero", "missionary"],
+    ["desde atras", "from behind"]
   ],
   "quality_fixups": [
-    ["improve quality", "ultra high quality, sharp focus, 8K, highly detailed, crisp"],
-    ["mejorar calidad", "ultra alta calidad, enfoque nítido, 8K, muy detallado"]
+    {"find": "improve quality", "replace": "ultra high quality, sharp focus, 8K, highly detailed, crisp"},
+    {"find": "mejorar calidad", "replace": "ultra alta calidad, enfoque nítido, 8K, muy detallado"}
   ]
 }

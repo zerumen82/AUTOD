@@ -26,7 +26,7 @@ def on_cancel_animate():
 
 
 def wire_animate_events(ui):
-    def on_animate_click(img_data, p, l_name, l_strength):
+    def on_animate_click(img_data, p, l_name, l_strength, stabilize_face):
         clear_cancel(SCOPE_ANIMATE)
 
         if state.is_animating:
@@ -57,6 +57,7 @@ def wire_animate_events(ui):
             try:
                 video, msg = logic.generate_grok_animation(
                     img, p,
+                    stabilize=stabilize_face,
                     progress_callback=progress_callback,
                     lora_name=l_name,
                     lora_strength=l_strength,
@@ -75,7 +76,7 @@ def wire_animate_events(ui):
         thread.start()
 
         try:
-            yield None, _status("Generando animación (~6s)..."), *btn_running()
+            yield None, _status("Generando animación autoregresiva..."), *btn_running()
             while True:
                 if is_cancelled(SCOPE_ANIMATE):
                     break
@@ -103,6 +104,7 @@ def wire_animate_events(ui):
             ui["prompt"],
             ui["lora_name"],
             ui["lora_strength"],
+            ui["face_stabilize"],
         ],
         outputs=[ui["video_output"], ui["progress_html"], ui["btn_animate"], ui["btn_cancel"]],
     )

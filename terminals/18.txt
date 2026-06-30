@@ -1,0 +1,16 @@
+---
+pid: 10076
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "D:\\PROJECTS\\AUTOAUTO\\venv\\Scripts\\pip.exe show pycrfsuite 2>&1
+D:\\PROJECTS\\AUTOAUTO\\venv\\Scripts\\python.exe -c \"import pycrfsuite; print('pycrfsuite ok', pycrfsuite)\"
+D:\\PROJECTS\\AUTOAUTO\\venv\\Scripts\\python.exe -c \"import open_clip; print('open_clip ok')\""
+started_at: 2026-06-25T05:48:07.701Z
+running_for_ms: 13995015 
+---
+WARNING: Package(s) not found: pycrfsuite
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "D:\PROJECTS\AUTOAUTO\venv\lib\site-packages\pycrfsuite\__init__.py", line 1, in <module>
+    from ._pycrfsuite import *
+ModuleNotFoundError: No module named 'pycrfsuite._pycrfsuite'
+open_clip ok

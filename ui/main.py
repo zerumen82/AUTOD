@@ -9,6 +9,7 @@ import sys
 import gradio as gr
 import atexit
 import socket
+import threading
 
 from ui.tabs.img_editor_tab import create_img_editor_tab
 
@@ -102,10 +103,33 @@ def check_comfy_status():
     return "🔴 stopped"
 
 
+_comfy_start_lock = threading.Lock()
+_comfy_start_running = False
+
+
 def start_comfyui():
-    from ui.tabs.comfy_launcher import start
-    start(directly_run=True)
-    return check_comfy_status()
+    """Arranca ComfyUI en segundo plano — no bloquea la UI (antes esperaba hasta 5 min)."""
+    global _comfy_start_running
+    if check_comfy_status() == "🟢 running":
+        return "🟢 running"
+    with _comfy_start_lock:
+        if _comfy_start_running:
+            return "🟡 iniciando… (pulsa ↻ para actualizar)"
+        _comfy_start_running = True
+
+    def _worker():
+        global _comfy_start_running
+        try:
+            from ui.tabs.comfy_launcher import start
+            start(directly_run=True)
+        except Exception as e:
+            print(f"[ComfyUI] Error arranque en background: {e}")
+        finally:
+            with _comfy_start_lock:
+                _comfy_start_running = False
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return "🟡 iniciando… (pulsa ↻ en ~30–90s)"
 
 
 def stop_comfyui():
@@ -259,9 +283,9 @@ def create_ui():
                     gr.Markdown(f"Error: {e}")
         
         # Eventos de ComfyUI
-        btn_refresh.click(fn=check_comfy_status, outputs=[comfy_status])
-        btn_start.click(fn=start_comfyui, outputs=[comfy_status])
-        btn_stop.click(fn=stop_comfyui, outputs=[comfy_status])
+        btn_refresh.click(fn=check_comfy_status, outputs=[comfy_status], queue=False)
+        btn_start.click(fn=start_comfyui, outputs=[comfy_status], queue=False)
+        btn_stop.click(fn=stop_comfyui, outputs=[comfy_status], queue=False)
         
         # Eventos de SD Launcher
         sd_btn_refresh.click(fn=check_sd_status, outputs=[sd_status])
@@ -288,6 +312,7 @@ def main():
         .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
         .main-tabs { width: 100% !important; }
     """
+    allowed = [os.path.join(os.getcwd(), ".autodeep_temp")]
     try:
         demo.launch(
             server_name="127.0.0.1",
@@ -295,7 +320,8 @@ def main():
             share=False,
             show_error=True,
             quiet=True,
-            css=css
+            css=css,
+            allowed_paths=allowed,
         )
     except OSError as e:
         if "Cannot find empty port" in str(e):
@@ -309,7 +335,8 @@ def main():
                 share=False,
                 show_error=True,
                 quiet=True,
-                css=css
+                css=css,
+                allowed_paths=allowed,
             )
         else:
             raise

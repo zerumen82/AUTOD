@@ -78,6 +78,8 @@ def wait_for_comfy_image(
     t0 = time.time()
     last_cb = 0.0
     last_phase = ""
+    last_console_phase = ""
+    last_log = 0.0
 
     while True:
         if cancel_check and cancel_check():
@@ -109,6 +111,19 @@ def wait_for_comfy_image(
             progress_callback(prog)
             last_cb = now
             last_phase = prog.get("phase", "")
+
+        phase_now = prog.get("phase") or "Esperando"
+        if now - last_log >= 10.0 or phase_now != last_console_phase:
+            step = int(prog.get("step") or 0)
+            total = int(prog.get("total") or 0) or steps_hint
+            pct = float(prog.get("progress") or 0) * 100
+            print(
+                f"[ComfyUI] {phase_now} | {pct:.0f}% | paso {step}/{total} | "
+                f"transcurrido {format_duration(elapsed)}",
+                flush=True,
+            )
+            last_log = now
+            last_console_phase = phase_now
 
         if prog.get("done"):
             try:
@@ -147,7 +162,10 @@ def build_generation_progress_html(
     <div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);padding:14px;border-radius:10px;
         border:1px solid #334155;margin:8px 0;">
         <div style="color:#a855f7;font-size:14px;font-weight:bold;margin-bottom:10px;text-align:center;">
-            Generando imagen
+            {phase}
+        </div>
+        <div style="color:#64748b;font-size:10px;text-align:center;margin-bottom:8px;">
+            No está colgado — LongCat/ComfyUI puede tardar 1–5 min la primera vez
         </div>
         <div style="margin-bottom:10px;background:rgba(255,255,255,0.05);border-radius:8px;height:22px;overflow:hidden;">
             <div style="width:{safe_pct:.1f}%;height:100%;background:{bar};transition:width 0.35s ease-out;

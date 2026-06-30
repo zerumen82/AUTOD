@@ -1,10 +1,9 @@
 import os
 from roop.animate.animate_manager import get_animate_manager
 
-# ~6s @ 12fps vía 2 bloques AR (37+36 frames tras concat)
+# AR automático estilo Imagine: bloques/decisión en animate_manager.resolve_autoregressive_plan
 PRESET = {
     "frames": 37,
-    "chunks": 2,
     "fps": 12,
     "steps": 24,
     "cfg": 5.5,
@@ -29,10 +28,10 @@ def generate_grok_animation(image, prompt, stabilize=False, progress_callback=No
             engine="wan_video",
             frames=PRESET["frames"],
             fps=PRESET["fps"],
-            face_stabilize=False,
+            face_stabilize=stabilize,
             steps=PRESET["steps"],
             cfg=PRESET["cfg"],
-            autoregressive_chunks=PRESET["chunks"],
+            autoregressive_chunks=0,
             mask_image=None,
             mask_mode="global",
             mask_prompt="",

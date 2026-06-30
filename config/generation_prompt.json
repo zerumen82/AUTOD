@@ -1,0 +1,69 @@
+{
+  "thresholds": {
+    "anatomy_structural": 0.06,
+    "anatomy_attribute": 0.10,
+    "multi_person_structural": 0.08,
+    "lora_scene_min_score": 0.12,
+    "flux_max_tail_parts": 5
+  },
+  "prompt_extras": {
+    "explicit_sdxl_prefix_fallback": "photorealistic, RAW photo, realistic, film grain, detailed skin texture, sharp focus, natural lighting, realistic anatomy, ",
+    "anti_stylize_negative": "anime, manga, cartoon, comic, illustration, cel shaded, stylized, digital art, concept art, painting, drawing, sketch, 2d, toon, 3d render, cgi, render, overrendered, oversaturated, plastic skin, doll, figurine, airbrushed, waxy skin, smooth skin, flawless skin, video game, flat shading, painterly, artistic",
+    "multi_subject_negative": "solo, alone, single person, 1girl solo, 1boy solo, portrait solo, only one person",
+    "anti_dismembered_negative": "floating penis, disembodied penis, detached penis, penis only, cock only, genitals only, severed penis, floating cock, disconnected genitals, penis without body, penis in air, isolated genitals, floating limbs, disembodied body parts, body parts floating, cropped penis, extra penis, duplicate penis, headless penis, torso missing, missing body",
+    "anti_censor_negative": "censored, sfw, clothed, covered, mosaic censoring, bar censor, blurry crotch, pixelated, cropped, underwear, bra, panties",
+    "anatomy_integrity_positive": "full bodies visible, complete anatomy, penis attached to male body, all subjects fully visible, connected bodies, proper human proportions"
+  },
+  "rewriter": {
+    "min_overlap_ratio": 0.28
+  },
+  "lora_catalog": [
+    {
+      "file": "nsfw-xl-2.1.safetensors",
+      "anchors": ["nsfw explicit adult uncensored nude scene"],
+      "strength": 0.50,
+      "always": true,
+      "boost": "",
+      "label": "NSFW base"
+    },
+    {
+      "file": "Nsfw Deepthroat.safetensors",
+      "anchors": ["oral sex blowjob deepthroat kneeling sucking fellatio"],
+      "strength": 0.72,
+      "boost": "",
+      "label": "Oral / deepthroat"
+    },
+    {
+      "file": "Cuckold_Threesome_SDXL.safetensors",
+      "anchors": ["threesome two men another man second man mmf cuckold waiting third person"],
+      "strength": 0.62,
+      "sdxl_only": true,
+      "boost": "",
+      "label": "Threesome 2M+1F"
+    },
+    {
+      "file": "Cuckold_Sex_-_Pony.safetensors",
+      "anchors": ["threesome two men another man cuckold mmf waiting"],
+      "strength": 0.62,
+      "pony_only": true,
+      "boost": "",
+      "label": "Threesome Pony"
+    },
+    {
+      "file": "NsfwPovAllInOneLoraSdxl-000009.safetensors",
+      "anchors": ["point of view pov first person camera perspective"],
+      "strength": 0.55,
+      "skip_when_multi_person": true,
+      "boost": "",
+      "label": "POV NSFW"
+    },
+    {
+      "file": "realism3.safetensors",
+      "anchors": ["photorealistic skin texture detailed realistic raw photograph"],
+      "strength": 0.35,
+      "image_type_trigger": ["photoreal", "amateur_street", "smartphone"],
+      "boost": "",
+      "label": "Realism skin"
+    }
+  ]
+}

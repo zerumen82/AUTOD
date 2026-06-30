@@ -1,0 +1,53 @@
+---
+pid: 11508
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "D:\\PROJECTS\\AUTOAUTO\\venv\\Scripts\\python.exe -c \"
+import os, time
+from PIL import Image
+from roop.animate.animate_manager import get_animate_manager
+
+img = Image.open('assets/_icon_test.png').convert('RGB')
+mgr = get_animate_manager()
+print('[TEST] Iniciando animacion FramePack (autoregresivo)...')
+t0=time.time()
+path, msg = mgr.generate_video(
+    image=img,
+    prompt='gentle subtle motion, soft light flicker',
+    engine='framepack',
+    frames=33,
+    fps=12,
+    steps=20,
+    cfg=6.0,
+    autoregressive_chunks=1,
+    progress_callback=lambda m: print(f'  > {m}')
+)
+print(f'[TEST] Resultado: {path}')
+print(f'[TEST] Mensaje: {msg}')
+print(f'[TEST] Existe: {path and os.path.exists(path)}')
+if path and os.path.exists(path):
+    print(f'[TEST] Tamano: {os.path.getsize(path)} bytes')
+print(f'[TEST] Tiempo: {time.time()-t0:.0f}s')
+\""
+started_at: 2026-06-23T08:08:29.283Z
+running_for_ms: 9944079  
+---
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.2 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[TEST] Iniciando animacion FramePack (autoregresivo)...
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[AnimateManager] Semantic Analysis: Magnitude=0.77
+[AnimateManager] Prompt: gentle subtle motion, soft light flicker...
+[AnimateManager] VRAM baja (8GB). Ajustando frames=121, steps=20.
+[AnimateManager] Params: frames=121, steps=20, cfg=6.0
+[AnimateManager] Engine=framepack Frames=121 FPS=12 Steps=20 CFG=6.0 LoRA=None
+  > Generando animación con FramePack...
+[AnimatePhoto] Resized: 256x256 -> 384x384, frames=49, steps=20, cfg=6.0
+[FramePack] Config: duration=4.1s, window=9, steps=20, cfg=6.0, guidance=6.0, fp8=True, gpu_mem=4.0GB
+[AnimatePhoto] ComfyUI dejó de responder. Abortando.
+[TEST] Resultado: None
+[TEST] Mensaje: Error en generación tras 1539s
+[TEST] Existe: None
+[TEST] Tiempo: 1540s

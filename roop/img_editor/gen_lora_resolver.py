@@ -1,64 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Selección automática de LoRAs SDXL por escena (sin UI manual)."""
+"""Selección automática de LoRAs SDXL por escena — config JSON + solapamiento semántico."""
 
 import os
-import re
 from typing import Dict, List, Tuple
 
-LoraPick = Tuple[str, float, str]  # archivo, strength, motivo
+from roop.img_editor.gen_prompt_config import get_gen_thresholds, get_lora_catalog
+from roop.img_editor.gen_semantic import is_multi_person_scene, score_anchor_overlap
 
-# tags = palabras que pueden aparecer en prompt traducido (EN)
-# boost = frases que se añaden al prompt si esta LoRA se activa (ayuda al modelo)
-SCENE_LORA_CATALOG: List[Dict] = [
-    {
-        "file": "nsfw-xl-2.1.safetensors",
-        "tags": ("nsfw", "nude", "naked", "explicit", "sex", "penis", "oral"),
-        "strength": 0.50,
-        "always": True,
-        "boost": "",
-        "label": "NSFW base",
-    },
-    {
-        "file": "Nsfw Deepthroat.safetensors",
-        "tags": ("sucking", "suck", "blowjob", "deepthroat", "oral", "fellatio", "penis", "kneeling", "on knees"),
-        "strength": 0.72,
-        "boost": "blowjob, deepthroat, oral sex, kneeling",
-        "label": "Oral / deepthroat",
-    },
-    {
-        "file": "Cuckold_Threesome_SDXL.safetensors",
-        "tags": ("threesome", "another man", "second man", "two men", "waiting", "third person", "mmf", "cuckold"),
-        "strength": 0.62,
-        "sdxl_only": True,
-        "boost": "threesome, two men, mmf, second man waiting",
-        "label": "Threesome 2M+1F",
-    },
-    {
-        "file": "Cuckold_Sex_-_Pony.safetensors",
-        "tags": ("threesome", "another man", "second man", "two men", "waiting", "cuckold", "mmf"),
-        "strength": 0.62,
-        "pony_only": True,
-        "boost": "threesome, two men, cuckold",
-        "label": "Threesome Pony",
-    },
-    {
-        "file": "NsfwPovAllInOneLoraSdxl-000009.safetensors",
-        "tags": ("pov", "point of view", "first person"),
-        "strength": 0.55,
-        "boost": "pov, point of view",
-        "label": "POV NSFW",
-    },
-    {
-        "file": "realism3.safetensors",
-        "tags": ("photorealistic", "skin", "texture", "detailed", "realistic", "raw photo"),
-        "strength": 0.35,
-        "boost": "detailed skin texture, photorealistic",
-        "label": "Realism skin",
-    },
-]
+LoraPick = Tuple[str, float, str]
 
-MAX_SCENE_LORAS = 2  # además de la base NSFW
+MAX_SCENE_LORAS = 2
 
 
 def _loras_dir() -> str:
@@ -71,13 +23,10 @@ def _lora_exists(name: str) -> bool:
 
 
 _SDXL_LORA_CACHE: Dict[str, bool] = {}
-
-
 _CLIP_LORA_CACHE: Dict[str, bool] = {}
 
 
 def lora_has_clip_keys(filename: str) -> bool:
-    """True si la LoRA modifica CLIP (lora_te*). Si False → usar LoraLoaderModelOnly."""
     key = filename.lower()
     if key in _CLIP_LORA_CACHE:
         return _CLIP_LORA_CACHE[key]
@@ -97,7 +46,6 @@ def lora_has_clip_keys(filename: str) -> bool:
 
 
 def _is_sdxl_lora(filename: str) -> bool:
-    """True si la LoRA tiene keys UNet/CLIP SDXL (no Flux/DiT)."""
     key = filename.lower()
     if key in _SDXL_LORA_CACHE:
         return _SDXL_LORA_CACHE[key]
@@ -124,16 +72,11 @@ def _is_pony_model(model_alias: str) -> bool:
     return a in ("pony_realism", "cyberrealistic_pony") or "pony" in a
 
 
-def _score_entry(prompt_l: str, entry: Dict) -> int:
-    return sum(1 for tag in entry.get("tags", ()) if tag in prompt_l)
-
-
-def _is_multi_person_scene(prompt_l: str) -> bool:
-    markers = (
-        "threesome", "two men", "another man", "second man", "mmf",
-        "cuckold", "third person", "men", "stranger",
-    )
-    return sum(1 for m in markers if m in prompt_l) >= 1
+def _score_entry(prompt_en: str, entry: Dict) -> float:
+    best = 0.0
+    for anchor in entry.get("anchors") or []:
+        best = max(best, score_anchor_overlap(prompt_en, anchor))
+    return best
 
 
 def resolve_scene_loras(
@@ -142,17 +85,14 @@ def resolve_scene_loras(
     base_strength: float = 0.55,
     image_type: str = "auto",
 ) -> Tuple[List[LoraPick], str]:
-    """
-    Devuelve lista de LoRAs a apilar y texto boost opcional para el prompt.
-    """
-    prompt_l = f" {(prompt_en or '').lower()} "
+    """LoRAs desde catálogo JSON + scores semánticos (sin ifs por palabra del usuario)."""
     pony = _is_pony_model(model_alias)
     picks: List[LoraPick] = []
-    boosts: List[str] = []
     used_files = set()
+    min_score = get_gen_thresholds().get("lora_scene_min_score", 0.12)
+    multi_person = is_multi_person_scene(prompt_en)
 
-    # 1) LoRA base NSFW siempre
-    for entry in SCENE_LORA_CATALOG:
+    for entry in get_lora_catalog():
         if not entry.get("always"):
             continue
         if entry.get("pony_only") and not pony:
@@ -169,59 +109,40 @@ def resolve_scene_loras(
         used_files.add(fname.lower())
         break
 
-    # 2) LoRAs de escena por coincidencia de tags
     scored = []
-    for entry in SCENE_LORA_CATALOG:
+    for entry in get_lora_catalog():
         if entry.get("always"):
             continue
         if entry.get("pony_only") and not pony:
             continue
         if entry.get("sdxl_only") and pony:
             continue
+        if entry.get("skip_when_multi_person") and multi_person:
+            continue
+        triggers = entry.get("image_type_trigger")
+        if triggers:
+            if (image_type or "auto") not in triggers:
+                continue
+            score = 1.0
+        else:
+            score = _score_entry(prompt_en, entry)
+            if score < min_score:
+                continue
         fname = entry["file"]
         if not _lora_exists(fname) or fname.lower() in used_files:
             continue
-        if entry.get("label") == "POV NSFW" and _is_multi_person_scene(prompt_l):
-            continue
-        score = _score_entry(prompt_l, entry)
-        if score <= 0:
-            continue
         if not _is_sdxl_lora(fname):
             print(f"[GenLoRA] Omitida escena (no SDXL): {fname}")
-            boost = (entry.get("boost") or "").strip()
-            if boost:
-                boosts.append(boost)
             continue
         scored.append((score, entry))
 
-    photoreal_modes = frozenset({"photoreal", "amateur_street", "smartphone"})
-    want_realism = (image_type in photoreal_modes) or any(
-        t in prompt_l for t in ("photorealistic", "raw photo", "realistic", "skin texture", "film grain")
-    )
-
     scored.sort(key=lambda x: (-x[0], -x[1].get("strength", 0)))
-    if want_realism:
-        for entry in SCENE_LORA_CATALOG:
-            if entry.get("label") != "Realism skin":
-                continue
-            fname = entry["file"]
-            if not _lora_exists(fname) or fname.lower() in used_files or not _is_sdxl_lora(fname):
-                continue
-            scored.insert(0, (99, entry))
-            break
-
     for _score, entry in scored[:MAX_SCENE_LORAS]:
         fname = entry["file"]
         picks.append((fname, float(entry["strength"]), entry.get("label", fname)))
         used_files.add(fname.lower())
-        boost = (entry.get("boost") or "").strip()
-        if boost:
-            boosts.append(boost)
 
-    boost_text = ", ".join(dict.fromkeys(
-        b.strip() for part in boosts for b in part.split(",") if b.strip()
-    ))
-    return picks, boost_text
+    return picks, ""
 
 
 def format_lora_log(picks: List[LoraPick]) -> str:

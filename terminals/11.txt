@@ -1,0 +1,72 @@
+---
+pid: 4440
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "Set-Location D:\\PROJECTS\\AUTOAUTO\\ui\\tob\\ComfyUI; .\\venv\\Scripts\\python.exe -u main.py --port 8188 --normalvram"
+started_at: 2026-06-23T09:50:33.650Z
+running_for_ms: 4425000  
+---
+Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+
+Prestartup times for custom nodes:
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+
+WARNING: You need pytorch with cu130 or higher to use optimized CUDA operations.
+Found comfy_kitchen backend eager: {'available': True, 'disabled': False, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8', 'scaled_mm_nvfp4']}
+Found comfy_kitchen backend cuda: {'available': True, 'disabled': True, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8']}
+Found comfy_kitchen backend triton: {'available': False, 'disabled': True, 'unavailable_reason': "ImportError: No module named 'triton'", 'capabilities': []}
+Checkpoint files will always be loaded safely.
+Total VRAM 8192 MB, total RAM 32713 MB
+pytorch version: 2.6.0+cu124
+Set vram state to: NORMAL_VRAM
+Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+Using async weight offloading with 2 streams
+Enabled pinned memory 13085.0
+Using pytorch attention
+Unsupported Pytorch detected. DynamicVRAM support requires Pytorch version 2.8 or later. Falling back to legacy ModelPatcher. VRAM estimates may be unreliable especially on Windows
+Python version: 3.10.6 (tags/v3.10.6:9c7b4bd, Aug  1 2022, 21:53:49) [MSC v.1932 64 bit (AMD64)]
+ComfyUI version: 0.19.0
+comfy-aimdo version: 0.2.12
+comfy-kitchen version: 0.2.8
+ComfyUI frontend version: 1.42.10
+[Prompt Server] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\comfyui_frontend_package\static
+Asset seeder disabled
+ComfyUI-GGUF: Partial torch compile only, consider updating pytorch
+Warning: Could not load sageattention: No module named 'triton'
+sageattention package is not installed, sageattention will not be available
+
+Import times for custom nodes:
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+   0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+   0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+   0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-FramePackWrapper
+   3.4 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+  15.8 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio
+  29.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+
+Context impl SQLiteImpl.
+Will assume non-transactional DDL.
+Failed to initialize database. Please ensure you have installed the latest requirements. If the error persists, please report this as in future the database will be required: Could not acquire lock on database 'D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\user\comfyui.db'. Another ComfyUI process may already be using it. Use --database-url to specify a separate database file.
+[ComfyUI-Easy-Use] server: v1.3.7 Loaded
+[ComfyUI-Easy-Use] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\web_version/v2 Loaded
+Starting server
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 526, in <module>
+    event_loop.run_until_complete(x)
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\asyncio\base_events.py", line 646, in run_until_complete
+    return future.result()
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 500, in start_all
+    await run(prompt_server, address=args.listen, port=args.port, verbose=not args.dont_print_server, call_on_start=call_on_start)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 372, in run
+    await asyncio.gather(
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\server.py", line 1248, in start_multi_address
+    await site.start()
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\aiohttp\web_runner.py", line 121, in start
+    self._server = await loop.create_server(
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\asyncio\base_events.py", line 1505, in create_server
+    raise OSError(err.errno, 'error while attempting '
+OSError: [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8188): solo se permite un uso de cada dirección de socket (protocolo/dirección de red/puerto)

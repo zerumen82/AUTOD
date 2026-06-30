@@ -1,0 +1,92 @@
+---
+pid: 28200
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "powershell -ExecutionPolicy Bypass -File \"D:\\PROJECTS\\AUTOAUTO\\scripts\\install_mmaudio.ps1\""
+started_at: 2026-06-23T08:08:23.840Z
+running_for_ms: 10555013 
+---
+
+====================================
+  Instalacion MMAudio (Animate Image)
+====================================
+
+ComfyUI-MMAudio ya instalado.
+Instalando dependencias Python (venv ComfyUI)...
+Looking in indexes: https://pypi.org/simple, https://pypi.ngc.nvidia.com
+Requirement already satisfied: librosa>=0.10.1 in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (0.11.0)
+Requirement already satisfied: torchdiffeq>=0.2.3 in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 2)) (0.2.5)
+Requirement already satisfied: einops>=0.7.0 in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 3)) (0.8.2)
+Requirement already satisfied: timm>=1.0.8 in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (1.0.15)
+Requirement already satisfied: omegaconf>=2.3.0 in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 5)) (2.3.0)
+Requirement already satisfied: open_clip_torch>=2.29.0 in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 6)) (2.32.0)
+Requirement already satisfied: accelerate in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 7)) (1.13.0)
+Requirement already satisfied: ftfy>=6.1.1 in d:\projects\autoauto\venv\lib\site-packages (from -r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 8)) (6.3.1)
+Requirement already satisfied: audioread>=2.1.9 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (3.1.0)
+Requirement already satisfied: numba>=0.51.0 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (0.63.1)
+Requirement already satisfied: numpy>=1.22.3 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.26.4)
+Requirement already satisfied: scipy>=1.6.0 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.15.3)
+Requirement already satisfied: scikit-learn>=1.1.0 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.7.2)
+Requirement already satisfied: joblib>=1.0 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.5.3)
+Requirement already satisfied: decorator>=4.3.0 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (5.2.1)
+Requirement already satisfied: soundfile>=0.12.1 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (0.13.1)
+Requirement already satisfied: pooch>=1.1 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.8.2)
+Requirement already satisfied: soxr>=0.3.2 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.0.0)
+Requirement already satisfied: typing_extensions>=4.1.1 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (4.15.0)
+Requirement already satisfied: lazy_loader>=0.1 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (0.4)
+Requirement already satisfied: msgpack>=1.0 in d:\projects\autoauto\venv\lib\site-packages (from librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.1.2)
+Requirement already satisfied: torch>=1.5.0 in d:\projects\autoauto\venv\lib\site-packages (from torchdiffeq>=0.2.3->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 2)) (2.6.0+cu124)
+Requirement already satisfied: torchvision in d:\projects\autoauto\venv\lib\site-packages (from timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (0.21.0+cu124)
+Requirement already satisfied: pyyaml in d:\projects\autoauto\venv\lib\site-packages (from timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (6.0.3)
+Requirement already satisfied: huggingface_hub in d:\projects\autoauto\venv\lib\site-packages (from timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (1.15.0)
+Requirement already satisfied: safetensors in d:\projects\autoauto\venv\lib\site-packages (from timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (0.7.0)
+Requirement already satisfied: antlr4-python3-runtime==4.9.* in d:\projects\autoauto\venv\lib\site-packages (from omegaconf>=2.3.0->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 5)) (4.9.3)
+Requirement already satisfied: regex in d:\projects\autoauto\venv\lib\site-packages (from open_clip_torch>=2.29.0->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 6)) (2026.3.32)
+Requirement already satisfied: tqdm in d:\projects\autoauto\venv\lib\site-packages (from open_clip_torch>=2.29.0->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 6)) (4.67.3)
+Requirement already satisfied: packaging>=20.0 in d:\projects\autoauto\venv\lib\site-packages (from accelerate->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 7)) (26.0)
+Requirement already satisfied: psutil in d:\projects\autoauto\venv\lib\site-packages (from accelerate->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 7)) (7.2.2)
+Requirement already satisfied: wcwidth in d:\projects\autoauto\venv\lib\site-packages (from ftfy>=6.1.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 8)) (0.6.0)
+Requirement already satisfied: filelock>=3.10.0 in d:\projects\autoauto\venv\lib\site-packages (from huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (3.25.2)
+Requirement already satisfied: fsspec>=2023.5.0 in d:\projects\autoauto\venv\lib\site-packages (from huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (2026.3.0)
+Requirement already satisfied: hf-xet<2.0.0,>=1.4.3 in d:\projects\autoauto\venv\lib\site-packages (from huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (1.4.3)
+Requirement already satisfied: httpx<1,>=0.23.0 in d:\projects\autoauto\venv\lib\site-packages (from huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (0.28.1)
+Requirement already satisfied: typer>=0.20.0 in d:\projects\autoauto\venv\lib\site-packages (from huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (0.24.1)
+Requirement already satisfied: anyio in d:\projects\autoauto\venv\lib\site-packages (from httpx<1,>=0.23.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (4.13.0)
+Requirement already satisfied: certifi in d:\projects\autoauto\venv\lib\site-packages (from httpx<1,>=0.23.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (2022.12.7)
+Requirement already satisfied: httpcore==1.* in d:\projects\autoauto\venv\lib\site-packages (from httpx<1,>=0.23.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (1.0.9)
+Requirement already satisfied: idna in d:\projects\autoauto\venv\lib\site-packages (from httpx<1,>=0.23.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (2.10)
+Requirement already satisfied: h11>=0.16 in d:\projects\autoauto\venv\lib\site-packages (from httpcore==1.*->httpx<1,>=0.23.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (0.16.0)
+Requirement already satisfied: llvmlite<0.47,>=0.46.0dev0 in d:\projects\autoauto\venv\lib\site-packages (from numba>=0.51.0->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (0.46.0)
+Requirement already satisfied: platformdirs>=2.5.0 in d:\projects\autoauto\venv\lib\site-packages (from pooch>=1.1->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (4.5.0)
+Requirement already satisfied: requests>=2.19.0 in d:\projects\autoauto\venv\lib\site-packages (from pooch>=1.1->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (2.28.1)
+Requirement already satisfied: charset-normalizer<3,>=2 in d:\projects\autoauto\venv\lib\site-packages (from requests>=2.19.0->pooch>=1.1->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (2.1.1)
+Requirement already satisfied: urllib3<1.27,>=1.21.1 in d:\projects\autoauto\venv\lib\site-packages (from requests>=2.19.0->pooch>=1.1->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (1.26.13)
+Requirement already satisfied: threadpoolctl>=3.1.0 in d:\projects\autoauto\venv\lib\site-packages (from scikit-learn>=1.1.0->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (3.6.0)
+Requirement already satisfied: cffi>=1.0 in d:\projects\autoauto\venv\lib\site-packages (from soundfile>=0.12.1->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (2.0.0)
+Requirement already satisfied: pycparser in d:\projects\autoauto\venv\lib\site-packages (from cffi>=1.0->soundfile>=0.12.1->librosa>=0.10.1->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 1)) (3.0)
+Requirement already satisfied: networkx in d:\projects\autoauto\venv\lib\site-packages (from torch>=1.5.0->torchdiffeq>=0.2.3->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 2)) (3.4.2)
+Requirement already satisfied: jinja2 in d:\projects\autoauto\venv\lib\site-packages (from torch>=1.5.0->torchdiffeq>=0.2.3->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 2)) (3.1.6)
+Requirement already satisfied: sympy==1.13.1 in d:\projects\autoauto\venv\lib\site-packages (from torch>=1.5.0->torchdiffeq>=0.2.3->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 2)) (1.13.1)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in d:\projects\autoauto\venv\lib\site-packages (from sympy==1.13.1->torch>=1.5.0->torchdiffeq>=0.2.3->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 2)) (1.3.0)
+Requirement already satisfied: colorama in d:\projects\autoauto\venv\lib\site-packages (from tqdm->open_clip_torch>=2.29.0->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 6)) (0.4.6)
+Requirement already satisfied: click>=8.2.1 in d:\projects\autoauto\venv\lib\site-packages (from typer>=0.20.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (8.3.1)
+Requirement already satisfied: shellingham>=1.3.0 in d:\projects\autoauto\venv\lib\site-packages (from typer>=0.20.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (1.5.4)
+Requirement already satisfied: rich>=12.3.0 in d:\projects\autoauto\venv\lib\site-packages (from typer>=0.20.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (14.3.3)
+Requirement already satisfied: annotated-doc>=0.0.2 in d:\projects\autoauto\venv\lib\site-packages (from typer>=0.20.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (0.0.4)
+Requirement already satisfied: markdown-it-py>=2.2.0 in d:\projects\autoauto\venv\lib\site-packages (from rich>=12.3.0->typer>=0.20.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (4.0.0)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in d:\projects\autoauto\venv\lib\site-packages (from rich>=12.3.0->typer>=0.20.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (2.20.0)
+Requirement already satisfied: mdurl~=0.1 in d:\projects\autoauto\venv\lib\site-packages (from markdown-it-py>=2.2.0->rich>=12.3.0->typer>=0.20.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (0.1.2)
+Requirement already satisfied: exceptiongroup>=1.0.2 in d:\projects\autoauto\venv\lib\site-packages (from anyio->httpx<1,>=0.23.0->huggingface_hub->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (1.3.1)
+Requirement already satisfied: MarkupSafe>=2.0 in d:\projects\autoauto\venv\lib\site-packages (from jinja2->torch>=1.5.0->torchdiffeq>=0.2.3->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 2)) (3.0.3)
+Requirement already satisfied: pillow!=8.3.*,>=5.3.0 in d:\projects\autoauto\venv\lib\site-packages (from torchvision->timm>=1.0.8->-r D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio\requirements.txt (line 4)) (12.2.0)
+
+Descargando: mmaudio_large_44k_v2_fp16.safetensors ~2 GB
+[notice] A new release of pip is available: 25.3 -> 26.1.2
+[notice] To update, run: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe -m pip install --upgrade pip
+OK: mmaudio_large_44k_v2_fp16.safetensors ~2 GB
+Ya existe: mmaudio_vae_44k_fp16.safetensors ~611 MB
+Ya existe: mmaudio_synchformer_fp16.safetensors ~475 MB
+Descargando: apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors ~1.9 GB
+OK: apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors ~1.9 GB
+
+MMAudio instalado correctamente.
+Reinicia ComfyUI y luego prueba Animate Image con 'Anadir audio (MMAudio)'.

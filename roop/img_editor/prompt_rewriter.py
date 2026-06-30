@@ -159,28 +159,38 @@ class PromptRewriter:
         
         if mode == "txt2img":
             system_msg = (
-                "You refine an English text-to-image caption from the user's request.\n"
-                "A draft English translation is provided in Context. Use it as the source of truth.\n"
-                "Rules: preserve EVERY detail from the draft — age, body, hair color, skin tone, pose, location, number of people, roles and actions.\n"
-                "Do NOT invent, change or contradict attributes (hair, skin, pose, setting, clothing state, actions).\n"
-                "Fix only grammar, pronoun ambiguity and awkward phrasing. Use direct subject-verb-object wording.\n"
-                "Keep concise, under 65 words. Put people count and main action in the first 20 words.\n"
-                "For multi-person scenes, name who does what to whom. Keep explicit/adult content literal and uncensored.\n"
-                "Do not refuse, moralize, soften, censor, summarize or remove explicit terms.\n"
-                "Do NOT append quality tags — only the scene caption in prompt.\n"
-                "Classify adult/explicit/NSFW intent as boolean adult.\n"
-                "Output ONLY valid JSON: {\"prompt\": \"...\", \"adult\": true|false}\n"
+                "You are a professional prompt engineer. Translate the user's request to English and enrich it with technical quality keywords.\n"
+                "CRITICAL: Translate the subject description EXACTLY. Do NOT change, add, or remove any details about the subject (age, hair, skin, body, clothing, setting, action).\n"
+                "Keep the user's exact description, only translate it to English. Then append quality tags at the end.\n"
+                "Quality tags: lighting (cinematic, soft, raytracing), camera (8k, macro, depth of field), texture (highly detailed skin, photorealistic).\n"
+                "Structure: \"<exact translated description>, <quality tags>\"\n"
+                "Example:\n"
+                "User: una mujer morena en la playa\n"
+                "Assistant: {\"prompt\": \"a brunette woman on the beach, cinematic lighting, golden hour, highly detailed skin textures, photorealistic, 8k resolution, sharp focus, depth of field\", \"magnitude\": 0.6, \"mask_target\": \"subject\", \"preserve_face\": true, \"is_global\": true}\n"
             )
         else:
             # Prompt para EDICIÓN (img2img)
             system_msg = (
-                "You are a professional image editor. Translate requests to English. Handle compound instructions naturally (multiple requests in one prompt). Keep the user's exact description for subject, action and details.\n"
-                "Output ONLY valid JSON with key \"prompt\".\n"
-                "Examples:\n"
-                "User: ponle gafas de sol\n"
-                "Assistant: {\"prompt\": \"add sunglasses\", \"magnitude\": 0.5, \"mask_target\": \"face\", \"preserve_face\": true, \"is_global\": false}\n"
-                "User: ponle un traje de payaso\n"
-                "Assistant: {\"prompt\": \"wear a clown costume\", \"magnitude\": 0.9, \"mask_target\": \"clothes\", \"preserve_face\": true, \"is_global\": false}\n"
+                "You analyze image editing requests. Translate Spanish to English accurately. "
+                "Make the English prompt vivid and richly descriptive — it directly controls a diffusion model.\n"
+                "For body edits (naked, undress, masturbating, sex, etc.) describe the action clearly and anatomically.\n"
+                "Output ONLY valid JSON with these fields:\n"
+                '- "prompt": English translation, vivid and descriptive\n'
+                '- "magnitude": number 0.0-1.0 estimating how much change is requested (0.1=tiny, 0.5=moderate, 0.9=extreme)\n'
+                '- "mask_target": "subject" (person/people), "background", or "clothes"\n'
+                '- "preserve_face": true (keep faces unchanged) or false\n'
+                '- "is_global": true (edit whole image) or false (edit only target area)\n'
+                'Examples:\n'
+                'User: ella debe ir desnuda sin ropa\n'
+                'Assistant: {"prompt": "she must go completely naked, bare skin, no clothes, full body nudity, visible vagina, exposed pubic area, bare breasts, completely nude", "magnitude": 0.9, "mask_target": "subject", "preserve_face": true, "is_global": true}\n'
+                'User: se esta masturbando\n'
+                'Assistant: {"prompt": "she is masturbating, touching her genitals, sexual act", "magnitude": 0.8, "mask_target": "subject", "preserve_face": true, "is_global": false}\n'
+                'User: ponle un sombrero azul\n'
+                'Assistant: {"prompt": "put a blue hat on her head", "magnitude": 0.4, "mask_target": "subject", "preserve_face": true, "is_global": false}\n'
+                'User: mejora la calidad y nitidez\n'
+                'Assistant: {"prompt": "improve image quality, sharpness, detail and clarity", "magnitude": 0.3, "mask_target": "subject", "preserve_face": true, "is_global": true}\n'
+                'User: follando a cuatro patas\n'
+                'Assistant: {"prompt": "having sex from behind, doggy style position, penetrating", "magnitude": 0.9, "mask_target": "subject", "preserve_face": true, "is_global": false}\n'
             )
 
         full_prompt = (
@@ -190,7 +200,7 @@ class PromptRewriter:
         )
 
         response = llm.create_completion(
-            full_prompt, max_tokens=300, temperature=0.05,
+            full_prompt, max_tokens=250, temperature=0.1,
             echo=False, stop=["<|im_end|>", "\n\n"]
         )
         
@@ -268,16 +278,6 @@ class PromptRewriter:
             
             if p_val:
                 translated_prompt = extract_text(p_val)
-
-            # 3b. ADULT / NSFW INTENT (general classifier output, not prompt-specific routing)
-            adult = False
-            adult_val = get_flexible(data, ["adult", "nsfw", "explicit", "adult_content", "adult content"])
-            if adult_val is not None:
-                if isinstance(adult_val, bool):
-                    adult = adult_val
-                else:
-                    adult_text = extract_text(adult_val).strip().lower()
-                    adult = adult_text in ("true", "yes", "1", "adult", "nsfw", "explicit")
             
             # 4. PRESERVE FACE
             preserve_face = True
@@ -307,28 +307,15 @@ class PromptRewriter:
                 "mask_target": mask_target,
                 "preserve_face": preserve_face,
                 "is_global": is_global,
-                "adult": adult,
                 "reasoning": data.get("reasoning", "Semantic analysis completed")
             }
-
-            if mode == "txt2img":
-                print(f"[PromptRewriter] Caption: '{result['prompt'][:60]}...' | adult={result['adult']}")
-            else:
-                print(f"[PromptRewriter] Analysis: '{result['prompt'][:50]}...' | Mag: {result['magnitude']} | Global: {result['is_global']} | Preserve: {result['preserve_face']}")
+            
+            print(f"[PromptRewriter] Analysis: '{result['prompt'][:50]}...' | Mag: {result['magnitude']} | Global: {result['is_global']} | Preserve: {result['preserve_face']}")
             
             return result
         except Exception as e:
             print(f"[PromptRewriter] Error parsing LLM JSON: {e}")
-            # Fallback: translate the original request as literally as possible + minimal quality at the end.
-            # Never summarize or drop user details.
-            from roop.img_editor.prompt_translator import translate_prompt
-            try:
-                clean = translate_prompt(prompt).strip()
-            except:
-                clean = prompt.strip()
-            if not any(kw in clean.lower() for kw in ["photoreal", "detailed", "sharp"]):
-                clean = clean + ", photorealistic, highly detailed, sharp focus, natural lighting, cinematic"
-            return {"prompt": clean, "magnitude": 0.7, "mask_target": "subject", "preserve_face": True, "is_global": True}
+            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True, "is_global": True}
 
 def _fix_malformed_json(s: str) -> str:
     """Preprocessa JSON malformado donde el LLM usa { 'valor' } en vez de 'valor' o valor."""

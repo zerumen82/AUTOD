@@ -1,0 +1,256 @@
+---
+pid: 16604
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "cd D:\\PROJECTS\\AUTOAUTO && python tools\\test_structural_global.py"
+started_at: 2026-06-23T11:57:33.783Z
+running_for_ms: 33190009 
+---
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.2 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+======================================================================
+PHASE 1 — Análisis structural → global (sin ComfyUI)
+======================================================================
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Imagine/LongCat Prompt: Instruction: add two people to the background. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible.
+
+[FAIL] 'añade dos personas al fondo'
+  tr='add two people to the background' struct=0.70 mag=0.92 target=subject global=True model=LongCat-Image-Edit-Q4_K_S.gguf
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Imagine/LongCat Prompt: Instruction: remove people from the right. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible.
+
+[OK] 'quita a la gente de la derecha'
+  tr='remove people from the right' struct=0.35 mag=0.74 target=subject global=True model=LongCat-Image-Edit-Q4_K_S.gguf
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Imagine/LongCat Prompt: Instruction: remove the person from the background. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible.
+
+[OK] 'elimina a la persona del fondo'
+  tr='remove the person from the background' struct=0.70 mag=0.92 target=subject global=True model=LongCat-Image-Edit-Q4_K_S.gguf
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Imagine/LongCat Prompt: Instruction: add another person on the left. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible.
+
+[OK] 'add another person on the left'
+  tr='add another person on the left' struct=0.45 mag=0.80 target=subject global=True model=LongCat-Image-Edit-Q4_K_S.gguf
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Imagine/LongCat Prompt: Instruction: remove the person in the background. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible.
+
+[OK] 'remove the person in the background'
+  tr='remove the person in the background' struct=0.70 mag=0.92 target=subject global=True model=LongCat-Image-Edit-Q4_K_S.gguf
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Imagine/LongCat Prompt: Instruction: change his clothes to red. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible.
+
+[FAIL] 'cambiale la ropa a rojo'
+  tr='change his clothes to red' struct=0.10 mag=0.68 target=clothes global=True model=LongCat-Image-Edit-Q4_K_S.gguf
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Imagine/LongCat Prompt: Instruction: Edit this exact photo. Keep the face, identity, lighting, background and overall scene exactly the same. Apply the requested change to the subject (clothing, body, pose etc as needed). that he is dancing
+
+[OK] 'que este bailando'
+  tr='that he is dancing' struct=0.00 mag=0.50 target=subject global=False model=LongCat-Image-Edit-Turbo-Q4_K_S.gguf
+
+----------------------------------------------------------------------
+Phase 1 result: FAIL
+[ComfyLauncher] Usando venv de ComfyUI (RECOMENDADO): D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8188: no hay LISTENING, saltando
+[DEBUG] Verificando puerto 8189...
+[DEBUG] Checking port 8189...
+[DEBUG] Puerto 8189: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8189: no hay LISTENING, saltando
+[DEBUG] No se encontró ComfyUI en puertos [8188, 8189]
+
+Iniciando ComfyUI...
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8188: no hay LISTENING, saltando
+[DEBUG] Verificando puerto 8189...
+[DEBUG] Checking port 8189...
+[DEBUG] Puerto 8189: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8189: no hay LISTENING, saltando
+[DEBUG] No se encontró ComfyUI en puertos [8188, 8189]
+
+[ComfyLauncher] ========================================
+[ComfyLauncher] INICIANDO ComfyUI en puerto 8188
+[ComfyLauncher] ========================================
+
+[ComfyLauncher] Puerto establecido: 8188
+[ComfyLauncher] VRAM detectada: 8GB → usando --normalvram
+[ComfyLauncher] Ejecutando: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe -u D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py --port 8188 --normalvram
+[ComfyLauncher] Directorio: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI
+[ComfyLauncher] Python: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[ComfyLauncher] ---------------------------------------
+[ComfyLauncher] Proceso creado (PID: 21480)
+
+[ComfyLauncher] Esperando respuesta de ComfyUI...
+[ComfyUI] Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+[ComfyUI] Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+[ComfyUI] Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+[ComfyUI] 
+[ComfyUI] Prestartup times for custom nodes:
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+[ComfyUI] 
+[ComfyUI] WARNING: You need pytorch with cu130 or higher to use optimized CUDA operations.
+[ComfyUI] Found comfy_kitchen backend triton: {'available': False, 'disabled': True, 'unavailable_reason': "ImportError: No module named 'triton'", 'capabilities': []}
+[ComfyUI] Found comfy_kitchen backend eager: {'available': True, 'disabled': False, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8', 'scaled_mm_nvfp4']}
+[ComfyUI] Found comfy_kitchen backend cuda: {'available': True, 'disabled': True, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8']}
+[ComfyUI] Checkpoint files will always be loaded safely.
+[ComfyUI] Total VRAM 8192 MB, total RAM 32713 MB
+[ComfyUI] pytorch version: 2.6.0+cu124
+[ComfyUI] Set vram state to: NORMAL_VRAM
+[ComfyUI] Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+[ComfyUI] Using async weight offloading with 2 streams
+[ComfyUI] Enabled pinned memory 13085.0
+[ComfyUI] Using pytorch attention
+[ComfyUI] Unsupported Pytorch detected. DynamicVRAM support requires Pytorch version 2.8 or later. Falling back to legacy ModelPatcher. VRAM estimates may be unreliable especially on Windows
+[ComfyUI] Python version: 3.10.6 (tags/v3.10.6:9c7b4bd, Aug  1 2022, 21:53:49) [MSC v.1932 64 bit (AMD64)]
+[ComfyUI] ComfyUI version: 0.19.0
+[ComfyUI] comfy-aimdo version: 0.2.12
+[ComfyUI] comfy-kitchen version: 0.2.8
+[ComfyUI] ComfyUI frontend version: 1.42.10
+[ComfyUI] [Prompt Server] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\comfyui_frontend_package\static
+[ComfyUI] Asset seeder disabled
+[ComfyUI] ComfyUI-GGUF: Partial torch compile only, consider updating pytorch
+[ComfyUI] Warning: Could not load sageattention: No module named 'triton'
+[ComfyUI] sageattention package is not installed, sageattention will not be available
+[ComfyUI] 
+[ComfyUI] Import times for custom nodes:
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+[ComfyUI]    0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+[ComfyUI]    0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+[ComfyUI]    0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-FramePackWrapper
+[ComfyUI]    2.2 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+[ComfyUI]    9.4 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio
+[ComfyUI]   23.4 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+[ComfyUI] 
+[ComfyUI] Context impl SQLiteImpl.
+[ComfyUI] Will assume non-transactional DDL.
+[ComfyUI] Starting server
+[ComfyUI] 
+[ComfyUI] To see the GUI go to: http://127.0.0.1:8188
+
+[ComfyLauncher] OK ComfyUI INICIADO (tiempo: 152.5s)
+[ComfyLauncher] URL: http://127.0.0.1:8188
+[ComfyLauncher] ========================================
+
+ComfyUI start: ok=True msg=ComfyUI iniciado port=8188
+ComfyUI listo tras 1s
+
+======================================================================
+PHASE 2 — Generación e2e (ComfyUI + LongCat)
+======================================================================
+Prompt: 'quita a la persona de la foto'
+Image: D:\PROJECTS\AUTOAUTO\testdata\test_person.jpg (1024x768)
+[NLP] Usando analizador local ligero (sin modelo externo, sin red).
+[ImgEditor] Semantic: Magnitude=0.74, Target=subject, Structural=0.35
+[ImgEditor] Dynamic Params: Mag=0.74, Denoise=0.82, Steps=26, CFG=2.8
+[ImgEditor] Imagine/LongCat Prompt: Instruction: remove the person from the photo. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible. Also improve colors, sharpness and photographic quality naturally.
+[ImgEditor] Target: subject (Global: True)
+[ImgEditor] Prompt final: Instruction: remove the person from the photo. Edit this exact photo. Keep the face and identity of existing main subjects. Apply the requested scene change (adding or removing people, objects, or elements) as completely, strongly and obviously as possible. Also improve colors, sharpness and photographic quality naturally.
+[ImgEditor] Compound prompt detected (main change + quality/color polish)
+[ImgEditor] Edición global (cambio estructural (ancla)) — instrucción fuerte + ref foto
+[ImgEditor] Edición global detectada (sin máscara)
+[ImgEditor] Iniciando generación con motor: imagine
+[ImgEditor] mag=0.74 (auto Full) → LongCat Full (denoise real, no Turbo)
+[ImgEditor] Enviando a ComfyUI (imagine, version=LongCat-Image-Edit-Q4_K_S.gguf)...
+[FluxClient] LongCat edit workflow: cfg=2.8, model=['2', 0], positive=['11', 0], negative=['7', 0], nodes=['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '16']
+[ComfyUI] got prompt
+[FluxClient] En cola ComfyUI (0s)
+[ComfyUI] Using pytorch attention in VAE
+[ComfyUI] Using pytorch attention in VAE
+[ComfyUI] VAE load device: cuda:0, offload device: cpu, dtype: torch.bfloat16
+[ComfyUI] Requested to load AutoencodingEngine
+[ComfyUI] loaded completely; 3028.43 MB usable, 159.87 MB loaded, full load: True
+[ComfyUI] Found quantization metadata version 1
+[ComfyUI] Using MixedPrecisionOps for text encoder
+[FluxClient] Cargando modelo (15s)
+[FluxClient] Cargando modelo (30s)
+[ComfyUI] CLIP/text encoder model load device: cuda:0, offload device: cpu, current: cpu, dtype: torch.float16
+[ComfyUI] Requested to load LongCatImageTEModel_
+[FluxClient] Cargando modelo (45s)
+[FluxClient] Cargando modelo (60s)
+[FluxClient] Cargando modelo (75s)
+[FluxClient] Preparando generación (90s)
+[FluxClient] Preparando generación (105s)
+[FluxClient] Preparando generación (120s)
+[FluxClient] Preparando generación (135s)
+[FluxClient] Preparando generación (150s)
+[FluxClient] Preparando generación (165s)
+[FluxClient] Preparando generación (180s)
+[ComfyUI] loaded partially; 5678.80 MB usable, 5225.55 MB loaded, 2684.34 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+[FluxClient] Preparando generación (195s)
+[ComfyUI] Requested to load AutoencodingEngine
+[ComfyUI] Unloaded partially: 2761.55 MB freed, 2464.00 MB remains loaded, 453.25 MB buffer reserved, lowvram patches: 0
+[ComfyUI] loaded completely; 504.31 MB usable, 159.87 MB loaded, full load: True
+[ComfyUI] loaded partially; 5660.68 MB usable, 5207.42 MB loaded, 2702.47 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+[FluxClient] Preparando generación (210s)
+[ComfyUI] gguf qtypes: F32 (247), Q5_K (49), Q4_K (112), BF16 (6)
+[ComfyUI] model weight dtype torch.bfloat16, manual cast: None
+[ComfyUI] model_type FLUX
+[ComfyUI] unet unexpected: ['norm_out.linear.bias', 'norm_out.linear.weight']
+[ComfyUI] Requested to load LongCatImage
+[FluxClient] Preparando generación (225s)
+[FluxClient] Preparando generación (240s)
+[FluxClient] Preparando generación (255s)
+[FluxClient] Preparando generación (270s)
+[ComfyUI] loaded completely; 4851.87 MB usable, 3763.31 MB loaded, full load: True
+[ComfyUI] [ComfyUI-Easy-Use] server: v1.3.7 Loaded
+[ComfyUI] [ComfyUI-Easy-Use] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\web_version/v2 Loaded
+[ComfyUI] 
+[FluxClient] Preparando generación (285s)
+[ComfyUI]   0%|          | 0/26 [00:00<?, ?it/s]
+[ComfyUI]   4%|▍         | 1/26 [00:15<06:30, 15.62s/it]
+[FluxClient] Preparando generación (300s)
+[ComfyUI]   8%|▊         | 2/26 [00:21<03:57,  9.90s/it]
+[ComfyUI]  12%|█▏        | 3/26 [00:27<03:10,  8.30s/it]
+[FluxClient] Preparando generación (315s)
+[ComfyUI]  15%|█▌        | 4/26 [00:37<03:15,  8.91s/it]
+[FluxClient] Preparando generación (330s)
+[ComfyUI]  19%|█▉        | 5/26 [00:45<02:58,  8.48s/it]
+[ComfyUI]  23%|██▎       | 6/26 [00:57<03:12,  9.65s/it]
+[FluxClient] Preparando generación (345s)
+[ComfyUI]  27%|██▋       | 7/26 [01:08<03:11, 10.10s/it]
+[ComfyUI]  31%|███       | 8/26 [01:14<02:37,  8.72s/it]
+[FluxClient] Preparando generación (360s)
+[ComfyUI]  35%|███▍      | 9/26 [01:20<02:13,  7.82s/it]
+[ComfyUI]  38%|███▊      | 10/26 [01:25<01:55,  7.24s/it]
+[FluxClient] Preparando generación (375s)
+[ComfyUI]  42%|████▏     | 11/26 [01:32<01:43,  6.92s/it]
+[ComfyUI]  46%|████▌     | 12/26 [01:40<01:40,  7.20s/it]
+[ComfyUI]  50%|█████     | 13/26 [01:47<01:34,  7.29s/it]
+[FluxClient] Preparando generación (390s)
+[ComfyUI]  54%|█████▍    | 14/26 [01:53<01:22,  6.87s/it]
+[ComfyUI]  58%|█████▊    | 15/26 [01:59<01:13,  6.71s/it]
+[FluxClient] Preparando generación (405s)
+[ComfyUI]  62%|██████▏   | 16/26 [02:08<01:13,  7.34s/it]
+[ComfyUI]  65%|██████▌   | 17/26 [02:14<01:02,  6.94s/it]
+[FluxClient] Preparando generación (420s)
+[ComfyUI]  69%|██████▉   | 18/26 [02:20<00:53,  6.65s/it]
+[ComfyUI]  73%|███████▎  | 19/26 [02:26<00:46,  6.59s/it]
+[FluxClient] Preparando generación (435s)
+[ComfyUI]  77%|███████▋  | 20/26 [02:37<00:46,  7.67s/it]
+[ComfyUI]  81%|████████  | 21/26 [02:43<00:36,  7.38s/it]
+[FluxClient] Preparando generación (450s)
+[ComfyUI]  85%|████████▍ | 22/26 [02:49<00:27,  6.86s/it]
+[ComfyUI]  88%|████████▊ | 23/26 [02:55<00:19,  6.50s/it]
+[ComfyUI]  92%|█████████▏| 24/26 [03:00<00:12,  6.25s/it]
+[FluxClient] Preparando generación (465s)
+[ComfyUI]  96%|█████████▌| 25/26 [03:06<00:06,  6.18s/it]
+[ComfyUI] 100%|██████████| 26/26 [03:16<00:00,  7.22s/it]
+[ComfyUI] 100%|██████████| 26/26 [03:16<00:00,  7.56s/it]
+[ComfyUI] Requested to load AutoencodingEngine
+[ComfyUI] Unloaded partially: 1756.98 MB freed, 2006.37 MB remains loaded, 75.97 MB buffer reserved, lowvram patches: 0
+[ComfyUI] loaded completely; 269.16 MB usable, 159.87 MB loaded, full load: True
+[ComfyUI] Prompt executed in 476.69 seconds
+[FluxClient] Completado (0s)
+[FluxClient] Generación completa. std=77.25, mean=94.52
+OK e2e (481s): OK (480s)
+Saved: D:\PROJECTS\AUTOAUTO\debug_test\structural_e2e_result.png
+Phase 2 result: PASS

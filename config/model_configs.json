@@ -172,11 +172,13 @@
     "explicit": true,
     "nsfw_tags": "nsfw, uncensored adult content, explicit adult scene",
     "multi_subject": true,
-    "steps": 25,
+    "steps": 18,
     "cfg": 3.5,
     "sampler": "euler_ancestral",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed, censored, sfw, clothed"
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed, censored, sfw, clothed, plastic skin, doll, airbrushed",
+    "prefix_compact": "photorealistic RAW photograph, ",
+    "photoreal_tail": "film grain, natural skin pores, realistic skin texture, sharp focus, natural lighting, realistic human anatomy, dslr, depth of field"
   },
   "schnell": {
     "name": "Flux Schnell Q4",

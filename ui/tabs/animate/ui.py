@@ -25,7 +25,7 @@ def build_animate_ui():
     with gr.Column(elem_classes=["animate-container"]):
         with gr.Group(elem_classes=["animate-header"]):
             gr.Markdown("## 🎬 ANIMATE IMAGE")
-            gr.Markdown("_Sube foto + escribe qué debe pasar (~6s). Audio ambiente y voz en español automáticos._")
+            gr.Markdown("_Sube foto + escribe qué debe pasar. Animación autoregresiva automática (~6–9s). Audio ambiente y voz en español._")
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -61,13 +61,20 @@ def build_animate_ui():
                         label="Intensidad LoRA",
                         minimum=0.0, maximum=2.0, step=0.05, value=1.0,
                     )
+                    face_stabilize = gr.Checkbox(
+                        label="Estabilizar rostro (opcional, ~2–4 min extra)",
+                        value=False,
+                    )
+                    gr.Markdown(
+                        "*Déjalo desactivado para velocidad. Actívalo solo si hay personas y la cara se deforma en el vídeo.*"
+                    )
 
                 progress_html = gr.HTML(
                     "<div style='text-align:center; color:#8b5cf6; padding:10px; font-weight:bold;'>Listo</div>"
                 )
 
             with gr.Column(scale=1):
-                video_output = gr.Video(label="Resultado (~6 segundos)", height=520)
+                video_output = gr.Video(label="Resultado (duración automática)", height=520)
                 with gr.Row():
                     bt_open_folder = gr.Button("📂 ABRIR SALIDA")
                     bt_open_folder.click(fn=open_animations_folder)
@@ -81,4 +88,5 @@ def build_animate_ui():
         "progress_html": progress_html,
         "lora_name": lora_name,
         "lora_strength": lora_strength,
+        "face_stabilize": face_stabilize,
     }

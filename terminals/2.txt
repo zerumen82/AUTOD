@@ -1,0 +1,76 @@
+---
+pid: 25616
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "cd \"D:\\PROJECTS\\AUTOAUTO\" && python -c \"
+import os, time
+from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client
+
+prompt = 'Mujer de 40 anos, delgada, pelo castano, piel blanca, de rodillas en un sucio callejon'
+client = get_flux_gen_client()
+print('ComfyUI:', client.is_available())
+ok, msg = client.load('pony_realism')
+print('Load:', ok, msg)
+t0 = time.time()
+res, err = client.generate_ai(prompt=prompt, width=1152, height=768)
+print('Tiempo:', round(time.time()-t0, 1), 's')
+if res:
+    out = os.path.abspath('output/generation/test_auto_lora.png')
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    res.image.save(out)
+    print('OK:', out, res.image.size)
+    print('Traducido:', res.user_translated)
+else:
+    print('ERROR:', err)
+\" 2>&1"
+started_at: 2026-06-22T18:39:55.572Z
+running_for_ms: 58700001 
+---
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.35 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[ComfyLauncher] Usando venv de ComfyUI (RECOMENDADO): D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: socket conectado exitosamente (127.0.0.1) - retornar True
+[DEBUG] Haciendo request HTTP a puerto 8188...
+[DEBUG] HTTP response: 200
+[ComfyLauncher] ✓ ComfyUI detectado en puerto 8188
+ComfyUI: True
+Load: True Listo (SDXL)
+[GenFlux] Usando path: PURE T2I (recomendado para GENERAR sin foto) para ponyRealism_V22.safetensors (ultra realista SIN CENSURA, ligero para 8GB - usa 'schnell' para velocidad)
+[PromptRewriter] Usando modelo de lenguaje dedicado: qwen2.5-0.5b-instruct-q4_k_m.gguf
+[PromptRewriter] Cargando rewriter: qwen2.5-0.5b-instruct-q4_k_m.gguf (GPU layers=32)
+[PromptRewriter] Rewriter listo
+[PromptRewriter] Raw LLM Response: {"prompt": "40 year old woman, thin, brown hair, white skin, kneeling in a dirty alley", "adult": true}
+[PromptRewriter] Caption: '40 year old woman, thin, brown hair, white skin, kneeling in...' | adult=True
+[GenFlux] Rewriter caption aceptado
+[GenFlux] [Smart] modelo=pony_realism steps=30 cfg=5.0 sampler=dpmpp_2m_sde_gpu scheduler=karras tipo=auto explicit=True
+[GenFlux] [1/4] Usuario: Mujer de 40 anos, delgada, pelo castano, piel blanca, de rodillas en un sucio callejon
+[GenFlux] [2/4] Traducción base: 40 year old woman, thin, brown hair, white skin, kneeling in a dirty alley
+[GenFlux] [3/4] Añadidos UI: (ninguno)
+[GenFlux] [4/4] Final → ComfyUI: score_9, score_8_up, score_7_up, source_photo, rating_explicit, (40 year old woman, thin, brown hair, white skin, kneeling in a dirty alley:1.35), photorealistic, raw photo, realistic, film grain, detailed skin texture, natural skin pores
+[GenFlux] Tokens~49 | Neg~149
+[GenFlux] Negativo: censored, sfw, clothed, covered, mosaic censoring, bar censor, blurry crotch, pixelated, cropped, underwear, bra, panties, solo, alone, single person, 1girl solo, 1boy solo, portrait solo, only one person, lowres, blurry, bad anatomy, bad hands, text, watermark, score_6, score_5, score_4, cartoon, anime, manga, comic, illustration, digital art, concept art, cel shaded, stylized, 3d render, cgi, painting, drawing, 2d, toon, plastic skin, doll, figurine, low quality, worst quality, deformed, disfigured, monochrome, exaggerated proportions, cartoon proportions, stylized anatomy, curvy exaggeration, thick body, barbie, waxy skin, airbrushed, over smooth, painterly, artistic render
+[GenFlux] Auto LoRA NSFW: nsfw-xl-2.1.safetensors strength=0.55
+[GenFlux] Ejecutando: ponyRealism_V22.safetensors | Steps=30 | CFG=5.0 | Sampler=dpmpp_2m_sde_gpu | Scheduler=karras
+Tiempo: 406.1 s
+OK: D:\PROJECTS\AUTOAUTO\output\generation\test_auto_lora.png (1152, 768)
+Traducido: 40 year old woman, thin, brown hair, white skin, kneeling in a dirty alley
+Exception ignored in: <function Llama.__del__ at 0x000001BEE440C860>
+Traceback (most recent call last):
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\llama_cpp\llama.py", line 2099, in __del__
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\llama_cpp\llama.py", line 2096, in close
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 609, in close
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 601, in __exit__
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 586, in __exit__
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 360, in __exit__
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\llama_cpp\_internals.py", line 66, in close
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 609, in close
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 601, in __exit__
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 586, in __exit__
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 469, in _exit_wrapper
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python311\Lib\site-packages\llama_cpp\_internals.py", line 60, in free_model
+TypeError: 'NoneType' object is not callable

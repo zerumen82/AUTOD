@@ -28,6 +28,13 @@ GENERATION_MODEL_REGISTRY: List[Tuple[str, Tuple[str, ...], str, int, bool]] = [
 
 GENERATION_SKIP_CHECKPOINTS = ("framepack", "wan2", "qwenimage", "qwen_image")
 
+# GGUF txt2img (FLUX) — orden negativo = primero en UI. Abliterated = calidad; Schnell = velocidad.
+FLUX_GEN_REGISTRY: List[Tuple[str, str, str, int]] = [
+    ("flux_dev_abliterated", "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf", "FLUX Abliterated (ultra realista)", -20),
+    ("schnell", "flux1-schnell-Q4_K_S.gguf", "FLUX Schnell (rápido ~8 pasos)", -15),
+    ("flux_dev_q4", "flux1-dev-Q4_K.gguf", "FLUX Dev Q4", -10),
+]
+
 GENERATION_ALIAS_FILES = {
     "pony_realism": "ponyRealism_V22.safetensors",
     "juggernaut_xl": "juggernautXL_ragnarok.safetensors",
@@ -159,20 +166,43 @@ def resolve_generation_engine(engine_id: str) -> Tuple[str, Optional[str]]:
     return "pony_realism", pony
 
 
+def _gguf_model_exists(filename: str) -> bool:
+    path = os.path.join(get_models_base(), "diffusion_models", filename)
+    return os.path.isfile(path)
+
+
 def get_installed_generation_engines() -> List[Tuple[str, str]]:
-    """Solo modelos del registro que existen en disco ahora mismo."""
+    """Modelos FLUX GGUF + checkpoints SDXL instalados."""
     files = _list_generation_checkpoint_files()
     engines: List[Tuple[int, str, str]] = []
+
+    for alias, gguf_name, label, order in FLUX_GEN_REGISTRY:
+        if _gguf_model_exists(gguf_name):
+            engines.append((order, label, alias))
 
     for alias, patterns, label, order, match_any in GENERATION_MODEL_REGISTRY:
         ckpt = _resolve_registry_alias(alias, files)
         if ckpt and get_checkpoint_architecture(ckpt) == "sdxl_full":
-            engines.append((order, label, alias))
+            sdxl_label = label if label.lower().startswith("sdxl") else f"SDXL · {label}"
+            engines.append((order, sdxl_label, alias))
         elif ckpt:
             print(f"[GenFlux] Omitido en UI (no SDXL completo): {ckpt}")
 
     engines.sort(key=lambda x: (x[0], x[1].lower()))
     return [(label, alias) for _order, label, alias in engines]
+
+
+def get_default_generation_engine() -> str:
+    """Default: FLUX Abliterated si está instalado; si no, primer motor disponible."""
+    engines = get_installed_generation_engines()
+    aliases = [a for _l, a in engines]
+    if "flux_dev_abliterated" in aliases:
+        return "flux_dev_abliterated"
+    if "schnell" in aliases:
+        return "schnell"
+    if "pony_realism" in aliases:
+        return "pony_realism"
+    return aliases[0] if aliases else "flux_dev_abliterated"
 
 
 @dataclass
@@ -439,24 +469,28 @@ class FluxGenComfyClient:
             translated = base_translated
             adult_intent = False
 
-            try:
-                from .prompt_rewriter import get_prompt_rewriter
-                from roop.img_editor.gen_prompt_modifiers import rewriter_caption_trustworthy
-                rewriter = get_prompt_rewriter()
-                rw = rewriter.rewrite(
-                    user_text,
-                    image_context=f"Draft EN: {base_translated}",
-                    mode="txt2img",
-                )
-                adult_intent = bool(rw.get("adult", False)) if rw else False
-                rw_prompt = (rw.get("prompt") or "").strip() if rw else ""
-                if rw_prompt and rewriter_caption_trustworthy(base_translated, rw_prompt):
-                    translated = rw_prompt
-                    print("[GenFlux] Rewriter caption aceptado")
-                elif rw_prompt:
-                    print("[GenFlux] Rewriter caption rechazado (alucinación/contradicción) → traducción base")
-            except Exception as e:
-                print(f"[GenFlux] Rewriter txt2img skipped: {e}")
+            use_rewriter = bool((prompt_modifiers or {}).get("use_rewriter", False))
+            if use_rewriter:
+                try:
+                    from .prompt_rewriter import get_prompt_rewriter
+                    from roop.img_editor.gen_prompt_modifiers import rewriter_caption_trustworthy
+                    rewriter = get_prompt_rewriter()
+                    rw = rewriter.rewrite(
+                        user_text,
+                        image_context=f"Draft EN: {base_translated}",
+                        mode="txt2img",
+                    )
+                    adult_intent = bool(rw.get("adult", False)) if rw else False
+                    rw_prompt = (rw.get("prompt") or "").strip() if rw else ""
+                    if rw_prompt and rewriter_caption_trustworthy(base_translated, rw_prompt):
+                        translated = rw_prompt
+                        print("[GenFlux] Rewriter caption aceptado")
+                    elif rw_prompt:
+                        print("[GenFlux] Rewriter caption rechazado (alucinación/contradicción) → traducción base")
+                except Exception as e:
+                    print(f"[GenFlux] Rewriter txt2img skipped: {e}")
+            else:
+                print("[GenFlux] Rewriter omitido (modo rápido)")
 
             modifiers = dict(prompt_modifiers or {})
             if not modifiers.get("image_type"):
@@ -489,6 +523,7 @@ class FluxGenComfyClient:
             neg = get_effective_negative(
                 self._alias, neg, modifiers, self._model_configs,
                 prompt_en=translated,
+                is_sdxl=self._is_sdxl,
             )
             from roop.img_editor.gen_prompt_modifiers import _model_explicit
             is_explicit = _model_explicit(self._alias, self._model_configs) or bool(conf.get("explicit"))
@@ -623,7 +658,7 @@ class FluxGenComfyClient:
             lora_name, lora_strength, conf, prompt_en=prompt_for_loras,
             image_type=effective_lora_type,
         )
-        if lora_boost and lora_boost.lower() not in (final_prompt or "").lower():
+        if lora_boost and lora_boost.strip():
             final_prompt = f"{final_prompt}, {lora_boost}"
 
         sampler_name = conf.get("sampler", "euler_ancestral")
@@ -780,13 +815,29 @@ class FluxGenComfyClient:
                 timeout=60,
             )
             out_img = Image.open(io.BytesIO(res.content)).convert("RGB")
+            enhance_quality = bool(kwargs.get("enhance_quality", False))
+            fast_finish = not self._is_sdxl and not enhance_quality
             try:
                 from roop.img_editor.hyperreal_polish import polish_result_image
-                out_img, polish_note, _ = polish_result_image(out_img, tier="hd")
+                out_img, polish_note, _ = polish_result_image(
+                    out_img, tier="hd", fast=fast_finish,
+                )
                 if polish_note and "omitido" not in polish_note:
                     print(f"[GenFlux] Post-acabado: {polish_note}")
             except Exception as e:
                 print(f"[GenFlux] Post-acabado omitido: {e}")
+            if enhance_quality:
+                try:
+                    from roop.img_editor.image_quality_pipeline import get_quality_finisher
+                    finisher = get_quality_finisher()
+                    _report("ESRGAN x2 full-frame", "textura", pct=96)
+                    out_img, esr_note = finisher.esrgan_x2_fullframe_blend(
+                        out_img, tier="hd", blend=0.26,
+                    )
+                    if esr_note:
+                        print(f"[GenFlux] {esr_note}")
+                except Exception as e:
+                    print(f"[GenFlux] ESRGAN post-gen omitido: {e}")
             return GenResult(
                 image=out_img,
                 final_prompt=final_prompt,

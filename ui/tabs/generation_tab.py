@@ -6,7 +6,11 @@ import queue
 import threading
 import time
 
-from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client, get_installed_generation_engines
+from roop.img_editor.flux_gen_comfy_client import (
+    get_flux_gen_client,
+    get_default_generation_engine,
+    get_installed_generation_engines,
+)
 from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices, get_compatible_dropdown_choices, preview_modifiers
 from roop.img_editor.comfy_progress import build_generation_progress_html, format_duration
 from roop.output_paths import get_generation_output_dir
@@ -25,13 +29,21 @@ def on_cancel_generation():
     request_cancel(SCOPE_GENERATION, interrupt_comfy=True)
     return cancel_status_html(), *btn_idle()
 
-def _build_modifiers(image_style: str, shot_framing: str, lighting: str = "auto") -> dict:
+def _build_modifiers(
+    image_style: str,
+    shot_framing: str,
+    lighting: str = "auto",
+    skin_finish: str = "auto",
+    *,
+    use_rewriter: bool = False,
+) -> dict:
     return {
         "image_type": image_style or "auto",
         "lighting": lighting or "auto",
-        "skin_finish": "auto",
+        "skin_finish": skin_finish or "auto",
         "framing": shot_framing or "auto",
         "color_grade": "auto",
+        "use_rewriter": use_rewriter,
     }
 
 
@@ -68,7 +80,10 @@ def _success_status_html(res) -> str:
     return status
 
 
-def on_generate_image(prompt, width, height, engine_val, image_style, shot_framing, lighting):
+def on_generate_image(
+    prompt, width, height, engine_val, image_style, shot_framing, lighting,
+    skin_finish, enhance_quality, use_rewriter,
+):
     clear_cancel(SCOPE_GENERATION)
     client = get_flux_gen_client()
     if not client.is_available():
@@ -103,7 +118,11 @@ def on_generate_image(prompt, width, height, engine_val, image_style, shot_frami
                 prompt=(prompt or "").strip(),
                 width=width,
                 height=height,
-                prompt_modifiers=_build_modifiers(image_style, shot_framing, lighting),
+                prompt_modifiers=_build_modifiers(
+                    image_style, shot_framing, lighting, skin_finish,
+                    use_rewriter=use_rewriter,
+                ),
+                enhance_quality=bool(enhance_quality),
                 progress_callback=progress_callback,
                 cancel_check=lambda: is_cancelled(SCOPE_GENERATION),
             )
@@ -214,7 +233,11 @@ def generation_tab():
     with gr.Column(elem_classes=["gen-tab-container"]):
         with gr.Group(elem_classes=["gen-tab-header"]):
             gr.Markdown("## 🚀 GENERAR")
-            gr.Markdown("_Escribe en español. Por defecto fotorreal — Automático en estilo también aplica calidad photoreal en modelos NSFW._")
+            gr.Markdown(
+                "_Escribe en español. Tu prompt va primero; estilo solo si lo eliges en los desplegables. "
+                "**Modelo**: FLUX arriba, **SDXL ·** abajo. Schnell = más rápido. "
+                "Rewriter/ESRGAN opcionales (OFF = más fiel y rápido)._"
+            )
 
         prompt = gr.Textbox(
             label="Prompt",
@@ -239,6 +262,11 @@ def generation_tab():
                 value="auto",
                 label="Plano / encuadre",
             )
+            skin_finish = gr.Dropdown(
+                choices=get_dropdown_choices("skin_finish"),
+                value="detailed",
+                label="Piel",
+            )
 
         modifier_preview = gr.HTML("")
 
@@ -249,11 +277,21 @@ def generation_tab():
                 label="Forma",
             )
             _engines = get_installed_generation_engines()
-            _default = "pony_realism" if any(a == "pony_realism" for _l, a in _engines) else (_engines[0][1] if _engines else "pony_realism")
+            _default = get_default_generation_engine()
             engine_model = gr.Dropdown(
-                choices=_engines or [("PonyRealism (recomendado)", "pony_realism")],
+                choices=_engines or [("FLUX Abliterated (ultra realista)", "flux_dev_abliterated")],
                 value=_default,
                 label="Modelo",
+            )
+
+        with gr.Row():
+            enhance_quality = gr.Checkbox(
+                label="Mejorar nitidez (ESRGAN, más lento)",
+                value=False,
+            )
+            use_rewriter = gr.Checkbox(
+                label="Rewriter LLM (mejor prompt, +5–15s)",
+                value=False,
             )
 
         width = gr.Slider(minimum=512, maximum=1536, step=64, value=1152, visible=False)
@@ -274,28 +312,44 @@ def generation_tab():
 
     orientation.change(fn=handle_shape, inputs=[orientation], outputs=[width, height])
 
-    def _on_style_change(style, light, frame):
+    def _on_style_change(style, light, frame, skin):
         l_choices, l_safe = get_compatible_dropdown_choices(style, "lighting", light)
         f_choices, f_safe = get_compatible_dropdown_choices(style, "framing", frame)
-        preview = preview_modifiers(style, l_safe, "auto", f_safe, "auto")
+        preview = preview_modifiers(style, l_safe, skin, f_safe, "auto")
         return gr.update(choices=l_choices, value=l_safe), gr.update(choices=f_choices, value=f_safe), preview
 
-    def _on_modifiers_change(style, light, frame):
-        return preview_modifiers(style, light, "auto", frame, "auto")
+    def _on_modifiers_change(style, light, frame, skin):
+        return preview_modifiers(style, light, skin, frame, "auto")
 
     image_style.change(
         fn=_on_style_change,
-        inputs=[image_style, lighting, shot_framing],
+        inputs=[image_style, lighting, shot_framing, skin_finish],
         outputs=[lighting, shot_framing, modifier_preview],
     )
-    lighting.change(fn=_on_modifiers_change, inputs=[image_style, lighting, shot_framing], outputs=[modifier_preview])
-    shot_framing.change(fn=_on_modifiers_change, inputs=[image_style, lighting, shot_framing], outputs=[modifier_preview])
+    lighting.change(
+        fn=_on_modifiers_change,
+        inputs=[image_style, lighting, shot_framing, skin_finish],
+        outputs=[modifier_preview],
+    )
+    shot_framing.change(
+        fn=_on_modifiers_change,
+        inputs=[image_style, lighting, shot_framing, skin_finish],
+        outputs=[modifier_preview],
+    )
+    skin_finish.change(
+        fn=_on_modifiers_change,
+        inputs=[image_style, lighting, shot_framing, skin_finish],
+        outputs=[modifier_preview],
+    )
 
     bt_open_folder.click(fn=open_generation_folder)
 
     gen_event = gen_btn.click(
         fn=on_generate_image,
-        inputs=[prompt, width, height, engine_model, image_style, shot_framing, lighting],
+        inputs=[
+            prompt, width, height, engine_model, image_style, shot_framing, lighting,
+            skin_finish, enhance_quality, use_rewriter,
+        ],
         outputs=[output_img, status_html, gen_btn, btn_cancel],
     )
 

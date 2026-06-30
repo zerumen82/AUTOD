@@ -391,6 +391,18 @@ class ProcessMgr:
                     lf.write(f"[PROC_FRAME] SIN valid_faces - return frame\n")
                 return frame
 
+            # Track average det_score for adaptive low-quality thresholds
+            video_path_q = getattr(self.options, 'current_video_path', None) or (file_path or "")
+            vkey_q = os.path.basename(video_path_q)
+            if valid_faces:
+                scores = [getattr(f, 'det_score', 0.5) for f in valid_faces if hasattr(f, 'det_score')]
+                if scores:
+                    frame_avg = sum(scores) / len(scores)
+                    score_attr = f'_avg_det_score_{vkey_q}'
+                    prev_avg = getattr(self, score_attr, 0.5)
+                    new_avg = 0.92 * prev_avg + 0.08 * frame_avg  # EMA suave
+                    setattr(self, score_attr, new_avg)
+
             # Calidad/identidad: globals + _process_face_swap_v21 (enhancer_blend_factor, GFPGAN, etc.)
             face_swap_mode = getattr(self.options, 'face_swap_mode', 'selected')
 
@@ -736,10 +748,19 @@ class ProcessMgr:
         Lógica de selección de cara origen:
         - Prioriza el matching por similitud para encontrar la mejor cara origen para el destino.
         - Usa el índice seleccionado como fallback si el matching no es posible.
+        - Si source_random está activo, elige aleatoriamente entre todas las caras origen.
         """
         try:
             if not candidate_faces:
                 return None
+
+            # 0. SOURCE ALEATORIO: elige una cara al azar de todas las disponibles
+            if getattr(roop.globals, 'source_random', False):
+                import random
+                idx = random.randint(0, len(candidate_faces) - 1)
+                picked = candidate_faces[idx]
+                print(f"[SOURCE_RANDOM] Cara #{idx+1} de {len(candidate_faces)} seleccionada")
+                return picked
             
             # 1. MATCHING POR SIMILITUD (Prioridad para encontrar "mejor cara")
             if face_swap_mode in ['selected', 'selected_faces', 'auto', 'selected_faces_frame']:
@@ -957,6 +978,21 @@ class ProcessMgr:
                     scene['camera_moving'] = True
                 else:
                     scene['camera_moving'] = False
+        
+        # SCENE CUT: Detectar cambio abrupto en número de caras
+        if len(scene['face_count_history']) >= 3:
+            prev_2 = scene['face_count_history'][-3:-1]
+            curr_count = scene['face_count_history'][-1]
+            if len(prev_2) == 2 and prev_2[0] > 0 and prev_2[1] > 0:
+                avg_prev = (prev_2[0] + prev_2[1]) / 2.0
+                if curr_count == 0 and avg_prev >= 1.5:
+                    scene['last_scene_cut'] = frame_count
+                    scene['total_scene_changes'] += 1
+                    print(f"[SCENE_CUT] Face count drop: {avg_prev:.0f} → 0 at frame {frame_count}")
+                elif curr_count >= 2 and avg_prev <= 0.5:
+                    scene['last_scene_cut'] = frame_count
+                    scene['total_scene_changes'] += 1
+                    print(f"[SCENE_CUT] Face count surge: {avg_prev:.0f} → {curr_count} at frame {frame_count}")
         
         setattr(self, scene_attr, scene)
         return scene
@@ -1234,7 +1270,10 @@ class ProcessMgr:
                         
                         # Progressive embedding update (v3.1: blend suave y frecuente)
                         if hasattr(best_match, 'embedding') and best_match.embedding is not None:
-                            if consec_success >= 5 and best_score > 0.50:
+                            # v5.81: Umbral más permisivo para baja calidad
+                            avg_det_emb = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+                            score_threshold = 0.35 if avg_det_emb < 0.30 else 0.50
+                            if consec_success >= 5 and best_score > score_threshold:
                                 old_emb = np.array(getattr(self, original_embedding_attr), dtype=np.float32)
                                 new_emb = np.array(best_match.embedding, dtype=np.float32)
                                 
@@ -1248,7 +1287,7 @@ class ProcessMgr:
                                     setattr(self, original_embedding_attr, blend / norm)
                                     setattr(self, consecutive_success_attr, 0)
                                     if frame_count % 30 == 0:
-                                        print(f"[TRACK] Frame {frame_count}: Embedding blend updated (profile={is_p})")
+                                        print(f"[TRACK] Frame {frame_count}: Embedding blend updated (profile={is_p}, score={best_score:.2f})")
                         
                         # Save tracking embedding as recovery fallback
                         tracking_emb_attr = f'_tracking_embedding_{video_basename}'
@@ -1284,7 +1323,12 @@ class ProcessMgr:
                                 best_recognition = face
                         
                         # v5.48: Umbral más permisivo para re-adquirir perfiles
-                        rec_threshold = 0.25 if lost_count < 10 else 0.35 
+                        # v5.81: Más permisivo aún para baja calidad
+                        avg_det_rec = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+                        if avg_det_rec < 0.30:
+                            rec_threshold = 0.20 if lost_count < 10 else 0.28
+                        else:
+                            rec_threshold = 0.25 if lost_count < 10 else 0.35
 
                         if best_recognition and best_rec_score >= rec_threshold:
                             print(f"[TRACK] RE-ACQUIRED via Global Recognition (score={best_rec_score:.2f})")
@@ -1321,7 +1365,10 @@ class ProcessMgr:
                     # GHOST TRACKING (v2.3): Predecir posición si se pierde la cara
                     # Evita parpadeos en perfiles o movimientos rápidos
                     # ==========================================================
-                    if lost_count < 6 and prediction and assigned_face:
+                    # v5.81: Ghost frames extendidos para baja calidad
+                    avg_det_g = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+                    ghost_limit = 10 if avg_det_g < 0.30 else (8 if avg_det_g < 0.45 else 6)
+                    if lost_count < ghost_limit and prediction and assigned_face:
                         import copy
                         ghost_face = copy.copy(assigned_face)
                         pred_x, pred_y, pred_conf = prediction
@@ -1341,8 +1388,9 @@ class ProcessMgr:
                                 dy = max_shift if dy > 0 else -max_shift
                             
                             # v5.48: Inercia aumentada para mejor seguimiento de perfiles
-                            dx = dx * 0.85
-                            dy = dy * 0.85
+                            inertia = 0.88 if avg_det_g < 0.30 else 0.85  # Más inercia en baja calidad
+                            dx = dx * inertia
+                            dy = dy * inertia
                             
                             # Desplazar BBox y Keypoints
                             if hasattr(ghost_face, 'bbox'):
@@ -1360,7 +1408,8 @@ class ProcessMgr:
                             setattr(ghost_face, '_ghost_dx', dx)
                             setattr(ghost_face, '_ghost_dy', dy)
                             # Score progresivo: 0.9 → 0.5 según lost_count
-                            decay = max(0.5, 1.0 - lost_count * 0.025)
+                            decay_slope = 0.020 if avg_det_g < 0.30 else 0.025  # Decaimiento más suave en baja calidad
+                            decay = max(0.5, 1.0 - lost_count * decay_slope)
                             ghost_face.det_score = getattr(assigned_face, 'det_score', 0.5) * decay
                             
                             # Actualizar historia con la predicción para mantener la inercia
@@ -1369,7 +1418,7 @@ class ProcessMgr:
                             setattr(self, position_history_attr, position_history)
                             
                             if lost_count % 3 == 0:
-                                print(f"[TRACK] Ghost Tracking Activo (frame {frame_count}, lost={lost_count}, score_decay={decay:.2f})")
+                                print(f"[TRACK] Ghost Tracking Activo (frame {frame_count}, lost={lost_count}/{ghost_limit}, score_decay={decay:.2f})")
                             return ghost_face
 
                     print(f"[TRACK] Frame {frame_count}: Lost (score={best_score:.2f}), attempts {lost_count}/15")
@@ -1407,15 +1456,25 @@ class ProcessMgr:
                 best_reacquire_score = -1
                 best_threshold = 0.15
                 
-                # Progressive threshold: stricter early, more lenient over time
-                if recovery_attempts < 15:
-                    base_thresh = 0.12
-                elif recovery_attempts < 60:
-                    base_thresh = 0.08
-                elif recovery_attempts < 200:
-                    base_thresh = 0.05
+                # v5.81: Umbrales más permisivos para baja calidad
+                avg_det_recp = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+                if avg_det_recp < 0.30:
+                    if recovery_attempts < 20:
+                        base_thresh = 0.10
+                    elif recovery_attempts < 80:
+                        base_thresh = 0.07
+                    else:
+                        base_thresh = 0.04
                 else:
-                    base_thresh = 0.03
+                    # Progressive threshold: stricter early, more lenient over time
+                    if recovery_attempts < 15:
+                        base_thresh = 0.12
+                    elif recovery_attempts < 60:
+                        base_thresh = 0.08
+                    elif recovery_attempts < 200:
+                        base_thresh = 0.05
+                    else:
+                        base_thresh = 0.03
                 
                 for face in valid_faces:
                     if not hasattr(face, 'embedding') or face.embedding is None:
@@ -1726,8 +1785,17 @@ class ProcessMgr:
                     f_size = 0.95
                     kps_ema = 0.85
 
-                    if velocity > 160 and not is_lockout:
-                        print(f"[SCENE_CUT] Frame {call_num}: Salto detectado ({velocity:.0f}px). Reseteando historial temporal.")
+                    # Adaptive scene cut: lower threshold for low quality video
+                    avg_det_scene = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+                    scene_threshold = 120 if avg_det_scene < 0.35 else 160
+                    # Also check scene state for face-count-based cut
+                    scene_state_obj = getattr(self, f'_scene_state_{video_basename}', {})
+                    scene_cut_frame = scene_state_obj.get('last_scene_cut', 0) if isinstance(scene_state_obj, dict) else 0
+                    frame_count_scene = getattr(self, f'_frame_count_{video_basename}', 0)
+                    is_near_scene_cut = abs(frame_count_scene - scene_cut_frame) < 5 if scene_cut_frame > 0 else False
+
+                    if (velocity > scene_threshold or is_near_scene_cut) and not is_lockout:
+                        print(f"[SCENE_CUT] Frame {call_num}: Salto detectado (vel={velocity:.0f}px, thresh={scene_threshold}, face_cut={is_near_scene_cut}). Reseteando historial temporal.")
                         if not hasattr(self, '_last_reset_call'): self._last_reset_call = {}
                         self._last_reset_call[video_key] = call_num
 
@@ -1748,11 +1816,19 @@ class ProcessMgr:
                         else:
                             # v5.79: det_score-aware smoothing — low-confidence jumps get smoothed more
                             det_score_kps = getattr(target_face, 'det_score', 1.0)
+                            # v5.81: avg_det_score adaptive — pervasively low quality = more smoothing
+                            avg_det_kps = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
                             if det_score_kps < 0.65 and velocity > 25:
                                 f_center = 0.75
                                 kps_ema = 0.60 if not is_profile else 0.55
                                 if call_num % 30 == 1:
                                     print(f"[TRACK_SMOOTH] Frame {call_num}: det={det_score_kps:.2f}, vel={velocity:.0f}px → suavizado fuerte")
+                            elif avg_det_kps < 0.30 and velocity > 15:
+                                # Low quality + moderate motion → extra smoothing
+                                f_center = 0.70
+                                kps_ema = 0.55 if not is_profile else 0.50
+                                if call_num % 30 == 1:
+                                    print(f"[TRACK_LOWQ] Frame {call_num}: avg_det={avg_det_kps:.2f}, vel={velocity:.0f}px → suavizado extra")
                             elif velocity < 4:
                                 f_center = 0.85
                                 kps_ema = 0.80 if not is_profile else 0.75
@@ -1873,7 +1949,14 @@ class ProcessMgr:
                     print(f"[TRACK] Frame {call_num}: ghost sin histórico → original")
                 return original_frame
 
+            # v5.81: En vez de saltar completamente, hacer hold del último swap para baja calidad
             if det_score < 0.05 and velocity > 100:
+                prev_frame_result = getattr(self, '_prev_frame_result', {}).get(video_key)
+                last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
+                if prev_frame_result is not None and last_bbox is not None:
+                    if call_num % 30 == 1:
+                        print(f"[SKIP_HOLD] Frame {call_num}: det_score={det_score:.2f} → hold último swap")
+                    return self._hold_previous_face_region(original_frame, prev_frame_result, last_bbox, blend=0.82)
                 if call_num % 30 == 1:
                     print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
                 return original_frame
@@ -2275,6 +2358,13 @@ class ProcessMgr:
             # v5.1.4: Bloquear swap_weight a 1.0 si el usuario lo pide (máxima potencia)
             swap_weight = 1.0 if user_blend >= 0.98 else user_blend
             
+            # v5.81: Atenuación extra por baja calidad general del video
+            avg_det_w = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+            if avg_det_w < 0.30:
+                swap_weight *= 0.85
+            elif avg_det_w < 0.40:
+                swap_weight *= 0.92
+            
             if is_profile:
                 # Perfil: peso completo excepto cuando tracking es inestable (bajo det_score o alta velocidad)
                 if velocity > 80:
@@ -2292,7 +2382,12 @@ class ProcessMgr:
             if enable_temporal_smoothing and prev_frame_result is not None and not is_ghost:
                 if prev_frame_result.shape == result_frame.shape:
                     det_score = getattr(target_face, 'det_score', 1.0)
-                    if det_score < 0.3:
+                    # v5.81: avg_det_score para low-quality = EMA más fuerte
+                    avg_det_t = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+                    if avg_det_t < 0.30:
+                        # Low quality: más suavizado temporal para reducir parpadeo
+                        alpha_prev = 0.40 if det_score < 0.4 else 0.30
+                    elif det_score < 0.3:
                         alpha_prev = 0.35
                     elif det_score < 0.4:
                         alpha_prev = 0.28
@@ -2304,7 +2399,7 @@ class ProcessMgr:
                         result_frame, prev_frame_result, final_mask, alpha_prev,
                     )
                     if call_num % 50 == 1:
-                        print(f"[QUALITY] EMA masked v5.76 (ghost={is_ghost}, det={det_score:.2f}, alpha={alpha_prev:.2f})")
+                        print(f"[QUALITY] EMA masked (det={det_score:.2f}, avg_det={avg_det_t:.2f}, alpha={alpha_prev:.2f})")
 
             if call_num <= 3:
                 cv2.imwrite(os.path.join(debug_dir, f'04_final_result_f{call_num}.png'), result_frame)

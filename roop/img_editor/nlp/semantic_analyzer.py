@@ -90,19 +90,17 @@ class SemanticIntentAnalyzer:
         self.anchors = {
             "pose": [
                 "changing character pose or body position",
-                "sitting, kneeling, standing, lying down, running, dancing, jumping, waving",
-                "repositioning limbs or changing posture, start dancing together",
+                "sitting, kneeling, standing, lying down, running",
+                "repositioning limbs or changing posture",
                 "cambiar la pose o posición del cuerpo",
-                "sentado, de rodillas, de pie, acostado, corriendo, bailando, bailar, danzando",
-                "cambiar la postura o posición de los brazos y piernas, ponerse a bailar",
+                "sentado, de rodillas, de pie, acostado, corriendo",
+                "cambiar la postura o posición de los brazos y piernas"
             ],
             "structural": [
                 "adding new people or large objects",
-                "adds insert places new person people character",
                 "changing the background completely",
                 "inserting new elements into the scene",
                 "removing people or large objects",
-                "remove delete erase persons people from scene",
                 "añadir gente nueva u objetos grandes",
                 "cambiar el fondo completamente",
                 "insertar elementos nuevos en la escena",
@@ -114,8 +112,8 @@ class SemanticIntentAnalyzer:
                 "adjusting brightness, filters, or style",
                 "subtle facial tweaks",
                 "removing clothes, getting naked or nude, barefoot, exposed body, undressed, sin ropa, desnuda",
-                "improving quality, sharpness, detail, resolution, clarity, enhance quality, deblur, upscale",
-                "mejorar calidad, nitidez, detalle, sharper, mejorar color, realzar calidad, desposterizar, ultra realista, hiperrealista",
+                "improving quality, sharpness, detail, resolution, clarity, enhance quality",
+                "mejorar calidad, nitidez, detalle, sharper, mejorar color, realzar calidad",
                 "cambiar color, textura o iluminación",
                 "modificar ropa, pelo u ojos",
                 "ajustar brillo, filtros o estilo",
@@ -129,6 +127,15 @@ class SemanticIntentAnalyzer:
             self.anchor_embeddings[intent] = self.model.encode(descriptions, convert_to_tensor=True, device=self.device)
             
         print("[NLP] Analizador semántico listo.")
+
+# Singleton global para evitar recargas y pings repetidos a huggingface
+_global_semantic_analyzer = None
+
+def get_semantic_analyzer():
+    global _global_semantic_analyzer
+    if _global_semantic_analyzer is None:
+        _global_semantic_analyzer = SemanticIntentAnalyzer()
+    return _global_semantic_analyzer
 
     def get_magnitude(self, prompt: str) -> float:
         """
@@ -144,14 +151,21 @@ class SemanticIntentAnalyzer:
         # 2. Calcular similitudes con cada ancla
         similarities = {}
         for intent, embeddings in self.anchor_embeddings.items():
+            # Similitud máxima con cualquiera de las descripciones del ancla
             cos_sim = util.cos_sim(prompt_embedding, embeddings)
             similarities[intent] = float(torch.max(cos_sim))
             
+        # 3. Mapeo matemático de intención a magnitud
+        
+        # Base mínima
         magnitude = 0.35
+        
+        # Contribuciones ponderadas (Usamos el máximo impacto para decidir fuerza)
         pose_weight = similarities.get("pose", 0)
         structural_weight = similarities.get("structural", 0)
         attribute_weight = similarities.get("attribute", 0)
         
+        # Escalamiento por impacto — pesos más generosos
         impact_weights = {
             "pose": pose_weight * 0.7,
             "structural": structural_weight * 0.7,
@@ -163,9 +177,11 @@ class SemanticIntentAnalyzer:
         
         print(f"[NLP] Similitudes: Pose={pose_weight:.2f}, Struct={structural_weight:.2f}, Attr={attribute_weight:.2f}")
         
+        # Umbral bajo para que prompts "difusos" (escenas complejas) sigan teniendo efecto
         if max_impact > 0.06:
             magnitude += max_impact
             
+        # Normalización final (mínimo 0.40 para que siempre haya cambio visible)
         return max(0.40, min(0.95, magnitude))
 
     def detect_target(self, prompt: str) -> str:
@@ -189,14 +205,17 @@ class SemanticIntentAnalyzer:
                 max_sim = sim
                 best_target = target
                 
+        # Ajuste fino: si hay mucha similitud con pose pero el target es face, 
+        # verificar si realmente es una pose (palabras de acción) o solo una zona del cuerpo
         pose_sim = float(torch.max(util.cos_sim(prompt_embedding, self.anchor_embeddings["pose"])))
         if pose_sim > 0.6 and best_target == "face":
+            # Solo cambiar a subject si la similitud con pose es muy alta
             best_target = "subject"
+        elif pose_sim > 0.4 and best_target == "subject":
+            # Mantener subject si ya es subject y hay algo de pose
+            pass
             
         return best_target if max_sim > 0.25 else "subject"
-
-
-_global_semantic_analyzer = None
 
 
 class LightLocalIntentAnalyzer:
@@ -215,19 +234,17 @@ class LightLocalIntentAnalyzer:
         self.anchors = {
             "pose": [
                 "changing character pose or body position",
-                "sitting, kneeling, standing, lying down, running, dancing, jumping, waving",
-                "repositioning limbs or changing posture, start dancing together",
+                "sitting, kneeling, standing, lying down, running",
+                "repositioning limbs or changing posture",
                 "cambiar la pose o posición del cuerpo",
-                "sentado, de rodillas, de pie, acostado, corriendo, bailando, bailar, danzando",
-                "cambiar la postura o posición de los brazos y piernas, ponerse a bailar",
+                "sentado, de rodillas, de pie, acostado, corriendo",
+                "cambiar la postura o posición de los brazos y piernas"
             ],
             "structural": [
                 "adding new people or large objects",
-                "adds insert places new person people character",
                 "changing the background completely",
                 "inserting new elements into the scene",
                 "removing people or large objects",
-                "remove delete erase persons people from scene",
                 "añadir gente nueva u objetos grandes",
                 "cambiar el fondo completamente",
                 "insertar elementos nuevos en la escena",
@@ -239,8 +256,8 @@ class LightLocalIntentAnalyzer:
                 "adjusting brightness, filters, or style",
                 "subtle facial tweaks",
                 "removing clothes, getting naked or nude, barefoot, exposed body, undressed, sin ropa, desnuda",
-                "improving quality, sharpness, detail, resolution, clarity, enhance quality, deblur, upscale",
-                "mejorar calidad, nitidez, detalle, sharper, mejorar color, realzar calidad, desposterizar, ultra realista, hiperrealista",
+                "improving quality, sharpness, detail, resolution, clarity, enhance quality",
+                "mejorar calidad, nitidez, detalle, sharper, mejorar color, realzar calidad",
                 "cambiar color, textura o iluminación",
                 "modificar ropa, pelo u ojos",
                 "ajustar brillo, filtros o estilo",
@@ -248,23 +265,14 @@ class LightLocalIntentAnalyzer:
             ]
         }
 
-    _STOPWORDS = frozenset({"the", "and", "for", "are", "but", "not", "you", "all", "can",
-                            "had", "her", "was", "one", "our", "out", "has", "how", "its",
-                            "may", "now", "old", "see", "way", "who", "did", "got", "let",
-                            "say", "she", "too", "use", "any", "per", "que", "del", "las",
-                            "los", "con", "por", "una"})
-
-    def _word_set(self, text: str) -> set:
-        return {w for w in text.lower().split() if len(w) > 2 and w not in self._STOPWORDS}
-
     def _score(self, prompt: str, texts: list) -> float:
-        """Similitud por solapamiento de palabras sin stopwords. Efectivo y sin hardcodes de usuario (usa solo anclas)."""
-        p_words = self._word_set(prompt)
+        """Similitud por solapamiento de palabras. Efectivo y sin hardcodes de usuario (usa solo anclas)."""
+        p_words = set(w for w in prompt.lower().split() if len(w) > 2)
         if not p_words:
             return 0.0
         best = 0.0
         for t in texts:
-            t_words = self._word_set(t)
+            t_words = set(w for w in t.lower().split() if len(w) > 2)
             if t_words:
                 overlap = len(p_words & t_words) / max(len(t_words), 1)
                 # Bonus por coincidencia parcial (ej. "ropa" en "modificar ropa") sin listas extra
@@ -276,147 +284,6 @@ class LightLocalIntentAnalyzer:
                 best = max(best, overlap)
         return min(1.0, best)
 
-    STRUCTURAL_SIGNAL_THRESHOLD = 0.06
-
-    def get_axis_scores(self, prompt: str) -> Dict[str, float]:
-        """Scores por eje semántico (anclas fijas). Usado para global en cambios estructurales."""
-        if not prompt or not prompt.strip():
-            return {"pose": 0.0, "structural": 0.0, "attribute": 0.0}
-        prompt_l = prompt.lower()
-        return {
-            "pose": self._score(prompt_l, self.anchors["pose"]),
-            "structural": self._score(prompt_l, self.anchors["structural"]),
-            "attribute": self._score(prompt_l, self.anchors["attribute"]),
-        }
-
-    def get_speech_intensity(self, prompt: str) -> float:
-        """Señal de diálogo/narración a cámara (anclas fijas, no lee palabras sueltas del usuario)."""
-        if not prompt or not prompt.strip():
-            return 0.0
-        prompt_l = prompt.lower()
-        speech_anchors = [
-            "saying speaking talking to camera dialogue narration voice words phrase",
-            "diciendo hablando mira a camara dice algo frase voz narracion habla",
-            "tell the audience say something speak to camera lip sync",
-            "que diga que digan que hablen que cuenten algo a camara",
-        ]
-        motion_only = self._score(
-            prompt_l,
-            [
-                "wind blowing hair moving camera cinematic motion",
-                "viento sopla cabello movimiento camara",
-            ],
-        )
-        speech = self._score(prompt_l, speech_anchors)
-        return max(0.0, min(1.0, speech - motion_only * 0.35))
-
-    def get_body_transform_intensity(self, prompt: str) -> float:
-        """Intensidad de cambio corporal/ropa (anclas attribute), excluyendo pedidos solo de calidad."""
-        if not prompt or not prompt.strip():
-            return 0.0
-        prompt_l = prompt.lower()
-        axes = self.get_axis_scores(prompt_l)
-        body_sub = self._score(
-            prompt_l,
-            [
-                self.anchors["attribute"][1],
-                self.anchors["attribute"][4],
-                self.anchors["attribute"][8],
-            ],
-        )
-        quality_sub = self._score(
-            prompt_l,
-            [self.anchors["attribute"][5], self.anchors["attribute"][6]],
-        )
-        signal = max(0.0, body_sub - quality_sub * 0.7)
-        if signal < 0.05:
-            return 0.0
-        if body_sub <= max(axes["pose"], axes["structural"] * 0.9):
-            signal *= 0.55
-        return min(1.0, signal)
-
-    def is_structural_dominant(self, prompt: str) -> bool:
-        """True si hay señal estructural (gente/fondo/elementos), incluso en prompts compuestos."""
-        return self.get_axis_scores(prompt)["structural"] > self.STRUCTURAL_SIGNAL_THRESHOLD
-
-    def get_structural_bias(self, prompt: str) -> str:
-        """'add', 'remove' o 'neutral' según sub-anclas estructurales (sin leer palabras del usuario)."""
-        if not prompt or not self.is_structural_dominant(prompt):
-            return "neutral"
-        prompt_l = prompt.lower()
-        add_score = self._score(
-            prompt_l,
-            [
-                self.anchors["structural"][0],
-                self.anchors["structural"][1],
-                self.anchors["structural"][3],
-                self.anchors["structural"][6],
-                self.anchors["structural"][8],
-                "add another person people to the scene photo",
-                "añadir anadir agregar incluir otra persona gente en la escena foto",
-                "anade agrega introduce una persona alguien en la imagen foto",
-                "introduce a new person character into the scene image",
-                "place insert a person someone in the image photograph",
-                "include add more people persons to this picture",
-                "put a person someone next to beside in front of",
-                "add a man woman child couple group crowd",
-            ],
-        )
-        remove_score = self._score(
-            prompt_l,
-            [
-                self.anchors["structural"][4],
-                self.anchors["structural"][5],
-                self.anchors["structural"][9],
-                "remove delete erase eliminate person people from photo scene",
-                "eliminar quitar borrar persona personas de la foto escena",
-                "remove person people from the scene",
-                "eliminar persona personas de la escena",
-                "delete erase take out all the people in the photo",
-                "remove delete the man woman child person people from picture",
-                "get rid of remove delete erase all persons everyone",
-            ],
-        )
-        if remove_score >= add_score and remove_score > 0.10:
-            return "remove"
-        if add_score > remove_score * 1.05:
-            return "add"
-        if remove_score > add_score * 1.05:
-            return "remove"
-        return "neutral"
-
-    def get_quality_intensity(self, prompt: str) -> float:
-        """Señal de mejora de calidad (nitidez, realismo…) sin cambio de escena/cuerpo."""
-        if not prompt or not prompt.strip():
-            return 0.0
-        prompt_l = prompt.lower()
-        quality_sub = self._score(
-            prompt_l,
-            [self.anchors["attribute"][5], self.anchors["attribute"][6]],
-        )
-        body_sub = self._score(
-            prompt_l,
-            [self.anchors["attribute"][1], self.anchors["attribute"][4]],
-        )
-        return max(0.0, min(1.0, quality_sub - body_sub * 0.65))
-
-    def is_quality_dominant(self, prompt: str) -> bool:
-        """True si el prompt pide sobre todo calidad/realismo, no pose/cuerpo/escena."""
-        if not prompt or not prompt.strip():
-            return False
-        axes = self.get_axis_scores(prompt)
-        pose = axes["pose"]
-        structural = axes["structural"]
-        attribute = axes["attribute"]
-        quality_int = self.get_quality_intensity(prompt)
-        if quality_int < 0.05:
-            return False
-        if pose >= 0.08 or structural >= 0.06:
-            return False
-        if self.get_body_transform_intensity(prompt) >= 0.08:
-            return False
-        return attribute >= max(pose, structural) * 1.1 and quality_int >= 0.06
-
     def get_magnitude(self, prompt: str) -> float:
         if not prompt or not prompt.strip():
             return 0.55  # valor razonable por defecto para Imagine style
@@ -425,10 +292,6 @@ class LightLocalIntentAnalyzer:
         pose = self._score(prompt_l, self.anchors["pose"])
         structural = self._score(prompt_l, self.anchors["structural"])
         attribute = self._score(prompt_l, self.anchors["attribute"])
-        quality_int = self.get_quality_intensity(prompt)
-
-        if self.is_quality_dominant(prompt):
-            return max(0.32, min(0.48, 0.34 + quality_int * 0.28))
 
         # Similar a la versión full pero sin embeddings
         magnitude = 0.50  # base decente para Imagine (permite cambios visibles sin saturar)
@@ -436,12 +299,8 @@ class LightLocalIntentAnalyzer:
         if impact > 0.04:
             magnitude += impact * 0.9
 
-        # Cambio corporal/ropa/escena (no solo calidad) → mag alta
-        body_sub = self._score(
-            prompt_l,
-            [self.anchors["attribute"][1], self.anchors["attribute"][4]],
-        )
-        if (body_sub > 0.05 or structural > 0.06 or pose > 0.06) and attribute > 0.06:
+        # Si hay señal de cambio de atributo/estructura (ropa, cuerpo, fondo), asegurar mag suficiente
+        if attribute > 0.06 or structural > 0.06:
             magnitude = max(magnitude, 0.68)
 
         return max(0.48, min(0.92, magnitude))  # permite edits fuertes manteniendo foto
@@ -450,9 +309,7 @@ class LightLocalIntentAnalyzer:
         prompt_l = prompt.lower()
         scores = {}
         for target, descs in {
-            "background": self.anchors["structural"][:2] + [
-                "background", "fondo", "entorno", "environment", "escena", "scenery",
-            ],
+            "background": self.anchors["structural"][:2] + ["background", "fondo"],
             "face": ["face", "cara", "rostro", "eyes", "ojos"],
             "clothes": ["clothes", "ropa", "dress", "outfit", "vestido", "naked", "nude", "desnuda", "sin ropa", "bare skin"],
             "hair": ["hair", "pelo", "cabello"],
@@ -464,12 +321,8 @@ class LightLocalIntentAnalyzer:
         if scores[best] < 0.05:
             best = "subject"
 
-        # Calidad (hiperrealista, nitidez…) no debe tapar señal clara de fondo/entorno
-        if (
-            self._score(prompt_l, self.anchors.get("attribute", [])) > 0.08
-            and best == "background"
-            and scores.get("background", 0) < 0.10
-        ):
+        # For body/clothing/undress (high attribute score), prefer subject/clothes over background
+        if self._score(prompt_l, self.anchors.get("attribute", [])) > 0.08 and best == "background":
             best = "subject"
 
         # Si parece cambio de pose/acción, preferimos subject global

@@ -843,6 +843,55 @@ class ImageQualityFinisher:
 
         return out, f"upscale {tier.upper()} ({' → '.join(notes)})"
 
+    def esrgan_x2_fullframe_blend(
+        self,
+        image: Image.Image,
+        tier: str = "hd",
+        blend: float = 0.35,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Tuple[Image.Image, str]:
+        """ESRGAN x2 a resolución completa (un paso), misma resolución — textura real antes de Lanczos."""
+        if blend <= 0:
+            return image, ""
+
+        w, h = image.size
+        max_side = max(w, h)
+        if max_side > 2560:
+            return image, ""
+
+        tier_l = (tier or "hd").lower()
+        est_tiles = self._estimate_tile_count(w, h, "esrganx2")
+        if tier_l == "8k" or est_tiles > 12 or (max_side <= 1280 and est_tiles > 8):
+            print(
+                f"[QualityFinisher] ESRGAN omitido ({est_tiles} tiles, tier={tier_l}) — "
+                "evita cuadrícula; usa Lanczos",
+                flush=True,
+            )
+            return image, ""
+
+        model_path = resolve_relative_path("../models/Frame/real_esrgan_x2.onnx")
+        if not os.path.isfile(model_path):
+            return image, ""
+
+        try:
+            upscaler = self._get_upscaler("esrganx2")
+            bgr = self._pil_to_bgr(image)
+            _emit_quality_progress(
+                progress_callback, "ESRGAN x2 full-frame", 0.58, f"{w}×{h}",
+            )
+            enhanced = self._esrgan_same_size(upscaler, bgr)
+            enhanced_pil = self._bgr_to_pil(enhanced)
+            mix = float(np.clip(blend, 0.18, 0.48))
+            out = Image.blend(image, enhanced_pil, mix)
+            print(
+                f"[QualityFinisher] ESRGAN x2 full-frame {w}×{h} ({int(mix * 100)}%)",
+                flush=True,
+            )
+            return out, f"ESRGAN x2 full-frame ({int(mix * 100)}%)"
+        except Exception as e:
+            print(f"[QualityFinisher] ESRGAN full-frame omitido: {e}")
+            return image, ""
+
     def upscale_lanczos_to_tier(
         self,
         image: Image.Image,

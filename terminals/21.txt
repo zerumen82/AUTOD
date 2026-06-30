@@ -1,0 +1,151 @@
+---
+pid: 3724
+cwd: "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI"
+command: "D:\\PROJECTS\\AUTOAUTO\\ui\\tob\\ComfyUI\\venv\\Scripts\\python.exe -u D:\\PROJECTS\\AUTOAUTO\\ui\\tob\\ComfyUI\\main.py --port 8188 --normalvram"
+started_at: 2026-06-26T10:51:41.039Z
+running_for_ms: 41700009 
+---
+Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+
+Prestartup times for custom nodes:
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+
+WARNING: You need pytorch with cu130 or higher to use optimized CUDA operations.
+Found comfy_kitchen backend triton: {'available': False, 'disabled': True, 'unavailable_reason': "ImportError: No module named 'triton'", 'capabilities': []}
+Found comfy_kitchen backend cuda: {'available': True, 'disabled': True, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8']}
+Found comfy_kitchen backend eager: {'available': True, 'disabled': False, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8', 'scaled_mm_nvfp4']}
+Checkpoint files will always be loaded safely.
+Total VRAM 8192 MB, total RAM 32713 MB
+pytorch version: 2.6.0+cu124
+Set vram state to: NORMAL_VRAM
+Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+Using async weight offloading with 2 streams
+Enabled pinned memory 13085.0
+Using pytorch attention
+Unsupported Pytorch detected. DynamicVRAM support requires Pytorch version 2.8 or later. Falling back to legacy ModelPatcher. VRAM estimates may be unreliable especially on Windows
+Python version: 3.10.6 (tags/v3.10.6:9c7b4bd, Aug  1 2022, 21:53:49) [MSC v.1932 64 bit (AMD64)]
+ComfyUI version: 0.19.0
+comfy-aimdo version: 0.2.12
+comfy-kitchen version: 0.2.8
+ComfyUI frontend version: 1.42.10
+[Prompt Server] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\comfyui_frontend_package\static
+Asset seeder disabled
+ComfyUI-GGUF: Partial torch compile only, consider updating pytorch
+Warning: Could not load sageattention: No module named 'triton'
+sageattention package is not installed, sageattention will not be available
+
+Import times for custom nodes:
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-FramePackWrapper
+   0.3 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+   0.7 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio
+   4.2 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+
+Context impl SQLiteImpl.
+Will assume non-transactional DDL.
+Starting server
+
+To see the GUI go to: http://127.0.0.1:8188
+got prompt
+Using pytorch attention in VAE
+Using pytorch attention in VAE
+VAE load device: cuda:0, offload device: cpu, dtype: torch.bfloat16
+Requested to load AutoencodingEngine
+loaded completely; 3006.00 MB usable, 159.87 MB loaded, full load: True
+Found quantization metadata version 1
+Using MixedPrecisionOps for text encoder
+CLIP/text encoder model load device: cuda:0, offload device: cpu, current: cpu, dtype: torch.float16
+Requested to load LongCatImageTEModel_
+loaded partially; 5676.80 MB usable, 5223.07 MB loaded, 2687.21 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load AutoencodingEngine
+Unloaded partially: 3730.32 MB freed, 1492.75 MB remains loaded, 453.25 MB buffer reserved, lowvram patches: 0
+loaded completely; 1453.12 MB usable, 159.87 MB loaded, full load: True
+loaded partially; 5660.68 MB usable, 5207.42 MB loaded, 2702.47 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+gguf qtypes: F32 (247), Q5_K (49), Q4_K (112), BF16 (6)
+model weight dtype torch.bfloat16, manual cast: None
+model_type FLUX
+unet unexpected: ['norm_out.linear.bias', 'norm_out.linear.weight']
+Requested to load LongCatImage
+loaded completely; 4840.47 MB usable, 3763.31 MB loaded, full load: True
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:09<04:33,  9.43s/it]  7%|▋         | 2/30 [00:15<03:20,  7.17s/it] 10%|█         | 3/30 [00:20<02:54,  6.46s/it] 13%|█▎        | 4/30 [00:26<02:39,  6.12s/it] 17%|█▋        | 5/30 [00:31<02:28,  5.95s/it] 20%|██        | 6/30 [00:37<02:20,  5.83s/it] 23%|██▎       | 7/30 [00:43<02:12,  5.77s/it] 27%|██▋       | 8/30 [00:48<02:05,  5.72s/it] 30%|███       | 9/30 [00:54<01:59,  5.70s/it] 33%|███▎      | 10/30 [01:00<01:53,  5.68s/it] 37%|███▋      | 11/30 [01:05<01:47,  5.68s/it] 40%|████      | 12/30 [01:11<01:42,  5.67s/it] 43%|████▎     | 13/30 [01:17<01:36,  5.66s/it] 47%|████▋     | 14/30 [01:22<01:30,  5.67s/it] 50%|█████     | 15/30 [01:28<01:25,  5.67s/it] 53%|█████▎    | 16/30 [01:34<01:19,  5.67s/it] 57%|█████▋    | 17/30 [01:39<01:13,  5.68s/it] 60%|██████    | 18/30 [01:45<01:08,  5.70s/it] 63%|██████▎   | 19/30 [01:51<01:02,  5.69s/it] 67%|██████▋   | 20/30 [01:56<00:56,  5.68s/it] 70%|███████   | 21/30 [02:02<00:51,  5.69s/it] 73%|███████▎  | 22/30 [02:08<00:45,  5.70s/it] 77%|███████▋  | 23/30 [02:13<00:39,  5.71s/it] 80%|████████  | 24/30 [02:19<00:34,  5.71s/it] 83%|████████▎ | 25/30 [02:25<00:28,  5.71s/it] 87%|████████▋ | 26/30 [02:31<00:22,  5.71s/it] 90%|█████████ | 27/30 [02:36<00:17,  5.71s/it] 93%|█████████▎| 28/30 [02:42<00:11,  5.70s/it] 97%|█████████▋| 29/30 [02:48<00:05,  5.73s/it]100%|██████████| 30/30 [02:53<00:00,  5.71s/it]100%|██████████| 30/30 [02:53<00:00,  5.80s/it]
+Requested to load AutoencodingEngine
+Unloaded partially: 1782.30 MB freed, 1981.05 MB remains loaded, 75.97 MB buffer reserved, lowvram patches: 0
+loaded completely; 266.83 MB usable, 159.87 MB loaded, full load: True
+Prompt executed in 448.84 seconds
+got prompt
+Requested to load LongCatImageTEModel_
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load AutoencodingEngine
+Unloaded partially: 3777.42 MB freed, 1428.00 MB remains loaded, 453.25 MB buffer reserved, lowvram patches: 0
+loaded completely; 1515.87 MB usable, 159.87 MB loaded, full load: True
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load LongCatImage
+loaded completely; 4839.47 MB usable, 3763.31 MB loaded, full load: True
+  0%|          | 0/17 [00:00<?, ?it/s]  6%|▌         | 1/17 [00:05<01:30,  5.63s/it] 12%|█▏        | 2/17 [00:11<01:24,  5.62s/it] 18%|█▊        | 3/17 [00:17<01:19,  5.69s/it] 24%|██▎       | 4/17 [00:22<01:14,  5.71s/it] 29%|██▉       | 5/17 [00:28<01:08,  5.72s/it] 35%|███▌      | 6/17 [00:34<01:03,  5.73s/it] 41%|████      | 7/17 [00:40<00:57,  5.74s/it] 47%|████▋     | 8/17 [00:45<00:51,  5.75s/it] 53%|█████▎    | 9/17 [00:51<00:46,  5.76s/it] 59%|█████▉    | 10/17 [00:57<00:40,  5.78s/it] 65%|██████▍   | 11/17 [01:03<00:34,  5.75s/it] 71%|███████   | 12/17 [01:08<00:28,  5.73s/it] 76%|███████▋  | 13/17 [01:14<00:22,  5.72s/it] 82%|████████▏ | 14/17 [01:20<00:17,  5.73s/it] 88%|████████▊ | 15/17 [01:25<00:11,  5.73s/it] 94%|█████████▍| 16/17 [01:31<00:05,  5.73s/it]100%|██████████| 17/17 [01:37<00:00,  5.73s/it]100%|██████████| 17/17 [01:37<00:00,  5.73s/it]
+Requested to load AutoencodingEngine
+Unloaded partially: 1782.30 MB freed, 1981.05 MB remains loaded, 75.97 MB buffer reserved, lowvram patches: 0
+loaded completely; 266.83 MB usable, 159.87 MB loaded, full load: True
+Prompt executed in 148.56 seconds
+got prompt
+Requested to load LongCatImageTEModel_
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load AutoencodingEngine
+Unloaded partially: 2482.42 MB freed, 2723.00 MB remains loaded, 453.25 MB buffer reserved, lowvram patches: 0
+loaded completely; 199.09 MB usable, 159.87 MB loaded, full load: True
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load LongCatImage
+loaded completely; 4841.43 MB usable, 3763.31 MB loaded, full load: True
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:07<03:31,  7.29s/it]  7%|▋         | 2/30 [00:12<02:56,  6.30s/it] 10%|█         | 3/30 [00:18<02:41,  5.99s/it] 13%|█▎        | 4/30 [00:24<02:32,  5.87s/it] 17%|█▋        | 5/30 [00:29<02:24,  5.79s/it] 20%|██        | 6/30 [00:35<02:18,  5.76s/it] 23%|██▎       | 7/30 [00:41<02:11,  5.73s/it] 27%|██▋       | 8/30 [00:46<02:05,  5.72s/it] 30%|███       | 9/30 [00:52<01:59,  5.71s/it] 33%|███▎      | 10/30 [00:58<01:54,  5.70s/it] 37%|███▋      | 11/30 [01:04<01:48,  5.71s/it] 40%|████      | 12/30 [01:09<01:42,  5.70s/it] 43%|████▎     | 13/30 [01:15<01:36,  5.70s/it] 47%|████▋     | 14/30 [01:21<01:31,  5.70s/it] 50%|█████     | 15/30 [01:26<01:25,  5.70s/it] 53%|█████▎    | 16/30 [01:32<01:19,  5.70s/it] 57%|█████▋    | 17/30 [01:38<01:14,  5.71s/it] 60%|██████    | 18/30 [01:43<01:08,  5.71s/it] 63%|██████▎   | 19/30 [01:49<01:02,  5.72s/it] 67%|██████▋   | 20/30 [01:55<00:57,  5.72s/it] 70%|███████   | 21/30 [02:01<00:51,  5.71s/it] 73%|███████▎  | 22/30 [02:06<00:45,  5.73s/it] 77%|███████▋  | 23/30 [02:12<00:39,  5.69s/it] 80%|████████  | 24/30 [02:18<00:33,  5.66s/it] 83%|████████▎ | 25/30 [02:23<00:28,  5.65s/it] 87%|████████▋ | 26/30 [02:29<00:22,  5.62s/it] 90%|█████████ | 27/30 [02:34<00:16,  5.61s/it] 93%|█████████▎| 28/30 [02:40<00:11,  5.60s/it] 97%|█████████▋| 29/30 [02:45<00:05,  5.59s/it]100%|██████████| 30/30 [02:51<00:00,  5.59s/it]100%|██████████| 30/30 [02:51<00:00,  5.72s/it]
+Requested to load AutoencodingEngine
+Unloaded partially: 1731.65 MB freed, 2031.69 MB remains loaded, 75.45 MB buffer reserved, lowvram patches: 0
+loaded completely; 258.72 MB usable, 159.87 MB loaded, full load: True
+Prompt executed in 193.82 seconds
+got prompt
+Requested to load LongCatImageTEModel_
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load AutoencodingEngine
+Unloaded partially: 3777.42 MB freed, 1428.00 MB remains loaded, 453.25 MB buffer reserved, lowvram patches: 0
+loaded completely; 1494.09 MB usable, 159.87 MB loaded, full load: True
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load LongCatImage
+loaded completely; 4842.42 MB usable, 3763.31 MB loaded, full load: True
+  0%|          | 0/16 [00:00<?, ?it/s]  6%|▋         | 1/16 [00:05<01:24,  5.65s/it] 12%|█▎        | 2/16 [00:11<01:18,  5.64s/it] 19%|█▉        | 3/16 [00:16<01:13,  5.64s/it] 25%|██▌       | 4/16 [00:22<01:07,  5.65s/it] 31%|███▏      | 5/16 [00:28<01:02,  5.65s/it] 38%|███▊      | 6/16 [00:33<00:56,  5.66s/it] 44%|████▍     | 7/16 [00:39<00:50,  5.67s/it] 50%|█████     | 8/16 [00:45<00:45,  5.67s/it] 56%|█████▋    | 9/16 [00:50<00:39,  5.67s/it] 62%|██████▎   | 10/16 [00:56<00:34,  5.68s/it] 69%|██████▉   | 11/16 [01:02<00:28,  5.68s/it] 75%|███████▌  | 12/16 [01:08<00:22,  5.69s/it] 81%|████████▏ | 13/16 [01:13<00:17,  5.69s/it] 88%|████████▊ | 14/16 [01:19<00:11,  5.70s/it] 94%|█████████▍| 15/16 [01:25<00:05,  5.70s/it]100%|██████████| 16/16 [01:30<00:00,  5.71s/it]100%|██████████| 16/16 [01:30<00:00,  5.68s/it]
+Requested to load AutoencodingEngine
+Unloaded partially: 1731.65 MB freed, 2031.69 MB remains loaded, 75.45 MB buffer reserved, lowvram patches: 0
+loaded completely; 258.72 MB usable, 159.87 MB loaded, full load: True
+Prompt executed in 166.26 seconds
+got prompt
+Requested to load LongCatImageTEModel_
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load AutoencodingEngine
+Unloaded partially: 3647.92 MB freed, 1557.50 MB remains loaded, 453.25 MB buffer reserved, lowvram patches: 0
+loaded completely; 1392.41 MB usable, 159.87 MB loaded, full load: True
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load LongCatImage
+loaded completely; 4841.28 MB usable, 3763.31 MB loaded, full load: True
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:07<03:28,  7.19s/it]  7%|▋         | 2/30 [00:12<02:52,  6.18s/it] 10%|█         | 3/30 [00:18<02:38,  5.86s/it] 13%|█▎        | 4/30 [00:23<02:28,  5.72s/it] 17%|█▋        | 5/30 [00:29<02:20,  5.64s/it] 20%|██        | 6/30 [00:34<02:14,  5.59s/it] 23%|██▎       | 7/30 [00:40<02:07,  5.57s/it] 27%|██▋       | 8/30 [00:45<02:01,  5.55s/it] 30%|███       | 9/30 [00:51<01:56,  5.53s/it] 33%|███▎      | 10/30 [00:56<01:50,  5.53s/it] 37%|███▋      | 11/30 [01:02<01:44,  5.52s/it] 40%|████      | 12/30 [01:07<01:39,  5.52s/it] 43%|████▎     | 13/30 [01:13<01:33,  5.53s/it] 47%|████▋     | 14/30 [01:18<01:28,  5.53s/it] 50%|█████     | 15/30 [01:24<01:22,  5.53s/it] 53%|█████▎    | 16/30 [01:29<01:17,  5.53s/it] 57%|█████▋    | 17/30 [01:35<01:12,  5.54s/it] 60%|██████    | 18/30 [01:40<01:06,  5.54s/it] 63%|██████▎   | 19/30 [01:46<01:00,  5.54s/it] 67%|██████▋   | 20/30 [01:52<00:55,  5.55s/it] 70%|███████   | 21/30 [01:57<00:50,  5.57s/it] 73%|███████▎  | 22/30 [02:03<00:44,  5.56s/it] 77%|███████▋  | 23/30 [02:08<00:38,  5.56s/it] 80%|████████  | 24/30 [02:14<00:33,  5.56s/it] 83%|████████▎ | 25/30 [02:19<00:27,  5.55s/it] 87%|████████▋ | 26/30 [02:25<00:22,  5.56s/it] 90%|█████████ | 27/30 [02:30<00:16,  5.56s/it] 93%|█████████▎| 28/30 [02:36<00:11,  5.56s/it] 97%|█████████▋| 29/30 [02:42<00:05,  5.56s/it]100%|██████████| 30/30 [02:47<00:00,  5.55s/it]100%|██████████| 30/30 [02:47<00:00,  5.59s/it]
+Requested to load AutoencodingEngine
+Unloaded partially: 1782.30 MB freed, 1981.05 MB remains loaded, 75.97 MB buffer reserved, lowvram patches: 0
+loaded completely; 274.27 MB usable, 159.87 MB loaded, full load: True
+Prompt executed in 249.94 seconds
+got prompt
+Requested to load LongCatImageTEModel_
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+Requested to load LongCatImage
+loaded completely; 4841.43 MB usable, 3763.31 MB loaded, full load: True
+  0%|          | 0/30 [00:00<?, ?it/s]  3%|▎         | 1/30 [00:05<02:41,  5.57s/it]  7%|▋         | 2/30 [00:11<02:34,  5.53s/it] 10%|█         | 3/30 [00:16<02:28,  5.52s/it] 13%|█▎        | 4/30 [00:22<02:23,  5.51s/it] 17%|█▋        | 5/30 [00:27<02:17,  5.50s/it] 20%|██        | 6/30 [00:33<02:12,  5.51s/it] 23%|██▎       | 7/30 [00:38<02:06,  5.51s/it] 27%|██▋       | 8/30 [00:44<02:01,  5.52s/it] 30%|███       | 9/30 [00:49<01:56,  5.53s/it] 33%|███▎      | 10/30 [00:55<01:50,  5.52s/it] 37%|███▋      | 11/30 [01:00<01:44,  5.52s/it] 40%|████      | 12/30 [01:06<01:39,  5.53s/it] 43%|████▎     | 13/30 [01:11<01:34,  5.53s/it] 47%|████▋     | 14/30 [01:17<01:28,  5.54s/it] 50%|█████     | 15/30 [01:22<01:23,  5.55s/it] 53%|█████▎    | 16/30 [01:28<01:17,  5.55s/it] 57%|█████▋    | 17/30 [01:34<01:12,  5.56s/it] 60%|██████    | 18/30 [01:39<01:06,  5.56s/it] 63%|██████▎   | 19/30 [01:45<01:01,  5.56s/it] 67%|██████▋   | 20/30 [01:50<00:55,  5.56s/it] 70%|███████   | 21/30 [01:56<00:50,  5.56s/it] 73%|███████▎  | 22/30 [02:01<00:44,  5.57s/it] 77%|███████▋  | 23/30 [02:07<00:38,  5.57s/it] 80%|████████  | 24/30 [02:13<00:33,  5.57s/it] 83%|████████▎ | 25/30 [02:18<00:27,  5.57s/it] 87%|████████▋ | 26/30 [02:24<00:22,  5.58s/it] 90%|█████████ | 27/30 [02:29<00:16,  5.58s/it] 93%|█████████▎| 28/30 [02:35<00:11,  5.57s/it] 97%|█████████▋| 29/30 [02:40<00:05,  5.57s/it]100%|██████████| 30/30 [02:46<00:00,  5.57s/it]100%|██████████| 30/30 [02:46<00:00,  5.55s/it]
+Requested to load AutoencodingEngine
+Unloaded partially: 1731.65 MB freed, 2031.69 MB remains loaded, 75.45 MB buffer reserved, lowvram patches: 0
+loaded completely; 258.72 MB usable, 159.87 MB loaded, full load: True
+Prompt executed in 195.39 seconds
+got prompt
+Requested to load LongCatImageTEModel_
+loaded partially; 5658.68 MB usable, 5205.42 MB loaded, 2704.54 MB offloaded, 453.25 MB buffer reserved, lowvram patches: 0
+[ComfyUI-Easy-Use] server: v1.3.7 Loaded
+[ComfyUI-Easy-Use] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\web_version/v2 Loaded

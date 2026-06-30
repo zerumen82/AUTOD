@@ -24,6 +24,7 @@ wait_after_extraction = None
 many_faces = None
 use_batch = None
 source_face_index = 0
+source_random = False
 target_face_index = 0
 face_position = None
 video_encoder = None

@@ -1,0 +1,15 @@
+---
+pid: 30852
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "Get-ChildItem \"D:\\PROJECTS\\AUTOAUTO\\ui\\tob\\ComfyUI\\models\\mmaudio\" | Select-Object Name,@{N='MB';E={[math]::Round($_.Length/1MB,1)}}"
+started_at: 2026-06-23T08:34:50.432Z
+running_for_ms: 8903885  
+---
+
+Name                                                MB
+----                                                --
+apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors    0,20
+mmaudio_large_44k_v2_fp16.safetensors          1965,70
+mmaudio_synchformer_fp16.safetensors              1,50
+mmaudio_vae_44k_fp16.safetensors                  0,00
+

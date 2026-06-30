@@ -1,0 +1,20 @@
+---
+pid: 25480
+cwd: "D:\PROJECTS\AUTOAUTO"
+command: "D:\\PROJECTS\\AUTOAUTO\\venv\\Scripts\\python.exe -c \"
+import requests, json
+base='http://127.0.0.1:8188'
+for ep in ['/queue','/prompt']:
+    pass
+q=requests.get(base+'/queue',timeout=10).json()
+print('RUNNING', len(q.get('queue_running',[])))
+print('PENDING', len(q.get('queue_pending',[])))
+if q.get('queue_running'):
+    print('running_item', json.dumps(q['queue_running'][0], default=str)[:500])
+\""
+started_at: 2026-06-23T09:25:39.084Z
+running_for_ms: 5870012  
+---
+RUNNING 1
+PENDING 0
+running_item [0, "e6301c9d-e608-415a-9e5c-ddc1d4edead6", {"1": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": "clip_l.safetensors", "clip_name2": "llava_llama3_fp16.safetensors", "type": "hunyuan_video"}}, "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "gentle subtle motion, soft light flicker", "clip": ["1", 0]}}, "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry, distorted, bad anatomy, static, frozen, still image, no movement, low resolution, watermark, tex

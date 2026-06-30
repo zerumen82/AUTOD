@@ -515,6 +515,7 @@ def wire_events(ui_comp):
     
     # ARCHIVOS ORIGEN/DESTINO
     def on_src_changed(files):
+        files = files or []
         _log(f"[TEST_CONSOLE] on_src_changed INICIO - {len(files)} archivo(s)")
         state.current_input_page = 0
         if not files: 
@@ -597,7 +598,11 @@ def wire_events(ui_comp):
         entry = state.list_files_process[state.selected_preview_index]
         return f"📂 **Archivo ({state.selected_preview_index+1}/{len(state.list_files_process)}):** {os.path.basename(entry.filename)}"
 
-    ui_comp["bt_destfiles"].change(on_dest_changed, [ui_comp["bt_destfiles"]], [ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]).then(update_file_indicator, None, ui_comp["file_indicator"])
+    def update_source_random_state():
+        has_video = any(util.is_video(entry.filename) for entry in state.list_files_process) if state.list_files_process else False
+        return gr.update(interactive=not has_video, value=False)
+
+    ui_comp["bt_destfiles"].change(on_dest_changed, [ui_comp["bt_destfiles"]], [ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]).then(update_file_indicator, None, ui_comp["file_indicator"]).then(update_source_random_state, None, ui_comp["source_random"])
 
     def jump_frame(current_f, delta):
         if not state.list_files_process: return gr.update(), None
@@ -686,6 +691,7 @@ def wire_events(ui_comp):
         inputs=[
             ui_comp["fake_preview"], ui_comp["autorotate"], ui_comp["smoothing"],
             ui_comp["face_distance"], ui_comp["blend_ratio"], ui_comp["enhancer_blend"], ui_comp["enhancer"],
+            ui_comp["source_random"],
         ],
         outputs=[ui_comp["bt_start"], ui_comp["bt_stop"], ui_comp["metrics_display"]],
     )
@@ -707,7 +713,7 @@ def on_target_page_change(delta):
     state.current_target_page = max(0, min(max(0, (total-1)//state.FACES_PER_PAGE), state.current_target_page + delta))
     return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total, "target"))
 
-async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer):
+async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer, source_random):
     from ui.tabs.faceswap.logic import start_swap
     from ui.job_cancel import clear as clear_cancel, SCOPE_FACESWAP
     clear_cancel(SCOPE_FACESWAP)
@@ -720,6 +726,8 @@ async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enh
     roop.globals.use_enhancer = enhancer not in (None, "", "None")
     roop.globals.autorotate_faces = auto_rot
     roop.globals.temporal_smoothing = temp_smooth
+    roop.globals.source_random = source_random
+    print(f"[SOURCE_RANDOM] {'ACTIVADO' if source_random else 'desactivado'}")
     gen = start_swap(enhancer=enhancer, keep_frames=False, wait_after_extraction=False, skip_audio=False, face_distance=dist, blend_ratio=blend, blend_mode="blend", selected_mask_engine="None", processing_method="Inswapper 128", no_face_action="skip", vr_mode=False, use_single_source_all=False, autorotate=auto_rot, temporal_smoothing=temp_smooth, num_swap_steps=1, imagemask=None)
     for value in gen:
         yield value
