@@ -332,6 +332,8 @@ class LightLocalIntentAnalyzer:
         return best
 
 
+
+
 # Fábrica: por defecto usa la versión ligera (local, sin saturar)
 # La versión full con embeddings solo si se pide explícitamente
 def get_semantic_analyzer(full_ai=False):

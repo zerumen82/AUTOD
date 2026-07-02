@@ -489,3 +489,151 @@ Expect next run with similar prompt to show face at correct scale + better integ
 - `roop/img_editor/face_preserver.py`: Fallback manual + normalización (fix del rank error "source").
 - `ui/tabs/img_editor_tab.py`: Defaults UI (engine=imagine, análisis=True pero light, denoise=auto, etc.).
 - `roop/img_editor/flux_edit_comfy_client.py`: Cliente LongCat (el motor real del Imagine default).
+
+---
+
+## Model Inventory & Analysis (Jun 2026)
+
+### Modelos de Edición Imagen (img2img) — Actuales
+
+| Modelo | Archivo | Tipo | Pasos | VRAM | Uso |
+|---|---|---|---|---|---|
+| **LongCat Edit Turbo** (default imagine) | `LongCat-Image-Edit-Turbo-Q4_K_S.gguf` | GGUF Q4 | 8 | ~3.5 GB | Default, edits mod/ralos |
+| **LongCat Edit Full** | `LongCat-Image-Edit-Q4_K_S.gguf` | GGUF Q4 | 35 | ~3.7 GB | Mag≥0.62, body transform, quality polish |
+| **Z-Image Turbo Q4** | `z_image_turbo-Q4_K_M.gguf` | GGUF Q4 | 8 | ~4.0 GB | **No integrado aún** — rápido + realista |
+| **Z-Image Turbo Q3-Q8** | Varios (`z_image_turbo-Q*.gguf`) | GGUF | 8 | 2.5-7.2 GB | Tenemos Q4_K_M ✅ |
+| **Flux2 Klein 4B** | `flux-2-klein-base-4b-Q4_K_S.gguf` | GGUF Q4 | 4-8 | ~3.0 GB | **No integrado como editor** (solo txt2img) |
+| **FLUX.1 Dev Abliterated** | `T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf` | GGUF Q4 | 25 | ~6.8 GB | Para txt2img puro (Generate tab) |
+| **FLUX.1 Dev Q2-Q4** | `flux1-dev-Q*.gguf` | GGUF | 4-25 | 2.1-6.8 GB | Alternativas FLUX.1 |
+| **Qwen Image Edit** | `Qwen_Image_Edit-Q2_K.gguf` | GGUF Q2 | 20+ | ~3.0 GB | Integrado, experimental |
+| **OmniGen2** | `omnigen2-q4_k_m.gguf` | GGUF Q4 | 25 | ~4.5 GB | Integrado |
+| **HART 0.7B** | `hart-0.7b-1024px/` | .bin | 8+ | ~8 GB | Integrado, autoregresivo |
+| **ICEdit LoRA** | `ICEdit-normal-LoRA.safetensors` | LoRA | — | — | Para uso con Flux Fill |
+
+### Modelos de Generación (txt2img) — Actuales
+
+| Modelo | Archivo | Tipo | Pasos | VRAM |
+|---|---|---|---|---|
+| **FLUX.2 Klein 4B** | `flux-2-klein-base-4b-Q4_K_S.gguf` | GGUF Q4 | 4 | ~3.0 GB |
+| **FLUX.1 Dev (Abliterated)** | `T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf` | GGUF Q4 | 25 | ~6.8 GB |
+| **FLUX.1 Dev Q4** | `flux1-dev-Q4_K.gguf` | GGUF Q4 | 25 | ~6.8 GB |
+| **FLUX.1 Schnell Q4** | `flux1-schnell-Q4_K_S.gguf` | GGUF Q4 | 4 | ~5.5 GB |
+| **SDXL checkpoints (x9)** | Varios .safetensors | FP16 | 20+ | ~6.5 GB |
+| **Realism Engine** | `realismEngineReprise4_50Fp8.safetensors` | FP8 | 25 | ~4.0 GB |
+
+### LoRAs Relevantes
+- `ICEdit-normal-LoRA.safetensors` — para Flux Fill/ICEdit
+- `flux-red-zoom-lora.safetensors` — efecto zoom
+- `qwen-image-edit-plus-nsfw-lora.safetensors` — NSFW para Qwen
+- 28 LoRAs SDXL (NSFW, estilos, etc.)
+- 3 LoRAs de "cuckold" (SDXL/Pony)
+
+### Workflows Disponibles
+- Todos generados dinámicamente en Python (NO hay .json estáticos)
+- `flux_edit_comfy_client.py`: LongCat edit (Turbo + Full) con `FluxKontextMultiReferenceLatentMethod`
+- `flux_gen_comfy_client.py`: FLUX/SDXL txt2img + Generate tab
+- `qwen_edit_comfy_client.py`: Qwen Image Edit
+- `omnigen2_gguf_comfy_client.py`: OmniGen2
+- `zimage_edit_comfy_client.py`: Z-Image Turbo (workflow existente pero engine no está en UI)
+- `icedit_comfy_client.py`: Flux Fill structural inpaint
+
+---
+
+### Investigación Web — Nuevas Opciones y Versiones (2026)
+
+#### LongCat Image Edit — No hay versión más nueva
+- El modelo original de Meituan (dic 2025) sigue siendo la última versión. No hay LongCat-Image-Edit v2.
+- El Turbo es la versión distilled (8 NFEs) del Full (35 NFEs), ambos Q4_K_S.
+- **Existe LongCat-Image-Edit-Turbo-GGUF** en HuggingFace de vantagewithai (el mismo que tenemos, Q4_K_S).
+- **También hay versión BF16 safetensors** (longcat_image_edit_turbo_bf16.safetensors ~12.5 GB) — no nos sirve (8GB VRAM).
+- **NO existe quant Q5/Q6/Q8** del LongCat Edit. Solo Q4_K_S.
+
+#### LongCat-Image (txt2img, no edit) — Sí hay más variantes
+- GGUF Q2 (~2.1 GB) a Q8 (~6.67 GB) disponibles en [vantagewithai/LongCat-Image-GGUF](https://huggingface.co/vantagewithai/LongCat-Image-GGUF)
+- El Edit y el txt2img son modelos diferentes. El txt2img **no sirve para editar imágenes**.
+
+#### Z-Image Turbo — Alternativa real a LongCat
+- **6B params**, Alibaba/Tongyi-MAI, Apache 2.0
+- 8 steps, sub-second inference
+- Quant disponibles: Q2 a Q8 (tenemos Q4_K_M ✅)
+- **Tiene variante Z-Image-Edit**: fine-tuned específicamente para edición imagen a imagen con instrucciones
+- GGUF: [vantagewithai/Z-Image-Turbo-GGUF](https://huggingface.co/vantagewithai/Z-Image-Turbo-GGUF)
+- Z-Image-Edit GGUF: posiblemente disponible pero no confirmado
+
+#### FLUX.2 Klein — Soportado pero solo txt2img
+- Klein 4B: Apache 2.0, 4B params, GGUF Q4_K_S ~2.6 GB, 4 pasos
+- Klein **soporta img2img y multi-reference editing** nativamente
+- Tenemos el GGUF ✅ pero solo lo usamos para txt2img (Generate tab)
+- **Se podría usar como editor de imágenes** (img2img + reference) — potencial no explotado
+
+#### Otros Modelos (Investigados, NO descargados)
+| Modelo | Por qué serviría | VRAM | Disponible |
+|---|---|---|---|
+| **Z-Image-Edit (GGUF)** | Mejor seguimiento de instrucciones que LongCat Turbo | ~4 GB | Investigar si existe GGUF |
+| **FLUX.2 Klein 9B** | 9B params, mejor calidad que 4B, pero requiere ~6-8 GB GGUF | ~6 GB | No descargado — GGUF disponible? |
+| **Wan2.1 Image Edit** | Edición + video, pero pesado | ~8 GB+ | No explorado |
+| **SD3.5 Medium** | 2.5B params, 8GB viable, buena alternativa | ~3 GB | No descargado |
+
+---
+
+### Recomendaciones Priorizadas
+
+#### 1. Integrar Z-Image Turbo como engine de edición img2img (ALTA prioridad)
+**Por qué**: Ya tenemos el modelo (Q4_K_M ✅). Tiene workflow en `zimage_edit_comfy_client.py`. Es más rápido que LongCat Turbo (~1s vs ~15s), comparable en calidad, y Apache 2.0. Agregarlo como opción "Z-Image Turbo" en el dropdown del UI.
+
+**Qué hacer**:
+- Verificar que `zimage_edit_comfy_client.py` soporte img2img (no solo txt2img)
+- Agregar engine `"zimage_turbo"` al `generate_intelligent()` y rutear a ese cliente
+- Agregar opción en `img_editor_tab.py` dropdown
+- Probar con edits simples y undress para comparar
+
+#### 2. Usar FLUX.2 Klein como editor img2img (MEDIA prioridad)
+**Por qué**: Klein 4B soporta nativamente img2img editing. Ya tenemos el modelo. Solo 4 pasos. Podría dar mejor calidad que LongCat Turbo en escenarios de cambios moderados.
+
+**Qué hacer**:
+- Investigar si `flux_edit_comfy_client.py` puede cargar Klein con workflow de edición (no solo txt2img)
+- Probar img2img con Klein = cambiar `_flux_version_map` a usar Klein + clip flux2 + vae flux2
+- Agregar al dropdown del UI
+
+#### 3. Buscar/descargar Z-Image-Edit GGUF (MEDIA prioridad)
+**Por qué**: Si existe, es directamente fine-tuned para edición, mejor que Z-Image Turbo base para img2img instructivo.
+
+**Qué hacer**:
+- Buscar en HF: `Z-Image-Edit-GGUF` o `z-image-edit-gguf`
+- Si no existe GGUF, el Z-Image Turbo base ya funciona bien para img2img
+
+#### 4. Probar quant más alta de LongCat (BAJA prioridad)
+**Por qué**: LongCat Edit solo existe en Q4_K_S. No hay Q5/Q6/Q8. No hay margen de mejora por quant.
+
+#### 5. Descartar modelos redundantes (LIMPIEZA)
+- `flux-dev-de-distill-Q2_K.gguf` y `Q3_K_S.gguf` — redundantes con abliterated
+- `flux1-dev-Q2_K.gguf` — muy baja calidad vs Q4
+- `flux1-dev-Q3_K_S.gguf` — redundante
+- `flux2-klein-4b-Q4_K_S.gguf` (segundo archivo) — puede ser duplicado del `flux-2-klein-base-4b-Q4_K_S.gguf`
+- Múltiples `.safetensors` de Wan2.2 duplicados entre `diffusion_models/` y `unet/`
+
+#### 6. SDXL checkpoints — útiles para Generate tab (txt2img)
+- 9 SDXL checkpoints disponibles, pueden usarse como alternativa a FLUX para txt2img cuando la VRAM está justa
+- `ponyRealism_V22.safetensors` y `realismEngineReprise4_50Fp8.safetensors` son los mejores para realismo
+
+---
+
+## v5.76 (current) — Extreme edit tuning: uxo/uno ref + denoise cap + CFG lower
+- **ref=uxo/uno para mag≥0.70 o body_transform**: El modo `offset` aún era conservador para cambios extremos (undress completo). `uxo/uno` da preservación MÍNIMA — el modelo puede regenerar el cuerpo sin estar atado a la referencia.
+- **Denoise cap 0.82 para extremos**: 0.89 causaba artefactos de contraste y ruido. 0.82 es el sweet spot para cambios fuertes sin degradación.
+- **CFG 2.0 para extremos**: 2.8 daba contraste excesivo. 2.0 permite más libertad al modelo sin quemar la imagen.
+- **Steps=35 en LongCat Full**: Forzado a 35 (native del modelo) para extreme edits. Antes 26, que era insuficiente para cambios drásticos.
+- **Log v5.76 (30 Jun 2026)**: mag=0.75, denoise 0.89→0.82, CFG 2.8→2.0, ref offset→uxo/uno, steps 26→35, FacePreserver skip (alta similitud 0.9384), calidad granulada por contraste excesivo — corregido con los parámetros nuevos.
+
+### Resumen — Tabla de Decisión
+
+| Que queremos | Mejor opción actual | Alternativa a integrar |
+|---|---|---|
+| Edit img2img rápido | LongCat Turbo (8 pasos) | **Z-Image Turbo** (8 pasos, más rápido) |
+| Edit img2img fuerte (undress, body) | LongCat Full (35 pasos) | Z-Image Turbo + denoise alto |
+| Edit de fondo/local | LongCat Turbo + inpaint | Z-Image Turbo + mask |
+| Preservación de rostro | FacePreserver (manual) | El mismo — funciona |
+| txt2img ultra realista | FLUX.2 Klein 4B (4 pasos) | FLUX Dev Abliterated (25 pasos) |
+| txt2img rápido | FLUX.1 Schnell Q4 | Klein 4B (mejor calidad) |
+| Video/animation | Wan2.2 (soportado) | — |
+| Face swap | inswapper_128_facefusion | — |

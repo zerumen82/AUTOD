@@ -81,6 +81,8 @@ def _generative_polish_pass(
     if mode == "edit":
         if poster < 0.18 and mag < 0.52:
             return None, ""
+        if mag >= 0.65:
+            return None, ""
     elif poster < 0.30:
         return None, ""
 
@@ -172,16 +174,7 @@ def _generative_realism_pass(
 
 
 def _preserve_faces(original: Image.Image, edited: Image.Image) -> Image.Image:
-    try:
-        from roop.img_editor.face_preserver import FacePreserver
-        fp = FacePreserver()
-        ok, _ = fp.initialize()
-        if not ok:
-            return edited
-        return fp.preserve_faces(original, edited, method="swap")
-    except Exception as e:
-        print(f"[TopTier] Face preserve omitido: {e}")
-        return edited
+    return edited
 
 
 def run_top_tier_quality(

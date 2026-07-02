@@ -597,6 +597,7 @@ class ImageQualityFinisher:
 
     @staticmethod
     def sharpen(image: Image.Image, amount: float = 1.35) -> Image.Image:
+        """Unsharp mask suave — halos mínimos, sin textura inventada."""
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
         blurred = cv2.GaussianBlur(bgr, (0, 0), 1.0)
         sharp = cv2.addWeighted(bgr, amount, blurred, -(amount - 1.0), 0)
@@ -640,7 +641,7 @@ class ImageQualityFinisher:
 
     @staticmethod
     def enhance_color(image: Image.Image, blend: float = 0.22) -> Image.Image:
-        """Contraste global + saturación suave (sin CLAHE por tiles → sin cuadrícula)."""
+        """Curva en S + calidez suave — contraste fotográfico realista."""
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
         mix = float(np.clip(blend, 0.0, 0.40))
         if mix <= 0.02:
@@ -648,15 +649,21 @@ class ImageQualityFinisher:
 
         lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
         l_ch, a_ch, b_ch = cv2.split(lab)
-        lo, hi = np.percentile(l_ch, (1.2, 98.8))
-        span = max(float(hi - lo), 12.0)
-        l_f = np.clip((l_ch.astype(np.float32) - lo) / span * 255.0, 0, 255)
-        l_out = (l_ch.astype(np.float32) * (1.0 - mix * 0.55) + l_f * (mix * 0.55)).astype(np.uint8)
+        l_f32 = l_ch.astype(np.float32)
 
-        hsv = cv2.cvtColor(cv2.merge([l_out, a_ch, b_ch]), cv2.COLOR_LAB2BGR)
-        hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV).astype(np.float32)
-        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1.0 + mix * 0.14), 0, 255)
-        hsv[:, :, 2] = np.clip(hsv[:, :, 2] * (1.0 + mix * 0.04), 0, 255)
+        l_norm = l_f32 / 255.0
+        s = mix * 5.0
+        l_s = l_norm + s * l_norm * (1.0 - l_norm) * (2.0 * l_norm - 1.0)
+        l_s = np.clip(l_s * 255.0, 0, 255).astype(np.uint8)
+
+        warm = mix * 0.18
+        a_out = np.clip(a_ch.astype(np.float32) + warm * 3.0, 0, 255).astype(np.uint8)
+        b_out = np.clip(b_ch.astype(np.float32) + warm * 2.0, 0, 255).astype(np.uint8)
+
+        hsv = cv2.cvtColor(cv2.cvtColor(cv2.merge([l_s, a_out, b_out]), cv2.COLOR_LAB2BGR), cv2.COLOR_BGR2HSV).astype(np.float32)
+        s_ch = hsv[:, :, 1]
+        boost = 1.0 + mix * 0.18 * (1.0 - s_ch / 255.0)
+        hsv[:, :, 1] = np.clip(s_ch * boost, 0, 255)
         out = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
         out = cv2.addWeighted(bgr, 1.0 - mix * 0.65, out, mix * 0.65, 0)
         return Image.fromarray(cv2.cvtColor(np.clip(out, 0, 255).astype(np.uint8), cv2.COLOR_BGR2RGB))
@@ -818,6 +825,34 @@ class ImageQualityFinisher:
                 if remaining <= 1.02:
                     break
                 if remaining < 1.85:
+                    plan_label = (plan.get("label") or "").lower()
+                    if "sin upscale" not in plan_label and "esrgan" in plan_label:
+                        w_cur, h_cur = out.size
+                        est = self._estimate_tile_count(w_cur, h_cur, "esrganx2")
+                        if est <= 90:
+                            _emit_quality_progress(
+                                progress_callback,
+                                f"Upscale {engine} (detail)",
+                                progress_base + progress_span * 0.5,
+                                f"{w_cur}×{h_cur} → ~{tier.upper()}",
+                            )
+                            try:
+                                mid, mid_note = self.upscale(out, scale=2, force=True, plan=plan)
+                                if mid_note and "lanczos" not in mid_note.lower() and "omitido" not in mid_note.lower():
+                                    notes.append(mid_note)
+                                    out = mid
+                                    ms2 = max(out.size)
+                                    if ms2 > target_side:
+                                        final_ratio = target_side / float(ms2)
+                                        nw = max(1, int(out.size[0] * final_ratio))
+                                        nh = max(1, int(out.size[1] * final_ratio))
+                                        out = out.resize((nw, nh), Image.LANCZOS)
+                                        notes.append(f"cap {tier}")
+                                    break
+                            except Exception as e:
+                                print(f"[QualityFinisher] ESRGAN pre-Lanczos fallback: {e}", flush=True)
+                        else:
+                            print(f"[QualityFinisher] ESRGAN {est}tiles omitido (too many) → Lanczos", flush=True)
                     nw, nh = max(1, int(out.size[0] * remaining)), max(1, int(out.size[1] * remaining))
                     out = out.resize((nw, nh), Image.LANCZOS)
                     notes.append(f"lanczos {remaining:.2f}x")

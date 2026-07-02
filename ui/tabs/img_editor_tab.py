@@ -27,7 +27,7 @@ def open_output_folder():
 _is_generating = False
 
 
-def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_val, quality_mode_val, lora_name, lora_strength, denoise_val):
+def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_val, quality_mode_val, enhance_tier_val, lora_name, lora_strength, denoise_val):
     global _is_generating
     
     if _is_generating:
@@ -64,6 +64,7 @@ def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_va
             engine=engine_val,
             enhance_faces=enhance_val,
             quality_mode=quality_mode_val,
+            enhance_tier=enhance_tier_val,
             lora_name=lora_name,
             lora_strength=lora_strength,
             denoise=denoise_val if denoise_val > 0 else None
@@ -183,6 +184,14 @@ def create_img_editor_tab():
                 with gr.Row():
                     quality_mode = gr.Checkbox(label="🎨 Modo Calidad (solo mejorar calidad, sin editar contenido)", value=False, info="Corrige posterización, artefactos, líneas verticales y convierte en ultra realista. Ignora cambios de ropa/cuerpo/pose.")
 
+                with gr.Row(visible=True):
+                    enhance_tier = gr.Radio(
+                        choices=[("HD (1920px)", "hd"), ("4K (3840px)", "4k"), ("8K (7680px)", "8k")],
+                        value="hd",
+                        label="Resolución de salida (Modo Calidad)",
+                        info="HD: mejora calidad sin upscale. 4K/8K: upscale con IA (ESRGAN) + detalle real"
+                    )
+
                 with gr.Accordion("⚙️ Opciones Avanzadas", open=False):
                     use_ai = gr.Checkbox(label="🧠 Análisis inteligente", value=True, info="Por defecto activado. Análisis local ligero automático (sin cargar nada pesado, sin internet). El usuario solo sube foto y escribe la instrucción.")
                     
@@ -233,7 +242,7 @@ def create_img_editor_tab():
 
     gen_btn.click(
         on_generate,
-        [input_img, prompt, engine, f_preserve, use_ai, enhance_faces, quality_mode, lora_dropdown, lora_strength, denoise],
+        [input_img, prompt, engine, f_preserve, use_ai, enhance_faces, quality_mode, enhance_tier, lora_dropdown, lora_strength, denoise],
         [output_img, status, mask_preview],
         concurrency_limit=None
     )

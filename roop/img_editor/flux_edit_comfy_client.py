@@ -215,10 +215,11 @@ class FluxEditComfyClient:
             last_model = ["20", 0]
             last_clip = ["20", 1]
 
-        # LongCat Turbo es distilled (CFG=1.0 forzado). Non-Turbo usa guidance real.
+        # LongCat Turbo es distilled (CFG=1.0 forzado, pasos nativos ~8).
         if is_longcat and self._is_longcat_turbo:
             actual_cfg = 1.0
             actual_denoise = 1.0
+            num_inference_steps = min(num_inference_steps, 12)
         else:
             actual_cfg = guidance_scale
             actual_denoise = denoise

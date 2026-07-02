@@ -305,16 +305,13 @@ class ImgEditorManager:
                         "Change the background, environment and scenery exactly as described. "
                         "Apply all other requested changes as strongly as possible."
                     )
+                    base = f"Instruction: {raw}. {preservation}"
                 else:
-                    preservation = (
-                        "Edit this exact photo. Keep the face, identity, lighting, background and overall scene. "
-                        "Apply the requested change (including pose, clothing or body) exactly as described and as strongly as possible."
-                    )
+                    base = f"Instruction: {raw}"
                 if has_quality_request:
-                    preservation += (
-                        " Also remove posterization; enhance color, sharpness, skin texture and image quality."
+                    base += (
+                        " Also improve quality, sharpness, color and detail."
                     )
-                base = f"Instruction: {raw}. {preservation}"
             else:
                 if scene_change:
                     preservation = (
@@ -796,6 +793,7 @@ class ImgEditorManager:
         quality_enhance_style: str = "auto",
         quality_use_generative: bool = True,
         quality_preserve_faces: bool = True,
+        face_preserve: bool = True,
         cancel_check=None,
     ) -> Tuple[Optional[Image.Image], str, Optional[Image.Image]]:
 

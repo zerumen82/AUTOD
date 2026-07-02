@@ -13,6 +13,34 @@ import threading
 
 from ui.tabs.img_editor_tab import create_img_editor_tab
 
+INCOGNITO_HTML = """
+<div id="incognito-wrap" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer;user-select:none;font-size:18px;line-height:1;padding:0 8px;" onclick="toggleIncognito()" title="Toggle incognito mode">
+    <span id="incognito-icon">👁</span>
+</div>
+<style>
+html.incognito img, html.incognito video, html.incognito canvas,
+html.incognito [data-testid="image"], html.incognito [data-testid="image"] img,
+html.incognito .gallery-container, html.incognito .gallery-container img,
+html.incognito .output-image, html.incognito .output-image img,
+html.incognito .preview, html.incognito .preview img,
+html.incognito gr-gallery, html.incognito gr-image {
+    visibility: hidden !important;
+}
+</style>
+<script>
+function toggleIncognito(){
+    var h=document.documentElement,i=document.getElementById('incognito-icon');
+    var a=h.classList.toggle('incognito');
+    if(i)i.textContent=a?'🚫':'👁';
+    try{localStorage.setItem('incognito',a?'1':'0')}catch(e){}
+}
+(function(){
+    var i=document.getElementById('incognito-icon');
+    try{if(localStorage.getItem('incognito')==='1'){document.documentElement.classList.add('incognito');if(i)i.textContent='🚫';}}catch(e){}
+})();
+</script>
+"""
+
 # Puerto base dinamico
 GRADIO_BASE_PORT = int(os.environ.get('GRADIO_SERVER_PORT', '7861'))
 COMFYUI_PORT = os.environ.get('COMFYUI_PORT', '8188')
@@ -208,6 +236,8 @@ def create_ui():
         
         # Controles ComfyUI - compacto, mitad del ancho
         with gr.Row(elem_id="comfy-controls", variant="compact"):
+            # Incognito toggle
+            gr.HTML(INCOGNITO_HTML, elem_id="incognito-toggle")
             # Status pequeno a la izquierda
             comfy_status = gr.Text(
                 value=check_comfy_status(),
