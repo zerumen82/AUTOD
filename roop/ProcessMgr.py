@@ -1,6 +1,6 @@
 print("\n" + "="*60)
-print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.78 — profile embedding + mask floor + multi-aspect close-up <<<")
-print(">>> (256px, Occlusion-Locked, Depth-Color, Hyper-Sharp, XSeg-PRO) <<<")
+print(">>> [TRUE-INTEGRATION] IDENTITY-ABSOLUTE v5.1004 — forehead attenuation + tracking spatial lock <<<")
+print(">>> (widen_mask single blur k27, forehead atten top-38%, nearby face emb fallback, spatial lock<50px) <<<")
 print("="*60 + "\n")
 
 import os
@@ -187,7 +187,7 @@ class ProcessMgr:
         self._mouth_object_detected = {} # Flag de objeto en boca (v5.65)
 
         if is_valid_progress_callback(self.progress_callback):
-            print(f"ProcessMgr v5.78 inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
+            print(f"ProcessMgr v5.1004 inicializado con progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
         else:
             print(f"ProcessMgr v5.78 inicializado SIN progress_callback (Top-K={self.selected_top_k}, TTL={self.selected_assignment_ttl})")
 
@@ -206,7 +206,7 @@ class ProcessMgr:
         self._mouth_open_history.clear()
         self._mouth_blend_smooth.clear()
 
-        print(f"ProcessMgr v5.78 inicializado: {len(self.input_facesets)} facesets, {len(self.target_faces)} target faces")
+        print(f"ProcessMgr v5.1004 inicializado: {len(self.input_facesets)} facesets, {len(self.target_faces)} target faces")
 
         if len(self.input_facesets) == 0:
             print("[WARNING] No hay facesets de origen cargados")
@@ -386,9 +386,22 @@ class ProcessMgr:
 
             valid_faces = target_faces_detected
 
+            video_path = getattr(self.options, 'current_video_path', None) or file_path
+            is_real_video = getattr(self.options, 'current_video_path', None) is not None
+            self._current_video_key = f"video_{os.path.basename(video_path)}" if video_path else "frame"
+
             if not valid_faces:
                 with open(_log, 'a') as lf:
-                    lf.write(f"[PROC_FRAME] SIN valid_faces - return frame\n")
+                    lf.write(f"[PROC_FRAME] SIN valid_faces - hold o frame\n")
+                if is_real_video and video_path:
+                    video_basename = os.path.basename(video_path)
+                    if self._should_hold_previous_swap(video_basename):
+                        prev_full = getattr(self, '_prev_frame_result', {}).get(self._current_video_key)
+                        last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
+                        if prev_full is not None and last_bbox is not None:
+                            # v5.1002: prev_mask=None para elipse en posicion actual (last_bbox),
+                            # prev_mask de frame anterior podria estar desfasado por ghost tracking
+                            return self._hold_previous_face_region(frame, prev_full, last_bbox, prev_mask=None)
                 return frame
 
             # Track average det_score for adaptive low-quality thresholds
@@ -406,16 +419,56 @@ class ProcessMgr:
             # Calidad/identidad: globals + _process_face_swap_v21 (enhancer_blend_factor, GFPGAN, etc.)
             face_swap_mode = getattr(self.options, 'face_swap_mode', 'selected')
 
-            video_path = getattr(self.options, 'current_video_path', None) or file_path
-            is_real_video = getattr(self.options, 'current_video_path', None) is not None
-            self._current_video_key = f"video_{os.path.basename(video_path)}" if video_path else "frame"
-            
             faces_to_process = []
             
             if is_real_video:
                 video_basename = os.path.basename(video_path)
+                frame_count_pre = getattr(self, f'_frame_count_{video_basename}', 0) + 1
+                self._update_closeup_state(valid_faces, frame.shape, video_basename)
+                plan_smooth_until = getattr(self, f'_plan_change_smooth_until_{video_basename}', 0)
+                is_visual_cut, cut_diff = self._detect_visual_scene_cut(
+                    frame, video_basename, frame_count_pre,
+                )
+                zoom_in = self._is_zoom_in_progress(valid_faces, video_basename)
+                if is_visual_cut and (zoom_in or frame_count_pre <= plan_smooth_until):
+                    setattr(
+                        self, f'_plan_change_smooth_until_{video_basename}',
+                        max(plan_smooth_until, frame_count_pre + 24),
+                    )
+                    if frame_count_pre % 35 == 1:
+                        print(
+                            f"[ZOOM_SKIP] Frame {frame_count_pre}: diff={cut_diff:.1f} "
+                            "— zoom/primer plano, no scene cut"
+                        )
+                elif is_visual_cut:
+                    self._reset_tracking_on_scene_cut(
+                        video_path, frame_count_pre,
+                        reason=f"cambio visual abrupto (diff={cut_diff:.1f})",
+                    )
+
+                plan_smooth_until = getattr(self, f'_plan_change_smooth_until_{video_basename}', 0)
+                if frame_count_pre <= plan_smooth_until and frame_count_pre % 30 == 1:
+                    print(
+                        f"[PLAN_CHANGE] Frame {frame_count_pre}: zoom suave activo "
+                        f"(hasta frame {plan_smooth_until})"
+                    )
+                if self._detect_closeup_plan_change(
+                    valid_faces, frame.shape, video_basename, frame_count_pre,
+                ):
+                    self._open_reacquire_window(video_basename, frame_count_pre, frames=60)
+                    print(
+                        f"[PLAN_CHANGE] Frame {frame_count_pre}: primer plano detectado "
+                        "— re-busqueda activa"
+                    )
+
                 if not hasattr(self, f'_reference_face_selected_{video_basename}'):
                     self._setup_selected_faces_frame_for_video(video_path, valid_faces)
+
+                recovered = self._try_unassigned_reacquire(
+                    valid_faces, video_basename, frame_count_pre, frame.shape,
+                )
+                if recovered is not None:
+                    self._assign_recovered_face(recovered, video_basename)
                 
                 target_face = self._find_target_face_for_selected_mode(video_path, valid_faces)
                 if target_face:
@@ -436,18 +489,25 @@ class ProcessMgr:
                             if sim > max_sim:
                                 max_sim = sim
                                 best_match = face
-                        if best_match and max_sim > 0.10:
+                        if best_match and max_sim > 0.35:
                             faces_to_process = [best_match]
-                
-                # v5.72: Sin fallback — si no hay match de la cara seleccionada, se salta
+
+                # v5.87: Sin fallback — si no hay match fiable, hold o frame original
 
             if not faces_to_process:
                 if is_real_video and video_path:
                     video_basename = os.path.basename(video_path)
-                    prev_full = getattr(self, '_prev_frame_result', {}).get(self._current_video_key)
-                    last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
-                    if prev_full is not None and last_bbox is not None:
-                        return self._hold_previous_face_region(frame, prev_full, last_bbox)
+                    if self._should_hold_previous_swap(video_basename) or (
+                        getattr(self, f'_closeup_active_{video_basename}', False)
+                        and self._has_swap_history(video_basename)
+                    ):
+                        prev_full = getattr(self, '_prev_frame_result', {}).get(self._current_video_key)
+                        last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
+                        if prev_full is not None and last_bbox is not None:
+                            blend = 0.95 if getattr(self, f'_closeup_active_{video_basename}', False) else 0.88
+                            return self._hold_previous_face_region(
+                                frame, prev_full, last_bbox, blend=blend, prev_mask=None,
+                            )
                 return frame
                 
             # Siempre key frame para máxima calidad
@@ -469,17 +529,15 @@ class ProcessMgr:
                     source_face = None
                     is_target_profile = ProcessMgr._is_profile_face(getattr(target_face, 'kps', None))
                     if is_real_video and video_path:
-                        lock_key = f'_video_locked_source_face_{os.path.basename(video_path)}'
-                        locked_face = getattr(self, lock_key, None)
-                        if locked_face is not None:
-                            lock_sim = self._calculate_similarity(
-                                getattr(locked_face, 'embedding', None),
-                                getattr(target_face, 'embedding', None),
-                            ) if hasattr(locked_face, 'embedding') else 0.0
-                            if lock_sim >= 0.18 or not is_target_profile:
+                        lock_key, profile_lock_key = self._video_source_lock_keys(video_path)
+                        if is_target_profile:
+                            profile_locked = getattr(self, profile_lock_key, None)
+                            if profile_locked is not None:
+                                source_face = profile_locked
+                        else:
+                            locked_face = getattr(self, lock_key, None)
+                            if locked_face is not None:
                                 source_face = locked_face
-                            elif ProcessMgr._swap_call_count % 60 == 1:
-                                print(f"[SELECT_SOURCE] Re-selección perfil (lock_sim={lock_sim:.3f})")
 
                     if source_face is None:
                         source_face = self._select_source_face(
@@ -487,17 +545,35 @@ class ProcessMgr:
                             is_profile=is_target_profile,
                         )
                         if source_face is not None and is_real_video and video_path:
+                            lock_key, profile_lock_key = self._video_source_lock_keys(video_path)
                             sim_score = self._calculate_similarity(
                                 getattr(source_face, 'embedding', None),
                                 getattr(target_face, 'embedding', None),
                             ) if hasattr(source_face, 'embedding') else 0
-                            if sim_score >= 0.18 or not is_target_profile:
+                            if is_target_profile:
+                                setattr(self, profile_lock_key, source_face)
+                                print(
+                                    f"[MATCH] Perfil bloqueado | similitud={sim_score:.3f} "
+                                    f"(identidad vía master+profile embedding)"
+                                )
+                            elif getattr(self, lock_key, None) is None:
                                 setattr(self, lock_key, source_face)
-                            print(f"[MATCH] Source seleccionada | similitud={sim_score:.3f}")
+                                tag = "alta" if sim_score >= 0.22 else "baja-sim"
+                                print(
+                                    f"[MATCH] Source bloqueada ({tag}) | "
+                                    f"similitud={sim_score:.3f} — estable hasta scene cut"
+                                )
 
                     if source_face is None:
+                        if is_real_video and video_path:
+                            video_basename = os.path.basename(video_path)
+                            if self._should_hold_previous_swap(video_basename):
+                                prev_full = getattr(self, '_prev_frame_result', {}).get(self._current_video_key)
+                                last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
+                                if prev_full is not None and last_bbox is not None:
+                                    return self._hold_previous_face_region(frame, prev_full, last_bbox, prev_mask=None)
                         continue
-                    
+
                     # PROCESAR SWAP CON CALIDAD FORZADA
                     result_frame = self._process_face_swap_v21(
                         source_face, target_face, result_frame, frame, enable_temporal_smoothing
@@ -620,6 +696,12 @@ class ProcessMgr:
             return -1.0
 
     def _find_best_source_embedding_for_target(self, target_emb, profile_only=False, min_sim=0.10):
+        match = self._find_best_source_entry_for_target(
+            target_emb, profile_only=profile_only, min_sim=min_sim,
+        )
+        return match['emb'] if match else None
+
+    def _find_best_source_entry_for_target(self, target_emb, profile_only=False, min_sim=0.10):
         if target_emb is None:
             return None
         entries = getattr(self, '_source_face_entries', [])
@@ -630,7 +712,7 @@ class ProcessMgr:
         if norm <= 0:
             return None
         target_arr = target_arr / norm
-        best_emb = None
+        best_entry = None
         best_sim = -1.0
         for entry in entries:
             if profile_only and not entry.get('is_profile'):
@@ -638,14 +720,371 @@ class ProcessMgr:
             sim = float(np.dot(target_arr, entry['emb']))
             if sim > best_sim:
                 best_sim = sim
-                best_emb = entry['emb']
-        if best_sim >= min_sim:
-            return best_emb
+                best_entry = entry
+        if best_entry is not None and best_sim >= min_sim:
+            best_entry = dict(best_entry)
+            best_entry['sim'] = best_sim
+            return best_entry
         return None
+
+    @staticmethod
+    def _video_source_lock_keys(video_path: str):
+        basename = os.path.basename(video_path)
+        return (
+            f'_video_locked_source_face_{basename}',
+            f'_video_locked_profile_source_{basename}',
+        )
+
+    def _clear_video_source_locks(self, video_path: str):
+        if not video_path:
+            return
+        lock_key, profile_lock_key = self._video_source_lock_keys(video_path)
+        for key in (lock_key, profile_lock_key):
+            if hasattr(self, key):
+                delattr(self, key)
+
+    def _get_user_reference_embedding(self, video_basename: str):
+        video_key = f"selected_face_ref_{video_basename}"
+        if hasattr(roop.globals, 'selected_face_references'):
+            ref = roop.globals.selected_face_references.get(video_key)
+            if ref and ref.get('embedding') is not None:
+                emb = np.array(ref['embedding'], dtype=np.float32)
+                norm = np.linalg.norm(emb)
+                if norm > 0:
+                    return emb / norm
+        orig = getattr(self, f'_original_embedding_{video_basename}', None)
+        if orig is not None:
+            emb = np.array(orig, dtype=np.float32)
+            norm = np.linalg.norm(emb)
+            if norm > 0:
+                return emb / norm
+        return getattr(self, f'_tracking_embedding_{video_basename}', None)
+
+    def _detect_visual_scene_cut(self, frame, video_basename: str, frame_count: int = 0):
+        if frame is None:
+            return False, 0.0
+        try:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            thumb = cv2.resize(gray, (64, 36), interpolation=cv2.INTER_AREA)
+            attr = f'_prev_scene_thumb_{video_basename}'
+            prev = getattr(self, attr, None)
+            setattr(self, attr, thumb)
+            if prev is None or prev.shape != thumb.shape:
+                return False, 0.0
+            diff = float(np.mean(np.abs(thumb.astype(np.float32) - prev.astype(np.float32))))
+
+            hist_attr = f'_scene_diff_history_{video_basename}'
+            history = getattr(self, hist_attr, [])
+            history.append(diff)
+            if len(history) > 12:
+                history.pop(0)
+            setattr(self, hist_attr, history)
+
+            last_visual_cut = getattr(self, f'_last_visual_cut_frame_{video_basename}', 0)
+            if frame_count > 0 and (frame_count - last_visual_cut) < 20:
+                return False, diff
+
+            baseline = (
+                sum(history[:-1]) / max(1, len(history) - 1)
+                if len(history) > 1 else diff
+            )
+            is_cut = diff > 48.0 or (
+                diff > max(38.0, baseline * 2.8) and diff > 28.0
+            )
+            if is_cut and frame_count > 0:
+                setattr(self, f'_last_visual_cut_frame_{video_basename}', frame_count)
+            return is_cut, diff
+        except Exception:
+            return False, 0.0
+
+    def _assign_recovered_face(self, face, video_basename: str):
+        setattr(self, f'_target_face_assigned_{video_basename}', face)
+        setattr(self, f'_tracking_lost_count_{video_basename}', 0)
+        setattr(self, f'_consecutive_tracking_success_{video_basename}', 0)
+        center = get_face_center(face)
+        if center:
+            setattr(self, f'_position_history_{video_basename}', [center])
+        for attr in (
+            f'_unassigned_since_{video_basename}',
+            f'_unassigned_reacquire_tick_{video_basename}',
+        ):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        return face
+
+    def _mark_unassigned(self, video_basename: str, frame_count: int):
+        if not getattr(self, f'_unassigned_since_{video_basename}', 0):
+            setattr(self, f'_unassigned_since_{video_basename}', frame_count)
+
+    def _open_reacquire_window(self, video_basename: str, frame_count: int, frames: int = 120):
+        setattr(self, f'_reacquire_window_until_{video_basename}', frame_count + frames)
+        self._mark_unassigned(video_basename, frame_count)
+
+    def _largest_face_area(self, face) -> float:
+        if not hasattr(face, 'bbox') or face.bbox is None:
+            return 0.0
+        x1, y1, x2, y2 = face.bbox
+        return max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+
+    def _update_closeup_state(self, valid_faces, frame_shape, video_basename: str):
+        active = False
+        if valid_faces and frame_shape is not None:
+            largest = max(valid_faces, key=self._largest_face_area)
+            active = self._is_closeup_face(largest.bbox, frame_shape)
+        setattr(self, f'_closeup_active_{video_basename}', active)
+        return active
+
+    def _is_zoom_in_progress(self, valid_faces, video_basename: str) -> bool:
+        if not valid_faces:
+            return False
+        largest = max(valid_faces, key=self._largest_face_area)
+        area = self._largest_face_area(largest)
+        if area <= 0:
+            return False
+        prev_attr = f'_prev_largest_face_area_{video_basename}'
+        prev_area = getattr(self, prev_attr, 0.0)
+        setattr(self, prev_attr, area)
+        if prev_area > 0 and area / prev_area >= 1.08:
+            return True
+        hist = getattr(self, f'_face_area_history_{video_basename}', [])
+        if len(hist) >= 2 and hist[-2] > 0 and area / hist[-2] >= 1.06:
+            return True
+        return False
+
+    def _has_swap_history(self, video_basename: str) -> bool:
+        video_key = f"video_{video_basename}"
+        prev_full = getattr(self, '_prev_frame_result', {}).get(video_key)
+        last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
+        return prev_full is not None and last_bbox is not None
+
+    def _detect_closeup_plan_change(self, valid_faces, frame_shape, video_basename: str, frame_count: int):
+        if not valid_faces or frame_shape is None:
+            return False
+        largest = max(valid_faces, key=self._largest_face_area)
+        area = self._largest_face_area(largest)
+        if area <= 0 or not self._is_closeup_face(largest.bbox, frame_shape):
+            return False
+
+        hist_attr = f'_face_area_history_{video_basename}'
+        history = getattr(self, hist_attr, [])
+        history.append(area)
+        if len(history) > 10:
+            history.pop(0)
+        setattr(self, hist_attr, history)
+
+        if len(history) < 4:
+            return False
+        baseline = sum(history[:-1]) / max(1, len(history) - 1)
+        if baseline <= 0:
+            return False
+        growth = area / baseline
+        # Zoom gradual en 2+ frames (evita salto brusco al entrar en primer plano)
+        recent_growth = 1.0
+        if len(history) >= 3:
+            prev_area = history[-2]
+            if prev_area > 0:
+                recent_growth = area / prev_area
+        assigned = getattr(self, f'_target_face_assigned_{video_basename}', None)
+        lost_count = getattr(self, f'_tracking_lost_count_{video_basename}', 0)
+        if assigned is not None and lost_count == 0:
+            # Tracking estable: solo marcar suavizado de tamaño, sin re-busqueda
+            if growth >= 1.45 or recent_growth >= 1.25:
+                setattr(self, f'_plan_change_smooth_until_{video_basename}', frame_count + 18)
+            return False
+        if growth >= 2.6 and recent_growth >= 1.18:
+            return True
+        return False
+
+    def _reset_tracking_on_scene_cut(self, video_path, frame_count, reason="", soft=False):
+        video_basename = os.path.basename(video_path) if video_path else ""
+        if not video_basename:
+            return
+        video_key = f"video_{video_basename}"
+        closeup_active = getattr(self, f'_closeup_active_{video_basename}', False)
+        if closeup_active:
+            soft = True
+
+        setattr(self, f'_target_face_assigned_{video_basename}', None)
+        setattr(self, f'_tracking_lost_count_{video_basename}', 0)
+        setattr(self, f'_position_history_{video_basename}', [])
+        setattr(self, f'_consecutive_tracking_success_{video_basename}', 0)
+        setattr(self, f'_strict_recovery_tick_{video_basename}', 0)
+        if not soft:
+            self._mark_unassigned(video_basename, frame_count)
+
+        if not soft:
+            if hasattr(self, '_prev_frame_result') and isinstance(self._prev_frame_result, dict):
+                self._prev_frame_result.pop(video_key, None)
+            if hasattr(self, '_last_swap_bbox') and isinstance(self._last_swap_bbox, dict):
+                self._last_swap_bbox.pop(video_basename, None)
+            if hasattr(self, '_last_swap_mask') and isinstance(self._last_swap_mask, dict):
+                self._last_swap_mask.pop(video_basename, None)
+        if hasattr(self, '_prev_face_bbox') and isinstance(self._prev_face_bbox, dict):
+            self._prev_face_bbox.pop(video_key, None)
+        if hasattr(self, '_prev_face_kps') and isinstance(self._prev_face_kps, dict):
+            self._prev_face_kps.pop(video_key, None)
+        for attr in (f'_last_known_bbox_{video_basename}', f'_last_known_kps_{video_basename}'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+        if not soft:
+            self._clear_video_source_locks(video_path)
+
+        scene_attr = f'_scene_state_{video_basename}'
+        scene = getattr(self, scene_attr, None)
+        if not isinstance(scene, dict):
+            scene = {'last_scene_cut': frame_count, 'total_scene_changes': 1}
+        else:
+            scene['last_scene_cut'] = frame_count
+            scene['total_scene_changes'] = scene.get('total_scene_changes', 0) + 1
+        setattr(self, scene_attr, scene)
+        suppress_frames = 2 if soft else 6
+        setattr(self, f'_hold_suppressed_until_{video_basename}', frame_count + suppress_frames)
+        if not soft:
+            self._open_reacquire_window(video_basename, frame_count, frames=120)
+        elif closeup_active:
+            setattr(self, f'_plan_change_smooth_until_{video_basename}', frame_count + 24)
+
+        if reason:
+            tag = "soft, mantiene swap" if soft else "reset tracking, sin hold"
+            print(f"[SCENE_CUT] Frame {frame_count}: {reason} — {tag}")
+
+    def _should_hold_previous_swap(self, video_basename: str) -> bool:
+        frame_count = getattr(self, f'_frame_count_{video_basename}', 0)
+        closeup_active = getattr(self, f'_closeup_active_{video_basename}', False)
+        lost_count = getattr(self, f'_tracking_lost_count_{video_basename}', 0)
+        has_history = self._has_swap_history(video_basename)
+
+        # Primer plano: mantener swap visible salvo pérdida muy prolongada
+        if closeup_active and has_history and lost_count < 20:
+            return True
+
+        if frame_count <= getattr(self, f'_hold_suppressed_until_{video_basename}', 0):
+            if closeup_active and has_history and lost_count < 8:
+                return True
+            return False
+        scene = getattr(self, f'_scene_state_{video_basename}', {})
+        if isinstance(scene, dict):
+            last_cut = scene.get('last_scene_cut', 0)
+            ban_frames = 3 if closeup_active else 8
+            if last_cut > 0 and abs(frame_count - last_cut) < ban_frames:
+                if closeup_active and has_history:
+                    return True
+                return False
+        lost_limit = 14 if closeup_active else 6
+        if lost_count >= lost_limit:
+            return False
+        return True
+
+    def _reacquire_face_global(
+        self, valid_faces, video_basename, frame_count,
+        min_sim=0.38, after_scene_cut=False, closeup_mode=False,
+    ):
+        ref_emb = self._get_user_reference_embedding(video_basename)
+        if ref_emb is None or not valid_faces:
+            return None
+        multi_face = len(valid_faces) >= 2
+        if closeup_mode:
+            min_sim = max(min_sim, 0.30 if multi_face else 0.22)
+        elif after_scene_cut:
+            min_sim = max(min_sim, 0.38 if multi_face else 0.26)
+        else:
+            min_sim = max(min_sim, 0.45 if multi_face else 0.32)
+
+        candidates = []
+        for face in valid_faces:
+            if not hasattr(face, 'embedding') or face.embedding is None:
+                continue
+            sim = float(self._calculate_similarity(ref_emb, face.embedding))
+            if sim >= min_sim:
+                area = self._largest_face_area(face)
+                candidates.append((sim, area, face))
+        if not candidates:
+            unassigned_since = getattr(self, f'_unassigned_since_{video_basename}', 0)
+            should_log = (
+                after_scene_cut or closeup_mode
+                or (unassigned_since > 0 and frame_count - unassigned_since > 20)
+            )
+            if should_log and frame_count % 20 == 1:
+                best_any = max(
+                    (
+                        float(self._calculate_similarity(ref_emb, f.embedding))
+                        for f in valid_faces
+                        if hasattr(f, 'embedding') and f.embedding is not None
+                    ),
+                    default=-1.0,
+                )
+                print(
+                    f"[TRACK] RE-BUSQUEDA sin match frame {frame_count} "
+                    f"(mejor_sim={best_any:.2f}, umbral={min_sim:.2f}, caras={len(valid_faces)})"
+                )
+            return None
+
+        if closeup_mode:
+            candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        else:
+            candidates.sort(key=lambda item: item[0], reverse=True)
+        best_sim, _best_area, best_face = candidates[0]
+        if multi_face and len(candidates) >= 2:
+            margin = best_sim - candidates[1][0]
+            need_margin = 0.04
+            if margin < need_margin:
+                # v5.1003: Relajado: intentar con la de mayor área si sim es aceptable
+                if best_sim >= min_sim:
+                    best_face = max(candidates, key=lambda item: item[1])[2]
+                    best_sim = max(c[0] for c in candidates)
+                else:
+                    if frame_count % 25 == 1:
+                        print(
+                            f"[TRACK] RE-BUSQUEDA ambigua frame {frame_count} "
+                            f"({best_sim:.2f} vs {candidates[1][0]:.2f})"
+                        )
+                    return None
+
+        tag = "closeup" if closeup_mode else "global"
+        print(f"[TRACK] RE-BUSQUEDA {tag} frame {frame_count} (sim={best_sim:.2f})")
+        return best_face
+
+    def _in_reacquire_window(self, video_basename: str, frame_count: int) -> bool:
+        return frame_count <= getattr(self, f'_reacquire_window_until_{video_basename}', 0)
+
+    def _try_unassigned_reacquire(self, valid_faces, video_basename, frame_count, frame_shape=None):
+        if not valid_faces:
+            return None
+        if getattr(self, f'_target_face_assigned_{video_basename}', None) is not None:
+            return None
+
+        in_window = self._in_reacquire_window(video_basename, frame_count)
+        unassigned_since = getattr(self, f'_unassigned_since_{video_basename}', 0)
+        long_unassigned = unassigned_since > 0 and (frame_count - unassigned_since) >= 20
+
+        has_closeup = False
+        if frame_shape is not None:
+            for face in valid_faces:
+                if hasattr(face, 'bbox') and self._is_closeup_face(face.bbox, frame_shape):
+                    has_closeup = True
+                    break
+
+        tick_attr = f'_unassigned_reacquire_tick_{video_basename}'
+        tick = getattr(self, tick_attr, 0) + 1
+        setattr(self, tick_attr, tick)
+
+        if not (in_window or has_closeup or long_unassigned or tick % 4 == 0):
+            return None
+
+        return self._reacquire_face_global(
+            valid_faces, video_basename, frame_count,
+            after_scene_cut=in_window or long_unassigned,
+            closeup_mode=has_closeup,
+        )
 
     def _resolve_swap_embedding(self, source_face, target_face, is_profile=False):
         """Embedding para inswapper: master frontal + refuerzo perfil/match en ángulos difíciles."""
         if not hasattr(self, 'master_source_embedding') or self.master_source_embedding is None:
+            return source_face
+
+        # SOURCE RANDOM: usar embedding real de la cara seleccionada, no master
+        if getattr(roop.globals, 'source_random', False):
             return source_face
 
         target_emb = getattr(target_face, 'embedding', None)
@@ -653,13 +1092,23 @@ class ProcessMgr:
         profile_master = getattr(self, 'profile_master_embedding', None)
 
         if is_profile:
-            match_emb = self._find_best_source_embedding_for_target(target_emb, profile_only=True, min_sim=0.20)
-            if match_emb is None:
-                match_emb = self._find_best_source_embedding_for_target(target_emb, profile_only=False, min_sim=0.25)
-            if match_emb is not None and profile_master is not None:
-                mixed = 0.20 * master + 0.30 * profile_master + 0.50 * match_emb
-            elif match_emb is not None:
-                mixed = 0.30 * master + 0.70 * match_emb
+            match_entry = self._find_best_source_entry_for_target(
+                target_emb, profile_only=True, min_sim=0.08,
+            )
+            if match_entry is None:
+                match_entry = self._find_best_source_entry_for_target(
+                    target_emb, profile_only=False, min_sim=0.10,
+                )
+            match_emb = match_entry['emb'] if match_entry else None
+            match_sim = float(match_entry.get('sim', 0.0)) if match_entry else 0.0
+            if match_emb is not None and match_sim >= 0.18 and profile_master is not None:
+                mixed = 0.25 * master + 0.30 * profile_master + 0.45 * match_emb
+            elif match_emb is not None and match_sim >= 0.12:
+                # v5.998: Incluir profile_master para identidad más consistente en perfiles
+                if profile_master is not None:
+                    mixed = 0.40 * master + 0.30 * profile_master + 0.30 * match_emb
+                else:
+                    mixed = 0.55 * master + 0.45 * match_emb
             elif profile_master is not None:
                 mixed = 0.40 * master + 0.60 * profile_master
             else:
@@ -687,8 +1136,8 @@ class ProcessMgr:
             
             target_emb = getattr(target_face, 'embedding', None)
             if target_emb is None:
-                print("[SELECT_SOURCE] Target sin embedding, usando quality fallback")
-                return self._select_best_source_face(candidate_faces, 'similarity_fallback')
+                print("[SELECT_SOURCE] Target sin embedding — sin fallback a otra source")
+                return None
             
             candidates = []
             for idx, src_face in enumerate(candidate_faces):
@@ -706,25 +1155,54 @@ class ProcessMgr:
                 })
             
             if not candidates:
-                print(f"[SELECT_SOURCE] No source con embedding, usando quality")
-                return self._select_best_source_face(candidate_faces, 'no_embedding')
+                print("[SELECT_SOURCE] No source con embedding — sin fallback a otra source")
+                return None
 
             max_sim = max(c['sim'] for c in candidates)
-            
-            if max_sim < 0.15:
-                print(f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). Ninguna fuente coincide bien; master+profile determinarán identidad en swap.")
-                max_sim = 0.15
+            critical_sim = max_sim < 0.15
+
+            if critical_sim:
+                print(
+                    f"[SELECT_SOURCE] Similitud crítica ({max_sim:.4f}). "
+                    "master+profile embedding; eligiendo mejor sim en pool perfil."
+                )
 
             sim_weight = 25.0 if is_profile else 10.0
 
             if is_profile or max_sim <= 0.22:
                 profile_cands = [c for c in candidates if c['is_profile']]
                 pool = profile_cands if profile_cands and (is_profile or max_sim < 0.18) else candidates
+                if critical_sim:
+                    best_candidate = max(pool, key=lambda c: c['sim'])
+                    tag = "perfil-crítico" if is_profile else "baja-sim-crítico"
+                    print(
+                        f"[SELECT_SOURCE] Modo {tag} (max_sim={max_sim:.4f}). "
+                        f"#{best_candidate['idx'] + 1} (sim={best_candidate['sim']:.4f}, qual={best_candidate['quality']:.2f})"
+                    )
+                    return best_candidate['face']
                 threshold = max(0.10, max_sim * 0.65) if is_profile else max(0.12, max_sim * 0.70)
                 identity_candidates = [c for c in pool if c['sim'] >= threshold] or pool
-                best_candidate = max(identity_candidates, key=lambda c: c['quality'] + (c['sim'] * sim_weight))
+                if is_profile and max_sim < 0.22:
+                    best_candidate = max(
+                        identity_candidates,
+                        key=lambda c: (c['sim'] * sim_weight) + (c['quality'] * 0.35),
+                    )
+                elif not is_profile and max_sim < 0.20:
+                    best_candidate = max(
+                        identity_candidates,
+                        key=lambda c: (c['sim'] * 18.0) + (c['quality'] * 0.30),
+                    )
+                else:
+                    best_candidate = max(
+                        identity_candidates,
+                        key=lambda c: c['quality'] + (c['sim'] * sim_weight),
+                    )
                 tag = "perfil" if is_profile else "baja-sim"
-                print(f"[SELECT_SOURCE] Modo {tag} (max_sim={max_sim:.4f}). #{best_candidate['idx'] + 1} (qual={best_candidate['quality']:.2f}, sim={best_candidate['sim']:.4f}, w={sim_weight:.0f})")
+                print(
+                    f"[SELECT_SOURCE] Modo {tag} (max_sim={max_sim:.4f}). "
+                    f"#{best_candidate['idx'] + 1} (qual={best_candidate['quality']:.2f}, "
+                    f"sim={best_candidate['sim']:.4f}, w={sim_weight:.0f})"
+                )
                 return best_candidate['face']
 
             if max_sim > 0.22:
@@ -762,28 +1240,16 @@ class ProcessMgr:
                 print(f"[SOURCE_RANDOM] Cara #{idx+1} de {len(candidate_faces)} seleccionada")
                 return picked
             
-            # 1. MATCHING POR SIMILITUD (Prioridad para encontrar "mejor cara")
+            # Solo matching por similitud + lock (sin fallback a otra source)
             if face_swap_mode in ['selected', 'selected_faces', 'auto', 'selected_faces_frame']:
-                result = self._select_source_face_by_similarity(target_face, candidate_faces, is_profile=is_profile)
-                if result is not None:
-                    return result
+                return self._select_source_face_by_similarity(
+                    target_face, candidate_faces, is_profile=is_profile,
+                )
+            return None
 
-            # 2. FALLBACK: Índice seleccionado explícitamente
-            if hasattr(self.options, 'selected_index') and self.options.selected_index is not None:
-                idx = self.options.selected_index
-                if 0 <= idx < len(candidate_faces):
-                    # print(f"[SELECT_SOURCE] Usando cara seleccionada explícitamente: #{idx+1}")
-                    return candidate_faces[idx]
-                elif len(candidate_faces) > 0:
-                    # Fallback al primer faceset si el índice es inválido
-                    return candidate_faces[0]
-
-            # 3. FALLBACK FINAL: Mejor cara por calidad
-            return self._select_best_source_face(candidate_faces, face_swap_mode)
-            
         except Exception as e:
             print(f"[ERROR] _select_source_face: {e}")
-            return candidate_faces[0] if candidate_faces else None
+            return None
 
     def _setup_selected_faces_frame_for_video(self, video_path, valid_faces):
         """
@@ -832,11 +1298,11 @@ class ProcessMgr:
             # Guardar flag para saber si el usuario seleccionó una cara
             setattr(self, f'_user_selected_face_{video_basename}', user_has_selected_face)
 
-            # En modo selected_faces_frame:
-            # - Si el usuario seleccionó cara: usar ESA cara como referencia (sin fallback)
-            # - Si el usuario NO seleccionó cara: usar fallback a la cara más grande PERO mantenerla fija
             if not user_has_selected_face:
-                print(f"[SELECTED_FACES_FRAME] No hay cara seleccionada por el usuario para {video_basename}, usando fallback automatico a la cara mas grande (FIJA para todo el video)")
+                print(
+                    f"[SELECTED_FACES_FRAME] Sin cara seleccionada para {video_basename} "
+                    "— sin fallback auto (hold hasta selección o match fuerte)"
+                )
 
             if face_ref_data:
                 user_selected_face = face_ref_data.get('face_obj')
@@ -860,17 +1326,23 @@ class ProcessMgr:
                             best_score = score
                             best_match = face
 
-                    if best_match and best_score > 0.15:
+                    if best_match and best_score > 0.35:
                         selected_face = best_match
                         selection_method = f"usuario (score={best_score:.2f})"
+                    elif best_score > 0.15:
+                        print(
+                            f"[SELECTED_FACES_FRAME] Match débil ({best_score:.2f}) "
+                            "— sin fallback, hold hasta mejor detección"
+                        )
                     else:
-                        selected_face = user_selected_face
-                        selection_method = f"usuario-guardado (score={best_score:.2f})"
+                        print(
+                            f"[SELECTED_FACES_FRAME] Sin match fiable ({best_score:.2f}) "
+                            "— sin fallback a otra cara"
+                        )
 
-            # FALLBACK INICIAL: Solo si no hay selección del usuario
             if selected_face is None:
-                selected_face = max(valid_faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-                selection_method = f"auto-grande ({len(valid_faces)} caras)"
+                setattr(self, f'_reference_face_selected_{video_basename}', True)
+                return
 
             # Guardar embedding de referencia para tracking consistente
             if hasattr(selected_face, 'embedding') and selected_face.embedding is not None:
@@ -980,19 +1452,23 @@ class ProcessMgr:
                     scene['camera_moving'] = False
         
         # SCENE CUT: Detectar cambio abrupto en número de caras
+        scene_cut_detected = False
         if len(scene['face_count_history']) >= 3:
             prev_2 = scene['face_count_history'][-3:-1]
             curr_count = scene['face_count_history'][-1]
             if len(prev_2) == 2 and prev_2[0] > 0 and prev_2[1] > 0:
                 avg_prev = (prev_2[0] + prev_2[1]) / 2.0
                 if curr_count == 0 and avg_prev >= 1.5:
-                    scene['last_scene_cut'] = frame_count
-                    scene['total_scene_changes'] += 1
+                    scene_cut_detected = True
                     print(f"[SCENE_CUT] Face count drop: {avg_prev:.0f} → 0 at frame {frame_count}")
                 elif curr_count >= 2 and avg_prev <= 0.5:
-                    scene['last_scene_cut'] = frame_count
-                    scene['total_scene_changes'] += 1
+                    scene_cut_detected = True
                     print(f"[SCENE_CUT] Face count surge: {avg_prev:.0f} → {curr_count} at frame {frame_count}")
+
+        if scene_cut_detected:
+            scene['last_scene_cut'] = frame_count
+            scene['total_scene_changes'] += 1
+            scene['_pending_reset'] = True
         
         setattr(self, scene_attr, scene)
         return scene
@@ -1076,6 +1552,133 @@ class ProcessMgr:
         
         return 0.5
 
+    def _identity_margin(self, valid_faces, ref_embedding):
+        sims = []
+        for face in valid_faces or []:
+            if not hasattr(face, 'embedding') or face.embedding is None:
+                continue
+            sims.append(float(self._calculate_similarity(ref_embedding, face.embedding)))
+        sims.sort(reverse=True)
+        if not sims:
+            return 0.0, 0.0
+        top = sims[0]
+        second = sims[1] if len(sims) > 1 else 0.0
+        return top, top - second
+
+    def _validate_locked_identity(self, valid_faces, ref_embedding, candidate_face, multi_face=False):
+        if ref_embedding is None or candidate_face is None:
+            return True, 1.0
+        cand_sim = float(self._calculate_similarity(
+            ref_embedding, getattr(candidate_face, 'embedding', None),
+        ))
+        top_sim, margin = self._identity_margin(valid_faces, ref_embedding)
+        min_sim = 0.52 if multi_face else 0.40
+        min_margin = 0.10 if multi_face else 0.05
+        ok = (
+            cand_sim >= min_sim
+            and cand_sim >= top_sim - 0.02
+            and margin >= min_margin
+        )
+        # v5.1003: Reintentar con margen más laxo si es multi-face con similitudes cercanas
+        if not ok and multi_face:
+            ok = (
+                cand_sim >= min_sim
+                and cand_sim >= top_sim - 0.03
+                and margin >= 0.04
+            )
+        return ok, margin
+
+    def _try_strict_same_person_reacquire(
+        self,
+        valid_faces,
+        ref_embedding,
+        spatial_anchor,
+        video_basename,
+        frame_count,
+        min_sim=0.50,
+    ):
+        """Re-enganche solo misma persona: sim alta + proximidad al último bbox conocido."""
+        if ref_embedding is None or not valid_faces or spatial_anchor is None:
+            return None
+        anchor_bbox = getattr(spatial_anchor, 'bbox', None)
+        if anchor_bbox is None:
+            return None
+
+        multi_face = len(valid_faces) >= 2
+        if multi_face:
+            min_sim = max(min_sim, 0.56)
+
+        anchor_center = get_face_center(spatial_anchor)
+        face_w = max(1.0, float(anchor_bbox[2] - anchor_bbox[0]))
+        max_center_dist = max(220.0, face_w * 1.2) if multi_face else max(250.0, face_w * 1.5)
+
+        candidates = []
+        for face in valid_faces:
+            if not hasattr(face, 'embedding') or face.embedding is None:
+                continue
+            sim = float(self._calculate_similarity(ref_embedding, face.embedding))
+            if sim < min_sim:
+                continue
+            center = get_face_center(face)
+            if anchor_center and center:
+                dist = np.sqrt(
+                    (center[0] - anchor_center[0]) ** 2 + (center[1] - anchor_center[1]) ** 2
+                )
+                if dist > max_center_dist:
+                    continue
+            candidates.append((sim, face))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        best_sim, best_face = candidates[0]
+        if len(candidates) >= 2:
+            margin = best_sim - candidates[1][0]
+            need_margin = 0.10 if multi_face else 0.06
+            if margin < need_margin:
+                # v5.1003: Reintentar con margen reducido para multi-face
+                if multi_face and margin >= 0.05:
+                    pass  # Accept with relaxed margin
+                else:
+                    if frame_count % 25 == 1:
+                        print(
+                            f"[TRACK_MULTI] Re-enganche ambiguo frame {frame_count} "
+                            f"({best_sim:.2f} vs {candidates[1][0]:.2f}) — hold"
+                        )
+                    return None
+
+        print(
+            f"[TRACK] RE-ENGANCHE estricto frame {frame_count} "
+            f"(sim={best_sim:.2f}, min={min_sim:.2f}, multi={multi_face})"
+        )
+        return best_face
+
+    def _apply_reacquired_face(self, face, assigned_attr, tracking_lost_attr,
+                               position_history_attr, video_basename, last_bbox=None, last_kps=None):
+        import copy
+        out = copy.copy(face)
+        if last_bbox is not None and hasattr(out, 'bbox'):
+            old_bbox = np.array(last_bbox, dtype=np.float32)
+            new_bbox = np.array(out.bbox, dtype=np.float32)
+            dist = np.sqrt(
+                np.sum(
+                    ((old_bbox[:2] + old_bbox[2:]) / 2 - (new_bbox[:2] + new_bbox[2:]) / 2) ** 2
+                )
+            )
+            if dist < 150:
+                blend_bbox = 0.35 * old_bbox + 0.65 * new_bbox
+                out.bbox = tuple(blend_bbox.astype(int))
+                if last_kps is not None and hasattr(out, 'kps') and out.kps is not None:
+                    old_kps = np.array(last_kps, dtype=np.float32)
+                    new_kps = np.array(out.kps, dtype=np.float32)
+                    out.kps = (0.35 * old_kps + 0.65 * new_kps).tolist()
+        setattr(self, assigned_attr, out)
+        setattr(self, tracking_lost_attr, 0)
+        center = get_face_center(out)
+        if center:
+            setattr(self, position_history_attr, [center])
+        return out
+
     def _find_target_face_for_selected_mode(self, video_path, valid_faces):
         """Intelligent tracking with scene analysis and motion prediction"""
         try:
@@ -1095,14 +1698,35 @@ class ProcessMgr:
             frame_count_attr = f'_frame_count_{video_basename}'
             frame_count = getattr(self, frame_count_attr, 0) + 1
             setattr(self, frame_count_attr, frame_count)
+
+            position_history_attr = f'_position_history_{video_basename}'
+            position_history = getattr(self, position_history_attr, [])
             
             # Update scene state with current frame
-            scene_state = self._update_scene_state(video_path, valid_faces, frame_count, [])
+            scene_state = self._update_scene_state(video_path, valid_faces, frame_count, position_history)
+
+            if scene_state.get('_pending_reset'):
+                scene_state['_pending_reset'] = False
+                setattr(self, f'_scene_state_{video_basename}', scene_state)
+                self._reset_tracking_on_scene_cut(
+                    video_path, frame_count, reason="cambio abrupto de caras en escena",
+                )
+                scene_state = getattr(self, f'_scene_state_{video_basename}', scene_state)
+                hold_suppressed = True
+                global_after_cut = self._reacquire_face_global(
+                    valid_faces, video_basename, frame_count, after_scene_cut=True,
+                )
+                if global_after_cut is not None:
+                    return self._apply_reacquired_face(
+                        global_after_cut,
+                        f'_target_face_assigned_{video_basename}',
+                        f'_tracking_lost_count_{video_basename}',
+                        position_history_attr, video_basename,
+                    )
             
             assigned_attr = f'_target_face_assigned_{video_basename}'
             original_embedding_attr = f'_original_embedding_{video_basename}'
             tracking_lost_attr = f'_tracking_lost_count_{video_basename}'
-            position_history_attr = f'_position_history_{video_basename}'
             consecutive_success_attr = f'_consecutive_tracking_success_{video_basename}'
             
             # Initialize attributes if needed
@@ -1112,6 +1736,7 @@ class ProcessMgr:
             
             lost_count = getattr(self, tracking_lost_attr)
             position_history = getattr(self, position_history_attr)
+            hold_suppressed = frame_count <= getattr(self, f'_hold_suppressed_until_{video_basename}', 0)
             
             # Get original embedding
             original_embedding = getattr(self, original_embedding_attr, None)
@@ -1127,31 +1752,7 @@ class ProcessMgr:
                             original_embedding = emb / norm
                             setattr(self, original_embedding_attr, original_embedding)
                 
-                # 2. SMART PROPAGATION FALLBACK: Si no hay específica, buscar en el lote global de target_faces
-                if original_embedding is None and self.target_faces:
-                    print(f"[TRACK] No hay referencia para {video_basename}, aplicando Propagación Inteligente...")
-                    best_global_match = None
-                    max_global_sim = -1
-                    
-                    # Comparar las caras detectadas en este frame con TODAS las caras seleccionadas en el lote
-                    for face in valid_faces:
-                        if not hasattr(face, 'embedding') or face.embedding is None: continue
-                        
-                        for target_face in self.target_faces:
-                            if not hasattr(target_face, 'embedding') or target_face.embedding is None: continue
-                            
-                            sim = self._calculate_similarity(target_face.embedding, face.embedding)
-                            if sim > max_global_sim:
-                                max_global_sim = sim
-                                best_global_match = target_face
-                    
-                    if best_global_match and max_global_sim > 0.45: # Umbral conservador para propagación automática
-                        print(f"[TRACK] Propagación exitosa para {video_basename} (sim={max_global_sim:.2f})")
-                        emb = np.array(best_global_match.embedding, dtype=np.float32)
-                        norm = np.linalg.norm(emb)
-                        original_embedding = emb / norm
-                        setattr(self, original_embedding_attr, original_embedding)
-            
+                # v5.87: Sin propagación automática a otra cara del lote — solo referencia explícita del usuario
             # INTELLIGENT TRACKING SECTION
             if hasattr(self, assigned_attr):
                 assigned_face = getattr(self, assigned_attr)
@@ -1174,10 +1775,17 @@ class ProcessMgr:
                         base_threshold = max(400, 0.9 * (assigned_face.bbox[2] - assigned_face.bbox[0]))
                     else:
                         base_threshold = max(250, 0.6 * (assigned_face.bbox[2] - assigned_face.bbox[0]))
-                    
+                    if len(valid_faces) >= 2:
+                        face_span = assigned_face.bbox[2] - assigned_face.bbox[0]
+                        base_threshold = min(base_threshold, max(240, face_span * 1.0))
+
                     # Predict next position using motion modeling
                     prediction = self._predict_next_position(position_history, scene_state)
                     
+                    multi_face = len(valid_faces) >= 2
+                    if multi_face and frame_count % 120 == 1:
+                        print(f"[TRACK_MULTI] {len(valid_faces)} caras en frame — lock identidad activo")
+
                     # Find best match with intelligent scoring
                     best_match = None
                     best_score = -1
@@ -1199,35 +1807,39 @@ class ProcessMgr:
                         # INTELLIGENT SCORING
                         score = 0.0
                         
-                        # 1. Distance component (normalized 0-1)
+                        dist_weight = 0.22 if multi_face else 0.40
+                        emb_weight = 0.58 if multi_face else 0.40
                         dist_normalized = 1.0 - (dist / base_threshold)
-                        score += dist_normalized * 0.4  # 40% weight on distance
-                        
-                        # 2. Embedding similarity
+                        score += dist_normalized * dist_weight
+
                         if original_embedding is not None and hasattr(face, 'embedding') and face.embedding is not None:
                             emb_score = self._calculate_similarity(original_embedding, face.embedding)
-                            
-                            # Dynamic threshold based on scene (Relaxed)
-                            if scene_state.get('is_close_up'):
-                                emb_thresh = 0.12
+                            if multi_face:
+                                emb_thresh = 0.48
+                            elif scene_state.get('is_close_up'):
+                                emb_thresh = 0.32
                             elif scene_state.get('camera_moving'):
-                                emb_thresh = 0.15
+                                emb_thresh = 0.35
                             else:
-                                emb_thresh = 0.18
+                                emb_thresh = 0.38
 
                             if emb_score >= emb_thresh:
-                                score += emb_score * 0.40  # 40% weight on embedding
+                                score += emb_score * emb_weight
                             else:
-                                # Check motion consistency - if motion is good, still consider it
-                                motion_consistency = self._calculate_motion_consistency(face, position_history)
-                                if emb_score >= 0.10 and motion_consistency > 0.80:
-                                    score += emb_score * 0.25 + motion_consistency * 0.15
-                                    # print(f"[TRACK] Low emb ({emb_score:.2f}) but good motion")
+                                # v5.1004: Si la cara está muy cerca del ancla espacial
+                                # (dist < 1/3 del umbral), NO rechazar — usar distancia
+                                # como señal principal. El embedding bajo puede ser un
+                                # falso negativo en multi-face (la misma persona pero
+                                # con expresión/iluminación diferente).
+                                if dist < base_threshold / 3:
+                                    score += max(0.20, emb_score) * emb_weight * 0.60
                                 else:
-                                    score -= 0.1  # Reduced penalty
-
+                                    score -= 0.55 if multi_face else 0.35
+                                    if multi_face:
+                                        continue
                         else:
-                            # No embedding - rely more on distance and motion
+                            if multi_face:
+                                continue
                             score += 0.25
                         
                         # 3. Motion prediction bonus
@@ -1252,9 +1864,22 @@ class ProcessMgr:
                             best_match = face
                             best_distance = dist
                     
-                    # Decision making
-                    if best_match and best_score > 0.20:  # Minimum confidence threshold (v3.6: Aumentado para evitar enganchar objetos falsos)
-                        # Update state
+                    min_track_score = 0.50 if multi_face else 0.38
+                    if scene_state.get('is_close_up') and lost_count > 0:
+                        min_track_score = 0.30 if multi_face else 0.28
+                    identity_ok = True
+                    id_margin = 1.0
+                    if best_match and original_embedding is not None:
+                        identity_ok, id_margin = self._validate_locked_identity(
+                            valid_faces, original_embedding, best_match, multi_face=multi_face,
+                        )
+
+                    # v5.1004: Spatial proximity bypass — si la cara está prácticamente
+                    # en la misma posición que el ancla, aceptar directamente porque
+                    # es la misma persona (indetectable a 60fps). El embedding puede
+                    # fallar por iluminación/expresión pero la posición no engaña.
+                    spatial_lock = best_match and best_distance < min(50, base_threshold * 0.15)
+                    if best_match and ((best_score > min_track_score and identity_ok) or spatial_lock):
                         setattr(self, assigned_attr, best_match)
                         new_center = get_face_center(best_match)
                         
@@ -1297,69 +1922,88 @@ class ProcessMgr:
                             if norm > 0:
                                 setattr(self, tracking_emb_attr, emb_arr / norm)
                         
-                        print(f"[TRACK] Frame {frame_count}: Success (score={best_score:.2f}, dist={best_distance:.1f}px)")
+                        print(
+                            f"[TRACK] Frame {frame_count}: Success "
+                            f"(score={best_score:.2f}, dist={best_distance:.1f}px"
+                            f"{f', margin={id_margin:.2f}' if multi_face else ''})"
+                        )
                         return best_match
+
+                    if best_match and multi_face and frame_count % 25 == 1:
+                        print(
+                            f"[TRACK_MULTI] Frame {frame_count}: candidato rechazado "
+                            f"(score={best_score:.2f}, margin={id_margin:.2f}) — ghost/hold"
+                        )
                     
-                    # ==========================================================
-                    # INTELLIGENT FALLBACK: Tracking lost, try Recognition
-                    # ==========================================================
-                    print(f"[TRACK] Frame {frame_count}: Local tracking failed, attempting Global Recognition...")
-                    
-                    rec_embedding = original_embedding
-                    if rec_embedding is None:
-                        rec_embedding = getattr(self, f'_tracking_embedding_{video_basename}', None)
-                    
-                    if rec_embedding is not None:
-                        best_recognition = None
-                        best_rec_score = -1
-                        
+                    rec_emb = original_embedding
+                    if rec_emb is None:
+                        rec_emb = getattr(self, f'_tracking_embedding_{video_basename}', None)
+                    strict_match = self._try_strict_same_person_reacquire(
+                        valid_faces, rec_emb, assigned_face, video_basename, frame_count,
+                    )
+                    if strict_match is not None:
+                        return self._apply_reacquired_face(
+                            strict_match, assigned_attr, tracking_lost_attr,
+                            position_history_attr, video_basename,
+                        )
+
+                    if best_score < 0 and valid_faces and assigned_center:
+                        fc0 = get_face_center(valid_faces[0])
+                        if fc0:
+                            d0 = np.sqrt((fc0[0] - assigned_center[0])**2 + (fc0[1] - assigned_center[1])**2)
+                            if frame_count % 30 == 1:
+                                print(
+                                    f"[TRACK_DIST] Frame {frame_count}: best_score={best_score:.2f}, "
+                                    f"1st face dist={d0:.0f}px (umbral={base_threshold:.0f}), "
+                                    f"n_faces={len(valid_faces)}, base_th={base_threshold:.0f}"
+                                )
+                        # Fallback: reintentar con umbral ampliado
+                        expanded_threshold = base_threshold * 2.5
                         for face in valid_faces:
-                            if not hasattr(face, 'embedding') or face.embedding is None:
+                            face_center = get_face_center(face)
+                            if not face_center:
                                 continue
-                            
-                            rec_score = self._calculate_similarity(rec_embedding, face.embedding)
-                            if rec_score > best_rec_score:
-                                best_rec_score = rec_score
-                                best_recognition = face
-                        
-                        # v5.48: Umbral más permisivo para re-adquirir perfiles
-                        # v5.81: Más permisivo aún para baja calidad
-                        avg_det_rec = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
-                        if avg_det_rec < 0.30:
-                            rec_threshold = 0.20 if lost_count < 10 else 0.28
-                        else:
-                            rec_threshold = 0.25 if lost_count < 10 else 0.35
+                            dist = np.sqrt(
+                                (face_center[0] - assigned_center[0])**2 +
+                                (face_center[1] - assigned_center[1])**2
+                            )
+                            if dist > expanded_threshold:
+                                continue
+                            score = 0.0
+                            if original_embedding is not None and hasattr(face, 'embedding') and face.embedding is not None:
+                                emb_score = float(self._calculate_similarity(original_embedding, face.embedding))
+                                if emb_score >= 0.38:
+                                    score = emb_score * 0.30
+                            if score > best_score:
+                                best_score = score
+                                best_match = face
+                                best_distance = dist
+                        if best_match and best_score > 0 and frame_count % 30 == 1:
+                            print(
+                                f"[TRACK_DIST] Fallback aceptó cara dist={best_distance:.0f}px "
+                                f"(score={best_score:.2f})"
+                            )
+                    elif frame_count % 30 == 1:
+                        print(
+                            f"[TRACK] Frame {frame_count}: tracking local perdido "
+                            f"(score={best_score:.2f}) — ghost/hold"
+                        )
 
-                        if best_recognition and best_rec_score >= rec_threshold:
-                            print(f"[TRACK] RE-ACQUIRED via Global Recognition (score={best_rec_score:.2f})")
-
-                            # Suavizar transición de bbox para evitar saltos bruscos
-                            if assigned_face is not None and hasattr(assigned_face, 'bbox') and hasattr(best_recognition, 'bbox'):
-                                import copy
-                                smoothed_face = copy.copy(best_recognition)
-                                old_bbox = np.array(assigned_face.bbox, dtype=np.float32)
-                                new_bbox = np.array(best_recognition.bbox, dtype=np.float32)
-                                blend_bbox = 0.5 * old_bbox + 0.5 * new_bbox
-                                smoothed_face.bbox = tuple(blend_bbox.astype(int))
-                                if hasattr(best_recognition, 'kps') and best_recognition.kps is not None and hasattr(assigned_face, 'kps') and assigned_face.kps is not None:
-                                    old_kps = np.array(assigned_face.kps, dtype=np.float32)
-                                    new_kps = np.array(best_recognition.kps, dtype=np.float32)
-                                    blend_kps = 0.4 * old_kps + 0.6 * new_kps
-                                    smoothed_face.kps = blend_kps.tolist()
-                                best_recognition = smoothed_face
-
-                            setattr(self, assigned_attr, best_recognition)
-                            setattr(self, tracking_lost_attr, 0)
-                            new_center = get_face_center(best_recognition)
-                            if new_center:
-                                setattr(self, position_history_attr, [new_center])
-                            setattr(self, f'_reacquire_ramp_{video_basename}', 0)
-                            return best_recognition
-                    
                     # Tracking truly lost
                     lost_count += 1
                     setattr(self, tracking_lost_attr, lost_count)
                     setattr(self, consecutive_success_attr, 0)
+
+                    if hold_suppressed or lost_count <= 3 or self._in_reacquire_window(video_basename, frame_count):
+                        global_match = self._reacquire_face_global(
+                            valid_faces, video_basename, frame_count,
+                            after_scene_cut=hold_suppressed or self._in_reacquire_window(video_basename, frame_count),
+                        )
+                        if global_match is not None:
+                            return self._apply_reacquired_face(
+                                global_match, assigned_attr, tracking_lost_attr,
+                                position_history_attr, video_basename,
+                            )
                     
                     # ==========================================================
                     # GHOST TRACKING (v2.3): Predecir posición si se pierde la cara
@@ -1368,7 +2012,9 @@ class ProcessMgr:
                     # v5.81: Ghost frames extendidos para baja calidad
                     avg_det_g = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
                     ghost_limit = 10 if avg_det_g < 0.30 else (8 if avg_det_g < 0.45 else 6)
-                    if lost_count < ghost_limit and prediction and assigned_face:
+                    if scene_state.get('is_close_up'):
+                        ghost_limit += 6
+                    if not hold_suppressed and lost_count < ghost_limit and prediction and assigned_face:
                         import copy
                         ghost_face = copy.copy(assigned_face)
                         pred_x, pred_y, pred_conf = prediction
@@ -1426,107 +2072,69 @@ class ProcessMgr:
                     # Reset y preparar re-intento periódico
                     if lost_count >= 15:
                         print(f"[TRACK] Resetting state after {lost_count} failures")
-                        # Guardar última posición conocida para transición suave al re-adquirir
-                        if assigned_face is not None and hasattr(assigned_face, 'bbox'):
-                            setattr(self, f'_last_known_bbox_{video_basename}', assigned_face.bbox)
-                            if hasattr(assigned_face, 'kps'):
-                                setattr(self, f'_last_known_kps_{video_basename}', assigned_face.kps)
                         setattr(self, assigned_attr, None)
                         setattr(self, position_history_attr, [])
+                        setattr(self, f'_hold_suppressed_until_{video_basename}', frame_count + 8)
+                        self._open_reacquire_window(video_basename, frame_count, frames=150)
+                        global_match = self._reacquire_face_global(
+                            valid_faces, video_basename, frame_count,
+                            after_scene_cut=True, closeup_mode=True,
+                        )
+                        if global_match is not None:
+                            return self._apply_reacquired_face(
+                                global_match, assigned_attr, tracking_lost_attr,
+                                position_history_attr, video_basename,
+                            )
                     return None
-            
-            # ==========================================================
-            # PERIODIC RE-ACQUISITION after reset
-            #   - Progressive thresholds as more frames pass
-            #   - Falls back to tracking embedding if original is None
-            # ==========================================================
-            recovery_attr = f'_recovery_attempts_{video_basename}'
-            if not hasattr(self, recovery_attr):
-                setattr(self, recovery_attr, 0)
-            recovery_attempts = getattr(self, recovery_attr) + 1
-            setattr(self, recovery_attr, recovery_attempts)
-            
-            # Best embedding available: original > tracking > None
-            reacquire_emb = original_embedding
-            if reacquire_emb is None:
-                reacquire_emb = getattr(self, f'_tracking_embedding_{video_basename}', None)
-            
-            if reacquire_emb is not None:
-                best_reacquire = None
-                best_reacquire_score = -1
-                best_threshold = 0.15
-                
-                # v5.81: Umbrales más permisivos para baja calidad
-                avg_det_recp = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
-                if avg_det_recp < 0.30:
-                    if recovery_attempts < 20:
-                        base_thresh = 0.10
-                    elif recovery_attempts < 80:
-                        base_thresh = 0.07
-                    else:
-                        base_thresh = 0.04
-                else:
-                    # Progressive threshold: stricter early, more lenient over time
-                    if recovery_attempts < 15:
-                        base_thresh = 0.12
-                    elif recovery_attempts < 60:
-                        base_thresh = 0.08
-                    elif recovery_attempts < 200:
-                        base_thresh = 0.05
-                    else:
-                        base_thresh = 0.03
-                
-                for face in valid_faces:
-                    if not hasattr(face, 'embedding') or face.embedding is None:
-                        continue
-                    
-                    emb_score = self._calculate_similarity(reacquire_emb, face.embedding)
-                    
-                    face_area = (face.bbox[2]-face.bbox[0]) * (face.bbox[3]-face.bbox[1]) if hasattr(face, 'bbox') else 0
-                    face_thresh = base_thresh - 0.03 if face_area > 10000 else base_thresh
-                    
-                    if emb_score >= face_thresh and emb_score > best_reacquire_score:
-                        best_reacquire_score = emb_score
-                        best_reacquire = face
-                        best_threshold = face_thresh
-                
-                if best_reacquire and best_reacquire_score >= best_threshold:
-                    print(f"[TRACK] RE-ACQUIRED after {recovery_attempts} frames (score={best_reacquire_score:.2f}, thresh={best_threshold:.2f})")
-                    # Suavizar transición desde la última posición conocida
-                    last_bbox = getattr(self, f'_last_known_bbox_{video_basename}', None)
-                    if last_bbox is not None and hasattr(best_reacquire, 'bbox'):
-                        import copy
-                        smoothed_face = copy.copy(best_reacquire)
-                        old_bbox = np.array(last_bbox, dtype=np.float32)
-                        new_bbox = np.array(best_reacquire.bbox, dtype=np.float32)
-                        
-                        # DETECTAR CAMBIO DE PLANO (Evitar mezclar bboxes lejanos)
-                        dist = np.sqrt(np.sum(((old_bbox[:2]+old_bbox[2:])/2 - (new_bbox[:2]+new_bbox[2:])/2)**2))
-                        if dist < 150:
-                            blend_bbox = 0.3 * old_bbox + 0.7 * new_bbox
-                            smoothed_face.bbox = tuple(blend_bbox.astype(int))
-                            last_kps = getattr(self, f'_last_known_kps_{video_basename}', None)
-                            if last_kps is not None and hasattr(best_reacquire, 'kps') and best_reacquire.kps is not None:
-                                old_kps = np.array(last_kps, dtype=np.float32)
-                                new_kps = np.array(best_reacquire.kps, dtype=np.float32)
-                                blend_kps = 0.3 * old_kps + 0.7 * new_kps
-                                smoothed_face.kps = blend_kps.tolist()
-                            best_reacquire = smoothed_face
-                        else:
-                            print(f"[SCENE_CUT] Re-adquisición lejana ({dist:.0f}px), ignorando blending.")
-                        
-                        # Limpiar para no re-usar en futuras re-adquisiciones lejanas
-                        delattr(self, f'_last_known_bbox_{video_basename}')
+
+            assigned_face = getattr(self, assigned_attr, None)
+            if assigned_face is None:
+                recovery_attr = f'_strict_recovery_tick_{video_basename}'
+                tick = getattr(self, recovery_attr, 0) + 1
+                setattr(self, recovery_attr, tick)
+
+                in_window = self._in_reacquire_window(video_basename, frame_count)
+                near_cut = abs(frame_count - scene_state.get('last_scene_cut', 0)) < 60
+                unassigned_since = getattr(self, f'_unassigned_since_{video_basename}', 0)
+                long_unassigned = unassigned_since > 0 and (frame_count - unassigned_since) >= 15
+                if in_window or near_cut or long_unassigned or tick % 2 == 0:
+                    global_match = self._reacquire_face_global(
+                        valid_faces, video_basename, frame_count,
+                        after_scene_cut=in_window or near_cut or long_unassigned,
+                        closeup_mode=long_unassigned,
+                    )
+                    if global_match is not None:
+                        setattr(self, recovery_attr, 0)
+                        return self._apply_reacquired_face(
+                            global_match, assigned_attr, tracking_lost_attr,
+                            position_history_attr, video_basename,
+                        )
+
+                rec_emb = original_embedding
+                if rec_emb is None:
+                    rec_emb = getattr(self, f'_tracking_embedding_{video_basename}', None)
+                last_bbox = getattr(self, f'_last_known_bbox_{video_basename}', None)
+                last_kps = getattr(self, f'_last_known_kps_{video_basename}', None)
+                if rec_emb is not None and last_bbox is not None and tick % 6 == 0:
+                    class _BBoxAnchor:
+                        pass
+                    anchor = _BBoxAnchor()
+                    anchor.bbox = last_bbox
+                    strict_match = self._try_strict_same_person_reacquire(
+                        valid_faces, rec_emb, anchor, video_basename, frame_count,
+                    )
+                    if strict_match is not None:
+                        setattr(self, recovery_attr, 0)
+                        if hasattr(self, f'_last_known_bbox_{video_basename}'):
+                            delattr(self, f'_last_known_bbox_{video_basename}')
                         if hasattr(self, f'_last_known_kps_{video_basename}'):
                             delattr(self, f'_last_known_kps_{video_basename}')
-                    setattr(self, assigned_attr, best_reacquire)
-                    setattr(self, tracking_lost_attr, 0)
-                    setattr(self, recovery_attr, 0)
-                    center = get_face_center(best_reacquire)
-                    if center:
-                        setattr(self, position_history_attr, [center])
-                    return best_reacquire
-            
+                        return self._apply_reacquired_face(
+                            strict_match, assigned_attr, tracking_lost_attr,
+                            position_history_attr, video_basename,
+                            last_bbox=last_bbox, last_kps=last_kps,
+                        )
+
             return None
             
         except Exception as e:
@@ -1598,7 +2206,9 @@ class ProcessMgr:
 
     @staticmethod
     def _is_profile_face(kps):
-        """Detect if face is a profile/side view based on 5-point kps landmarks"""
+        """Detect if face is a profile/side view based on 5-point kps landmarks
+        v5.96: Stricter — requiere eye_ratio bajo O ambas señales (eye_ratio+eye_y) para evitar
+        clasificar caras ligeramente inclinadas como perfiles."""
         if kps is None or len(kps) < 5:
             return False
         kps = np.array(kps)
@@ -1606,13 +2216,11 @@ class ProcessMgr:
         face_width = np.max(kps[:, 0]) - np.min(kps[:, 0])
         if face_width < 1:
             return False
-        # Profile: eyes are close together in x relative to face width
         eye_ratio = eye_dist_x / face_width
-        # Also check if one eye is much higher than the other (head tilt in profile)
         eye_dist_y = abs(kps[0][1] - kps[1][1])
         eye_y_ratio = eye_dist_y / (face_width + 1e-6)
-        # v5.1: Relaxed y_ratio (0.30 -> 0.45) to avoid false profile detection on tilted faces
-        return eye_ratio < 0.22 or eye_y_ratio > 0.45
+        # v5.96: Perfil real = ojos muy juntos O (moderadamente juntos + mucha inclinación)
+        return eye_ratio < 0.20 or (eye_ratio < 0.28 and eye_y_ratio > 0.40)
 
     @staticmethod
     def _source_identity_params(is_profile: bool = False, is_closeup: bool = False):
@@ -1627,7 +2235,7 @@ class ProcessMgr:
         elif ui_identity >= 0.90:
             gfpgan_mix = min(gfpgan_mix, 0.28)
         base_cm = float(getattr(roop.globals, 'color_match_strength', 0.10))
-        color_match = min(0.16, base_cm * 1.25) if is_profile else base_cm
+        color_match = min(0.14, base_cm * 0.85) if is_profile else base_cm
         if is_closeup:
             color_match *= 0.65
         brightness = float(getattr(roop.globals, 'brightness_strength', 0.15))
@@ -1670,40 +2278,251 @@ class ProcessMgr:
             return False
 
     @staticmethod
-    def _hold_previous_face_region(current_frame, prev_frame, bbox, blend=0.88):
-        """Mantiene el último swap en la región facial cuando el tracking falla (evita parpadeos).
-        v5.80: Feathering en bordes + color match para evitar rectángulo visible."""
+    def _hold_previous_face_region(current_frame, prev_frame, bbox, blend=0.88, prev_mask=None):
+        """Mantiene el último swap cuando falla tracking/detección.
+        v5.94: Reutiliza la máscara real del último swap si existe (evita círculo visible)."""
         if prev_frame is None or bbox is None or current_frame is None:
             return current_frame
         try:
-            result = current_frame.copy()
+            if prev_frame.shape != current_frame.shape:
+                return current_frame
             x1, y1, x2, y2 = [int(v) for v in bbox]
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(current_frame.shape[1], x2), min(current_frame.shape[0], y2)
-            if x2 <= x1 or y2 <= y1:
+            fw, fh = x2 - x1, y2 - y1
+            if fw <= 0 or fh <= 0:
                 return current_frame
-            h, w = y2 - y1, x2 - x1
-            curr_roi = result[y1:y2, x1:x2].astype(np.float32)
-            prev_roi = prev_frame[y1:y2, x1:x2].astype(np.float32)
-            if curr_roi.shape != prev_roi.shape:
-                return current_frame
-            mix = float(np.clip(blend, 0.5, 0.95))
+            mix = float(np.clip(blend, 0.5, 0.92))
+            h_f, w_f = current_frame.shape[:2]
 
-            # v5.80: Color match del prev_roi al curr_roi para reducir diferencia de tono
-            prev_matched = match_color_histogram(prev_roi, curr_roi, blend_factor=0.35)
-
-            # v5.80: Feathering progresivo — bordes priorizan frame actual, centro prioriza blend
-            Y, X = np.ogrid[:h, :w]
-            dist_to_edge = np.minimum(np.minimum(X, w - 1 - X), np.minimum(Y, h - 1 - Y))
-            feather_px = max(8, min(h, w) // 10)
-            soft_mask = np.clip(dist_to_edge / feather_px, 0, 1)
+            if prev_mask is not None and prev_mask.shape[:2] == (h_f, w_f):
+                soft_mask = np.clip(prev_mask.astype(np.float32), 0, 1)
+                blur_sz = max(21, min(fw, fh) // 5) | 1
+                soft_mask = cv2.GaussianBlur(soft_mask, (blur_sz, blur_sz), 0)
+            else:
+                cx = int(np.clip((x1 + x2) // 2, 0, w_f - 1))
+                cy = int(np.clip((y1 + y2) // 2, 0, h_f - 1))
+                soft_mask = np.zeros((h_f, w_f), dtype=np.float32)
+                cv2.ellipse(
+                    soft_mask,
+                    (cx, cy),
+                    (max(8, int(fw * 0.40)), max(8, int(fh * 0.44))),
+                    0, 0, 360, 1.0, -1,
+                )
+                blur_sz = max(21, min(fw, fh) // 4) | 1
+                soft_mask = cv2.GaussianBlur(soft_mask, (blur_sz, blur_sz), 0)
+            soft_mask = np.clip(soft_mask * mix, 0, 1)
             soft_3ch = cv2.merge([soft_mask, soft_mask, soft_mask])
 
-            blended = curr_roi * (1.0 - mix) + prev_matched * mix
-            result[y1:y2, x1:x2] = (curr_roi * (1.0 - soft_3ch) + blended * soft_3ch).astype(np.uint8)
-            return result
+            curr = current_frame.astype(np.float32)
+            prev_matched = match_color_histogram(prev_frame, current_frame, blend_factor=0.35).astype(np.float32)
+            blended = curr * (1.0 - mix) + prev_matched * mix
+            return (curr * (1.0 - soft_3ch) + blended * soft_3ch).astype(np.uint8)
         except Exception:
             return current_frame
+
+    @staticmethod
+    def _build_ellipse_mask(frame_shape, cx, cy, rx, ry, tight=False):
+        h_f, w_f = frame_shape[:2]
+        cx = int(np.clip(cx, 0, w_f - 1))
+        cy = int(np.clip(cy, 0, h_f - 1))
+        if tight:
+            rx = max(12, int(rx * 0.88))
+            ry = max(12, int(ry * 0.88))
+        rx = max(12, int(rx))
+        ry = max(12, int(ry))
+        mask = np.zeros((h_f, w_f), dtype=np.float32)
+        cv2.ellipse(mask, (cx, cy), (rx, ry), 0, 0, 360, 1.0, -1)
+        blur_ratio = 0.38 if tight else 0.35  # v5.1000: 0.34/0.26→0.38/0.35 — elipse más suave, menos marco
+        blur_size = max(25 if tight else 21, int(min(rx, ry) * blur_ratio)) | 1  # v5.1000: min blur 21/17→25/21
+        mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
+        return np.clip(mask, 0, 1.0)
+
+    @staticmethod
+    def _regenerate_face_safety_mask(frame_shape, swapped_face_aligned, M_inv, bbox=None, tight=False):
+        """Regenera máscara elíptica; elige warp o bbox según cobertura real."""
+        candidates = []
+        h_f_s, w_f_s = frame_shape[:2]
+
+        if M_inv is not None and swapped_face_aligned is not None:
+            h_a_f, w_a_f = swapped_face_aligned.shape[:2]
+            corners = np.array(
+                [[0, 0], [w_a_f, 0], [w_a_f, h_a_f], [0, h_a_f]],
+                dtype=np.float32,
+            )
+            corners_w = cv2.transform(corners.reshape(-1, 1, 2), M_inv).reshape(-1, 2)
+            cx_w = int(np.mean(corners_w[:, 0]))
+            cy_w = int(np.mean(corners_w[:, 1]))
+            face_w_s = max(8, int(np.max(corners_w[:, 0]) - np.min(corners_w[:, 0])))
+            face_h_s = max(8, int(np.max(corners_w[:, 1]) - np.min(corners_w[:, 1])))
+            if face_w_s >= 20 and face_h_s >= 20:
+                warp_mask = ProcessMgr._build_ellipse_mask(
+                    frame_shape, cx_w, cy_w, face_w_s // 2, face_h_s // 2, tight=tight,
+                )
+                candidates.append(('warp', warp_mask))
+
+        if bbox is not None:
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            cx_b, cy_b = (x1 + x2) // 2, (y1 + y2) // 2
+            scale = 0.88 if tight else 1.0
+            rx_b = max(16, int((x2 - x1) // 2 * scale))
+            ry_b = max(16, int((y2 - y1) // 2 * scale))
+            bbox_mask = ProcessMgr._build_ellipse_mask(frame_shape, cx_b, cy_b, rx_b, ry_b, tight=tight)
+            candidates.append(('bbox', bbox_mask))
+
+        if not candidates:
+            return None
+
+        best = max(candidates, key=lambda item: item[1].mean())
+        return best[1]
+
+    @staticmethod
+    def _mask_face_coverage(mask, threshold=0.15):
+        if mask is None:
+            return 0
+        return int(np.sum(mask > threshold))
+
+    @staticmethod
+    def _mask_needs_safety_recovery(mask, face_w, face_h):
+        """Detecta máscaras rotas por cobertura facial real (no mean global del frame)."""
+        if mask is None:
+            return True
+        mask_max = float(mask.max())
+        if mask_max < 0.25:
+            return True
+        face_area = max(1, face_w * face_h)
+        min_pixels = max(64, int(face_area * 0.10))
+        coverage = ProcessMgr._mask_face_coverage(mask, 0.15)
+        if coverage < min_pixels:
+            return True
+        strong = int(np.sum(mask > 0.45))
+        if strong < max(24, int(face_area * 0.04)):
+            return True
+        return False
+
+    @staticmethod
+    def _build_bbox_safety_mask(frame_shape, x1, y1, x2, y2, scale=1.0, tight=False):
+        fw, fh = max(8, x2 - x1), max(8, y2 - y1)
+        scale = float(max(0.75, scale))
+        return ProcessMgr._build_ellipse_mask(
+            frame_shape,
+            (x1 + x2) // 2, (y1 + y2) // 2,
+            max(18, int(fw // 2 * scale)), max(18, int(fh // 2 * scale)),
+            tight=tight,
+        )
+
+    @staticmethod
+    def _feather_mask_edges(mask, feather_px=14):
+        """Suaviza bordes con distance transform — elimina marco/elipse visible."""
+        if mask is None or float(mask.max()) < 0.01:
+            return mask
+        m = np.clip(mask.astype(np.float32), 0, 1)
+        adaptive_thresh = min(0.35, max(0.10, float(m.mean()) * 1.8))
+        binary = (m > adaptive_thresh).astype(np.uint8) * 255
+        if not np.any(binary):
+            return m
+        feather = max(6.0, float(feather_px))
+        dist_in = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
+        ramp = np.clip(dist_in / feather, 0, 1).astype(np.float32)
+        core = m > 0.55
+        softened = np.where(core, m, m * ramp)
+        return np.clip(softened, 0, 1.0)
+
+    @staticmethod
+    def _widen_mask_for_blend(mask, face_w, face_h):
+        """Transición suave sin invadir pelo/fondo — un solo blur mantiene el borde en la cara.
+        El doble blur + dilatación previo (v5.1001) extendía la máscara ~40px fuera de la cara,
+        invadiendo el flequillo/pelo y creando artefactos de piel del source sobre pelo del target."""
+        m = np.clip(mask.astype(np.float32), 0, 1)
+        blur = max(13, (min(face_w, face_h) // 6) | 1)
+        blur = min(blur, 27) | 1
+        wide = cv2.GaussianBlur(m, (blur, blur), 0)
+        return np.clip(wide, 0, 1.0)
+
+    @staticmethod
+    def _prime_warp_edges(warped_face, original_frame, mask, face_w, face_h):
+        """Pre-mezcla warped→original en zona de borde — preserva flequillo mezclando
+        más original en la transición sin endurecer el borde de máscara."""
+        if warped_face is None or original_frame is None or mask is None:
+            return warped_face
+        m = np.clip(mask.astype(np.float32), 0, 1)
+        edge = np.clip((0.85 - m) / 0.83, 0, 1).astype(np.float32)
+        blur = max(13, (min(face_w, face_h) // 8) | 1)
+        edge = cv2.GaussianBlur(edge, (blur, blur), 0) * 0.95
+        if float(edge.max()) < 0.02:
+            return warped_face
+        e3 = cv2.merge([edge, edge, edge])
+        out = warped_face.astype(np.float32) * (1.0 - e3) + original_frame.astype(np.float32) * e3
+        return np.clip(out, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def _soothe_swap_ring(result_frame, original_frame, mask, face_w, face_h):
+        """Post-paso: funde el anillo de transición hacia el original — preserva flequillo."""
+        if mask is None or result_frame is None or original_frame is None:
+            return result_frame
+        if result_frame.shape != original_frame.shape:
+            return result_frame
+        m = np.clip(mask.astype(np.float32), 0, 1)
+        if float(m.max()) < 0.05:
+            return result_frame
+        soothe = np.clip((0.97 - m) / 0.94, 0, 1).astype(np.float32)
+        soothe *= (m > 0.01).astype(np.float32) * (m < 0.90).astype(np.float32)
+        blur = max(17, (min(face_w, face_h) // 6) | 1)
+        soothe = cv2.GaussianBlur(soothe, (blur, blur), 0)
+        if float(soothe.max()) < 0.02:
+            return result_frame
+        soothe *= 0.95
+        s3 = cv2.merge([soothe, soothe, soothe])
+        blended = (
+            result_frame.astype(np.float32) * (1.0 - s3)
+            + original_frame.astype(np.float32) * s3
+        )
+        return np.clip(blended, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def _mouth_mask_full_frame(frame, mouth_region, crop_origin=(0, 0), crop_size=None):
+        """Máscara oral en coordenadas del frame completo (corrige crop en close-up)."""
+        from roop.processors.FaceSwap import create_mouth_preservation_mask
+        if crop_size is not None and mouth_region is not None:
+            ox, oy = crop_origin
+            cw, ch = crop_size
+            if cw > 0 and ch > 0:
+                crop_canvas = np.zeros((ch, cw, 3), dtype=np.uint8)
+                crop_mask = create_mouth_preservation_mask(crop_canvas, mouth_region, blend_ratio=1.0)
+                full_mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.float32)
+                y2p = min(frame.shape[0], oy + ch)
+                x2p = min(frame.shape[1], ox + cw)
+                full_mask[oy:y2p, ox:x2p] = crop_mask[0:y2p - oy, 0:x2p - ox]
+                return full_mask
+        return create_mouth_preservation_mask(frame, mouth_region, blend_ratio=1.0)
+
+    @staticmethod
+    def _detect_mouth_content_diff(swapped_aligned, reference_aligned):
+        """Diferencia swap vs original en zona oral — detecta lengua/objetos no presentes en el swap."""
+        try:
+            if swapped_aligned is None or reference_aligned is None:
+                return 0.0
+            if swapped_aligned.shape != reference_aligned.shape:
+                reference_aligned = cv2.resize(
+                    reference_aligned,
+                    (swapped_aligned.shape[1], swapped_aligned.shape[0]),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+            h, w = swapped_aligned.shape[:2]
+            mouth_zone = np.zeros((h, w), dtype=np.uint8)
+            cv2.ellipse(
+                mouth_zone, (w // 2, int(h * 0.72)),
+                (max(8, int(w * 0.24)), max(6, int(h * 0.16))),
+                0, 0, 360, 255, -1,
+            )
+            diff = cv2.absdiff(swapped_aligned, reference_aligned)
+            diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+            mouth_pixels = diff_gray[mouth_zone > 0]
+            if len(mouth_pixels) < 40:
+                return 0.0
+            mean_diff = float(np.mean(mouth_pixels))
+            p90_diff = float(np.percentile(mouth_pixels, 90))
+            return float(np.clip((mean_diff * 0.45 + p90_diff * 0.55) / 255.0, 0.0, 1.0))
+        except Exception:
+            return 0.0
 
     @staticmethod
     def _masked_temporal_blend(current, previous, mask, alpha):
@@ -1759,6 +2578,7 @@ class ProcessMgr:
             # ============================================
             video_key = getattr(self, '_current_video_key', 'default')
             video_basename = video_key[6:] if video_key.startswith('video_') else video_key
+            video_path = getattr(self.options, 'current_video_path', None)
             if enable_temporal_smoothing:
                 prev_bbox = getattr(self, '_prev_face_bbox', {}).get(video_key)
                 prev_kps = getattr(self, '_prev_face_kps', {}).get(video_key)
@@ -1794,10 +2614,20 @@ class ProcessMgr:
                     frame_count_scene = getattr(self, f'_frame_count_{video_basename}', 0)
                     is_near_scene_cut = abs(frame_count_scene - scene_cut_frame) < 5 if scene_cut_frame > 0 else False
 
-                    if (velocity > scene_threshold or is_near_scene_cut) and not is_lockout:
+                    plan_smooth = frame_count_scene <= getattr(
+                        self, f'_plan_change_smooth_until_{video_basename}', 0,
+                    )
+                    hard_scene_cut = velocity > scene_threshold and not plan_smooth
+                    soft_scene_cut = is_near_scene_cut and velocity > 35 and not plan_smooth
+                    if (hard_scene_cut or soft_scene_cut) and not is_lockout:
                         print(f"[SCENE_CUT] Frame {call_num}: Salto detectado (vel={velocity:.0f}px, thresh={scene_threshold}, face_cut={is_near_scene_cut}). Reseteando historial temporal.")
                         if not hasattr(self, '_last_reset_call'): self._last_reset_call = {}
                         self._last_reset_call[video_key] = call_num
+                        if video_path and hard_scene_cut:
+                            self._reset_tracking_on_scene_cut(
+                                video_path, frame_count_scene,
+                                reason=f"salto bbox vel={velocity:.0f}px",
+                            )
 
                         for attr in ['_color_ema', '_brightness_ema', '_enhancer_ema', '_mouth_state_history']:
                             if hasattr(self, attr):
@@ -1840,9 +2670,17 @@ class ProcessMgr:
                                 kps_ema = 0.90 if not is_profile else 0.88
                         
                         f_size = 0.95
+                        if plan_smooth:
+                            f_size = 0.62
+                            f_center = min(f_center, 0.82)
                     
                     curr_size = curr_bbox[2:] - curr_bbox[:2]
                     prev_size = prev_bbox_arr[2:] - prev_bbox_arr[:2]
+                    size_ratio = float(np.max(curr_size) / max(1.0, np.max(prev_size)))
+                    if size_ratio > 1.35 or size_ratio < 0.72:
+                        f_size = min(f_size, 0.58 if plan_smooth else 0.72)
+                        if call_num % 25 == 1:
+                            print(f"[PLAN_SMOOTH] Frame {call_num}: zoom bbox ratio={size_ratio:.2f} → f_size={f_size:.2f}")
                     
                     new_center = f_center * curr_center + (1 - f_center) * prev_center
                     new_size = f_size * curr_size + (1 - f_size) * prev_size
@@ -1876,6 +2714,8 @@ class ProcessMgr:
             mouth_open = False
             mouth_region = None
             mouth_open_ratio = 0.0
+            mouth_crop_origin = (0, 0)
+            mouth_crop_size = None
 
             bx1, by1, bx2, by2 = target_face.bbox
             is_closeup = self._is_closeup_face(target_face.bbox, original_frame.shape)
@@ -1895,6 +2735,8 @@ class ProcessMgr:
                         cx2, cy2 = min(original_frame.shape[1], int(bx2) + pad), min(original_frame.shape[0], int(by2) + pad)
                         if cx2 > cx1 and cy2 > cy1:
                             mouth_probe = original_frame[cy1:cy2, cx1:cx2]
+                            mouth_crop_origin = (cx1, cy1)
+                            mouth_crop_size = (mouth_probe.shape[1], mouth_probe.shape[0])
                     mouth_open, mouth_region, mouth_open_ratio = detect_mouth_open(
                         target_face, landmarks_106, mouth_probe,
                     )
@@ -1909,8 +2751,6 @@ class ProcessMgr:
                         thresh = 0.24 if is_profile else (0.06 if prev_state else 0.09)
                     else:
                         thresh = 0.30 if is_profile else (0.05 if prev_state else 0.15)
-                    if is_profile:
-                        mouth_open_ratio = min(mouth_open_ratio, 0.5)
                     mouth_open = mouth_open_ratio > thresh
                     self._mouth_state_history[video_key] = mouth_open
                     
@@ -1937,29 +2777,64 @@ class ProcessMgr:
             is_ghost = getattr(target_face, 'is_ghost', False)
             lost_count = getattr(self, f'_tracking_lost_count_{video_basename}', 0)
 
-            # Ghost tracking: no re-swap con bbox predicho (causa caras flotantes/desalineadas)
+            # Ghost tracking: mantener último swap (nunca parpadear a original en primer plano)
             if is_ghost:
+                closeup_active = getattr(self, f'_closeup_active_{video_basename}', False)
                 prev_frame_result = getattr(self, '_prev_frame_result', {}).get(video_key)
                 last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
                 if prev_frame_result is not None and last_bbox is not None:
                     if call_num % 25 == 1:
-                        print(f"[TRACK] Frame {call_num}: ghost lost={lost_count} → hold último swap")
-                    return self._hold_previous_face_region(original_frame, prev_frame_result, last_bbox)
+                        print(
+                            f"[TRACK] Frame {call_num}: ghost lost={lost_count} "
+                            f"→ hold swap (closeup={closeup_active})"
+                        )
+                    hold_blend = 0.96 if closeup_active else 0.90
+                    # v5.1001: usar bbox predicha de ghost_face (desplazada con dx,dy) en vez de last_bbox
+                    if not hasattr(self, '_last_swap_bbox'):
+                        self._last_swap_bbox = {}
+                    self._last_swap_bbox[video_basename] = (x1, y1, x2, y2)
+                    # v5.1002: prev_mask=None para forzar elipse en la NUEVA posicion (predicha),
+                    # en vez de la mascara del frame anterior (posicion vieja que causa swap congelado)
+                    return self._hold_previous_face_region(
+                        original_frame, prev_frame_result, (x1, y1, x2, y2),
+                        blend=hold_blend, prev_mask=None,
+                    )
+                if not self._should_hold_previous_swap(video_basename) and not closeup_active:
+                    if call_num % 25 == 1:
+                        print(f"[TRACK] Frame {call_num}: ghost post-corte → frame original")
+                    return original_frame
                 if call_num % 25 == 1:
                     print(f"[TRACK] Frame {call_num}: ghost sin histórico → original")
                 return original_frame
 
-            # v5.81: En vez de saltar completamente, hacer hold del último swap para baja calidad
+            # v5.95: Skip-hold con timeout — después de 12 frames consecutivos, fuerza swap nuevo
+            skip_hold_count_attr = f'_skip_hold_count_{video_basename}'
+            skip_hold_count = getattr(self, skip_hold_count_attr, 0)
             if det_score < 0.05 and velocity > 100:
-                prev_frame_result = getattr(self, '_prev_frame_result', {}).get(video_key)
-                last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
-                if prev_frame_result is not None and last_bbox is not None:
-                    if call_num % 30 == 1:
-                        print(f"[SKIP_HOLD] Frame {call_num}: det_score={det_score:.2f} → hold último swap")
-                    return self._hold_previous_face_region(original_frame, prev_frame_result, last_bbox, blend=0.82)
+                if skip_hold_count < 12:
+                    prev_frame_result = getattr(self, '_prev_frame_result', {}).get(video_key)
+                    last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
+                    if prev_frame_result is not None and last_bbox is not None:
+                        setattr(self, skip_hold_count_attr, skip_hold_count + 1)
+                        if call_num % 10 == 1:
+                            print(f"[SKIP_HOLD] Frame {call_num}: hold #{skip_hold_count+1} (det_score={det_score:.2f})")
+                        # v5.1001: usar bbox actual (la cara se movió, last_bbox está desfasada)
+                        if not hasattr(self, '_last_swap_bbox'):
+                            self._last_swap_bbox = {}
+                        self._last_swap_bbox[video_basename] = (x1, y1, x2, y2)
+                        # v5.1002: prev_mask=None para elipse en posicion actual, no mascara vieja
+                        return self._hold_previous_face_region(
+                            original_frame, prev_frame_result, (x1, y1, x2, y2), blend=0.82, prev_mask=None,
+                        )
+                    if call_num % 10 == 1:
+                        print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
+                    setattr(self, skip_hold_count_attr, skip_hold_count + 1)
+                    return original_frame
+                # Timeout: forzar swap nuevo aunque det_score sea bajo
                 if call_num % 30 == 1:
-                    print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
-                return original_frame
+                    print(f"[SKIP_HOLD_TIMEOUT] Frame {call_num}: timeout {skip_hold_count} holds → forzando swap")
+                setattr(self, skip_hold_count_attr, 0)
+                # Continuar con swap normal
 
             # ============================================
             # 1. IDENTITY INJECTION (v5.78: master + perfil/match)
@@ -1993,10 +2868,13 @@ class ProcessMgr:
                     # Detectar si hay un cambio brusco (escena nueva) para no suavizar
                     m_diff = np.max(np.abs(M - prev_m))
                     if m_diff < 15.0: # Umbral para jitter vs movimiento real
-                        m_alpha = 0.70 if m_diff < 5.0 else 0.50
-                        if is_profile:
-                            m_alpha *= 0.10  # v5.65: rigidity-pro en perfiles para seguimiento instantáneo
-                        M = M * (1.0 - m_alpha) + prev_m * m_alpha
+                        if is_profile and m_diff >= 6.0:
+                            pass  # v5.994: giro de cabeza en perfil → M fresco, sin lag que causa marco
+                        else:
+                            m_alpha = 0.60 if m_diff < 5.0 else 0.35  # v5.1001: más responsivo en movimiento rápido
+                            if is_profile:
+                                m_alpha *= 0.72  # v5.997: 0.48→0.72 — menos lag = menos marco
+                            M = M * (1.0 - m_alpha) + prev_m * m_alpha
                 setattr(self, m_attr, M)
 
             # DEBUG: guardar raw model output para frame 1-3
@@ -2049,7 +2927,7 @@ class ProcessMgr:
                                 if not hasattr(self, '_enhancer_ema'): self._enhancer_ema = {}
                                 prev_enh = self._enhancer_ema.get(video_key)
                                 if prev_enh is not None and prev_enh.shape == enhanced.shape:
-                                    enh_ema_alpha = 0.80 # v5.64: más responsivo para texturas dinámicas
+                                    enh_ema_alpha = 0.62 if is_profile else 0.55
                                     enhanced = cv2.addWeighted(enhanced, enh_ema_alpha, prev_enh, 1.0 - enh_ema_alpha, 0)
                                 self._enhancer_ema[video_key] = enhanced.copy()
                             
@@ -2096,7 +2974,7 @@ class ProcessMgr:
                 curr_bright_ratio = np.mean(cv2.cvtColor(reference_region, cv2.COLOR_BGR2GRAY)) / (np.mean(cv2.cvtColor(swapped_face_aligned, cv2.COLOR_BGR2GRAY)) + 1e-6)
                 curr_bright_ratio = np.clip(curr_bright_ratio, 0.7, 1.3)
                 
-                smooth_bright = 0.2 * curr_bright_ratio + 0.8 * prev_bright
+                smooth_bright = 0.45 * curr_bright_ratio + 0.55 * prev_bright
                 self._brightness_ema[video_key] = smooth_bright
                 
                 face_lab = cv2.cvtColor(swapped_face_aligned, cv2.COLOR_BGR2LAB).astype(np.float32)
@@ -2110,9 +2988,9 @@ class ProcessMgr:
                 if not hasattr(self, '_color_ema'): self._color_ema = {}
                 prev_color = self._color_ema.get(video_key)
                 if prev_color is not None and prev_color.shape == swapped_face_aligned.shape:
-                    # Menos EMA de color = menos tirón hacia frames target anteriores
+                    # v5.95: Color EMA más responsivo — 42% nuevo (antes 28%) para reducir efecto congelado
                     ui_identity = float(getattr(roop.globals, 'enhancer_blend_factor', 0.92))
-                    color_ema_alpha = 0.72 if ui_identity >= 0.85 else 0.80
+                    color_ema_alpha = 0.72 if is_profile else (0.58 if ui_identity >= 0.85 else 0.65)
                     swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, color_ema_alpha, prev_color, 1.0 - color_ema_alpha, 0)
                 self._color_ema[video_key] = swapped_face_aligned
 
@@ -2127,8 +3005,11 @@ class ProcessMgr:
             if M is not None:
                 M_inv = cv2.invertAffineTransform(M)
                 
-                # A. Warp de la cara (BORDER_REFLECT para evitar halo oscuro en bordes de máscara)
-                warped_face = cv2.warpAffine(swapped_face_aligned, M_inv, (w_f, h_f), borderMode=cv2.BORDER_REFLECT)
+                # A. Warp de la cara — perfil/closeup usan CONSTANT+fill (REFLECT deja marco en bordes)
+                warp_border = cv2.BORDER_CONSTANT if (is_profile or is_closeup) else cv2.BORDER_REFLECT
+                warped_face = cv2.warpAffine(
+                    swapped_face_aligned, M_inv, (w_f, h_f), borderMode=warp_border, borderValue=0,
+                )
 
                 # Safety fill: rellenar áreas negras del warp con el frame original para evitar "máscara negra"
                 fb = np.max(warped_face.astype(np.float32), axis=2) < 1
@@ -2171,9 +3052,12 @@ class ProcessMgr:
                         # La máscara XSeg se genera sobre la cara alineada (calidad nativa 256x256)
                         xseg_mask = self.processors["mask_xseg"].Run(swapped_face_aligned, "")
                         if xseg_mask is not None and np.max(xseg_mask) > 0:
-                            # v5.45: Umbral bajado 0.40→0.25 para incluir más zona facial y evitar recorte elíptico visible
-                            xseg_thresh = 0.25
-                            _, xseg_mask = cv2.threshold(xseg_mask, xseg_thresh, 1.0, cv2.THRESH_BINARY)
+                            xseg_thresh = 0.20 if is_profile else 0.25
+                            if is_profile or is_closeup:
+                                xseg_mask = np.clip((xseg_mask.astype(np.float32) - xseg_thresh) / max(0.05, 1.0 - xseg_thresh), 0, 1)
+                                xseg_mask = cv2.GaussianBlur(xseg_mask, (17, 17), 0)
+                            else:
+                                _, xseg_mask = cv2.threshold(xseg_mask, xseg_thresh, 1.0, cv2.THRESH_BINARY)
 
                             # v5.75: Atenuación superior reducida al 5% con curva más abrupta
                             h_x, w_x = xseg_mask.shape[:2]
@@ -2215,11 +3099,11 @@ class ProcessMgr:
                 # D. Aplicar oclusión (v5.2: Independiente del blend ratio para proteger objetos siempre)
                 occ_mask_aligned = detect_foreground_occlusion(raw_swapped_aligned, reference_region)
                 
-                # v5.65: Estabilización temporal (EMA) de oclusión para evitar parpadeo en videos
+                # v5.95: Estabilización temporal (EMA) de oclusión rápida — baja latencia para objetos en movimiento
                 if enable_temporal_smoothing and video_key:
                     prev_occ = self._occ_mask_ema.get(video_key)
                     if prev_occ is not None and prev_occ.shape == occ_mask_aligned.shape:
-                        occ_ema_alpha = 0.85 # v5.65: alta respuesta pero sin ruido
+                        occ_ema_alpha = 0.55 # v5.95: 0.55 permite 45% nuevo cada frame → ~3 frames de adaptación
                         occ_mask_aligned = cv2.addWeighted(occ_mask_aligned, occ_ema_alpha, prev_occ, 1.0 - occ_ema_alpha, 0)
                     self._occ_mask_ema[video_key] = occ_mask_aligned.copy()
 
@@ -2233,112 +3117,263 @@ class ProcessMgr:
                     if call_num % 100 == 1:
                         print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f}, blur=31)")
 
-                # v5.78: Erosión adaptativa — más suave en perfil / boca abierta
+                # v5.78: Erosión adaptativa — más suave en perfil / boca abierta / primer plano
                 ekernel = max(3, min(face_w, face_h) // 32) | 1
                 if is_profile:
+                    ekernel = max(3, ekernel - 1)  # v5.993: -2→-1 — menos contracción = menos marco visible en perfiles
+                if is_closeup and min(face_w, face_h) >= 180:
                     ekernel = max(3, ekernel - 2)
-                if mouth_open:
+                if mouth_open and mouth_open_ratio <= 0.45:
                     ekernel = max(3, ekernel - 1)
-                blur_sz = int(max(3, min(face_w, face_h) // 75)) | 1
-                kernel_e = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ekernel, ekernel))
-                final_mask = cv2.erode(final_mask, kernel_e, iterations=1)
-                final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
+                blur_sz = int(max(5 if is_closeup else 3, min(face_w, face_h) // (85 if is_closeup else 75))) | 1
+                if is_profile or is_closeup:
+                    # v5.995: sin erosión en perfil/closeup (causa marco). Dilatación mínima + blur + feather.
+                    dilate_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                    final_mask = cv2.dilate(final_mask, dilate_k, iterations=1)
+                    blur_sz = max(blur_sz, (min(face_w, face_h) // (7 if is_profile else 8)) | 1)
+                    blur_sz = min(blur_sz, 27)
+                    final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
+                    final_mask = self._feather_mask_edges(final_mask, feather_px=max(10, blur_sz // 2))
+                else:
+                    kernel_e = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ekernel, ekernel))
+                    final_mask = cv2.erode(final_mask, kernel_e, iterations=1)
+                    final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
 
-                # v5.65: Content feathering "Surgical-Seams" (offset 1) para eliminar blur residual
-                content_blur_sz = int(max(31, blur_sz + 1)) | 1
-                tent = np.clip(1.0 - np.abs(final_mask - 0.5) * 2.0, 0, 1.0)
-                if np.max(tent) > 0.01:
-                    blurred_face = cv2.GaussianBlur(warped_face, (content_blur_sz, content_blur_sz), 0)
-                    tent_3ch = cv2.merge([tent, tent, tent])
-                    warped_face = (warped_face.astype(np.float32) * (1.0 - tent_3ch) + blurred_face.astype(np.float32) * tent_3ch).astype(np.uint8)
+                # v5.83/94/993: Sin content-feather en elipse pura, primer plano o perfil — evita bloque/marco
+                if not skip_xseg and not is_closeup and not is_profile:
+                    content_blur_sz = int(max(13, min(25, blur_sz + 3))) | 1
+                    tent = np.clip(1.0 - np.abs(final_mask - 0.5) * 2.0, 0, 1.0)
+                    warp_gate = (np.max(warped_face.astype(np.float32), axis=2) > 8).astype(np.float32)
+                    warp_gate = cv2.GaussianBlur(warp_gate, (9, 9), 0)
+                    tent = tent * warp_gate
+                    if np.max(tent) > 0.01:
+                        blurred_face = cv2.GaussianBlur(warped_face, (content_blur_sz, content_blur_sz), 0)
+                        tent_3ch = cv2.merge([tent, tent, tent])
+                        warped_face = (warped_face.astype(np.float32) * (1.0 - tent_3ch) + blurred_face.astype(np.float32) * tent_3ch).astype(np.uint8)
 
                 # v5.75: Tail truncation mínimo 0.005 — solo elimina ruido, no mata caras pequeñas
                 final_mask = np.clip((final_mask - 0.005) / (1.0 - 0.005), 0, 1.0)
             else:
-                # Fallback de emergencia
-                print("[WARNING] M es None, usando fallback de elipse directa")
+                print("[WARNING] M es None, usando fallback elíptico (sin paste rectangular)")
                 warped_face = result_frame.copy()
-                warped_face[y1:y2, x1:x2] = cv2.resize(swapped_face_aligned, (x2-x1, y2-y1))
+                resized_face = cv2.resize(swapped_face_aligned, (face_w, face_h))
+                roi_mask = np.zeros((face_h, face_w), dtype=np.float32)
+                cv2.ellipse(
+                    roi_mask,
+                    (face_w // 2, face_h // 2),
+                    (max(4, int(face_w * 0.44)), max(4, int(face_h * 0.48))),
+                    0, 0, 360, 1.0, -1,
+                )
+                roi_mask = cv2.GaussianBlur(roi_mask, (21, 21), 0)
+                roi_mask_3 = cv2.merge([roi_mask, roi_mask, roi_mask])
+                roi_orig = warped_face[y1:y2, x1:x2].astype(np.float32)
+                warped_face[y1:y2, x1:x2] = (
+                    resized_face.astype(np.float32) * roi_mask_3 + roi_orig * (1.0 - roi_mask_3)
+                ).astype(np.uint8)
                 final_mask = create_soft_mask((x1, y1, x2, y2), (h_f, w_f), feather=40)
 
             mask_before_mouth = final_mask.copy() if final_mask is not None else None
+            mouth_force_paste = False
+            mouth_paste_strength = 0.0
 
             # ============================================
             # 5c. PRESERVACIÓN DE BOCA — con suelo de máscara (v5.79)
             # ============================================
             if mouth_open and mouth_region is not None and mask_before_mouth is not None:
+                mouth_occ_score = 0.0
+                mouth_content_score = 0.0
                 if is_profile:
                     m_blend = 0.48
                 elif is_closeup:
-                    m_blend = 0.52 if mouth_open_ratio > 0.55 else 0.58
+                    m_blend = 0.48
                 else:
-                    m_blend = 0.62
-                # v5.79: Reducir preservación en caras pequeñas para evitar máscara cero
+                    m_blend = 0.52
+                if mouth_open_ratio > 0.38:
+                    oral_strength = min(1.0, (mouth_open_ratio - 0.38) / 0.42)
+                    m_blend = min(0.92, m_blend * (1.0 + oral_strength * 0.90))  # v5.993: hasta ~91% original en boca muy abierta
                 if is_small_face:
                     m_blend *= 0.55
-                
+                if mask_before_mouth.mean() < 0.04:
+                    m_blend *= 0.70
+
                 try:
                     mouth_mask_aligned = create_mouth_preservation_mask(reference_region, mouth_region, blend_ratio=1.0)
-                    mouth_occ_score = np.mean(cv2.bitwise_and(occ_mask_aligned, mouth_mask_aligned))
-                    
-                    if mouth_occ_score > 0.02:
-                        m_blend = min(0.68, 0.38 + mouth_occ_score * 4.5)
+                    mouth_occ_score = float(np.mean(cv2.bitwise_and(occ_mask_aligned, mouth_mask_aligned)))
+                    # v5.998: Solo computar content_diff en boca abierta (>0.25) para evitar
+                    # que la diferencia natural entre dos personas distintas dispare el paste.
+                    if mouth_open_ratio > 0.25:
+                        mouth_content_score = self._detect_mouth_content_diff(raw_swapped_aligned, reference_region)
+                    else:
+                        mouth_content_score = 0.0
+                    mouth_signal = max(mouth_occ_score, mouth_content_score * 0.50)
+                    if mouth_signal > 0.004:
+                        occ_strength = min(1.0, mouth_signal * 12.0)
+                        m_blend = min(0.92, m_blend * (1.0 + occ_strength * 0.65))
+                        # Umbral más alto para evitar paste en diferencias faciales naturales
+                        if mouth_content_score > 0.080 or mouth_occ_score > 0.015:
+                            mouth_force_paste = True
+                            mouth_paste_strength = min(
+                                0.96,
+                                0.82 + mouth_content_score * 0.55 + mouth_occ_score * 1.0,
+                            )
                         if call_num % 50 == 1:
-                            print(f"[MOUTH_OBJECT] Objeto detectado (score={mouth_occ_score:.3f}). m_blend={m_blend:.2f}")
+                            print(
+                                f"[MOUTH_OBJECT] Contenido oral (occ={mouth_occ_score:.3f}, "
+                                f"diff={mouth_content_score:.3f}) → restore={m_blend:.2f}, "
+                                f"paste={mouth_paste_strength:.2f}"
+                            )
                 except Exception:
                     pass
 
-                mouth_mask = create_mouth_preservation_mask(original_frame, mouth_region, blend_ratio=1.0)
-                mouth_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-                mouth_mask = cv2.dilate(mouth_mask, mouth_kernel, iterations=2)
-                mouth_mask = cv2.GaussianBlur(mouth_mask, (15, 15), 0)
+                m_blend = float(np.clip(m_blend, 0.0, 0.92))
+                apply_mouth_preserve = m_blend >= 0.10
 
-                m_impact = (mouth_mask * m_blend).mean()
-                final_mask = np.clip(final_mask - (mouth_mask * m_blend), 0, 1.0)
-
-                if final_mask.max() < 0.08:
-                    final_mask = np.maximum(
-                        final_mask,
-                        np.clip(mask_before_mouth - mouth_mask * (m_blend * 0.42), 0.14, 1.0),
+                if apply_mouth_preserve:
+                    mouth_mask = self._mouth_mask_full_frame(
+                        original_frame, mouth_region, mouth_crop_origin, mouth_crop_size,
                     )
-                    if call_num % 40 == 1:
-                        print(f"[MASK_FLOOR] Frame {call_num}: suelo de máscara tras boca (max={final_mask.max():.3f})")
+                    mouth_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+                    mouth_mask = cv2.dilate(mouth_mask, mouth_kernel, iterations=2)  # v5.998: 3→2 — menos fuga a toda la cara, evita marco
+                    mouth_mask = cv2.GaussianBlur(mouth_mask, (15, 15), 0)
 
-                if call_num % 50 == 1:
-                    print(f"[QUALITY] Boca restaurada (impacto={m_impact:.3f}, fuerza={m_blend*100:.0f}%)")
+                    m_impact = (mouth_mask * m_blend).mean()
+                    final_mask = np.clip(final_mask - (mouth_mask * m_blend), 0, 1.0)
+                    # v5.997: Ensure at least 10% mask survives in mouth region to prevent marco
+                    min_mouth_residual = 0.10 * mouth_mask
+                    final_mask = np.maximum(final_mask, min_mouth_residual)
+
+                    floor_scale = 0.50 if mouth_open_ratio <= 0.45 else 0.30
+                    if final_mask.max() < 0.12:
+                        floor_mask = np.clip(
+                            mask_before_mouth - mouth_mask * (m_blend * floor_scale), 0, 1.0,
+                        )
+                        floor_mask = cv2.GaussianBlur(floor_mask, (31, 31), 0)
+                        final_mask = np.maximum(final_mask, floor_mask * 0.95)
+                        if call_num % 40 == 1:
+                            print(f"[MASK_FLOOR] Frame {call_num}: suelo suave tras boca (max={final_mask.max():.3f})")
+                    # v5.1001: Suelo facial completo — weight 0.95→2.50 (con mask_before_mouth≥0.117 alcanza 0.25, evitando safety recovery)
+                    if final_mask.max() < 0.22:
+                        face_residual = np.clip(mask_before_mouth * 0.90, 0.08, 1.0)
+                        face_residual = cv2.GaussianBlur(face_residual, (35, 35), 0)
+                        final_mask = np.maximum(final_mask, face_residual * 2.50)
+                        if call_num % 40 == 1:
+                            print(f"[MASK_FLOOR_BROAD] Frame {call_num}: suelo facial completo (max={final_mask.max():.3f})")
+
+                    if call_num % 50 == 1:
+                        print(
+                            f"[QUALITY] Boca (ratio={mouth_open_ratio:.2f}, occ={mouth_occ_score:.3f}, "
+                            f"impacto={m_impact:.3f}, restore={m_blend*100:.0f}%)"
+                        )
+                elif call_num % 50 == 1:
+                    print(
+                        f"[MOUTH_SKIP] Frame {call_num}: expresión oral fuerte "
+                        f"(ratio={mouth_open_ratio:.2f}) — swap visible, oclusión activa"
+                    )
 
             # ============================================
-            # 5b. SAFETY FALLBACK — si máscara < 0.30 regenera para evitar ghost/mosaic (v5.80)
+            # 5b. SAFETY FALLBACK — cobertura rota → regenerar elipse (v5.83)
             # ============================================
-            if final_mask is not None and final_mask.max() < 0.30:
-                if mask_before_mouth is not None and mask_before_mouth.max() > 0:
-                    # v5.80: Blur más grande y transición suave en lugar de clip duro a 0.12
+            M_inv_safe = cv2.invertAffineTransform(M) if M is not None else None
+            if final_mask is not None and self._mask_needs_safety_recovery(final_mask, face_w, face_h):
+                recovered = False
+                if mask_before_mouth is not None and not self._mask_needs_safety_recovery(mask_before_mouth, face_w, face_h):
                     final_mask = cv2.GaussianBlur(mask_before_mouth, (31, 31), 0)
-                    final_mask = np.clip(final_mask * 0.85, 0.06, 1.0)
-                    print(f"[MASK_RECOVER] Frame {call_num}: recuperada desde pre-boca (max={final_mask.max():.3f})")
+                    final_mask = np.clip(final_mask * 0.88, 0.08, 1.0)
+                    recovered = True
+                    if call_num % 20 == 1:
+                        print(f"[MASK_RECOVER] Frame {call_num}: pre-boca (mean={final_mask.mean():.3f}, max={final_mask.max():.3f})")
                 else:
-                    print(f"[MASK_SAFETY] Frame {call_num}: máscara <0.30. Regenerando elipse suave.")
-                    h_f_s, w_f_s = original_frame.shape[:2]
-                    # v5.80: Usar M_inv para posicionar elipse donde está warped_face real
-                    if M is not None:
-                        h_a_f, w_a_f = swapped_face_aligned.shape[:2]
-                        corners = np.array([[0, 0], [w_a_f, 0], [w_a_f, h_a_f], [0, h_a_f]], dtype=np.float32)
-                        corners_w = cv2.transform(corners.reshape(-1, 1, 2), M_inv).reshape(-1, 2)
-                        cx_s = int(np.mean(corners_w[:, 0]))
-                        cy_s = int(np.mean(corners_w[:, 1]))
-                        face_w_s = int(np.max(corners_w[:, 0]) - np.min(corners_w[:, 0]))
-                        face_h_s = int(np.max(corners_w[:, 1]) - np.min(corners_w[:, 1]))
-                        rx_s = max(30, int(face_w_s // 2 * 1.15))
-                        ry_s = max(30, int(face_h_s // 2 * 1.15))
-                    else:
-                        cx_s, cy_s = (x1 + x2) // 2, (y1 + y2) // 2
-                        rx_s = max(30, int((x2 - x1) // 2 * 1.2))
-                        ry_s = max(30, int((y2 - y1) // 2 * 1.2))
-                    final_mask = np.zeros((h_f_s, w_f_s), dtype=np.float32)
-                    cv2.ellipse(final_mask, (cx_s, cy_s), (rx_s, ry_s), 0, 0, 360, 1.0, -1)
-                    blur_size = max(31, int(min(rx_s, ry_s) * 0.3)) | 1
-                    final_mask = cv2.GaussianBlur(final_mask, (blur_size, blur_size), 0)
-                    final_mask = np.clip(final_mask, 0, 1.0)
+                    regen = self._regenerate_face_safety_mask(
+                        original_frame.shape[:2],
+                        swapped_face_aligned,
+                        M_inv_safe,
+                        bbox=(x1, y1, x2, y2),
+                        tight=is_closeup or is_profile,
+                    )
+                    if regen is not None:
+                        prev_swap_mask = getattr(self, '_last_swap_mask', {}).get(video_basename)
+                        if (
+                            prev_swap_mask is not None
+                            and prev_swap_mask.shape == regen.shape
+                            and (is_profile or is_closeup)
+                        ):
+                            # v5.997: reducir peso previo (0.42→0.15) para evitar ghosting
+                            # cuando el frame anterior también fue safety fallback
+                            final_mask = cv2.addWeighted(
+                                regen.astype(np.float32), 0.85,
+                                prev_swap_mask.astype(np.float32), 0.15, 0,
+                            )
+                        else:
+                            final_mask = regen
+                        recovered = True
+                if recovered and self._mask_needs_safety_recovery(final_mask, face_w, face_h):
+                    if is_profile or is_closeup:
+                        sb = max(15, (min(face_w, face_h) // 6) | 1)
+                        final_mask = cv2.GaussianBlur(final_mask, (sb, sb), 0)
+                        final_mask = np.clip(final_mask * 1.04, 0.08, 1.0)
+                        final_mask = self._feather_mask_edges(final_mask, feather_px=sb // 2)
+                        if (
+                            self._mask_needs_safety_recovery(final_mask, face_w, face_h)
+                            and mask_before_mouth is not None
+                        ):
+                            final_mask = cv2.GaussianBlur(mask_before_mouth, (35, 35), 0)
+                            final_mask = np.clip(final_mask * 0.92, 0.10, 1.0)
+                            final_mask = self._feather_mask_edges(final_mask, feather_px=sb // 2)
+                            if call_num % 20 == 1:
+                                print(f"[MASK_SAFETY] Frame {call_num}: perfil/closeup pre-boca blur (sin bbox)")
+                    if self._mask_needs_safety_recovery(final_mask, face_w, face_h) and not is_profile:
+                        boost = 1.18 if min(face_w, face_h) < 120 else 1.08
+                        final_mask = self._build_bbox_safety_mask(
+                            original_frame.shape[:2], x1, y1, x2, y2, scale=boost, tight=False,
+                        )
+                        if self._mask_needs_safety_recovery(final_mask, face_w, face_h):
+                            final_mask = self._build_bbox_safety_mask(
+                                original_frame.shape[:2], x1, y1, x2, y2, scale=boost * 1.20, tight=False,
+                            )
+                        if call_num % 20 == 1:
+                            cov = self._mask_face_coverage(final_mask)
+                            print(f"[MASK_SAFETY] Frame {call_num}: fallback bbox (mean={final_mask.mean():.3f}, cov={cov}, max={final_mask.max():.3f})")
+                    elif (
+                        self._mask_needs_safety_recovery(final_mask, face_w, face_h)
+                        and is_closeup and not is_profile
+                    ):
+                        boost = 0.92
+                        final_mask = self._build_bbox_safety_mask(
+                            original_frame.shape[:2], x1, y1, x2, y2, scale=boost, tight=True,
+                        )
+                        if call_num % 20 == 1:
+                            cov = self._mask_face_coverage(final_mask)
+                            print(f"[MASK_SAFETY] Frame {call_num}: closeup bbox tight (mean={final_mask.mean():.3f}, cov={cov})")
+                elif recovered and call_num % 20 == 1:
+                    cov = self._mask_face_coverage(final_mask)
+                    print(f"[MASK_SAFETY] Frame {call_num}: elipse OK (mean={final_mask.mean():.3f}, cov={cov}, max={final_mask.max():.3f})")
+                # v5.1002: widen ya aplicado globalmente en blend_mask (linea 3335)
+                # ya no se necesita widen adicional en final_mask post-recovery
+                if recovered and is_profile:
+                    prev_swap_mask = getattr(self, '_last_swap_mask', {}).get(video_basename)
+                    if prev_swap_mask is not None and prev_swap_mask.shape == final_mask.shape:
+                        final_mask = cv2.addWeighted(final_mask, 0.84, prev_swap_mask.astype(np.float32), 0.16, 0)
+                    final_mask = self._feather_mask_edges(
+                        final_mask, feather_px=max(10, (min(face_w, face_h) // 10)),
+                    )
+                if recovered and mouth_open and mouth_region is not None:
+                    try:
+                        mouth_mask_safe = self._mouth_mask_full_frame(
+                            original_frame, mouth_region, mouth_crop_origin, mouth_crop_size,
+                        )
+                        mouth_kernel_safe = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                        mouth_mask_safe = cv2.dilate(mouth_mask_safe, mouth_kernel_safe, iterations=1)
+                        mouth_mask_safe = cv2.GaussianBlur(mouth_mask_safe, (11, 11), 0)
+                        m_blend_safe = 0.22 if is_profile else 0.26
+                        if mouth_open_ratio > 0.45:
+                            m_blend_safe *= 0.45
+                        if is_small_face:
+                            m_blend_safe *= 0.65
+                        trial = np.clip(final_mask - mouth_mask_safe * m_blend_safe, 0, 1.0)
+                        if not self._mask_needs_safety_recovery(trial, face_w, face_h):
+                            final_mask = trial
+                    except Exception:
+                        pass
             # ============================================
             # 6. DEBUG MASK
             # ============================================
@@ -2350,7 +3385,24 @@ class ProcessMgr:
             # ============================================
             # 7. BLENDING FINAL (UNIFICADO)
             # ============================================
-            mask_3ch = cv2.merge([final_mask, final_mask, final_mask])
+            # v5.1002: widen_mask SIEMPRE en todas las caras — erosion+blur minimo
+            # (ekernel=3, blur_sz=3) produce transicion ~1.5px que causa marco visible.
+            # Widen_mask genera transicion >15px eliminando el borde.
+            if final_mask is not None:
+                blend_mask = self._widen_mask_for_blend(final_mask, face_w, face_h)
+                # v5.1004: Atenuación frontal superior — preserva flequillo/pelo del target
+                # en la zona alta de la cara (desde bbox top hasta ~35% abajo). Sin esto,
+                # la máscara incluye la frente completa y el swap reemplaza el flequillo
+                # del target por la frente sin pelo del source.
+                if not is_profile and face_h > 50:
+                    h, w = blend_mask.shape
+                    y_coords = np.arange(h)[:, np.newaxis]
+                    norm_y = (y_coords - float(y1)) / float(face_h)
+                    atten = np.clip((norm_y - 0.08) / 0.30, 0, 1.0)
+                    blend_mask = blend_mask * atten
+            else:
+                blend_mask = final_mask
+            mask_3ch = cv2.merge([blend_mask, blend_mask, blend_mask])
             
             # Atenuación por perfil, velocidad o "ghosting"
             velocity = getattr(self, '_last_velocity', 0)
@@ -2375,6 +3427,11 @@ class ProcessMgr:
 
             mask_3ch = mask_3ch * swap_weight
 
+            if blend_mask is not None:
+                warped_face = self._prime_warp_edges(
+                    warped_face, original_frame, blend_mask, face_w, face_h,
+                )
+
             result_frame = (warped_face.astype(np.float32) * mask_3ch + 
                            original_frame.astype(np.float32) * (1.0 - mask_3ch)).astype(np.uint8)
 
@@ -2382,31 +3439,77 @@ class ProcessMgr:
             if enable_temporal_smoothing and prev_frame_result is not None and not is_ghost:
                 if prev_frame_result.shape == result_frame.shape:
                     det_score = getattr(target_face, 'det_score', 1.0)
-                    # v5.81: avg_det_score para low-quality = EMA más fuerte
                     avg_det_t = getattr(self, f'_avg_det_score_{video_basename}', 0.5)
+                    # v5.95: Alpha reducido ~40% para menor inercia temporal — más responsivo a cambios de expresión/giro
                     if avg_det_t < 0.30:
-                        # Low quality: más suavizado temporal para reducir parpadeo
-                        alpha_prev = 0.40 if det_score < 0.4 else 0.30
+                        alpha_prev = 0.22 if det_score < 0.4 else 0.16
                     elif det_score < 0.3:
-                        alpha_prev = 0.35
+                        alpha_prev = 0.18
                     elif det_score < 0.4:
-                        alpha_prev = 0.28
+                        alpha_prev = 0.14
                     elif det_score < 0.6:
-                        alpha_prev = 0.22 if is_profile else 0.18
+                        alpha_prev = 0.06 if is_profile else 0.10
                     else:
-                        alpha_prev = 0.15 if is_profile else 0.10
+                        alpha_prev = 0.03 if is_profile else 0.06
+                    if is_profile:
+                        alpha_prev = min(alpha_prev, 0.04)
+                    if is_profile and velocity > 25:
+                        alpha_prev = min(alpha_prev, 0.02)
+                    frame_count_ema = getattr(self, f'_frame_count_{video_basename}', 0)
+                    if frame_count_ema <= getattr(self, f'_plan_change_smooth_until_{video_basename}', 0):
+                        alpha_prev = min(alpha_prev, 0.06)
+                    # v5.82: EMA alto + máscara débil = mosaico; reducir mezcla temporal
+                    if final_mask is not None and self._mask_needs_safety_recovery(final_mask, face_w, face_h):
+                        alpha_prev = min(alpha_prev, 0.08 if is_closeup else 0.10)
+                    if is_profile and is_closeup:
+                        alpha_prev = min(alpha_prev, 0.015)
+                    elif is_closeup:
+                        alpha_prev = min(alpha_prev, 0.06)
+                    elif is_profile:
+                        alpha_prev = min(alpha_prev, 0.025)
                     result_frame = self._masked_temporal_blend(
                         result_frame, prev_frame_result, final_mask, alpha_prev,
                     )
                     if call_num % 50 == 1:
                         print(f"[QUALITY] EMA masked (det={det_score:.2f}, avg_det={avg_det_t:.2f}, alpha={alpha_prev:.2f})")
 
+            if mouth_force_paste and mouth_region is not None and mouth_paste_strength > 0.01:
+                try:
+                    paste_mask = self._mouth_mask_full_frame(
+                        original_frame, mouth_region, mouth_crop_origin, mouth_crop_size,
+                    )
+                    paste_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+                    paste_mask = cv2.dilate(paste_mask, paste_kernel, iterations=2)
+                    paste_mask = cv2.GaussianBlur(paste_mask, (21, 21), 0)
+                    paste_mask = np.clip(paste_mask * mouth_paste_strength, 0, 1.0)
+                    paste_3ch = cv2.merge([paste_mask, paste_mask, paste_mask])
+                    result_frame = (
+                        original_frame.astype(np.float32) * paste_3ch
+                        + result_frame.astype(np.float32) * (1.0 - paste_3ch)
+                    ).astype(np.uint8)
+                    if call_num % 50 == 1:
+                        print(
+                            f"[MOUTH_PASTE] Frame {call_num}: píxeles originales en boca "
+                            f"(strength={mouth_paste_strength:.2f})"
+                        )
+                except Exception:
+                    pass
+
+            if blend_mask is not None:
+                result_frame = self._soothe_swap_ring(
+                    result_frame, original_frame, blend_mask, face_w, face_h,
+                )
+
             if call_num <= 3:
                 cv2.imwrite(os.path.join(debug_dir, f'04_final_result_f{call_num}.png'), result_frame)
 
-            mask_mean = final_mask.mean() if 'final_mask' in dir() else -1
+            mask_mean = final_mask.mean() if final_mask is not None else -1
+            mask_max = final_mask.max() if final_mask is not None else -1
+            if self._mask_needs_safety_recovery(final_mask, face_w, face_h) and call_num % 20 == 1:
+                cov = self._mask_face_coverage(final_mask)
+                print(f"[MASK_WARN] Frame {call_num}: cobertura crítica (mean={mask_mean:.4f}, cov={cov}, max={mask_max:.3f})")
             with open(os.path.join(os.path.dirname(__file__), '..', 'debug_swap.log'), 'a') as lf:
-                lf.write(f"[SWAP_END] Frame {call_num}: resultado devuelto. Mask mean={mask_mean:.3f}\n")
+                lf.write(f"[SWAP_END] Frame {call_num}: resultado devuelto. Mask mean={mask_mean:.3f} max={mask_max:.3f}\n")
 
             # Guardar estado para el siguiente frame
             if enable_temporal_smoothing and video_key:
@@ -2415,6 +3518,10 @@ class ProcessMgr:
             if not hasattr(self, '_last_swap_bbox'):
                 self._last_swap_bbox = {}
             self._last_swap_bbox[video_basename] = (x1, y1, x2, y2)
+            if final_mask is not None:
+                if not hasattr(self, '_last_swap_mask'):
+                    self._last_swap_mask = {}
+                self._last_swap_mask[video_basename] = final_mask.copy()
 
             return result_frame
             

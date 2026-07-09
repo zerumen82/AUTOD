@@ -81,16 +81,27 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
         cv2.circle(protect_mask, (int(w * 0.35), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
         cv2.circle(protect_mask, (int(w * 0.65), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
         
-        # v5.65: Gestión inteligente de boca en oclusión
-        # Protegemos la boca de la máscara de oclusión (para no preservar la boca original por error)
-        # EXCEPTO si hay un objeto claro (micro, mano) detectado por LAB
+        # v5.96: Gestión inteligente de boca en oclusión — revisada para detectar
+        # también manos/objetos con tono de piel (LAB<65) que antes pasaban inadvertidos.
+        # Protegemos la boca de detail_mask SOLO si no hay NINGUNA señal de oclusión real.
         mouth_area = np.zeros((h, w), dtype=np.uint8)
-        cv2.ellipse(mouth_area, (w//2, int(h*0.68)), (int(w*0.20), int(h*0.12)), 0, 0, 360, 255, -1)
+        cv2.ellipse(mouth_area, (w//2, int(h*0.70)), (int(w*0.24), int(h*0.15)), 0, 0, 360, 255, -1)
         
         has_mouth_object = False
+        # 1. Objetos muy diferentes (LAB>65) — micro, comida, etc.
         if 'object_mask' in locals():
-            mouth_occ_score = np.mean(cv2.bitwise_and(object_mask, mouth_area))
-            if mouth_occ_score > 5: # Objeto detectado
+            mouth_obj_score = np.mean(cv2.bitwise_and(object_mask, mouth_area))
+            if mouth_obj_score > 1.5:
+                has_mouth_object = True
+        # 2. Objetos con tono de piel (LAB>28) — manos, brazos
+        if not has_mouth_object and 'skin_occ_mask' in locals():
+            mouth_skin_score = np.mean(cv2.bitwise_and(skin_occ_mask, mouth_area))
+            if mouth_skin_score > 1.5:
+                has_mouth_object = True
+        # 3. Textura cruda en boca (Sobel) — captura manos con color de piel casi idéntico
+        if not has_mouth_object:
+            mouth_tex_score = np.mean(cv2.bitwise_and(texture_mask, mouth_area))
+            if mouth_tex_score > 1.8:  # v5.997: 2.5→1.8 — captura objetos más pequeños en boca (lengua, etc.)
                 has_mouth_object = True
         
         if not has_mouth_object:

@@ -9,7 +9,81 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.75 (current) — Safety fallback BEFORE mouth preserve + mosaico fix + tail 0.005
+### v5.99 — Boca viva al hablar + perfiles sin rayas
+- **Fix de oral_strength insuficiente (v5.98 seguía fallando)**: v5.98 usaba `m_blend *= (0.85 + oral_strength * 0.15)` — el multiplicador máximo era 1.0×, por lo que m_blend nunca superaba el base 0.48. Con clip a 0.48, la boca era máximo 48% original (52% swap), y el swap (expresión neutral del source) seguía dominando. Ahora: `m_blend = min(0.72, m_blend * (1.0 + oral_strength * 0.50))` con clip a 0.72. Boca muy abierta → ~67% original (vs 48% en v5.98), el original domina sobre el swap.
+- **Fix de rayas en perfiles**: M-EMA de perfiles `m_alpha *= 0.35` → `0.50`, ahora 25-35% transformada nueva por frame (vs 17-24%). Erosión `ekernel-2` → `ekernel-1` para máscara más limpia. Blur mínimo 5px para perfiles. Reduce drásticamente las rayas/artefactos en bordes de máscara en ángulos de perfil.
+- **Resultado real (1472 frames, 766s, 1.85fps)**: Perfiles detectados con sim~0.12. QUALITY log muestra restore=48% constante (frames con ratio<0.38). Frames 938 (ratio=0.62) y 950 (ratio=0.72) activan oral_strength boost → ~67% original. **Usuario reporta**: "reborde en el perfil" (causado por ekernel-1 excesiva) y "falla un poco aún en la boca" (boost insuficiente). Objetos en boca no detectados (occ_score=0.000-0.010).
+
+### v5.991 (failed) — ekernel revert + oral boost insufficient
+
+### v5.998 — Marco + ruido oclusión boca
+- **Fix de marco pequeño (reapareció en algunos fotogramas)**: `mouth_mask` dilatación 9×9×3 cubría toda la cara en caras pequeñas (119×153px). Tras restar `mouth_mask * m_blend`, la máscara entera colapsaba (`max<0.12`). `MASK_FLOOR` restauraba solo 0.10 en zona bucal, pero `_mask_needs_safety_recovery` veía `max=0.100<0.25` y regeneraba elipse desalineada → marco. Cambios: dilatación `3→2` iteraciones; nuevo `MASK_FLOOR_BROAD` añade 0.18×`mask_before_mouth` en toda la cara si `max<0.22`, evitando safety recovery.
+- **Fix de ruido oclusión boca (paste falso en casi todos los frames)**: `mouth_occ_score` era 0.006-0.010 (residual de occ_mask solapando mouth_mask), activando paste vía `>0.003`. Umbral `0.003→0.015`, peso `*2.0 → *1.0`.
+- **Resultado real (1472 frames, 936.82s, 1.51fps)**: Marco grande eliminado. **Usuario**: "de calidad mucho mucho mejor!!, solo que al final del video en algunos fotogramas sale un borde de la mascara pero muy ligero". MASK_FLOOR_BROAD se activó en Frame 1241 (`max=0.100`) pero el factor 0.18 es insuficiente: `face_residual * 0.18 = 0.065` (con mask_before_mouth~0.40), no supera el floor de 0.100 de MASK_FLOOR. Safety recovery aún se activa (frames 1241, 1381) generando "elipse OK" pero con borde visible. Mouth occ threshold 0.015 filtra correctamente el ruido de 0.006-0.010 (paste=0.00). Diff-based paste solo en frames con ratio>0.25.
+
+### v5.999 (completed) — Fix MASK_FLOOR_BROAD weight 0.18→0.60
+- **Fix de borde ligero de máscara (persiste en algunos frames al final del video)**: MASK_FLOOR_BROAD multiplicaba por 0.18, insuficiente para levantar `final_mask.max()` por encima de 0.25 (necesario para evitar safety recovery). Con `mask_before_mouth.max()~0.40`, `face_residual * 0.18 = 0.065`, muy por debajo del floor actual de 0.100. Ahora: `face_residual * 0.60` — con mask_before_mouth=0.40 da 0.216 (>0.22 threshold), y para mask_before_mouth≥0.47 da >0.25 evitando safety recovery.
+- **Resultado real (1472 frames, 933.96s, 1.52fps)**: MASK_FLOOR_BROAD activado en Frame 1241 pero `max=0.100` todavía — insuficiente porque `mask_before_mouth.max()` es ≤0.18 al final del vídeo (cara pequeña, XSeg degradada). `face_residual * 0.60 = clip(0.18*0.90, 0.08, 1.0) * 0.60 = 0.097`, no supera el floor 0.100. Safety recovery dispara en frames 1241 y 1381 ("elipse OK") generando el marco rectangular visible. Usuario reporta: "sigue saliendo en algunos fotogramas como un marco en la mascara, rectangular...pero en pocos frames y no demasiado marcado. pero quiero dejarlo perfecto".
+
+### v5.1001 (current) — Fix marco definitivo + tracking responsivo
+- **Fix de marco visible (v5.1000: _feather_mask_edges era contraproducente, broad 0.95 insuficiente)**: Causa raíz real: `mask_before_mouth.max()≤0.12` en caras pequeñas (Frame 1241). Ni siquiera *0.95 levanta el floor porque `face_residual * 0.95 = 0.100 ≤ MASK_FLOOR floor 0.100`. Peor aún: `_feather_mask_edges` (distance transform) multiplica valores del borde por rampa 0–1 → ENDURECE la transición, no la suaviza. Tres cambios:
+  1. **MASK_FLOOR_BROAD weight 0.95→2.50**: Con `mask_before_mouth=0.117`: `face_residual * 2.50 = clip(0.117*0.90,0.08,1.0)*2.50 = 0.263 ≥ 0.25`, evitando safety recovery. Con mask_before_mouth normal el clip a 1.0 no tiene efecto adverso (solo se ejecuta si `final_mask.max()<0.22`).
+  2. **Eliminar `_feather_mask_edges` para no-perfiles**: Distance transform producía rampa 0–1 en el borde de la máscara → multiplicaba valores externos por <1 → reducía aún más la transición → borde MÁS visible. Reemplazado con `_widen_mask_for_blend` que dilata + blur doble + transición ancha.
+  3. **`_widen_mask_for_blend` en toda máscara recuperada (no solo perfiles)**: Blur (`max(21, face//4|1)` cap 45) + dilate(3,3) + blur. Máscara se extiende más allá de la cara con transición suave → el borde se funde con el fondo sin marco visible.
+- **Fix de swap congelado en ghost tracking**: Ghost tracking predecía la nueva posición de la cara (desplaza bbox con dx, dy del kalman), pero el handler `is_ghost` usaba `last_bbox` (posición vieja del último swap exitoso) en vez de la bbox predicha. El swap se pegaba en la posición anterior mientras la cara real ya se había movido → swap "congelado" en posición incorrecta. Ahora ghost y skip-hold usan `(x1,y1,x2,y2)` de `target_face.bbox` (que para ghost_face es la bbox desplazada con dx,dy de la predicción). Además se actualiza `_last_swap_bbox` en cada hold para que el siguiente frame use la posición corregida.
+- **Fix de tracking lento (M-EMA)**: `m_alpha` para movimiento rápido (m_diff≥5.0) reducido de 0.50→0.35 (35% matriz anterior, 65% nueva). Para movimiento lento (m_diff<5.0): 0.70→0.60. Perfiles mantienen `*0.72`. El tracking sigue suave sin jitter pero ahora responde ~50% más rápido a cambios de posición/rotación.
+- **misma velocidad**: Solo cambios de coordenadas y alpha, sin inferencia extra.
+
+### v5.1000 (completed) — Fix marco rectangular: broad floor 0.60→0.95 + ellipse softer + feathering (fallido)
+- **Fix de marco rectangular persistente (v5.999 seguía mostrando safety recovery en frames 1241 y 1381)**: Causa raíz: `mask_before_mouth.max()` es ≤0.18 en caras pequeñas al final del vídeo (XSeg degradada). Con weight 0.60, `face_residual * 0.60 = clip(0.18*0.90, 0.08, 1.0) * 0.60 = 0.097`, insuficiente para superar el floor 0.100 de MASK_FLOOR y alcanzar el umbral 0.25 que evita safety recovery. Tres cambios:
+  1. **MASK_FLOOR_BROAD weight 0.60→0.95**: `face_residual * 0.95 = clip(0.18*0.90, 0.08, 1.0) * 0.95 = 0.154`, supera el floor 0.100. Para `mask_before_mouth≥0.29`: `0.29*0.90*0.95 = 0.248 ≥ 0.25`, evita safety recovery. Para `mask_before_mouth<0.29`: XSeg ya falló, safety recovery es el fallback correcto.
+  2. **Ellipse blur aumentado (0.26→0.35, min 17→21)**: La elipse de safety recovery ahora tiene transición más ancha (~10px vs ~8px en cara 120px), reduciendo el contraste del borde visible.
+  3. **_feather_mask_edges en toda máscara recuperada (no solo perfiles)**: Suaviza el borde de la elipse con distance transform, eliminando el aspecto "rectangular". Antes solo perfiles tenían este feathering post-recovery.
+- **Resultado real (1472 frames, 950.35s, 1.49 fps)**: Frame 1241 `MASK_FLOOR_BROAD max=0.100` — weight 0.95 NO levanta el floor (mismo 0.100 que v5.999). `mask_before_mouth.max()≤0.12` → `face_residual*0.95=0.100`. Safety recovery sigue disparando en frames 1241 y 1381. **Usuario reporta**: "sigue saliendo un marco o las líneas de un marco". `_feather_mask_edges` es contraproducente (endurece borde). **Fallido** — v5.1001 corrige con weight 2.50 + widen_mask.
+
+### v5.997 — M-EMA 0.72 perfil + MASK_FLOOR 10% + content diff restrict
+- **Fix de marco en perfiles**: M-EMA 0.42→0.72 (seguimiento más directo, menos ghosting).
+- **Fix de máscara colapsada por boca (MASK_FLOOR)**: `floor_mask = mask_before_mouth - mouth_mask * (m_blend * floor_scale)` restaura geometría real, no solo 0.10 plano.
+- **Fix de small_face m_blend para perfil**: 0.55→0.70.
+- **Fix content diff**: Solo computa en boca abierta (>0.25). Threshold 0.038→0.080. Peso 0.85→0.50.
+- **Resultado log real (1472f, 956s)**: Perfiles mejoran (sim 0.12-0.16). Usuario: "ha mejorado el tema de perfiles... pero ha vuelto a salir un pequeño marco en algunos fotogramas, y aun le queda un poco el tema de la oclusion y la boca".
+
+### v5.992 — Perfiles sin marco + boca/lengua viva
+- **Fix de marco en perfiles (marco visible)**: El "marco" marginal en algunos frames persistía pese a ekernel-2 (v5.991). Causa real: el M-EMA `*0.50` daba demasiado peso al frame anterior (35% prev), combinado con enhancer EMA 0.55, creaba ghosting en bordes de máscara cuando la transformada cambiaba. `m_alpha *= 0.50` → `0.42` (menos prev = seguimiento más directo = menos ghosting). Blur mínimo `5` → `7` para bordes de máscara más suaves.
+- **Fix de boca/lengua/objetos**: Tres cambios:
+  1. Boost oral `0.60x` → `0.80x`, clip `0.75` → `0.80`. Ratio=0.72 → `m_blend = min(0.80, 0.48 * (1 + 0.810 * 0.80)) = min(0.80, 0.791) = 0.791 → ~79% original` (vs ~71% v5.991, vs ~67% v5.99, vs ~47% v5.98).
+  2. Lógica de oclusión INVERTIDA: antes reducía m_blend cuando detectaba objeto en boca (asumiendo que el objeto debía evitarse). Ahora INCREMENTA m_blend (`m_blend = min(0.85, m_blend * (1 + occ_strength * 0.50))`) — más original cuando hay lengua/objeto, para preservar lo que está en la boca. Threshold bajado `0.02` → `0.01` para capturar objetos más pequeños.
+  3. Dilatación de mouth_mask `2` → `3` iteraciones para cubrir lengua sobresaliente.
+- **Se mantiene**: ekernel-2 en perfiles, enhancer EMA 0.55, base m_blend 0.48 closeup/perfil.
+- **Resultado esperado**: Perfiles sin marco visible, boca natural con ~79% original en boca muy abierta (ratio=0.72), lengua y objetos en boca preservados por boost + occlusión invertida + máscara más ancha. Misma velocidad (~1.8-1.85fps).
+
+### v5.97 — Boca viva en closeups + oclusión fina (superceded by v5.98)
+- **Fix de boca congelada en closeup**: `m_blend` base para closeup era 0.36 (36% original, 64% swap). Con el multiplicador oral_strength `max(0.22, ...)`, bocas muy abiertas (ratio>0.70) reducían a ~13% original — el swap dominaba y la boca se veía mal al hablar. Ahora: closeup y perfil `m_blend=0.48` (máximo del clip), y el suelo oral_strength sube a `max(0.35, ...)`. Boca muy abierta → ~17% original (vs 13%); boca normal → ~48% original (vs 36%). Más expresión oral fiel.
+- **Fix de oral_strength floor**: `max(0.22, 1.0 - oral_strength * 0.78)` → `max(0.35, ...)`. La preservación de boca ya no colapsa a ~8% cuando oral_strength=1.0. Ahora floor=0.35 asegura que al menos 35% de la base sobrevive incluso en bocas extremas.
+
+### v5.96 — Perfiles precisos + detección manos/objetos en boca
+- **Fix de perfiles raros**: `_is_profile_face()` — antes cualquier cara con ojos ligeramente juntos (`eye_ratio<0.22`) O cabeza inclinada (`eye_y_ratio>0.45`) se clasificaba como perfil, activando embeddings débiles y M-EMA congelado. Ahora requiere `eye_ratio<0.20` O ambas señales (`eye_ratio<0.28 AND eye_y_ratio>0.40`) — menos falsos perfiles en caras casi frontales.
+- **Fix de identidad en perfiles**: En `_resolve_swap_embedding`, la match_emb con similitud baja (~0.12-0.18) tenía 65% de peso, diluyendo el master embedding. Ahora: match_sim≥0.18 → master 25% / profile_master 30% / match 45%; match_sim≥0.12 → master 55% / match 45% (antes 35/65). Más identidad real del source incluso en ángulos difíciles.
+- **Fix de color bleeding en perfiles**: `color_match` perfil se redujo de `min(0.16, base*1.25)` → `min(0.14, base*0.85)`. Antes permitía más fuga de color del target, haciendo que el perfil se viera "lavado" o con tono incorrecto. Ahora menos bleeding = más parecido al source.
+- **Fix de M-EMA congelado en perfiles**: `m_alpha *= 0.10` → `m_alpha *= 0.35`. La matriz de transformación apenas se actualizaba (7% nuevo por frame). Ahora se actualiza al 24% — seguimiento real de cara en movimiento.
+- **Fix de manos/objetos no detectados en la boca**: En `detect_foreground_occlusion`, la mouth_area solo revisaba `object_mask` (LAB>65). Manos con tono de piel similar (LAB<28) pasaban inadvertidas, y la detail_mask se removía de la boca, perdiendo la oclusión. Ahora se revisan 3 señales: object_mask (LAB>65) → skin_occ_mask (LAB>28, manos) → texture_mask cruda (Sobel, captura incluso manos con color de piel idéntico). Si cualquiera supera su umbral, la detail_mask se mantiene en la boca.
+- **Resultado real (video 1472f, closeup 1280×720)**: 940.87s / 1.51 fps (vs v5.95: 999s / 1.42 fps). 100% completion. `restore=36%` constante = m_blend=0.36 para closeup. Perfiles detectados en frames 831-935 y 996-1023 con max_sim~0.12. Mouth occlusion scores siempre 0.000-0.010 (sin oclusión real en este video). La oclusión funcionó perfectamente, pero **la boca falló al hablar** — m_blend demasiado bajo para preservar expresión oral. (v5.97 corrige esto.)
+
+### v5.95 — Fix de oclusiones, boca congelada y EMA cascade (v5.95)
+- **Fix de frames congelados por EMA cascade**: Reducidas todas las EMAs en cadena que causaban inercia visual. Antes cada frame pasaba por 5 EMAs (enhancer 0.80, color 0.72, brillo 0.80, oclusión 0.85, temporal 0.40), resultando en solo ~20-30% de cara nueva visible. Ahora enhancer→0.55, color→0.58, brillo→0.45, oclusión→0.55, temporal reducido ~40% — el frame nuevo tiene ~55-75% de peso real.
+- **Fix de oclusión demasiado lenta**: `occ_ema_alpha` 0.85→0.55 — la máscara de oclusión ahora se adapta en ~3 frames en vez de ~7. Mejor respuesta a manos/objetos que cruzan la cara.
+- **Fix de oclusión oral destruyendo preservación de boca**: Antes `mouth_occ_score > 0.05` forzaba `m_blend = min(m_blend, 0.18)`, colapsando la preservación. Ahora `m_blend = min(m_blend, 0.30)` y el floor mínimo subió de 0.15→0.30.
+- **Fix de mouth preservation floor**: Umbral de activación 0.08→0.12, floor mínimo 0.14→0.18, floor_scale 0.42/0.22→0.50/0.30. La boca nunca se queda sin máscara aunque las condiciones sean adversas.
+- **Timeout en skip-hold**: Antes `det_score < 0.05 && velocity > 100` congelaba indefinidamente. Ahora timeout de 12 frames, después fuerza swap nuevo.
+- **m_blend clip mínimo**: 0.12→0.10 para que más casos activen preservación.
+
+### v5.79 — Fix de padding controlado en caras de origen (v5.79)
+- **Fix de falsos negativos en caras al borde (padding)**: Corregida validación en `roop/face_util.py` (`extract_face_images`). Antes requería que la cara detectada en la imagen acolchada ocupara el 15% del total (`fw > w * 0.15`), descartando caras nítidas de 50-100px en fotos de origen medianas o grandes (de 768x768 a 3000x2000). Ahora el límite se capa a un mínimo absoluto seguro de 35px (`fw > min(w * 0.15, 35)`). Recupera decenas de caras de origen válidas (ej. `P1070467_0.jpg`, `P1160030.jpg`, `[002449]_0.jpg`) antes perdidas.
+
+### v5.78 — Single-Best / Configuración General
+- **ProcessMgr v5.78**: Optimizaciones en la integración de oclusión, blend de boca dinámico y unsharp moderado para RT-3060Ti.
+
+### v5.75 — Safety fallback BEFORE mouth preserve + mosaico fix + tail 0.005
 - **Safety fallback antes de mouth preserve**: Bug crítico: mouth preservation (restar `mouth_mask * 0.70` de final_mask) causaba que la máscara llegara a cero en bocas abiertas en caras pequeñas. El safety fallback (que iba DESPUÉS) sobreescribía toda la máscara, PERDIENDO la preservación de boca. Ahora safety va ANTES y mouth reduce sobre máscara garantizada no-cero. Soluciona 10/130 frames que perdían boca preservada.
 - **Safety ellipse radius 120→30**: Para cara de 63×82px, la elipse antes era 240×240 (4× la cara, creaba mosaico). Ahora ~68×70 (10% > bbox).
 - **Tail truncation 0.03→0.005**: 6× menos frames activan safety fallback. Solo elimina ruido, no mata caras pequeñas.
@@ -75,7 +149,8 @@
 - Frame 2 (cara ~96×167px): v5.73 daba mask_mean=0.000; v5.75 lo corrige con erosión 3×3 adaptativa + safety fallback.
 
 ## Key Decisions
-- **m_blend 0.85→0.70**: La boca es el área más expresiva; restaurarla al target al 85% tapaba identidad source. 70% es el sweet spot — suficiente para no perder calidad, máximo para identidad.
+- **m_blend 0.85→0.70→0.48**: La boca necesita preservar expresión oral. En closeup, m_blend=0.36 era insuficiente (solo 36% original). 0.48 es el máximo del clip.
+- **oral_strength invertido (v5.98)**: Antes reducía m_blend con boca abierta (m_blend *= max(0.35, 1.0 - oral_strength * 0.78) = ~17% para boca muy abierta). Ahora escala de 0.85× a 1.0× con oral_strength, dando ~47% incluso en boca extremadamente abierta.
 - **Unsharp 6.8→2.5**: Priorizar identidad sin halos en close-ups. El sharpening extremo (5.8× neto) creaba pixelación; 1.5× da nitidez natural.
 - **Erosión adaptativa**: Kernel proporcional al tamaño de cara (3×3 para chicas, 7+×7+ para grandes). Evita matar máscaras en caras pequeñas.
 - **Tail truncation 0.05→0.03**: 2% más retención en bordes, crítico para preservar máscara en caras pequeñas.
@@ -84,17 +159,27 @@
 - enhancer_blend via slider (default 0.95) — respeta UI, no hardcode
 
 ## Next Steps
-- Testear v5.73 con m_blend 0.70 — debe dar más identidad source en boca sin perder calidad
-- Si aún no es suficiente: enhancer_blend 0.70→0.60 (más swap crudo, menos GFPGAN)
+- Testear v5.1001 — confirmar que MASK_FLOOR_BROAD 2.50 evita safety recovery (frames 1241, 1381 no disparan) y _widen_mask_for_blend elimina el marco si safety recovery es inevitable
+- Confirmar que ghost tracking ya no congela el swap en posición incorrecta al moverse la cabeza
+- Confirmar que M-EMA reducido (0.35 para m_diff≥5.0) mejora tracking en movimiento rápido sin introducir jitter
+- Si la boca sigue sin naturalidad (demasiado swap): reducir aún más el threshold de mouth_occ_score a 0.020 o eliminar el boost por occ
 
 ## Critical Context
-- Log v5.73 (115 imágenes Grok): 2m01s, enhancer 0.70, mask mean=0.010–0.111, unsharp 2.5, m_blend 0.70 ✅
+- v5.99: closeup y perfil `m_blend=0.48` (antes 0.36/0.40), oral_strength boost `* (1.0 + oral*0.50)` clip `0.72` → ~67% original en boca muy abierta
+- v5.991: boost `* (1.0 + oral*0.60)` clip `0.75` → ~71% original. Erosión perfil revertida ekernel-1 → ekernel-2 para evitar reborde
+- v5.992: boost `* (1.0 + oral*0.80)` clip `0.80` → ~79% original. Occlusión INVERTIDA + mouth_mask dilate 3 iters. M-EMA perfil `0.50→0.42`, blur 5→7
+- v5.96: Perfiles con embedding más puro (master 55% vs match 45%), color bleeding reducido (base*0.85), M-EMA activo (0.35 vs 0.10)
+- v5.96: Mouth occlusion revisa 3 señales (object_mask, skin_occ_mask, texture_mask) — captura manos con color de piel casi idéntico
+- v5.997: M-EMA perfil 0.42→0.72, MASK_FLOOR con floor_mask basado en mask_before_mouth, content_diff restringido a ratio>0.25, threshold 0.038→0.080, peso 0.85→0.50
+- v5.998: mouth_occ threshold 0.003→0.015, peso occ 2.0→1.0, dilatación mouth_mask 3→2 iteraciones, MASK_FLOOR_BROAD añade 0.18×mask_before_mouth en toda la cara (max<0.22) para evitar safety recovery
+- v5.999: MASK_FLOOR_BROAD weight 0.18→0.60 para que con mask_before_mouth≥0.47 final_mask.max()≥0.25 y evite safety recovery
+- v5.1000: MASK_FLOOR_BROAD weight 0.60→0.95, ellipse blur 0.26→0.35 (min 17→21), feathering en toda máscara recuperada
 - `dna_mix=1.0` ya inyecta 100% Master Embedding — no hay más margen por ese lado.
-- `DEBUG_MASK mean` saltó de ~0.036 a ~0.111 en frames con cara grande (mask expansion efectiva).
 - enhancer_blend via slider (default 0.95) en ProcessMgr.py:1736
 
 ## Relevant Files
-- `roop/ProcessMgr.py`: Pipeline principal — v5.75 erosión adaptativa 3-7+, tail truncation 0.005, safety fallback ANTES de mouth preserve, m_blend 0.70, unsharp 2.5, mask expandida 0.75/0.70, single-best embedding, dna_mix=1.0, enhancer_blend 0.70
+- `roop/ProcessMgr.py`: Pipeline principal — v5.99 m_blend closeup/perfil=0.48, oral boost `* (1.0 + oral*0.50)` clip 0.72; v5.991 boost `* (1.0 + oral*0.60)` clip 0.75, ekernel perfil revertido a ekernel-2; v5.992 boost `* (1.0 + oral*0.80)` clip 0.80, M-EMA 0.42, blur_min 7, occlusión invertida, mouth_mask dilate 3x; v5.998 occ threshold 0.003→0.015, peso occ 2.0→1.0, dilatación 3→2, MASK_FLOOR_BROAD; v5.999 MASK_FLOOR_BROAD 0.18→0.60; v5.1000 MASK_FLOOR_BROAD 0.60→0.95, ellipse blur 0.26→0.35 (min 17→21), feathering post-recovery universal
+- `roop/quality_enhancements.py`: `detect_foreground_occlusion()` — v5.96 mouth revisa 3 señales (object+skin_occ+texture_mask)
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
 - `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas
 

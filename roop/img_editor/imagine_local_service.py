@@ -89,12 +89,6 @@ class LocalImagineService:
         # Traducción al estilo Imagine (Google + fallbacks)
         prompt = translate_prompt(instruction)
 
-        # Para LongCat usamos un prefijo especial observado en logs ("Instruction: ...")
-        if self.engine in ("longcat", "longcat_full"):
-            final_prompt = f"Instruction: {prompt}"
-        else:
-            final_prompt = prompt
-
         mgr = self._get_manager()
 
         try:
@@ -102,7 +96,7 @@ class LocalImagineService:
             # El usuario no necesita configurar nada: sube foto + escribe instrucción = funciona.
             result, msg, _mask = mgr.generate_intelligent(
                 image=image,
-                prompt=final_prompt,
+                prompt=prompt,
                 engine=self.engine,
                 face_preserve=face_preserve,
                 use_rewriter=True,

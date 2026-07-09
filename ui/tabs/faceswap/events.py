@@ -543,18 +543,82 @@ def wire_events(ui_comp):
         return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total_faces, "input"))
     
     _src_processing = False
+    _src_last_key = None
+    _src_last_finished_at = 0.0
+
+    def _src_files_key(files):
+        if not files:
+            return ()
+        paths = []
+        for f in files:
+            p = f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
+            paths.append(os.path.normpath(p))
+        return tuple(sorted(paths))
+
+    def _src_pagination_outputs():
+        total_faces = len(ui.globals.ui_input_thumbs)
+        return (
+            logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"),
+            logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"),
+            *logic.update_pagination_buttons(total_faces, "input"),
+        )
+
+    def _src_loading_outputs():
+        if ui.globals.ui_input_thumbs:
+            return _src_pagination_outputs()
+        return (
+            [],
+            "⏳ Cargando caras...",
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+        )
+
     def _safe_on_src_changed(files):
-        nonlocal _src_processing
+        nonlocal _src_processing, _src_last_key, _src_last_finished_at
+        files_key = _src_files_key(files)
+        now = time.time()
+
         if _src_processing:
-            return
+            return _src_loading_outputs()
+
+        if files_key and files_key == _src_last_key and (now - _src_last_finished_at) < 3.0:
+            return _src_pagination_outputs()
+
         _src_processing = True
         try:
-            return on_src_changed(files)
+            result = on_src_changed(files)
+            _src_last_key = files_key
+            _src_last_finished_at = time.time()
+            return result
+        except Exception as exc:
+            print(f"[UI] Error cargando sources: {exc}")
+            return (
+                [],
+                f"❌ Error cargando caras: {exc}",
+                gr.update(interactive=False),
+                gr.update(interactive=False),
+            )
         finally:
             _src_processing = False
 
-    ui_comp["bt_srcfiles"].change(fn=_safe_on_src_changed, inputs=[ui_comp["bt_srcfiles"]], outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
-    ui_comp["bt_srcfiles"].upload(fn=_safe_on_src_changed, inputs=[ui_comp["bt_srcfiles"]], outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
+    _src_outputs = [
+        ui_comp["input_faces"],
+        ui_comp["input_page_info"],
+        ui_comp["bt_input_prev"],
+        ui_comp["bt_input_next"],
+    ]
+    ui_comp["bt_srcfiles"].upload(
+        fn=_safe_on_src_changed,
+        inputs=[ui_comp["bt_srcfiles"]],
+        outputs=_src_outputs,
+        show_progress="hidden",
+    )
+    ui_comp["bt_srcfiles"].change(
+        fn=_safe_on_src_changed,
+        inputs=[ui_comp["bt_srcfiles"]],
+        outputs=_src_outputs,
+        show_progress="hidden",
+    )
 
     def on_dest_changed(files):
         state.current_target_page = 0
@@ -713,7 +777,7 @@ def on_target_page_change(delta):
     state.current_target_page = max(0, min(max(0, (total-1)//state.FACES_PER_PAGE), state.current_target_page + delta))
     return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total, "target"))
 
-async def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer, source_random):
+def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer, source_random):
     from ui.tabs.faceswap.logic import start_swap
     from ui.job_cancel import clear as clear_cancel, SCOPE_FACESWAP
     clear_cancel(SCOPE_FACESWAP)

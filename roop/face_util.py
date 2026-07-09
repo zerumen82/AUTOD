@@ -339,8 +339,8 @@ def extract_face_images(
                     for f in faces_padded:
                         fw = f.bbox[2] - f.bbox[0]
                         fh = f.bbox[3] - f.bbox[1]
-                        # Evitar ruido: la cara debe tener un tamaño mínimo proporcional al original
-                        if fw > w * 0.15 and fh > h * 0.15:
+                        # Evitar ruido: la cara debe tener un tamaño mínimo (capado en 35px) para ser real
+                        if fw > min(w * 0.15, 35) and fh > min(h * 0.15, 35):
                             f.bbox[0] -= pad_w
                             f.bbox[2] -= pad_w
                             f.bbox[1] -= pad_h

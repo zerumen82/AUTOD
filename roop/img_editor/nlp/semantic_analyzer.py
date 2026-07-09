@@ -128,64 +128,46 @@ class SemanticIntentAnalyzer:
             
         print("[NLP] Analizador semántico listo.")
 
-# Singleton global para evitar recargas y pings repetidos a huggingface
-_global_semantic_analyzer = None
-
-def get_semantic_analyzer():
-    global _global_semantic_analyzer
-    if _global_semantic_analyzer is None:
-        _global_semantic_analyzer = SemanticIntentAnalyzer()
-    return _global_semantic_analyzer
-
     def get_magnitude(self, prompt: str) -> float:
-        """
-        Calcula la magnitud sugerida (0.0 a 1.0) mediante similitud de coseno.
-        No usa 'if word in prompt', sino 'que tan cerca esta esta idea de estas otras'.
-        """
         if not prompt or not prompt.strip():
             return 0.5
-            
-        # 1. Vectorizar el prompt del usuario
         prompt_embedding = self.model.encode(prompt, convert_to_tensor=True, device=self.device)
-        
-        # 2. Calcular similitudes con cada ancla
         similarities = {}
         for intent, embeddings in self.anchor_embeddings.items():
-            # Similitud máxima con cualquiera de las descripciones del ancla
             cos_sim = util.cos_sim(prompt_embedding, embeddings)
             similarities[intent] = float(torch.max(cos_sim))
-            
-        # 3. Mapeo matemático de intención a magnitud
-        
-        # Base mínima
         magnitude = 0.35
-        
-        # Contribuciones ponderadas (Usamos el máximo impacto para decidir fuerza)
         pose_weight = similarities.get("pose", 0)
         structural_weight = similarities.get("structural", 0)
         attribute_weight = similarities.get("attribute", 0)
-        
-        # Escalamiento por impacto — pesos más generosos
         impact_weights = {
             "pose": pose_weight * 0.7,
             "structural": structural_weight * 0.7,
             "attribute": attribute_weight * 0.5
         }
-        
         best_intent = max(impact_weights, key=impact_weights.get)
         max_impact = impact_weights[best_intent]
-        
         print(f"[NLP] Similitudes: Pose={pose_weight:.2f}, Struct={structural_weight:.2f}, Attr={attribute_weight:.2f}")
-        
-        # Umbral bajo para que prompts "difusos" (escenas complejas) sigan teniendo efecto
         if max_impact > 0.06:
             magnitude += max_impact
-            
-        # Normalización final (mínimo 0.40 para que siempre haya cambio visible)
         return max(0.40, min(0.95, magnitude))
 
+    def get_body_transform_intensity(self, prompt: str) -> float:
+        if not prompt or not prompt.strip():
+            return 0.0
+        prompt_embedding = self.model.encode(prompt, convert_to_tensor=True, device=self.device)
+        body_descs = [
+            "removing clothes, getting naked, nude, undressed",
+            "body exposure, bare skin, nudity, desnuda, sin ropa",
+            "breasts, genitals, torso, intimate body parts exposed",
+            "taking off clothes, stripping, completely naked",
+        ]
+        body_embeddings = self.model.encode(body_descs, convert_to_tensor=True, device=self.device)
+        body_sim = float(torch.max(util.cos_sim(prompt_embedding, body_embeddings)))
+        attr_sim = float(torch.max(util.cos_sim(prompt_embedding, self.anchor_embeddings["attribute"])))
+        return min(1.0, body_sim * 0.75 + attr_sim * 0.25)
+
     def detect_target(self, prompt: str) -> str:
-        """Determina el objetivo de la máscara mediante semántica"""
         targets = {
             "background": ["the background, environment, scenery, location", "el fondo, escenario, paisaje, entorno"],
             "face": ["the face, facial features, head, eyes, mouth", "la cara, rostro, rasgos faciales, cabeza, ojos, boca"],
@@ -193,29 +175,32 @@ def get_semantic_analyzer():
             "hair": ["hair, hairstyle, bald", "el pelo, cabello, peinado, calvo"],
             "subject": ["the person, character body, the whole figure", "la persona, el cuerpo del personaje, la figura completa"]
         }
-        
         prompt_embedding = self.model.encode(prompt, convert_to_tensor=True, device=self.device)
         best_target = "subject"
         max_sim = 0
-        
         for target, desc in targets.items():
             desc_embedding = self.model.encode(desc, convert_to_tensor=True, device=self.device)
             sim = float(torch.max(util.cos_sim(prompt_embedding, desc_embedding)))
             if sim > max_sim:
                 max_sim = sim
                 best_target = target
-                
-        # Ajuste fino: si hay mucha similitud con pose pero el target es face, 
-        # verificar si realmente es una pose (palabras de acción) o solo una zona del cuerpo
         pose_sim = float(torch.max(util.cos_sim(prompt_embedding, self.anchor_embeddings["pose"])))
         if pose_sim > 0.6 and best_target == "face":
-            # Solo cambiar a subject si la similitud con pose es muy alta
             best_target = "subject"
-        elif pose_sim > 0.4 and best_target == "subject":
-            # Mantener subject si ya es subject y hay algo de pose
-            pass
-            
         return best_target if max_sim > 0.25 else "subject"
+
+
+# Singleton global para evitar recargas y pings repetidos a huggingface
+_global_semantic_analyzer = None
+
+def get_semantic_analyzer(full_ai=False):
+    global _global_semantic_analyzer
+    if full_ai:
+        if _global_semantic_analyzer is None or not hasattr(_global_semantic_analyzer, "model"):
+            _global_semantic_analyzer = SemanticIntentAnalyzer()
+        return _global_semantic_analyzer
+    else:
+        return LightLocalIntentAnalyzer()
 
 
 class LightLocalIntentAnalyzer:
@@ -305,6 +290,20 @@ class LightLocalIntentAnalyzer:
 
         return max(0.48, min(0.92, magnitude))  # permite edits fuertes manteniendo foto
 
+    def get_body_transform_intensity(self, prompt: str) -> float:
+        if not prompt or not prompt.strip():
+            return 0.0
+        prompt_l = prompt.lower()
+        body_anchors = [
+            "naked", "nude", "undress", "desnuda", "sin ropa",
+            "bare skin", "barefoot", "bare chested", "topless",
+            "remove clothes", "take off clothes", "sin ropa",
+        ]
+        body = self._score(prompt_l, body_anchors)
+        body = max(body, self._score(prompt_l, ["naked", "nude", "desnuda", "sin ropa"])) * 0.85
+        body += self._score(prompt_l, ["body", "cuerpo", "skin", "piel", "breasts", "tits", "pussy", "vagina", "penis", "ass"]) * 0.15
+        return min(1.0, body)
+
     def detect_target(self, prompt: str) -> str:
         prompt_l = prompt.lower()
         scores = {}
@@ -331,18 +330,47 @@ class LightLocalIntentAnalyzer:
 
         return best
 
+    STRUCTURAL_SIGNAL_THRESHOLD = 0.06
+
+    def get_axis_scores(self, prompt: str) -> Dict[str, float]:
+        if not prompt or not prompt.strip():
+            return {"pose": 0.0, "structural": 0.0, "attribute": 0.0}
+        prompt_l = prompt.lower()
+        return {
+            "pose": self._score(prompt_l, self.anchors["pose"]),
+            "structural": self._score(prompt_l, self.anchors["structural"]),
+            "attribute": self._score(prompt_l, self.anchors["attribute"]),
+        }
+
+    def is_structural_dominant(self, prompt: str) -> bool:
+        scores = self.get_axis_scores(prompt)
+        return scores.get("structural", 0.0) > self.STRUCTURAL_SIGNAL_THRESHOLD
+
+    def get_structural_bias(self, prompt: str) -> str:
+        prompt_l = (prompt or "").lower()
+        remove_score = self._score(
+            prompt_l,
+            self.anchors["structural"][3:4]
+            + ["remove", "quitar", "eliminar", "borrar", "sin personas"],
+        )
+        add_score = self._score(
+            prompt_l,
+            self.anchors["structural"][:2]
+            + ["add", "añadir", "poner gente", "insertar"],
+        )
+        if remove_score > add_score and remove_score > 0.06:
+            return "remove"
+        if add_score > remove_score and add_score > 0.06:
+            return "add"
+        return "neutral"
+
+    def is_quality_dominant(self, prompt: str) -> bool:
+        scores = self.get_axis_scores(prompt)
+        quality = scores.get("attribute", 0.0)
+        action = max(scores.get("pose", 0.0), scores.get("structural", 0.0))
+        return quality > 0.10 and quality > action * 1.15
 
 
 
-# Fábrica: por defecto usa la versión ligera (local, sin saturar)
-# La versión full con embeddings solo si se pide explícitamente
-def get_semantic_analyzer(full_ai=False):
-    global _global_semantic_analyzer
-    if full_ai:
-        # Solo carga el modelo pesado si el usuario quiere máxima inteligencia
-        if _global_semantic_analyzer is None or not hasattr(_global_semantic_analyzer, "model"):
-            _global_semantic_analyzer = SemanticIntentAnalyzer()
-        return _global_semantic_analyzer
-    else:
-        # Ligero por defecto: 100% local, cero red, bajo consumo
-        return LightLocalIntentAnalyzer()
+
+
