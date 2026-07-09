@@ -103,10 +103,14 @@ class ImgEditorManager:
             # Semantic + rewriter decide how much. Turbo forces full denoise anyway.
             denoise = 0.58 + (magnitude * 0.42)
             if body_transform:
-                denoise = max(denoise, 0.86 + body_intensity * 0.10)
-                denoise = min(denoise, 0.98)
-                guidance = 2.3
-                steps = max(steps, 28)
+                denoise = max(denoise, 0.78 + body_intensity * 0.08)
+                denoise = min(denoise, 0.82)
+                guidance = 2.0
+                steps = max(steps, 35)
+            elif magnitude >= 0.70:
+                denoise = min(denoise, 0.82)
+                guidance = 2.0
+                steps = max(steps, 35)
             elif quality_primary:
                 denoise = min(denoise, 0.42)
             elif quality_hybrid and has_quality and not body_transform:
@@ -200,6 +204,71 @@ class ImgEditorManager:
                 best = max(best, overlap)
         return min(1.0, best)
 
+    def _strip_instruction_prefix(self, prompt: str) -> str:
+        text = (prompt or "").strip()
+        for prefix in ("instruction:", "instrucción:", "instruccion:"):
+            if text.lower().startswith(prefix):
+                return text[len(prefix):].strip()
+        return text
+
+    def _resolve_reference_latents_method(
+        self,
+        analysis: Dict,
+        *,
+        background_focus: bool,
+        structural_inpaint: bool,
+        force_global: bool,
+        engine: str,
+    ) -> Optional[str]:
+        if engine not in ("longcat", "imagine", "longcat_full"):
+            return None
+        mag = float(analysis.get("magnitude", 0.5))
+        body_transform = bool(analysis.get("body_transform", False))
+        high_structural = bool(analysis.get("high_structural", False))
+        structural_bias = str(analysis.get("structural_bias", "neutral"))
+        if structural_inpaint and structural_bias == "remove":
+            return "index"
+        if structural_inpaint and structural_bias == "add":
+            return "offset"
+        if body_transform or mag >= 0.70:
+            return "uxo/uno"
+        if force_global or mag >= 0.62 or high_structural:
+            return "offset"
+        if background_focus:
+            return "index_timestep_zero"
+        return "offset"
+
+    def _apply_prompt_rewriter(
+        self,
+        prompt: str,
+        *,
+        img_context: str = "",
+        magnitude: float,
+        body_transform: bool,
+    ) -> Tuple[str, float, str, bool, bool]:
+        try:
+            from roop.img_editor.prompt_rewriter import get_prompt_rewriter
+            rewriter = get_prompt_rewriter()
+            rw = rewriter.rewrite(prompt, image_context=img_context, mode="img2img")
+            if not isinstance(rw, dict):
+                return prompt, magnitude, "subject", True, False
+            new_prompt = (rw.get("prompt") or prompt).strip()
+            new_mag = float(rw.get("magnitude", magnitude))
+            new_mag = max(magnitude, min(0.98, new_mag))
+            mask_target = str(rw.get("mask_target", "subject")).lower()
+            is_global = bool(rw.get("is_global", True))
+            if body_transform:
+                new_mag = max(new_mag, magnitude)
+                is_global = True
+            print(
+                f"[ImgEditor] Rewriter: mag={new_mag:.2f}, target={mask_target}, "
+                f"global={is_global}"
+            )
+            return new_prompt, new_mag, mask_target, is_global, True
+        except Exception as e:
+            print(f"[ImgEditor] Rewriter omitido: {e}")
+            return prompt, magnitude, "subject", True, False
+
     def _compose_generation_prompt(
         self,
         user_prompt: str,
@@ -282,22 +351,11 @@ class ImgEditorManager:
                 )
                 base = f"Instruction: {raw}. {preservation}"
             elif body_transform or magnitude > 0.75:
-                preservation = (
-                    "Edit this exact photo. Keep only the face and identity. "
-                    "Change the body, clothing and skin exposure exactly as the instruction says, "
-                    "as completely, strongly and obviously as possible."
-                )
-                if scene_change:
-                    preservation += (
-                        " Change the background, environment and scenery exactly as requested "
-                        "while keeping subjects integrated with the new scene."
-                    )
+                base = f"Instruction: {raw}"
                 if has_quality_request:
-                    preservation += (
-                        " Also remove posterization and AI artifacts; improve colors, vibrance, "
-                        "sharpness, skin texture and overall photographic quality naturally."
+                    base += (
+                        " Also improve quality, sharpness, color and detail."
                     )
-                base = f"Instruction: {raw}. {preservation}"
             elif magnitude > 0.6:
                 if scene_change:
                     preservation = (
@@ -315,17 +373,17 @@ class ImgEditorManager:
             else:
                 if scene_change:
                     preservation = (
-                        "Edit this exact photo. Keep the face, identity and main subjects. "
+                        "Keep the face, identity and main subjects. "
                         "Change only the background, environment and scenery as requested."
                     )
                 else:
                     preservation = (
-                        "Edit this exact photo. Keep the face, identity, lighting, background and overall scene exactly the same. "
-                        "Apply the requested change to the subject (clothing, body, pose etc as needed)."
+                        "Keep the face and identity. "
+                        "Apply the requested change as completely and obviously as possible."
                     )
                 if has_quality_request:
-                    preservation += " Also improve sharpness, color and photographic quality; reduce posterization."
-                base = f"Instruction: {preservation} {raw}"
+                    preservation += " Also improve sharpness, color and photographic quality."
+                base = f"Instruction: {raw}. {preservation}"
             print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
             return base
         elif is_hart:
@@ -830,6 +888,7 @@ class ImgEditorManager:
             )
         else:
             prompt = translate_prompt(prompt_raw)
+        prompt = self._strip_instruction_prefix(prompt)
         negative_prompt = (negative_prompt or "").strip()
 
         if engine == "flux_dev_abliterated":
@@ -1019,6 +1078,24 @@ class ImgEditorManager:
                 "(sin máscara, evita costuras)"
             )
 
+        rewrote = False
+        if use_rewriter and not quality_only and not quality_hybrid and prompt:
+            prompt, mag_suggested, rw_target, rw_global, rewrote = self._apply_prompt_rewriter(
+                prompt,
+                img_context=img_description,
+                magnitude=mag_suggested,
+                body_transform=body_transform,
+            )
+            if rewrote:
+                if rw_target in ("subject", "background", "clothes", "face", "hair"):
+                    mask_target = rw_target
+                    background_focus = mask_target == "background" and not body_transform
+                if rw_global or body_transform or mag_suggested >= 0.62:
+                    is_global = True
+                    background_focus = False
+                if mag_suggested >= 0.55:
+                    quality_primary = False
+
         analysis = {
             "prompt": prompt,
             "magnitude": mag_suggested,
@@ -1124,9 +1201,9 @@ class ImgEditorManager:
             if final_mask is None:
                 print("[ImgEditor] Structural remove: sin máscara persona — global agresivo")
         elif high_structural and structural_bias == "add" and final_mask is None:
-            final_mask = self._build_person_addition_mask(img)
-            if final_mask is None:
-                print("[ImgEditor] Structural add: sin máscara protección — global")
+            # ADD sin máscara — el prompt + LongCat global da mejor resultado que mask+inpaint
+            print("[ImgEditor] Structural add: edit global (sin máscara, el prompt guía todo)")
+            pass  # final_mask se queda None → cae en force_global abajo
 
         structural_inpaint = (
             high_structural and structural_bias in ("remove", "add") and final_mask is not None
@@ -1246,10 +1323,10 @@ class ImgEditorManager:
                     client = self.flux_klein_client
                     if structural_inpaint and not use_flux_structural_inpaint:
                         bias_label = structural_bias.upper()
-                        version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                        version = "LongCat-Image-Edit-Q4_K_S.gguf"
                         print(
                             f"[ImgEditor] Structural {bias_label} → {version} "
-                            "(inpaint, denoise alto)"
+                            "(Full, inpaint, prompt activo)"
                         )
                     elif (mag_suggested >= 0.62 or body_transform) and not background_focus:
                         version = "LongCat-Image-Edit-Q4_K_S.gguf"
@@ -1351,17 +1428,21 @@ class ImgEditorManager:
                             gen_params["guidance_scale"] = 1.0
                         elif high_structural and engine in ("longcat", "imagine", "longcat_full"):
                             if structural_inpaint and structural_bias == "remove":
-                                gen_params["reference_latents_method"] = "index"
                                 gen_params["grow_mask_by"] = 40
                                 gen_params["denoise"] = min(0.98, max(params["denoise"], 0.97))
                             elif structural_inpaint and structural_bias == "add":
-                                gen_params["reference_latents_method"] = "offset"
                                 gen_params["grow_mask_by"] = 30
                                 gen_params["denoise"] = min(0.98, max(params["denoise"], 0.94))
-                            else:
-                                gen_params["reference_latents_method"] = "offset"
-                        elif force_global and (body_transform or not high_structural):
-                            gen_params["reference_latents_method"] = "offset"
+                        ref_method = self._resolve_reference_latents_method(
+                            analysis,
+                            background_focus=background_focus,
+                            structural_inpaint=structural_inpaint,
+                            force_global=force_global,
+                            engine=engine,
+                        )
+                        if ref_method:
+                            gen_params["reference_latents_method"] = ref_method
+                            print(f"[ImgEditor] Kontext ref={ref_method}")
                         if "qwen" not in engine and not flux_structural_override:
                             gen_params["mask_image"] = final_mask if mask_mode in ["manual", "global"] else None
 
@@ -1446,7 +1527,11 @@ class ImgEditorManager:
                         run_top_tier_edit_finish,
                         should_edit_top_finish,
                     )
-                    if should_edit_top_finish(analysis):
+                    skip_heavy_polish = bool(
+                        analysis.get("body_transform")
+                        or float(analysis.get("magnitude", 0.0)) >= 0.62
+                    )
+                    if should_edit_top_finish(analysis) and not skip_heavy_polish:
                         print("[ImgEditor] Acabado TOP post-edit (LongCat pulido + caras)")
                         result, polish_note, polish_analysis = run_top_tier_edit_finish(
                             result,
@@ -1459,7 +1544,7 @@ class ImgEditorManager:
                         if polish_note and "omitido" not in polish_note:
                             msg = f"{msg} | {polish_note}" if msg else polish_note
                             print(f"[ImgEditor] Post-acabado TOP: {polish_note}")
-                    else:
+                    elif bool(analysis.get("has_quality_request")):
                         from roop.img_editor.hyperreal_polish import polish_result_image
                         result, polish_note, polish_analysis = polish_result_image(
                             result, tier=enhance_tier or "hd",
