@@ -95,23 +95,11 @@ class ImgEditorManager:
         quality_hybrid = bool(analysis.get("quality_hybrid", False))
         quality_primary = bool(analysis.get("quality_primary", False))
 
-        # Parámetros base escalados por magnitud, rangos apropiados para LongCat (Qwen+Flux).
-        # CFG alto (>4) quema el contraste, denoise alto (>0.90) desestabiliza.
         if engine in ("longcat", "imagine"):
-            denoise = 0.55 + (magnitude * 0.30)
-            denoise = min(denoise, 0.88)
-            if quality_primary:
-                denoise = min(denoise, 0.42)
-            elif quality_hybrid and has_quality:
-                denoise = min(denoise, 0.55)
-            guidance = 1.5 + (magnitude * 2.0)
+            denoise = 0.60 + (magnitude * 0.20)
+            guidance = 2.0
             if background_focus:
-                denoise = 0.35 + (magnitude * 0.20)
-                if quality_hybrid or has_quality:
-                    denoise = min(denoise, 0.52)
-                else:
-                    denoise = min(denoise, 0.60)
-                guidance = 2.5
+                denoise = 0.40 + (magnitude * 0.15)
                 print(f"[ImgEditor] Fondo focal: denoise={denoise:.2f}, steps={steps}")
         elif engine == "longcat_full":
             steps = int(20 + (magnitude * 10))
@@ -1269,22 +1257,7 @@ class ImgEditorManager:
                     if self.flux_klein_client is None:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
-                    if structural_inpaint and not use_flux_structural_inpaint:
-                        bias_label = structural_bias.upper()
-                        version = "LongCat-Image-Edit-Q4_K_S.gguf"
-                        print(
-                            f"[ImgEditor] Structural {bias_label} → {version} "
-                            "(Full, inpaint, prompt activo)"
-                        )
-                    elif (mag_suggested >= 0.62 or body_transform) and not background_focus:
-                        version = "LongCat-Image-Edit-Q4_K_S.gguf"
-                        reason = "body transform" if body_transform else f"mag={mag_suggested:.2f}"
-                        print(f"[ImgEditor] Alta intensidad ({reason}) → LongCat Full")
-                    elif background_focus:
-                        version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
-                        print("[ImgEditor] Fondo focal → LongCat Turbo (inpaint suave)")
-                    else:
-                        version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                    version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
                 elif engine == "longcat_full":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
