@@ -95,34 +95,14 @@ class ImgEditorManager:
         quality_hybrid = bool(analysis.get("quality_hybrid", False))
         quality_primary = bool(analysis.get("quality_primary", False))
 
-        # Ajustes técnicos mínimos por motor (sin hardcoding semántico)
+        # Sin hardcoding: la magnitud del análisis semántico escala denoise/steps/guidance naturalmente.
         if engine in ("longcat", "imagine"):
-            # Grok Imagine style (edit engine).
-            # Use dynamic magnitude from semantic analyzer.
-            # Higher base + stronger scaling to allow full body/clothing changes (undress etc) while keeping photo.
-            # Semantic + rewriter decide how much. Turbo forces full denoise anyway.
             denoise = 0.58 + (magnitude * 0.42)
-            if body_transform:
-                denoise = max(denoise, 0.78 + body_intensity * 0.08)
-                denoise = min(denoise, 0.82)
-                guidance = 2.0
-                steps = max(steps, 35)
-            elif magnitude >= 0.70:
-                denoise = min(denoise, 0.82)
-                guidance = 2.0
-                steps = max(steps, 35)
-            elif quality_primary:
+            denoise = min(denoise, 0.95)
+            if quality_primary:
                 denoise = min(denoise, 0.42)
-            elif quality_hybrid and has_quality and not body_transform:
+            elif quality_hybrid and has_quality:
                 denoise = min(denoise, 0.55)
-            elif has_quality and magnitude > 0.6:
-                denoise = min(denoise, 0.82)
-            denoise = min(denoise, 0.98)
-            if not body_transform:
-                guidance = 2.8 if magnitude > 0.65 else 3.0
-            # More steps for high mag to allow better following
-            if magnitude > 0.6:
-                steps = max(steps, 26)
             if background_focus:
                 denoise = 0.40 + (magnitude * 0.22)
                 if quality_hybrid or has_quality:
@@ -130,32 +110,7 @@ class ImgEditorManager:
                 else:
                     denoise = min(denoise, 0.65)
                 guidance = 3.0
-                steps = max(steps, 22)
-                print(
-                    f"[ImgEditor] Fondo focal (máscara): denoise={denoise:.2f}, steps={steps}"
-                )
-            elif high_structural:
-                if structural_bias == "remove":
-                    denoise = 1.0
-                    steps = max(steps, 26)
-                    guidance = 1.0
-                    ref_note = "Flux Fill"
-                elif structural_bias == "add":
-                    denoise = max(denoise, 0.94)
-                    denoise = min(denoise, 0.98)
-                    steps = max(steps, 30)
-                    guidance = 2.5
-                    ref_note = "inpaint add"
-                else:
-                    denoise = max(denoise, 0.92)
-                    denoise = min(denoise, 0.98)
-                    steps = max(steps, 28)
-                    guidance = 2.5
-                    ref_note = "offset"
-                print(
-                    f"[ImgEditor] Structural bias={structural_bias}: "
-                    f"denoise={denoise:.2f}, steps={steps}, model={ref_note}"
-                )
+                print(f"[ImgEditor] Fondo focal: denoise={denoise:.2f}, steps={steps}")
         elif engine == "longcat_full":
             steps = int(20 + (magnitude * 10))
             guidance = 4.5
@@ -222,18 +177,9 @@ class ImgEditorManager:
     ) -> Optional[str]:
         if engine not in ("longcat", "imagine", "longcat_full"):
             return None
-        mag = float(analysis.get("magnitude", 0.5))
-        body_transform = bool(analysis.get("body_transform", False))
-        high_structural = bool(analysis.get("high_structural", False))
         structural_bias = str(analysis.get("structural_bias", "neutral"))
         if structural_inpaint and structural_bias == "remove":
             return "index"
-        if structural_inpaint and structural_bias == "add":
-            return "offset"
-        if body_transform or mag >= 0.70:
-            return "uxo/uno"
-        if force_global or mag >= 0.62 or high_structural:
-            return "offset"
         if background_focus:
             return "index_timestep_zero"
         return "offset"
