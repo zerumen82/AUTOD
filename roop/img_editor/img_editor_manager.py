@@ -95,21 +95,23 @@ class ImgEditorManager:
         quality_hybrid = bool(analysis.get("quality_hybrid", False))
         quality_primary = bool(analysis.get("quality_primary", False))
 
-        # Sin hardcoding: la magnitud del análisis semántico escala denoise/steps/guidance naturalmente.
+        # Parámetros base escalados por magnitud, rangos apropiados para LongCat (Qwen+Flux).
+        # CFG alto (>4) quema el contraste, denoise alto (>0.90) desestabiliza.
         if engine in ("longcat", "imagine"):
-            denoise = 0.58 + (magnitude * 0.42)
-            denoise = min(denoise, 0.95)
+            denoise = 0.55 + (magnitude * 0.30)
+            denoise = min(denoise, 0.88)
             if quality_primary:
                 denoise = min(denoise, 0.42)
             elif quality_hybrid and has_quality:
                 denoise = min(denoise, 0.55)
+            guidance = 1.5 + (magnitude * 2.0)
             if background_focus:
-                denoise = 0.40 + (magnitude * 0.22)
+                denoise = 0.35 + (magnitude * 0.20)
                 if quality_hybrid or has_quality:
-                    denoise = min(denoise, 0.58)
+                    denoise = min(denoise, 0.52)
                 else:
-                    denoise = min(denoise, 0.65)
-                guidance = 3.0
+                    denoise = min(denoise, 0.60)
+                guidance = 2.5
                 print(f"[ImgEditor] Fondo focal: denoise={denoise:.2f}, steps={steps}")
         elif engine == "longcat_full":
             steps = int(20 + (magnitude * 10))
