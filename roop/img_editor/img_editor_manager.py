@@ -162,7 +162,6 @@ class ImgEditorManager:
         *,
         background_focus: bool,
         structural_inpaint: bool,
-        force_global: bool,
         engine: str,
     ) -> Optional[str]:
         if engine not in ("longcat", "imagine", "longcat_full"):
@@ -240,86 +239,7 @@ class ImgEditorManager:
                 )
                 print(f"[ImgEditor] Modo mejora tier={tier}: sin prompt generativo (preserva foto)")
                 return base
-
-            if high_structural and not background_focus:
-                if structural_bias == "remove":
-                    preservation = (
-                        "Edit this exact photo. Keep the same environment, lighting, camera angle and scene style. "
-                        "Completely remove the specified people from the image with no visible trace, ghosting, "
-                        "silhouette or leftover body parts. Fill the area naturally with coherent background."
-                    )
-                elif structural_bias == "add":
-                    preservation = (
-                        "Edit this exact photo. Keep existing main subjects, lighting and camera perspective. "
-                        "Seamlessly add the requested people into the scene with correct scale, shadows, "
-                        "perspective and photographic integration."
-                    )
-                else:
-                    preservation = (
-                        "Edit this exact photo. Keep the face and identity of existing main subjects. "
-                        "Apply the requested scene change (adding or removing people, objects, or elements) "
-                        "as completely, strongly and obviously as possible."
-                    )
-                if has_quality_request:
-                    preservation += " Also improve colors, sharpness and photographic quality naturally."
-                base = f"Instruction: {raw}. {preservation}"
-            elif background_focus or (scene_change and not body_transform):
-                preservation = (
-                    "Edit this exact photo. Keep the face, identity and main subjects completely unchanged. "
-                    "Change and enhance only the background, environment and scenery as described, "
-                    "with natural photographic integration and realistic detail."
-                )
-                if has_quality_request:
-                    preservation += (
-                        " Also improve colors, sharpness, microcontrast and photographic quality naturally."
-                    )
-                base = f"Instruction: {raw}. {preservation}"
-            elif (
-                quality_hybrid
-                and has_quality_request
-                and not body_transform
-                and not background_focus
-            ):
-                preservation = (
-                    "Edit this exact photo. Keep the face and identity. "
-                    "Enhance photographic realism, colors, lighting, sharpness, fine detail "
-                    "and skin texture across the entire image as described, as strongly as possible."
-                )
-                base = f"Instruction: {raw}. {preservation}"
-            elif body_transform or magnitude > 0.75:
-                base = f"Instruction: {raw}"
-                if has_quality_request:
-                    base += (
-                        " Also improve quality, sharpness, color and detail."
-                    )
-            elif magnitude > 0.6:
-                if scene_change:
-                    preservation = (
-                        "Edit this exact photo. Keep the face, identity and main subjects. "
-                        "Change the background, environment and scenery exactly as described. "
-                        "Apply all other requested changes as strongly as possible."
-                    )
-                    base = f"Instruction: {raw}. {preservation}"
-                else:
-                    base = f"Instruction: {raw}"
-                if has_quality_request:
-                    base += (
-                        " Also improve quality, sharpness, color and detail."
-                    )
-            else:
-                if scene_change:
-                    preservation = (
-                        "Keep the face, identity and main subjects. "
-                        "Change only the background, environment and scenery as requested."
-                    )
-                else:
-                    preservation = (
-                        "Keep the face and identity. "
-                        "Apply the requested change as completely and obviously as possible."
-                    )
-                if has_quality_request:
-                    preservation += " Also improve sharpness, color and photographic quality."
-                base = f"Instruction: {raw}. {preservation}"
+            base = f"Instruction: {raw}"
             print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
             return base
         elif is_hart:
@@ -1358,7 +1278,6 @@ class ImgEditorManager:
                             analysis,
                             background_focus=background_focus,
                             structural_inpaint=structural_inpaint,
-                            force_global=force_global,
                             engine=engine,
                         )
                         if ref_method:
