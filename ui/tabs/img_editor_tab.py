@@ -60,7 +60,7 @@ def on_generate(img_data, p_text, engine_val, f_preserve, use_ai_val, enhance_va
         
         res_img, msg, mask_img = manager.generate_intelligent(
             image=img, prompt=p_text,
-            face_preserve=f_preserve, use_rewriter=use_ai_val,
+            face_preserve=f_preserve, use_rewriter=False,
             engine=engine_val,
             enhance_faces=enhance_val,
             quality_mode=quality_mode_val,
@@ -200,7 +200,8 @@ def create_img_editor_tab():
 
                     engine = gr.Dropdown(
                         choices=[
-                            ("✨ Grok Imagine (Turbo) (rápido + calidad, img2img real)", "imagine"),
+                            ("✨ Grok Imagine (LongCat Full) (img2img real, calidad, sigue instrucciones)", "imagine"),
+                            ("⚡ Z-Image Turbo (img2img rápido, 8 pasos, ~4GB)", "zimage_turbo"),
                             ("FLUX.1 Dev Abliterated (txt2img puro, lento, sin img2img)", "flux_dev_abliterated"),
                             ("LongCat Image Edit (Full, experimental)", "longcat_full"),
                             ("LongCat Image Edit Turbo", "longcat"),
@@ -210,7 +211,7 @@ def create_img_editor_tab():
                             ("OmniGen 2", "omnigen2"),
                             ("Qwen Image Edit", "qwen_edit")
                         ],
-                        value="imagine", label="Motor de Generación"
+                        value="zimage_turbo", label="Motor de Generación"
                     )
                     f_preserve = gr.Checkbox(label="💎 Preservar Rostro", value=True)
                     enhance_faces = gr.Checkbox(label="🌟 Mejorar Rostro (CodeFormer)", value=False, info="Post-procesa los rostros con CodeFormer para más realismo (usa VRAM)")

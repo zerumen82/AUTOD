@@ -98,9 +98,10 @@ class ImgEditorManager:
         if engine in ("longcat", "imagine"):
             denoise = 0.60 + (magnitude * 0.20)
             guidance = 2.0
-            if background_focus:
-                denoise = 0.40 + (magnitude * 0.15)
-                print(f"[ImgEditor] Fondo focal: denoise={denoise:.2f}, steps={steps}")
+        elif engine == "zimage_turbo":
+            denoise = min(0.95, 0.35 + (magnitude * 0.80))
+            guidance = 4.5
+            steps = int(12 + (magnitude * 14))
         elif engine == "longcat_full":
             steps = int(20 + (magnitude * 10))
             guidance = 4.5
@@ -169,8 +170,6 @@ class ImgEditorManager:
         structural_bias = str(analysis.get("structural_bias", "neutral"))
         if structural_inpaint and structural_bias == "remove":
             return "index"
-        if background_focus:
-            return "index_timestep_zero"
         return "offset"
 
     def _apply_prompt_rewriter(
@@ -223,6 +222,7 @@ class ImgEditorManager:
         img_context = (img_context or "").strip()
         
         is_longcat = engine in ("longcat", "longcat_full", "imagine") or "longcat" in engine.lower()
+        is_zimage = engine == "zimage_turbo"
         is_hart = engine == "hart"
         mask_target = (mask_target or "subject").lower()
         background_focus = mask_target == "background" and not body_transform
@@ -241,6 +241,11 @@ class ImgEditorManager:
                 return base
             base = f"Instruction: {raw}"
             print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
+            return base
+        elif is_zimage:
+            raw = (user_prompt or img_context or "").strip()
+            base = f"Edit this photo: {raw}"
+            print(f"[ImgEditor] Z-Image Turbo Prompt: {base}")
             return base
         elif is_hart:
             # HART autoregressive - prompt as provided (user or context)
@@ -1177,13 +1182,20 @@ class ImgEditorManager:
                     if self.flux_klein_client is None:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
-                    version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                    mag = analysis.get("magnitude", 0.0)
+                    version = "LongCat-Image-Edit-Q4_K_S.gguf" if mag >= 0.60 else "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
                 elif engine == "longcat_full":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
                     version = "LongCat-Image-Edit-Q4_K_S.gguf"
+                elif engine == "zimage_turbo":
+                    from roop.img_editor.zimage_edit_comfy_client import get_zimage_edit_comfy_client
+                    if not hasattr(self, '_zimage_client') or self._zimage_client is None:
+                        self._zimage_client = get_zimage_edit_comfy_client()
+                    client = self._zimage_client
+                    version = "q4"
                 elif engine == "flux_dev_abliterated":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_dev_abl_client is None:
@@ -1245,7 +1257,7 @@ class ImgEditorManager:
                         )
                     else:
                         self._release_local_gpu_before_comfy()
-                        load_params = {"flux_version": version} if "qwen" not in engine else {"qwen_version": version}
+                        load_params = {"zimage_version": version} if engine == "zimage_turbo" else ({"qwen_version": version} if "qwen" in engine else {"flux_version": version})
                         success, msg = client.load(**load_params)
                         if not success:
                             return None, msg, final_mask
@@ -1283,7 +1295,7 @@ class ImgEditorManager:
                         if ref_method:
                             gen_params["reference_latents_method"] = ref_method
                             print(f"[ImgEditor] Kontext ref={ref_method}")
-                        if "qwen" not in engine and not flux_structural_override:
+                        if "qwen" not in engine and not flux_structural_override and engine != "zimage_turbo":
                             gen_params["mask_image"] = final_mask if mask_mode in ["manual", "global"] else None
 
                         if cancel_check and cancel_check():

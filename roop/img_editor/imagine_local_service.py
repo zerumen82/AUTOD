@@ -99,7 +99,7 @@ class LocalImagineService:
                 prompt=prompt,
                 engine=self.engine,
                 face_preserve=face_preserve,
-                use_rewriter=True,
+                use_rewriter=False,
                 enhance_faces=enhance_faces,
                 num_inference_steps=num_steps,
                 guidance_scale=guidance,

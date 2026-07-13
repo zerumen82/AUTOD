@@ -98,6 +98,7 @@ class ZImageEditComfyClient:
         denoise: float = 0.75,
         width: int = 1024,
         height: int = 1024,
+        negative_prompt: str = None,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
@@ -172,7 +173,7 @@ class ZImageEditComfyClient:
                 },
                 "7": {
                     "class_type": "CLIPTextEncode",
-                    "inputs": {"text": "low quality, blurry, bad anatomy, deformed, ugly, watermark", "clip": ["3", 0]}
+                    "inputs": {"text": negative_prompt or "low quality, blurry, bad anatomy, deformed, ugly, watermark", "clip": ["3", 0]}
                 },
                 "8": {
                     "class_type": "KSampler",
@@ -209,7 +210,7 @@ class ZImageEditComfyClient:
                 raise Exception(f"No prompt_id: {r.text}")
 
             # Poll para resultado
-            for _ in range(300):  # 5 min max
+            for _ in range(600):  # 10 min max
                 time.sleep(1)
                 r = requests.get(f"{COMFY}/history/{prompt_id}")
                 if r.status_code == 200:
