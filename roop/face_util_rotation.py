@@ -222,8 +222,50 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
             # Filtrar duplicados si hay múltiples detecciones
             if all_faces:
                 all_faces = filter_duplicate_faces(all_faces)
-            else:
-                # v5.50: Fallback a MediaPipe si RetinaFace no detectó nada (perfiles extremos)
+
+            # 3. v5.1022: Closeup detection con det_size reducido (640)
+            #    RetinaFace con det_size=1024 NO detecta caras que ocupan >50% del frame
+            #    al usar det_size=640, la cara gigante en modelo input es menor y
+            #    entra dentro del rango de anchors (~512px máximo)
+            try:
+                h_cam, w_cam = frame_rgb.shape[:2]
+                frame_aspect = w_cam / float(max(1, h_cam))
+                is_portrait = frame_aspect < 0.85
+                # Activar si: no hay caras, o todas las caras detectadas son pequeñas
+                # (sugiere que la cara principal en closeup no fue detectada por det_size=1024)
+                max_face_ratio = 0.08 if is_portrait else 0.12
+                all_small = all(
+                    (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]) < max_face_ratio * w_cam * h_cam
+                    for f in all_faces
+                ) if all_faces else True
+                needs_closeup = not all_faces or all_small
+                if needs_closeup:
+                    orig_det_size = analizador.det_size
+                    orig_input_size = analizador.det_model.input_size
+                    try:
+                        analizador.det_size = (640, 640)
+                        analizador.det_model.input_size = (640, 640)
+                        cu_faces = analizador.get(frame_rgb)
+                        if cu_faces:
+                            valid_cu = [f for f in cu_faces if f.get('det_score', 0.0) >= effective_threshold]
+                            if valid_cu:
+                                converted_cu = convert_faces_to_face_objects(valid_cu)
+                                new_faces = 0
+                                for cf in converted_cu:
+                                    is_dup = any(calculate_iou(cf.bbox, ef.bbox) > 0.5 for ef in all_faces)
+                                    if not is_dup:
+                                        all_faces.append(cf)
+                                        new_faces += 1
+                                if new_faces > 0:
+                                    print(f"[FACE] Closeup det_size=640: {new_faces} cara(s) adicional(es) — total {len(all_faces)}")
+                    finally:
+                        analizador.det_size = orig_det_size
+                        analizador.det_model.input_size = orig_input_size
+            except Exception:
+                pass
+
+            # 4. Fallback a MediaPipe si RetinaFace no detectó nada
+            if not all_faces:
                 if MEDIAPIPE_DETECTOR_AVAILABLE:
                     try:
                         mp_faces = get_all_faces_mediapipe(frame)

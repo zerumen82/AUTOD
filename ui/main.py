@@ -230,7 +230,11 @@ def open_sd_webview():
 def create_ui():
     atexit.register(cleanup_comfyui)
     
-    with gr.Blocks(title="AutoAuto - AI Editor") as demo:
+    css = """
+        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+        .main-tabs { width: 100% !important; }
+    """
+    with gr.Blocks(title="AutoAuto - AI Editor", css=css) as demo:
         # Header simple
         gr.Markdown("# AutoAuto")
         
@@ -335,13 +339,9 @@ def main():
     demo = create_ui()
     # Habilitado - necesario para el funcionamiento de los botones
     # Varios workers evitan que una edición larga (8K, LongCat…) congele toda la UI.
-    demo.queue(default_concurrency_limit=8)
+    demo.queue()
     
     # Intentar lanzar en el puerto disponible
-    css = """
-        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
-        .main-tabs { width: 100% !important; }
-    """
     allowed = [os.path.join(os.getcwd(), ".autodeep_temp")]
     try:
         demo.launch(
@@ -350,7 +350,6 @@ def main():
             share=False,
             show_error=True,
             quiet=True,
-            css=css,
             allowed_paths=allowed,
         )
     except OSError as e:
@@ -365,7 +364,6 @@ def main():
                 share=False,
                 show_error=True,
                 quiet=True,
-                css=css,
                 allowed_paths=allowed,
             )
         else:

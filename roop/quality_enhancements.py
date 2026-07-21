@@ -101,7 +101,7 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
         # 3. Textura cruda en boca (Sobel) — captura manos con color de piel casi idéntico
         if not has_mouth_object:
             mouth_tex_score = np.mean(cv2.bitwise_and(texture_mask, mouth_area))
-            if mouth_tex_score > 1.8:  # v5.997: 2.5→1.8 — captura objetos más pequeños en boca (lengua, etc.)
+            if mouth_tex_score > 1.0:  # v5.1035: 1.8→1.0 — captura lengua/objetos sutiles en boca
                 has_mouth_object = True
         
         if not has_mouth_object:

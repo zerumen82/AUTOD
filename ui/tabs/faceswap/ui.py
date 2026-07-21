@@ -156,9 +156,9 @@ def build_faceswap_ui():
 
                 with gr.Row(variant="panel"):
                     with gr.Column():
-                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", file_types=["image", ".fsz"], height=100)
+                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", file_types=["image", ".fsz"], height=200)
                     with gr.Column():
-                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=100)
+                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=200)
 
             # COLUMNA DERECHA: Preview y Control
             with gr.Column(scale=3):

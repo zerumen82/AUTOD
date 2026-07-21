@@ -458,7 +458,8 @@ def wire_events(ui_comp):
         inputs=[ui_comp["delete_mode"]], 
         outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]
     )
-    ui_comp["target_faces"].delete(fn=on_target_face_delete, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
+    # Nota: .delete() no existe en Gradio 3.x.
+    # El borrado funciona mediante el checkbox "Modo Borrado" + on_target_face_select.
 
     ui_comp["previewimage"].select(
         fn=on_preview_click,
