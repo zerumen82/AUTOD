@@ -519,24 +519,50 @@ def wire_events(ui_comp):
     )
     
     # ARCHIVOS ORIGEN/DESTINO
+    def _resolve_src_path(raw):
+        try:
+            if isinstance(raw, str):
+                return raw
+            if isinstance(raw, dict):
+                name = raw.get("name") or raw.get("path") or raw.get("filename")
+                if name:
+                    return name
+            if hasattr(raw, "name"):
+                return raw.name
+        except Exception:
+            pass
+        return None
+
+    def _is_image_path(path: str) -> bool:
+        try:
+            ext = os.path.splitext(path)[1].lower()
+            return ext in {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp", ".avif", ".gif"}
+        except Exception:
+            return False
+
     def on_src_changed(files):
         files = files or []
         _log(f"[TEST_CONSOLE] on_src_changed INICIO - {len(files)} archivo(s)")
         state.current_input_page = 0
-        if not files: 
+        if not files:
             roop.globals.INPUT_FACESETS, ui.globals.ui_input_thumbs = [], []
             return [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False)
-        
+
         roop.globals.INPUT_FACESETS, ui.globals.ui_input_thumbs = [], []
         MIN_SRC_SIZE = 64
-        for f in files:
-            f_path = f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
+        handled = 0
+        for raw in files:
+            f_path = _resolve_src_path(raw)
+            if not f_path or not _is_image_path(f_path):
+                continue
+            handled += 1
             faces_data = logic.extract_face_images(f_path, is_source_face=True)
             if not faces_data:
                 print(f"[FACES] ⚠️ No se detectaron caras en: {os.path.basename(f_path)}")
                 print(f"[UI] ⚠️ No se detectaron caras en {os.path.basename(f_path)}")
             for face_obj, face_img in faces_data:
-                if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE: continue
+                if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE:
+                    continue
                 face_img = np.ascontiguousarray(face_img)
                 from roop.types import FaceSet
                 face_obj.face_img = face_img
@@ -545,9 +571,9 @@ def wire_events(ui_comp):
                 gradio_img = util.convert_to_gradio(face_img, is_rgb=True)
                 if gradio_img is not None:
                     ui.globals.ui_input_thumbs.append(gradio_img)
-        
+
         total_faces = len(ui.globals.ui_input_thumbs)
-        _log(f"[LOAD] Fuentes: {total_faces} caras en {len(files)} archivo(s)")
+        _log(f"[LOAD] Fuentes: {total_faces} caras en {handled} archivo(s) válidos de {len(files)} recibidos")
         return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total_faces, "input"))
     
     _src_processing = False
