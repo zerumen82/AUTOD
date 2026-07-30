@@ -328,6 +328,52 @@ class ImgEditorManager:
         union = cv2.GaussianBlur(union, (31, 31), 0)
         return Image.fromarray(union).convert("L")
 
+    def _create_mask_from_face_detection(
+        self,
+        image: Image.Image,
+        target: str = "subject",
+    ) -> Optional[Image.Image]:
+        """Genera una máscara geométrica a partir de detección facial real.
+        No depende del prompt; usa solo la geometría de la imagen detectada.
+        """
+        try:
+            import roop.face_util as face_util
+        except Exception:
+            return None
+        try:
+            img_np = np.array(image)
+            if img_np.ndim == 3 and img_np.shape[2] == 4:
+                img_np = img_np[:, :, :3]
+            faces_data = face_util.extract_face_images(
+                img_np,
+                target_face_detection=True,
+            )
+            if not faces_data:
+                return None
+            faces = [fd.get("face") for fd in faces_data if fd.get("face") is not None]
+            if not faces:
+                return None
+
+            w, h = image.size
+            if target == "face":
+                return self._mask_from_face_bboxes(
+                    image, faces, width_mult=2.2, height_mult=3.0, head_pad=0.35
+                )
+            if target == "hair":
+                return self._mask_from_face_bboxes(
+                    image, faces, width_mult=2.8, height_mult=4.0, head_pad=1.35
+                )
+            if target == "clothes":
+                return self._mask_from_face_bboxes(
+                    image, faces, width_mult=3.2, height_mult=6.5, head_pad=0.45
+                )
+            # subject/fallback
+            return self._mask_from_face_bboxes(
+                image, faces, width_mult=3.0, height_mult=5.5, head_pad=0.5
+            )
+        except Exception:
+            return None
+
     def _release_local_gpu_before_comfy(self):
         """Libera VRAM local (InsightFace/CLIPSeg) antes de que ComfyUI use la GPU."""
         try:
@@ -1132,6 +1178,18 @@ class ImgEditorManager:
                     print(f"[ImgEditor] Máscara automática GENERADA para '{mask_query}'")
             except Exception as e:
                 print(f"[ImgEditor] Error en máscara: {e}")
+
+            # Fallback sin hardcoding: si no hay máscara y el target es una zona de la persona,
+            # usar detección facial real para generar una máscara elíptica aproximada.
+            # No depende de palabras del prompt, solo de geometría de la imagen.
+            if final_mask is None and mask_target in ("subject", "clothes", "face", "hair"):
+                try:
+                    face_mask = self._create_mask_from_face_detection(img, target=mask_target)
+                    if face_mask is not None:
+                        final_mask = face_mask
+                        print(f"[ImgEditor] Máscara facial/geometrica generada para '{mask_target}' (fallback deteccion)")
+                except Exception as e:
+                    print(f"[ImgEditor] Error en máscara facial: {e}")
 
         if final_mask is None and is_global:
              print(f"[ImgEditor] Edición global detectada (sin máscara)")
