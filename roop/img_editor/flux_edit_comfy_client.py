@@ -26,6 +26,7 @@ class FluxEditComfyClient:
         self._flux_version = None
         self._is_longcat_turbo = False
         self._is_qwen_image_edit = False
+        self._is_qwen_q5 = False  # v5.1040 fix: always defined to avoid AttributeError on klein/flux
 
     def is_available(self):
         try:
