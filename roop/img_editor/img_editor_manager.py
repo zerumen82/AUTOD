@@ -190,10 +190,11 @@ class ImgEditorManager:
             new_mag = float(rw.get("magnitude", magnitude))
             new_mag = max(magnitude, min(0.98, new_mag))
             mask_target = str(rw.get("mask_target", "subject")).lower()
-            is_global = bool(rw.get("is_global", True))
+            is_global = bool(rw.get("is_global", False))
             if body_transform:
                 new_mag = max(new_mag, magnitude)
-                is_global = True
+                mask_target = "subject"
+                is_global = False
             print(
                 f"[ImgEditor] Rewriter: mag={new_mag:.2f}, target={mask_target}, "
                 f"global={is_global}"
@@ -950,7 +951,7 @@ class ImgEditorManager:
                 if rw_target in ("subject", "background", "clothes", "face", "hair"):
                     mask_target = rw_target
                     background_focus = mask_target == "background" and not body_transform
-                if rw_global or body_transform or mag_suggested >= 0.62:
+                if rw_global or high_structural:
                     is_global = True
                     background_focus = False
                 if mag_suggested >= 0.55:
@@ -1099,12 +1100,11 @@ class ImgEditorManager:
                 except Exception as e:
                     print(f"[ImgEditor] ClothingSegmenter no disponible: {e}")
 
-        # force_global solo cuando NO hay máscara y es cambio estructural o de alta magnitud.
+        # force_global solo cuando NO hay máscara y es cambio estructural o quality_hybrid sin máscara exitosa.
         # La máscara de ropa ya se intentó arriba; si existe, se usará.
+        # body_transform se maneja con máscara de sujeto (no global) para preservar la foto original.
         force_global = final_mask is None and not background_focus and (
             high_structural
-            or mag_suggested > 0.6
-            or body_transform
             or (quality_hybrid and has_quality_request and not quality_primary)
         )
 
