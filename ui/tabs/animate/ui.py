@@ -52,6 +52,11 @@ def build_animate_ui():
                     from animate_photo import AnimatePhoto
                     animator = AnimatePhoto()
                     lora_list = ["None"] + animator.get_available_loras()
+                    engine = gr.Dropdown(
+                        label="Motor de animación",
+                        choices=["framepack", "wan_video", "svd_turbo", "ltx_video"],
+                        value="framepack",
+                    )
                     lora_name = gr.Dropdown(
                         label="LoRA WanVideo",
                         choices=lora_list,
@@ -82,6 +87,7 @@ def build_animate_ui():
     return {
         "input_img": input_img,
         "prompt": prompt,
+        "engine": engine,
         "btn_animate": btn_animate,
         "btn_cancel": btn_cancel,
         "video_output": video_output,

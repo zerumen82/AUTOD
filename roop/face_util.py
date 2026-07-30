@@ -246,22 +246,39 @@ def get_face_analyser():
             return None
 
 
-def get_cache_key(image_path: str, options: tuple, target_face_detection: bool) -> str:
-    """Genera una clave unica para el cache"""
-    return f"{image_path}_{options}_{target_face_detection}"
+def get_cache_key(
+    image_path: str,
+    options: tuple,
+    target_face_detection: bool,
+    is_source_face: bool = False,
+) -> str:
+    """Genera una clave unica para el cache (source vs target no se mezclan)."""
+    return f"{image_path}_{options}_{target_face_detection}_src={bool(is_source_face)}"
 
 
 def detect_faces_robust(img_rgb, analyser, thresh_override=None):
     """Detecta caras usando el analizador ya inicializado (NO llamar prepare())"""
     try:
-        # El analizador ya está inicializado con det_thresh=0.1 desde get_face_analyser()
-        faces = analyser.get(img_rgb)
+        if img_rgb is None or getattr(img_rgb, "size", 0) == 0:
+            return []
+        # InsightFace det suele esperar BGR; probar BGR y luego RGB
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        faces = None
+        for img_try in (img_bgr, img_rgb):
+            try:
+                faces = analyser.get(img_try)
+            except Exception:
+                faces = None
+            if faces:
+                break
         if faces:
-            # Filtrar por umbral si se especificó uno
             if thresh_override is not None:
-                faces = [f for f in faces if hasattr(f, 'det_score') and f.det_score >= thresh_override]
-            return faces if faces else []
-        
+                thr = float(thresh_override)
+                faces = [
+                    f for f in faces
+                    if float(getattr(f, "det_score", getattr(f, "score", 0.0)) or 0.0) >= thr
+                ]
+            return list(faces) if faces else []
         return []
     except Exception as e:
         print(f"[ERROR] detect_faces_robust: {e}")
@@ -286,7 +303,12 @@ def extract_face_images(
     image_id = f"{image_path}_{frame_index}" if is_video else str(image_path)
     
     # 1. Verificar cache de RESULTADOS COMPLETOS
-    cache_key = get_cache_key(image_path if isinstance(image_path, str) else str(id(image_path)), options, target_face_detection)
+    cache_key = get_cache_key(
+        image_path if isinstance(image_path, str) else str(id(image_path)),
+        options,
+        target_face_detection,
+        is_source_face=is_source_face,
+    )
     if cache_key in CACHE_RESULTS:
         return CACHE_RESULTS[cache_key]
     
@@ -324,58 +346,78 @@ def extract_face_images(
         if is_source_face:
             h, w = img_rgb.shape[:2]
             print(f"[SOURCE_DETECT] Cargando cara de origen: {os.path.basename(str(image_path))} ({w}x{h})")
-            
-            # 1. Intentar detección normal (aumentado umbral a 0.50 para evitar falsos positivos)
-            faces = detect_faces_robust(img_rgb, FACE_ANALYSER, 0.50)
-            
-            # 2. Si falla, intentar con PADDING pero solo si la imagen es razonable
+
+            def _run_detect(img_try, analyser, thresh):
+                return detect_faces_robust(img_try, analyser, thresh) or []
+
+            faces = []
+            # Cascada permisiva: 0.50 era demasiado alto (perfiles / fotos difíciles = 0 caras)
+            for thr in (0.35, 0.22, 0.12, 0.08):
+                faces = _run_detect(img_rgb, FACE_ANALYSER, thr)
+                if faces:
+                    print(f"[SOURCE_DETECT] Detectadas {len(faces)} cara(s) (thresh={thr})")
+                    break
+
+            # Preproceso (contraste) si sigue vacío
+            if not faces:
+                try:
+                    pre = preprocess_image_for_detection(cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+                    pre_rgb = cv2.cvtColor(pre, cv2.COLOR_BGR2RGB)
+                    faces = _run_detect(pre_rgb, FACE_ANALYSER, 0.10)
+                    if faces:
+                        print(f"[SOURCE_DETECT] Detectadas con preproceso: {len(faces)}")
+                except Exception as e:
+                    print(f"[SOURCE_DETECT] Preproceso omitido: {e}")
+
+            # Padding controlado
             if not faces and w > 100 and h > 100:
-                print(f"[SOURCE_DETECT] No se detectó cara directamente. Intentando con padding controlado...")
+                print(f"[SOURCE_DETECT] No se detectó cara directamente. Intentando con padding...")
                 pad_h, pad_w = h // 3, w // 3
-                img_padded = cv2.copyMakeBorder(img_rgb, pad_h, pad_h, pad_w, pad_w, cv2.BORDER_CONSTANT, value=[127, 127, 127])
-                faces_padded = detect_faces_robust(img_padded, FACE_ANALYSER, 0.40)
+                img_padded = cv2.copyMakeBorder(
+                    img_rgb, pad_h, pad_h, pad_w, pad_w, cv2.BORDER_CONSTANT, value=[127, 127, 127]
+                )
+                faces_padded = _run_detect(img_padded, FACE_ANALYSER, 0.10)
                 if faces_padded:
-                    # Validar que las caras detectadas tengan sentido
                     for f in faces_padded:
                         fw = f.bbox[2] - f.bbox[0]
                         fh = f.bbox[3] - f.bbox[1]
-                        # Evitar ruido: la cara debe tener un tamaño mínimo (capado en 35px) para ser real
                         if fw > min(w * 0.15, 35) and fh > min(h * 0.15, 35):
                             f.bbox[0] -= pad_w
                             f.bbox[2] -= pad_w
                             f.bbox[1] -= pad_h
                             f.bbox[3] -= pad_h
-                            if hasattr(f, 'kps') and f.kps is not None:
+                            if hasattr(f, "kps") and f.kps is not None:
                                 f.kps[:, 0] -= pad_w
                                 f.kps[:, 1] -= pad_h
                             faces.append(f)
                     if faces:
-                        print(f"[SOURCE_DETECT] ¡Cara real detectada con padding!")
+                        print(f"[SOURCE_DETECT] Cara detectada con padding ({len(faces)})")
+
+            # Fallback CPU
+            if not faces:
+                try:
+                    cpu_an = get_face_analyser_cpu()
+                    if cpu_an is not None:
+                        faces = _run_detect(img_rgb, cpu_an, 0.08)
+                        if faces:
+                            print(f"[SOURCE_DETECT] Detectadas en CPU: {len(faces)}")
+                except Exception as e:
+                    print(f"[SOURCE_DETECT] CPU fallback omitido: {e}")
 
             if faces:
-                # Filtrar resultados por calidad y forma
+                # Filtrar ruido: tamaño mínimo, aspecto razonable, confianza mínima, nitidez
                 valid_source_faces = []
                 for f in faces:
                     fw = f.bbox[2] - f.bbox[0]
                     fh = f.bbox[3] - f.bbox[1]
                     aspect = fw / fh if fh > 0 else 0
-                    # Filtros de ruido: tamaño mínimo absoluto y forma humana
-                    if not (fw > 20 and fh > 20 and 0.25 < aspect < 3.5):
+                    det = getattr(f, 'det_score', 0.0) or 0.0
+                    if not (fw > 24 and fh > 24 and 0.25 < aspect < 3.5 and det >= 0.30):
                         continue
-                    
-                    # Validar que la cara sea razonable (filtros básicos de ruido)
-                    kps = getattr(f, 'kps', None)
-                    if kps is not None and len(kps) == 5:
-                        kps_y = kps[:, 1]
-                        # Ojos encima de nariz, nariz encima de boca (validación mínima de estructura)
-                        eye_y = min(kps_y[0], kps_y[1])  # ojo más alto
-                        mouth_y = max(kps_y[3], kps_y[4])  # boca más baja
-                        if mouth_y - eye_y < fh * 0.1:
-                            continue  # demasiado comprimido verticalmente
-                    
                     valid_source_faces.append(f)
-                
                 faces = valid_source_faces
+                if not faces:
+                    print("[SOURCE_DETECT] Caras filtradas por tamaño/aspecto/confianza (ninguna válida)")
 
             if faces:
                 # Procesar todas las caras detectadas
@@ -446,7 +488,14 @@ def extract_face_images(
                     x1p, y1p = max(0, x1 - px), max(0, y1 - py)
                     x2p, y2p = min(w, x2 + px), min(h, y2 + py)
                     face_img = img_rgb[y1p:y2p, x1p:x2p].copy()
-                    
+
+                    # Filtro de nitidez: rechazar caras muy borrosas (Laplacian variance)
+                    gray_crop = cv2.cvtColor(face_img, cv2.COLOR_RGB2GRAY)
+                    lap_var = cv2.Laplacian(gray_crop, cv2.CV_64F).var()
+                    if lap_var < 15.0:
+                        print(f"[SOURCE_DETECT] ❌ Cara borrosa (lap_var={lap_var:.1f} < 15). Omitiendo.")
+                        continue
+
                     # Guardar el recorte en el objeto
                     face_obj.face_img = face_img
                     

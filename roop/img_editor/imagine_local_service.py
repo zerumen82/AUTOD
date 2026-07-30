@@ -37,16 +37,19 @@ class LocalImagineService:
 
 
     SUPPORTED_ENGINES = {
-        "imagine": "imagine",       # Grok Imagine style - default (máxima fidelidad a la foto + instrucción)
-        "autoregressive": "hart",   # HART = Hybrid Autoregressive Transformer (generación libre)
+        "imagine": "longcat",
+        "autoregressive": "hart",
         "hart": "hart",
         "longcat": "longcat",
+        "longcat_turbo": "longcat_turbo",
         "longcat_full": "longcat_full",
-        "edit": "imagine",
+        "qwen_image_edit": "qwen_image_edit",
+        "edit": "longcat",
+        "klein_base": "klein_base",
     }
 
-    def __init__(self, engine: str = "imagine", use_semantic: bool = True):
-        raw = (engine or "imagine").lower()
+    def __init__(self, engine: str = "longcat", use_semantic: bool = True):
+        raw = (engine or "longcat").lower()
         self.engine = self.SUPPORTED_ENGINES.get(raw, "imagine")
         self.use_semantic = use_semantic
         self._manager = None
@@ -62,7 +65,6 @@ class LocalImagineService:
         self,
         image: Image.Image,
         instruction: str,
-        face_preserve: bool = True,
         enhance_faces: bool = False,
         num_steps: Optional[int] = None,
         guidance: Optional[float] = None,
@@ -73,7 +75,6 @@ class LocalImagineService:
         Args:
             image: Imagen de entrada (referencia visual)
             instruction: Instrucción natural ("undress her", "ponle ropa cyberpunk", etc)
-            face_preserve: Intentar preservar identidad facial (usa FacePreserver)
             ...
 
         Returns:
@@ -98,7 +99,6 @@ class LocalImagineService:
                 image=image,
                 prompt=prompt,
                 engine=self.engine,
-                face_preserve=face_preserve,
                 use_rewriter=False,
                 enhance_faces=enhance_faces,
                 num_inference_steps=num_steps,
@@ -133,7 +133,6 @@ class LocalImagineService:
             image=placeholder,
             prompt=f"Instruction: {prompt}" if "longcat" in self.engine else prompt,
             engine="hart",
-            face_preserve=False,
             use_rewriter=False,
         )
         return result, msg

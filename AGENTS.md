@@ -9,7 +9,41 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
-### v5.1035 (current) — Forehead fix + mouth object detection + closeup tracking
+### v5.1036 — Image Editor modular + autoregresivo + sin preservación
+- **Refactor completo del Image Editor**: Separado en `ui/tabs/img_editor/` siguiendo el patrón modular (`ui.py` + `events.py` + `state.py` + `entry point`). Eliminada dependencia de `roop.globals` — estado aislado en `state.py`.
+- **Modo Autoregresivo**: El resultado de cada iteración se realimenta como entrada. Configurable de 1 a 20 iteraciones. Permite cambios complejos encadenados con el mismo prompt.
+- **Sin preservación de rostro**: Eliminado FacePreserver del flujo. El modelo edita libremente según el prompt, sin reconstrucción forzada de la cara original.
+- **Z-Image Turbo como default**: Motor rápido (~4GB VRAM, 8 pasos) como opción predeterminada. FLUX.2 Klein como secundario (~3GB, 4 pasos).
+- **UI simplificada**: Eliminados checkboxes de "Preservar Rostro", "Mejorar Rostro", "Análisis IA", "Modo Calidad", LoRA. Solo imagen + prompt + motor + fuerza de edición + modo autoregresivo.
+- **FacePreserver deprecado**: El archivo `face_preserver.py` se mantiene por compatibilidad pero no se usa en el nuevo flujo.
+- **Nota**: Los modelos redundantes identificados (~44GB en duplicados) y la limpieza general de tabs queda pendiente para próxima iteración.
+
+### v5.1039 (current) — Fix Perfiles + Flequillo + Oclusiones + Boca
+- **Fix de Perfiles en fotos y vídeo**:
+  1. Hysteresis `prof_state` desvinculado en fotos estáticas (`enable_temporal_smoothing=False`) — evita que una foto de perfil contamine fotos frontales posteriores.
+  2. Eliminada función `_feather_mask_edges` en máscaras de perfil que pinchaba el gradiente GaussianBlur y producía un anillo/ancho de marco rígido alrededor del perfil.
+  3. Desactivados EMA de oclusión (`_occ_frame_ema`) en fotos estáticas para evitar que oclusiones de una foto sangren hacia otra.
+- **Fix de Efecto Flequillo (Forehead Gradient)**:
+  1. `_apply_forehead_gradient` acotado verticalmente entre `max(0, y1 - 0.10×face_h)` y `y1 + 0.22×face_h` (línea de nacimiento del pelo) en lugar de cubrir hasta los ojos (`eye_y + 0.05×face_h`).
+  2. `max_reduction` reducido de 0.50 (50% de atenuación sobre la piel de la frente) a 0.20-0.22 max solo en la raíz del pelo — elimina la franja/línea horizontal de cambio de tono sobre la frente.
+- **Fix de Oclusiones (Manos/Objetos/Gafas/Micrófono)**:
+  1. `center_mask` en `detect_foreground_occlusion` expandido de `(0.45, 0.45)` a `(0.82, 0.85)` — permite detectar manos, dedos, vasos, gafas y objetos en mejillas, mandíbula, sienes y barbilla.
+  2. Cap de `reduction` de oclusión elevado de `0.35` a `0.75` (fuerza base 0.80) en `ProcessMgr.py` — los objetos/manos delante de la cara ahora ocultan la cara swapped correctamente en lugar de pintar la cara swapped semi-transparente sobre la mano al 65% de opacidad.
+- **Fix de Boca & Objetos bucales**:
+  1. Asignación corregida: `m_blend = max(m_blend, mouth_paste_strength)` cuando `mouth_force_paste=True` — antes `mouth_paste_strength` (0.82-0.96) se calculaba y logueaba pero NUNCA se asignaba a `_mouth_blend_factor`, dejando la boca restaurada solo al ~45%.
+  2. Umbrales de apertura `thresh` ajustados (closeup `0.14/0.18`, normal `0.15/0.20`) y `oral_strength` activo desde `mouth_open_ratio > 0.15` (antes >0.28) — detecta y preserva expresiones de habla/conversación.
+  3. Umbrales de diferencia bucal reducidos (`mouth_content_score > 0.008`, `mouth_occ_score > 0.010`) para detectar objetos sutiles (pajitas, cigarrillos, comida, lengua).
+
+### v5.1038 — OpenCV enhancement path for color/quality edits
+- **Ruta OpenCV para color/quality puro**: Cuando el analyzer detecta `has_quality_request=True` y NO hay body_transform/high_structural/background_focus, se aplica procesado OpenCV directo (HSV saturation + CLAHE contraste + unsharp mask) — 100ms, 0 VRAM, preserva la foto exacta al píxel. Sin AI involucrado.
+- **"COLOR THE IMAGE" ahora funciona**: Detectado como color request (match "color" en ancla "mejorar color" / "better colors"). Saturation boost 1.3-1.6x según magnitud. Sin AI, sin referencia, sin "Instruction:".
+- **"mejora la calidad"**: CLAHE (contraste adaptativo) + unsharp mask + saturation ligero. Magnitud controla intensidad.
+- **Compound prompts ("desnuda y mejora color")**: calidad_hybrid + magnitud > 0.5 → NO usa OpenCV, cae en AI (LongCat) para el cambio completo.
+- **Face Swap**: color_match_strength=0.0, brightness_strength=0.0, gfpgan_mix floor=0.01 (sin cambios).
+- **LongCat routing restaurado**: "imagine"/"longcat" → LongCat Full (no Z-Image). Z-Image solo para `zimage_turbo` engine explícito. Para edits complejos, LongCat + offset preserva mejor que Z-Image.
+- **Nota**: Los modelos AI (LongCat, Z-Image) siguen sin poder hacer edits simples como "color the image" — la referencia condiciona demasiado. La solución es no usar AI para eso: OpenCV directo. Para edits complejos (body, fondo, objetos), LongCat sigue siendo la mejor opción.
+
+### v5.1035 — Forehead fix + mouth object detection + closeup tracking
 - **Fix de efecto flequillo (forehead gradient max_reduction 1.0→0.50)**: `max_reduction=1.0` para no-perfiles significaba 0% swap en la parte superior del frame, creando un "efecto flequillo" artificial incluso cuando el target no tiene flequillo. Ahora `max_reduction=0.50` para ambos (perfil/no-perfil), garantizando mínimo 50% swap en toda la frente con transición smoothstep gradual.
 - **Fix de objetos en boca no detectados (3 cambios)**:
   1. `quality_enhancements.py:104`: `mouth_tex_score > 1.8 → 1.0` — textura Sobel en boca captura lengua/objetos más sutiles
@@ -303,10 +337,11 @@
 - enhancer_blend via slider (default 0.95) — respeta UI, no hardcode
 
 ## Next Steps
-- Testear v5.1001 — confirmar que MASK_FLOOR_BROAD 2.50 evita safety recovery (frames 1241, 1381 no disparan) y _widen_mask_for_blend elimina el marco si safety recovery es inevitable
-- Confirmar que ghost tracking ya no congela el swap en posición incorrecta al moverse la cabeza
-- Confirmar que M-EMA reducido (0.35 para m_diff≥5.0) mejora tracking en movimiento rápido sin introducir jitter
-- Si la boca sigue sin naturalidad (demasiado swap): reducir aún más el threshold de mouth_occ_score a 0.020 o eliminar el boost por occ
+- Testear Image Editor v5.1036: autoregresivo con Z-Image Turbo, confirmar resultados sin preservación de rostro
+- Limpiar modelos redundantes (~44GB identificados en ComfyUI models)
+- Separar tabs restantes (Settings, Generate) al patrón modular
+- Integrar Z-Image-Edit GGUF si existe (investigar en HF)
+- Integrar FLUX.2 Klein como engine img2img nativo (ya soporta editing)
 
 ## Critical Context
 - v5.99: closeup y perfil `m_blend=0.48` (antes 0.36/0.40), oral_strength boost `* (1.0 + oral*0.50)` clip `0.72` → ~67% original en boca muy abierta
@@ -326,6 +361,11 @@
 - `roop/quality_enhancements.py`: `detect_foreground_occlusion()` — v5.96 mouth revisa 3 señales (object+skin_occ+texture_mask)
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
 - `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas
+- `ui/tabs/img_editor/`: Image Editor modular — `ui.py` + `events.py` + `state.py` + entry point `img_editor_tab.py`
+- `ui/tabs/img_editor/ui.py`: UI simplificada (sin face_preserve/enhance/quality/LoRA)
+- `ui/tabs/img_editor/events.py`: Eventos con modo autoregresivo (1-20 iteraciones)
+- `ui/tabs/img_editor/state.py`: Estado aislado (sin dependencia de roop.globals)
+- `roop/img_editor/img_editor_manager.py`: `generate_intelligent()` — Z-Image Turbo como engine prioritario
 
 ---
 
@@ -847,7 +887,7 @@ Expect next run with similar prompt to show face at correct scale + better integ
 
 ---
 
-## v5.76 (current) — Extreme edit tuning: uxo/uno ref + denoise cap + CFG lower
+## v5.1036 — Image Editor modular + autoregresivo + sin preservación (ver Progress arriba)
 - **ref=uxo/uno para mag≥0.70 o body_transform**: El modo `offset` aún era conservador para cambios extremos (undress completo). `uxo/uno` da preservación MÍNIMA — el modelo puede regenerar el cuerpo sin estar atado a la referencia.
 - **Denoise cap 0.82 para extremos**: 0.89 causaba artefactos de contraste y ruido. 0.82 es el sweet spot para cambios fuertes sin degradación.
 - **CFG 2.0 para extremos**: 2.8 daba contraste excesivo. 2.0 permite más libertad al modelo sin quemar la imagen.

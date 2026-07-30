@@ -7,156 +7,193 @@ del proceso de intercambio de caras.
 
 import cv2
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
+
+
+def match_color_histogram(
+    source: np.ndarray,
+    reference: np.ndarray,
+    blend_factor: float = 1.0,
+) -> np.ndarray:
+    """
+    Ajusta color/tonalidad de `source` hacia `reference` (espacio LAB, media+std).
+
+    Usado por ProcessMgr (swap + temporal) y apply_quality_enhancements.
+    blend_factor=0 → source intacto; 1 → match completo.
+    """
+    try:
+        if source is None or reference is None:
+            return source
+        if source.size == 0 or reference.size == 0:
+            return source
+
+        blend = float(np.clip(blend_factor, 0.0, 1.0))
+        if blend <= 1e-6:
+            return source
+
+        src = source
+        ref = reference
+        if src.dtype != np.uint8:
+            src_u8 = np.clip(src, 0, 255).astype(np.uint8)
+        else:
+            src_u8 = src
+        if ref.dtype != np.uint8:
+            ref_u8 = np.clip(ref, 0, 255).astype(np.uint8)
+        else:
+            ref_u8 = ref
+
+        # Mismo tamaño de referencia para estadísticas (no reescalar source)
+        if ref_u8.shape[:2] != src_u8.shape[:2]:
+            ref_u8 = cv2.resize(
+                ref_u8, (src_u8.shape[1], src_u8.shape[0]), interpolation=cv2.INTER_LINEAR
+            )
+
+        if src_u8.ndim == 2:
+            src_u8 = cv2.cvtColor(src_u8, cv2.COLOR_GRAY2BGR)
+        if ref_u8.ndim == 2:
+            ref_u8 = cv2.cvtColor(ref_u8, cv2.COLOR_GRAY2BGR)
+        if src_u8.shape[2] == 4:
+            src_u8 = src_u8[:, :, :3]
+        if ref_u8.shape[2] == 4:
+            ref_u8 = ref_u8[:, :, :3]
+
+        src_lab = cv2.cvtColor(src_u8, cv2.COLOR_BGR2LAB).astype(np.float32)
+        ref_lab = cv2.cvtColor(ref_u8, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+        matched = src_lab.copy()
+        for c in range(3):
+            s = src_lab[:, :, c]
+            r = ref_lab[:, :, c]
+            s_mean, s_std = float(s.mean()), float(s.std())
+            r_mean, r_std = float(r.mean()), float(r.std())
+            s_std = max(s_std, 1e-3)
+            r_std = max(r_std, 1e-3)
+            channel = (s - s_mean) * (r_std / s_std) + r_mean
+            matched[:, :, c] = (1.0 - blend) * s + blend * channel
+
+        matched = np.clip(matched, 0, 255).astype(np.uint8)
+        out = cv2.cvtColor(matched, cv2.COLOR_LAB2BGR)
+        return out
+    except Exception as e:
+        print(f"[COLOR_MATCH] Error: {e}")
+        return source
 
 
 def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray) -> np.ndarray:
     """
-    Detecta pelo, flequillo o manos sobre la cara para protegerlos durante el swap. (v5.10)
-    Incluye detección de oclusiones con tono de piel (manos) mediante distancia de color LAB.
-    Mejorado para reducir falsos positivos en boca y mejorar detección de objetos reales.
+    Detecta pelo, flequillo, manos u objetos sobre la cara para protegerlos durante el swap.
     """
     try:
+        if face_img is None or target_region is None:
+            return np.zeros((1, 1), dtype=np.float32)
         if face_img.shape != target_region.shape:
             target_region = cv2.resize(target_region, (face_img.shape[1], face_img.shape[0]))
-        
+
         h, w = face_img.shape[:2]
-            
+
         # 1. Análisis de texturas y bordes (Sobel)
         src_gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
         tgt_gray = cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY)
-        
+
         tgt_sob = cv2.Sobel(tgt_gray, cv2.CV_32F, 1, 1, ksize=3)
         src_sob = cv2.Sobel(src_gray, cv2.CV_32F, 1, 1, ksize=3)
         diff_sob = cv2.absdiff(tgt_sob, src_sob)
-        
-        # v5.8: Umbral adaptativo basado en la intensidad de bordes
+
         sob_mean = np.mean(diff_sob)
         sob_thresh = max(25, min(40, sob_mean * 1.5))
         _, texture_mask = cv2.threshold(diff_sob.astype(np.uint8), sob_thresh, 255, cv2.THRESH_BINARY)
-        
-        # 2. Análisis de color (Piel) - Rango ampliado para mejor detección
+
+        # 2. Análisis de color (piel)
         tgt_hsv = cv2.cvtColor(target_region, cv2.COLOR_BGR2HSV)
-        lower_skin = np.array([0, 12, 40])  
-        upper_skin = np.array([20, 170, 220]) 
+        lower_skin = np.array([0, 12, 40])
+        upper_skin = np.array([20, 170, 220])
         skin_mask = cv2.inRange(tgt_hsv, lower_skin, upper_skin)
-        
-        # Máscara de zona central de la cara (evitar detección de bordes de la imagen como oclusión)
+
+        # Zona facial expandida (mejillas, mandíbula, frente, sienes)
         center_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.ellipse(center_mask, (w//2, h//2), (int(w*0.45), int(h*0.45)), 0, 0, 360, 255, -1)
-        
+        cv2.ellipse(center_mask, (w // 2, h // 2), (int(w * 0.82), int(h * 0.85)), 0, 0, 360, 255, -1)
+
         not_skin_mask = cv2.bitwise_and(cv2.bitwise_not(skin_mask), center_mask)
-        
-        # 3. Oclusión base: textura extra DONDE NO ES PIEL (pelo, objetos no-piel)
+
+        # 3. Oclusión base: textura extra donde no es piel
         occlusion = cv2.bitwise_and(texture_mask, not_skin_mask)
-        
-        # 4. v5.8: Detección de oclusiones CON TONO DE PIEL (manos, objetos)
+
+        # v5.1040: Detección por diferencia de color DIRECTA (swap vs original)
+        # Cuando un objeto cubre la cara, el swap genera piel limpia pero el original tiene el objeto.
+        # La diferencia de color grande = oclusión. Captura objetos que Sobel/LAB no detectan.
+        color_diff = cv2.absdiff(face_img, target_region)
+        color_diff_gray = cv2.cvtColor(color_diff, cv2.COLOR_BGR2GRAY)
+        _, color_occ_mask = cv2.threshold(color_diff_gray, 35, 255, cv2.THRESH_BINARY)
+        color_occ_mask = cv2.bitwise_and(color_occ_mask, center_mask)
+        # Solo donde el original NO es piel (objetos no-cutáneos) o donde la diferencia es muy alta
+        high_diff = cv2.threshold(color_diff_gray, 60, 255, cv2.THRESH_BINARY)[1]
+        high_diff = cv2.bitwise_and(high_diff, center_mask)
+        color_occ_mask = cv2.bitwise_or(color_occ_mask, high_diff)
+        occlusion = cv2.bitwise_or(occlusion, color_occ_mask)
+
+        # 4. Oclusiones con tono de piel (manos) + objetos
         tgt_lab = cv2.cvtColor(target_region, cv2.COLOR_BGR2LAB).astype(np.float32)
         skin_pixels = tgt_lab[skin_mask > 0]
+        skin_occ_mask = np.zeros((h, w), dtype=np.uint8)
+        object_mask = np.zeros((h, w), dtype=np.uint8)
         if len(skin_pixels) > 30:
             avg_skin_lab = np.mean(skin_pixels, axis=0)
             lab_diff = np.sqrt(np.sum((tgt_lab - avg_skin_lab.reshape(1, 1, 3)) ** 2, axis=2))
-            
-            # Objetos con diferencia moderada en zona de piel + textura extra
+
             _, skin_occ_mask = cv2.threshold(lab_diff.astype(np.uint8), 28, 255, cv2.THRESH_BINARY)
             skin_occ_mask = cv2.bitwise_and(skin_occ_mask, cv2.bitwise_and(texture_mask, skin_mask))
-            
-            # Objetos muy diferentes (no piel) en cualquier zona
+
             _, object_mask = cv2.threshold(lab_diff.astype(np.uint8), 65, 255, cv2.THRESH_BINARY)
             object_mask = cv2.bitwise_and(object_mask, center_mask)
-            
+
             occlusion = cv2.bitwise_or(occlusion, cv2.bitwise_or(skin_occ_mask, object_mask))
-        
-        # 5. v5.8: Análisis de Detalle Fino (Laplaciano) - solo para bordes fuertes
+
+        # 5. Detalle fino (Laplaciano)
         swp_lap = cv2.Laplacian(src_gray, cv2.CV_32F)
         tgt_lap = cv2.Laplacian(tgt_gray, cv2.CV_32F)
-        
-        # v5.65: Detalle Laplaciano Optimizado (Diferencia de gradientes locales)
         diff_lap = np.clip(np.abs(tgt_lap) - np.abs(swp_lap) * 1.5, 0, 255)
         lap_thresh = max(35, np.mean(diff_lap[diff_lap > 0]) * 0.6 if np.any(diff_lap > 0) else 40)
         _, detail_mask = cv2.threshold(diff_lap.astype(np.uint8), lap_thresh, 255, cv2.THRESH_BINARY)
-        
-        # Proteger ojos de falsos positivos (cambios naturales de expresión)
+
         protect_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(protect_mask, (int(w * 0.35), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
         cv2.circle(protect_mask, (int(w * 0.65), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
-        
-        # v5.96: Gestión inteligente de boca en oclusión — revisada para detectar
-        # también manos/objetos con tono de piel (LAB<65) que antes pasaban inadvertidos.
-        # Protegemos la boca de detail_mask SOLO si no hay NINGUNA señal de oclusión real.
+
         mouth_area = np.zeros((h, w), dtype=np.uint8)
-        cv2.ellipse(mouth_area, (w//2, int(h*0.70)), (int(w*0.24), int(h*0.15)), 0, 0, 360, 255, -1)
-        
+        cv2.ellipse(mouth_area, (w // 2, int(h * 0.70)), (int(w * 0.24), int(h * 0.15)), 0, 0, 360, 255, -1)
+
         has_mouth_object = False
-        # 1. Objetos muy diferentes (LAB>65) — micro, comida, etc.
-        if 'object_mask' in locals():
-            mouth_obj_score = np.mean(cv2.bitwise_and(object_mask, mouth_area))
-            if mouth_obj_score > 1.5:
-                has_mouth_object = True
-        # 2. Objetos con tono de piel (LAB>28) — manos, brazos
-        if not has_mouth_object and 'skin_occ_mask' in locals():
-            mouth_skin_score = np.mean(cv2.bitwise_and(skin_occ_mask, mouth_area))
+        mouth_obj_score = float(np.mean(cv2.bitwise_and(object_mask, mouth_area)))
+        if mouth_obj_score > 1.5:
+            has_mouth_object = True
+        if not has_mouth_object:
+            mouth_skin_score = float(np.mean(cv2.bitwise_and(skin_occ_mask, mouth_area)))
             if mouth_skin_score > 1.5:
                 has_mouth_object = True
-        # 3. Textura cruda en boca (Sobel) — captura manos con color de piel casi idéntico
         if not has_mouth_object:
-            mouth_tex_score = np.mean(cv2.bitwise_and(texture_mask, mouth_area))
-            if mouth_tex_score > 1.0:  # v5.1035: 1.8→1.0 — captura lengua/objetos sutiles en boca
+            mouth_tex_score = float(np.mean(cv2.bitwise_and(texture_mask, mouth_area)))
+            if mouth_tex_score > 1.0:
                 has_mouth_object = True
-        
+
         if not has_mouth_object:
             detail_mask = cv2.bitwise_and(detail_mask, cv2.bitwise_not(mouth_area))
-            
+
         detail_mask = cv2.bitwise_and(detail_mask, cv2.bitwise_not(protect_mask))
-        
         occlusion = cv2.bitwise_or(occlusion, detail_mask)
-        
-        # 6. Post-procesamiento: limpiar ruido + feathering suave (v5.10)
+
         kernel_open = np.ones((3, 3), np.uint8)
         occlusion = cv2.morphologyEx(occlusion, cv2.MORPH_OPEN, kernel_open, iterations=2)
-        
         kernel_dilate = np.ones((7, 7), np.uint8)
         occlusion = cv2.dilate(occlusion, kernel_dilate, iterations=1)
-        
         occlusion = cv2.GaussianBlur(occlusion, (11, 11), 0)
-        
+
         return occlusion.astype(np.float32) / 255.0
-    except:
-        return np.zeros(face_img.shape[:2], dtype=np.float32)
-
-
-def match_color_histogram(source: np.ndarray, target: np.ndarray, blend_factor: float = 0.25) -> np.ndarray:
-    """
-    Ajusta el histograma de color de forma ultra-estable para evitar parpadeos. (v2.7)
-    """
-    try:
-        if source is None or target is None or source.size == 0 or target.size == 0:
-            return source
-        
-        if source.shape != target.shape:
-            target = cv2.resize(target, (source.shape[1], source.shape[0]), interpolation=cv2.INTER_LINEAR)
-        
-        # Convertir a LAB para preservar luminancia y tono natural
-        source_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
-        target_lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB).astype(np.float32)
-        
-        # Estadísticas globales de la cara
-        for i in range(3):
-            s_mean, s_std = np.mean(source_lab[:,:,i]), np.std(source_lab[:,:,i])
-            t_mean, t_std = np.mean(target_lab[:,:,i]), np.std(target_lab[:,:,i])
-            
-            if s_std > 0.1:
-                # Ratio de desviación más restrictivo para evitar colores lavados
-                ratio = np.clip(t_std / (s_std + 1e-6), 0.90, 1.10)
-                adjusted = (source_lab[:,:,i] - s_mean) * ratio + t_mean
-                
-                # Mezcla conservadora por canal
-                source_lab[:,:,i] = source_lab[:,:,i] * (1 - blend_factor) + adjusted * blend_factor
-        
-        matched = cv2.cvtColor(np.clip(source_lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
-        return matched
     except Exception as e:
-        return source
+        print(f"[OCCLUSION] Error: {e}")
+        try:
+            return np.zeros(face_img.shape[:2], dtype=np.float32)
+        except Exception:
+            return np.zeros((1, 1), dtype=np.float32)
 
 
 def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, int], feather: int = 35, occlusion_mask: np.ndarray = None) -> np.ndarray:

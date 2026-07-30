@@ -156,7 +156,7 @@ def build_faceswap_ui():
 
                 with gr.Row(variant="panel"):
                     with gr.Column():
-                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", file_types=["image", ".fsz"], height=200)
+                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", file_types=["image"], height=200)
                     with gr.Column():
                         bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=200)
 
@@ -176,7 +176,7 @@ def build_faceswap_ui():
                     with gr.Column(scale=3):
                         preview_frame_num = gr.Slider(1, 1, value=1, label="🎬 Timeline del Video", step=1.0)
                 
-                previewimage = gr.Image(label="Vista Previa", height=480, type="filepath")
+                previewimage = gr.Image(label="Vista Previa", height=480)
                 
                 with gr.Row():
                     bt_prev_file = gr.Button("📂 Anterior", size="sm")

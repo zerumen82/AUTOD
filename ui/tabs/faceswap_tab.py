@@ -1,5 +1,4 @@
 import gradio as gr
-import roop.globals
 import ui.tabs.faceswap.ui as faceswap_ui
 import ui.tabs.faceswap.events as faceswap_events
 import ui.tabs.faceswap.logic as logic

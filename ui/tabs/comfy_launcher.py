@@ -313,8 +313,6 @@ def start(
         
         vram_gb = get_vram_gb()
         if vram_gb <= 8:
-            # --normalvram: mantiene el modelo de difusión en GPU, solo offloadea VAE/CLIP.
-            # Para Q4_K_S (~5.6GB) cabe sobrado en 8GB, evitando el swap por paso de --lowvram.
             vram_mode = "--normalvram"
         else:
             vram_mode = "--normalvram"

@@ -25,6 +25,7 @@ class FluxEditComfyClient:
         self._loaded = False
         self._flux_version = None
         self._is_longcat_turbo = False
+        self._is_qwen_image_edit = False
 
     def is_available(self):
         try:
@@ -52,6 +53,7 @@ class FluxEditComfyClient:
         clip_map = {
             "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
             "flux-2-klein-base-4b-Q4_K_S.gguf": ("qwen3-4b-abl-q4_0.gguf", "flux2"),
+            "flux-2-klein-9b-Q4_K_S.gguf": ("Qwen_Qwen3-8B-Q4_0.gguf", "flux2"),  # 12288-dim text encoder para Klein 9B
             "flux1-schnell-Q4_K_S.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
             "flux1-dev-Q4_K.gguf": ("t5-v1_1-xxl-encoder-Q4_K_S.gguf", "flux"),
         }
@@ -85,6 +87,15 @@ class FluxEditComfyClient:
             self._is_gguf_clip = False
             self._clip_name2 = None
             self._is_longcat_turbo = False
+        elif flux_version == "Qwen_Image_Edit-Q2_K.gguf":
+            clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+            clip_type = "qwen_image"
+            self._dual_clip = False
+            self._is_gguf_clip = False
+            self._clip_name2 = None
+            self._is_longcat_turbo = False
+            self._is_qwen_image_edit = True
+            self._is_qwen_q5 = False
         elif flux_version in (
             "ggml-model-Q4_K_M.gguf",
             "flux1-fill-dev-q4_k_m.gguf",
@@ -108,8 +119,10 @@ class FluxEditComfyClient:
         if self._dual_clip:
             checks.append(("text_encoders", self._clip_name2, f"CLIP2 {self._clip_name2}"))
         
-        # VAE: flux2 para modelos flux2/flux-2, ae.safetensors para LongCat y otros (16 canales)
-        if any(x in flux_version for x in ["flux2", "flux-2"]):
+        # VAE: flux2 para modelos flux2/flux-2, Qwen_Image-VAE para Qwen-Image-Edit, ae.safetensors para LongCat y otros (16 canales)
+        if "Qwen_Image_Edit" in flux_version:
+            vae_name = "Qwen_Image-VAE.safetensors"
+        elif any(x in flux_version for x in ["flux2", "flux-2"]):
             vae_name = "flux2_vae.safetensors"
         else:
             vae_name = "ae.safetensors"
@@ -152,17 +165,28 @@ class FluxEditComfyClient:
         progress_callback=None,
         reference_latents_method: str = "index_timestep_zero",
         grow_mask_by: int = 4,
+        no_kontext: bool = False,
+        drop_edit_image_ref: bool = False,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
         if not self._loaded:
             return None, "No cargado - llama a load() primero"
 
+        # También aceptado vía kwargs por llamadas genéricas del manager
+        drop_edit_image_ref = bool(drop_edit_image_ref or kwargs.get("drop_edit_image_ref", False))
+        no_kontext = bool(no_kontext or kwargs.get("no_kontext", False))
+        ref_method = reference_latents_method or "index_timestep_zero"
+        if no_kontext:
+            ref_method = "none"
+
         # Prompt negativo base (mínimo para calidad)
         if not negative_prompt:
             negative_prompt = "low quality, blurry, distorted, low resolution"
 
         is_longcat = "LongCat" in self._flux_version
+        is_qwen = self._is_qwen_image_edit or self._is_qwen_q5
+        is_klein_9b = "klein-9b" in self._flux_version
 
         t0 = time.time()
         image = image.convert("RGB")
@@ -170,8 +194,8 @@ class FluxEditComfyClient:
         new_w, new_h = (w // 64) * 64, (h // 64) * 64
         if new_w != w or new_h != h:
             image = image.resize((new_w, new_h), Image.LANCZOS)
-        # LongCat maneja hasta 1024px nativamente; otros modelos 768px
-        max_dim = 1024 if is_longcat else 768
+        # LongCat hasta 1024px; Klein 9B hasta 1024px; Qwen-Image-Edit 640px (20B Q2_K apenas cabe en 8GB); otros 768px
+        max_dim = 1024 if (is_longcat or is_klein_9b) else (640 if is_qwen else 768)
         if new_w > max_dim or new_h > max_dim:
             image.thumbnail((max_dim, max_dim), Image.LANCZOS)
             new_w, new_h = image.size
@@ -232,20 +256,54 @@ class FluxEditComfyClient:
             else:
                 model_input = last_model
 
+            # drop_edit_image_ref: la fuente no aporta croma útil al encode (señal de imagen).
+            encode_image = None if (no_kontext and drop_edit_image_ref) else ["16", 0]
+            wf["6"] = {
+                "class_type": "TextEncodeQwenImageEditPlus",
+                "inputs": {
+                    "clip": last_clip,
+                    "prompt": prompt,
+                    "vae": ["4", 0],
+                    "image1": encode_image,
+                    "image2": None,
+                    "image3": None,
+                },
+            }
+            if no_kontext:
+                if drop_edit_image_ref:
+                    print("[FluxClient] Kontext BYPASS + text-encode sin image-ref")
+                else:
+                    print("[FluxClient] Kontext BYPASS — conditioning directo a KSampler")
+                wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
+                positive_input = ["6", 0]
+                negative_input = ["7", 0]
+            else:
+                ref_method = reference_latents_method or "index_timestep_zero"
+                if ref_method not in ("offset", "index", "uxo/uno", "index_timestep_zero"):
+                    ref_method = "index_timestep_zero"
+                wf["11"] = {
+                    "class_type": "FluxKontextMultiReferenceLatentMethod",
+                    "inputs": {"conditioning": ["6", 0], "reference_latents_method": ref_method},
+                }
+                wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
+                positive_input = ["11", 0]
+                negative_input = ["7", 0]
+        elif is_qwen:
+            wf["16"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
+            model_input = last_model
             wf["6"] = {
                 "class_type": "TextEncodeQwenImageEditPlus",
                 "inputs": {"clip": last_clip, "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
             }
-            ref_method = reference_latents_method or "index_timestep_zero"
-            if ref_method not in ("offset", "index", "uxo/uno", "index_timestep_zero"):
-                ref_method = "index_timestep_zero"
-            wf["11"] = {
-                "class_type": "FluxKontextMultiReferenceLatentMethod",
-                "inputs": {"conditioning": ["6", 0], "reference_latents_method": ref_method},
-            }
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
-            positive_input = ["11", 0]
+            positive_input = ["6", 0]
             negative_input = ["7", 0]
+            if lora_name and lora_name != "None":
+                actual_cfg = 1.0
+                num_inference_steps = min(num_inference_steps, 12)
+            else:
+                actual_cfg = guidance_scale if guidance_scale >= 1.0 else 2.5
+            # Qwen-Image-Edit usa VAEEncode con imagen escalada (FluxKontextImageScale)
         else:
             wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": last_clip}}
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
@@ -259,7 +317,7 @@ class FluxEditComfyClient:
                 "model": model_input, "positive": positive_input, "negative": negative_input,
                 "latent_image": ["5", 0], "seed": seed or int(t0) % 1000000,
                 "steps": num_inference_steps, "cfg": actual_cfg,
-                "sampler_name": "euler_ancestral",
+                "sampler_name": "euler" if is_qwen else "euler_ancestral",
                 "scheduler": "simple",
                 "denoise": actual_denoise
             }
@@ -275,28 +333,44 @@ class FluxEditComfyClient:
         }
         wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FastEdit"}}
 
+        uses_kontext = (is_longcat or is_qwen) and not no_kontext
         if mname:
             wf["14"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
-            if is_longcat:
+            if uses_kontext:
                 wf["19"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["14", 0]}}
-            wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["19", 0] if is_longcat else ["14", 0], "channel": "red"}}
+            wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["19", 0] if uses_kontext else ["14", 0], "channel": "red"}}
             wf["5"] = {
                 "class_type": "VAEEncodeForInpaint",
                 "inputs": {
-                    "pixels": ["16", 0] if is_longcat else ["1", 0],
+                    "pixels": ["16", 0] if uses_kontext else ["1", 0],
                     "vae": ["4", 0],
                     "mask": ["15", 0],
                     "grow_mask_by": max(0, int(grow_mask_by)),
                 },
             }
         else:
-            wf["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["16", 0] if is_longcat else ["1", 0], "vae": ["4", 0]}}
+            wf["5"] = {
+                "class_type": "VAEEncode",
+                "inputs": {
+                    "pixels": ["16", 0] if uses_kontext else ["1", 0],
+                    "vae": ["4", 0],
+                },
+            }
 
         if is_longcat:
             print(
                 "[FluxClient] LongCat edit workflow: "
                 f"cfg={wf['8']['inputs']['cfg']}, denoise={actual_denoise:.2f}, "
                 f"ref={ref_method}, "
+                f"drop_img_ref={drop_edit_image_ref}, "
+                f"mask={'inpaint' if mname else 'global'}, "
+                f"nodes={sorted(wf.keys(), key=int)}",
+                flush=True,
+            )
+        elif is_qwen:
+            print(
+                "[FluxClient] Qwen-Image-Edit workflow: "
+                f"cfg={wf['8']['inputs']['cfg']}, steps={num_inference_steps}, "
                 f"mask={'inpaint' if mname else 'global'}, "
                 f"nodes={sorted(wf.keys(), key=int)}",
                 flush=True,

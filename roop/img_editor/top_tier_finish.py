@@ -143,7 +143,7 @@ def _generative_polish_pass(
         num_inference_steps=steps,
         guidance_scale=guidance,
         denoise=denoise,
-        reference_latents_method="index_timestep_zero",
+        reference_latents_method="offset",
         progress_callback=progress_callback,
     )
     if gen_result is None or gen_result.image is None:

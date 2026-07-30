@@ -99,6 +99,44 @@ def _api_translate(prompt: str) -> str:
 
     return None
 
+# Palabras función ES (detección de idioma, no de intención de edit)
+_ES_FUNC = frozenset({
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al",
+    "que", "con", "por", "para", "en", "es", "son", "se", "su", "sus", "mi",
+    "tu", "y", "o", "pero", "como", "mas", "más", "muy", "sin", "sobre",
+    "este", "esta", "estos", "estas", "ese", "esa", "aqui", "aquí", "alli",
+    "colorea", "colorear", "cambia", "cambiar", "quita", "quitar", "añade",
+    "anade", "añadir", "haz", "hacer", "pon", "poner", "mejora", "mejorar",
+    "personajes", "persona", "fondo", "imagen", "foto", "comic", "cómic",
+    "desnuda", "desnudo", "ropa", "pelo", "cara", "cuerpo",
+})
+
+
+def _is_english(text: str) -> bool:
+    """
+    Heurística de idioma para decidir si traducir.
+    No es hardcode de intención de edit: solo evita mandar español al modelo EN.
+    """
+    if not text:
+        return True
+    clean = text.strip()
+    if not clean:
+        return True
+    # Acentos / ñ → no inglés
+    if any(ord(c) > 127 for c in clean):
+        return False
+    words = re.findall(r"[a-zA-Z]+", clean.lower())
+    if not words:
+        return True
+    es_hits = sum(1 for w in words if w in _ES_FUNC)
+    # ≥1 función ES en prompts cortos, o ≥20% en largos → español
+    if len(words) <= 8 and es_hits >= 1:
+        return False
+    if es_hits / max(len(words), 1) >= 0.18:
+        return False
+    return True
+
+
 def translate_prompt(prompt: str) -> str:
     if not prompt or not any(c.isalpha() for c in prompt):
         return prompt
@@ -106,11 +144,34 @@ def translate_prompt(prompt: str) -> str:
     if len(prompt.strip()) < 4:
         return clean_text(prompt)
 
+    local_result = _local_translate(prompt)
+
+    # Si local cambió algo (mappings), usar eso; si el original es ES, forzar API
+    if not _is_english(prompt):
+        if os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("AUTOAUTO_OFFLINE") == "1":
+            print(f"[Translate] ES detectado, offline → local: '{local_result[:60]}...'")
+            return local_result
+        translated = _api_translate(prompt)
+        if translated:
+            return translated
+        # Fallback: local + si no cambió, devolver local igual
+        if local_result and local_result != clean_text(prompt):
+            return local_result
+        print(f"[Translate] ES sin API; usando local: '{local_result[:60]}...'")
+        return local_result
+
+    already_english = (
+        _is_english(prompt)
+        and local_result == clean_text(prompt)
+    )
+    if already_english:
+        return local_result
+
     if os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("AUTOAUTO_OFFLINE") == "1":
-        return _local_translate(prompt)
+        return local_result
 
     translated = _api_translate(prompt)
     if translated:
         return translated
 
-    return _local_translate(prompt)
+    return local_result

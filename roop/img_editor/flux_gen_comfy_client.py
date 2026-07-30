@@ -18,12 +18,7 @@ GENERATION_MODEL_REGISTRY: List[Tuple[str, Tuple[str, ...], str, int, bool]] = [
     ("pony_realism", ("ponyrealism",), "PonyRealism (recomendado)", 0, True),
     ("juggernaut_xl", ("juggernaut",), "Juggernaut Ragnarok", 1, True),
     ("cyberrealistic_pony", ("cyberrealistic", "pony"), "CyberRealistic Pony v1.8", 2, False),
-    ("talmendo_xl", ("talmendo",), "TalmendoXL", 3, True),
-    ("helloworld_xl", ("helloworld",), "HelloWorld XL 7.0", 4, True),
-    ("realism_engine", ("realismengine", "reprise"), "Realism Engine", 5, True),
-    ("miamodel_nsfw", ("miamodel",), "Miamodel", 6, True),
-    ("lazy_nsfw", ("lazymix", "realisticlazy"), "Lazy Mix", 7, True),
-    ("nova_nsfw", ("novaillustrous",), "Nova", 8, True),
+    ("realism_engine", ("realismengine", "reprise"), "Realism Engine", 3, True),
 ]
 
 GENERATION_SKIP_CHECKPOINTS = ("framepack", "wan2", "qwenimage", "qwen_image")
@@ -39,12 +34,7 @@ GENERATION_ALIAS_FILES = {
     "pony_realism": "ponyRealism_V22.safetensors",
     "juggernaut_xl": "juggernautXL_ragnarok.safetensors",
     "cyberrealistic_pony": "cyberrealisticPony_v180Coreshift.safetensors",
-    "talmendo_xl": "talmendoxlSDXL_v11Beta.safetensors",
-    "helloworld_xl": "leosamsHelloworldXL_helloworldXL70.safetensors",
     "realism_engine": "realismEngineReprise4_50Fp8.safetensors",
-    "miamodel_nsfw": "miamodelSFWNSFWSDXL_v30.safetensors",
-    "lazy_nsfw": "realisticLazyMixNSFW_v10.safetensors",
-    "nova_nsfw": "novaillustrousNSFW_v20.safetensors",
 }
 
 
@@ -335,11 +325,9 @@ class FluxGenComfyClient:
             "longcat": "LongCat-Image-Edit-Turbo-Q4_K_S.gguf",
             "longcat_full": "LongCat-Image-Edit-Q4_K_S.gguf",
             "klein_base": "flux-2-klein-base-4b-Q4_K_S.gguf",
-            "flux_q3": "flux1-dev-Q3_K_S.gguf",
             "flux_q2": "flux1-dev-Q2_K.gguf",
             "flux_dev_abliterated": "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf",
             "flux_dev_q4": "flux1-dev-Q4_K.gguf",
-            "flux_dev": "flux1-dev-Q4_K.gguf",
             "schnell": "flux1-schnell-Q4_K_S.gguf",
             "hart": "hart",
         }

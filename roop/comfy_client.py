@@ -107,19 +107,15 @@ class ComfyClient:
                 if nan_detected:
                     raise Exception("Error: El modelo generó valores NaN. Esto suele ocurrir por incompatibilidad con el VAE o el modelo. Prueba con otro VAE o modelo.")
                 
-                # Mostrar progreso cada 10 intentos
-                if attempts % 20 == 0:
+                # Mostrar progreso solo cada ~160 intentos (80s) para no saturar log
+                if attempts % 160 == 0:
                     print(f"[ComfyClient] Esperando... intento {attempts}, status={status}")
                 
                 if outputs:
-                    print(f"[ComfyClient] Outputs disponibles: {list(outputs.keys())}")
-                    
                     # Buscar imágenes en todos los nodos
                     for nid, node_output in outputs.items():
                         if "images" in node_output:
-                            print(f"[ComfyClient] ¡IMAGEN ENCONTRADA en nodo {nid}!")
                             for image in node_output["images"]:
-                                print(f"[ComfyClient] Descargando: {image['filename']}")
                                 image_data = requests.get(
                                     f"{self.base_url}/view",
                                     params={
@@ -132,11 +128,8 @@ class ComfyClient:
                                 if image_data.status_code == 200:
                                     images.append(image_data.content)
                                     found_images = True
-                                    print(f"[ComfyClient] OK Imagen ({len(image_data.content)} bytes)")
                             
-                            # ¡IMPORTANTE! Salir inmediatamente si encontramos imágenes
                             if found_images:
-                                print(f"[ComfyClient] Saliendo del bucle - imagenes encontradas")
                                 break
                         
                         if found_images:
@@ -145,7 +138,6 @@ class ComfyClient:
                     # Verificar estado sin depender del endpoint de job/status
                     has_images = len(images) > 0
                     if "status" in history[prompt_id] and history[prompt_id]["status"] in ("completed", "success"):
-                        print(f"[ComfyClient] ¡Prompt completado!")
                         break
                     elif has_images:
                         break
@@ -154,7 +146,6 @@ class ComfyClient:
                         raise Exception(f"Generacion fallida: {error_msg}")
             
             if found_images:
-                print(f"[ComfyClient] Saliendo del bucle - imagenes encontradas")
                 break
             
             # Esperar antes del siguiente intento
@@ -169,8 +160,6 @@ class ComfyClient:
     def get_videos(self, prompt_id: str, node_id: str = "*") -> list:
         """Obtiene videos de un prompt (busca en 'gifs' y 'images')"""
         videos = []
-        
-        print(f"[ComfyClient] get_videos: {prompt_id[:8]}...")
         
         max_attempts = 1200  # Maximo 600 segundos esperando (10 minutos)
         attempts = 0
@@ -209,8 +198,8 @@ class ComfyClient:
                 if nan_detected:
                     raise Exception("Error: El modelo generó valores NaN. Esto suele ocurrir por incompatibilidad con el VAE o el modelo. Prueba con otro VAE o modelo.")
                 
-                # Mostrar progreso cada 20 intentos
-                if attempts % 20 == 0:
+                # Mostrar progreso solo cada ~160 intentos (80s) para no saturar log
+                if attempts % 160 == 0:
                     status_str = status.get("status", "unknown") if isinstance(status, dict) else str(status)
                     print(f"[ComfyClient] Esperando video... intento {attempts}, status={status_str}")
                 
@@ -225,14 +214,11 @@ class ComfyClient:
                     
                     # Buscar videos en todos los nodos (pueden estar en 'gifs' o 'images')
                     for nid, node_output in outputs.items():
-                        # ComfyUI guarda videos en 'gifs' o a veces en 'images'
                         for key in ["gifs", "images"]:
                             if key in node_output:
                                 for item in node_output[key]:
                                     filename = item.get("filename", "")
-                                    # Verificar si es un archivo de video por extensión
                                     if any(filename.lower().endswith(ext) for ext in [".mp4", ".webm", ".mov", ".gif", ".avi"]):
-                                        print(f"[ComfyClient] ¡VIDEO ENCONTRADO en nodo {nid} ({key}): {filename}!")
                                         video_data = requests.get(
                                             f"{self.base_url}/view",
                                             params={
@@ -245,9 +231,6 @@ class ComfyClient:
                                         if video_data.status_code == 200:
                                             videos.append(video_data.content)
                                             found_videos = True
-                                            print(f"[ComfyClient] OK Video ({len(video_data.content)} bytes)")
-                                        else:
-                                            print(f"[ComfyClient] Error descargando video: {video_data.status_code}")
                                 
                                 if found_videos:
                                     break
@@ -255,9 +238,7 @@ class ComfyClient:
                         if found_videos:
                             break
                     
-                    # Verificar estado
                     if "status" in history[prompt_id] and history[prompt_id]["status"] in ("completed", "success"):
-                        print(f"[ComfyClient] ¡Prompt completado!")
                         break
                     elif found_videos:
                         break

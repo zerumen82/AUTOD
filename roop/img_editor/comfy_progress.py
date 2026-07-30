@@ -113,14 +113,13 @@ def wait_for_comfy_image(
             last_phase = prog.get("phase", "")
 
         phase_now = prog.get("phase") or "Esperando"
-        if now - last_log >= 10.0 or phase_now != last_console_phase:
+        if phase_now != last_console_phase:
             step = int(prog.get("step") or 0)
             total = int(prog.get("total") or 0) or steps_hint
             pct = float(prog.get("progress") or 0) * 100
             print(
                 f"[ComfyUI] {phase_now} | {pct:.0f}% | paso {step}/{total} | "
-                f"transcurrido {format_duration(elapsed)}",
-                flush=True,
+                f"transcurrido {format_duration(elapsed)}"
             )
             last_log = now
             last_console_phase = phase_now

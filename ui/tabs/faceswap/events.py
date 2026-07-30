@@ -139,7 +139,9 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
 
         if not is_duplicate:
             roop.globals.TARGET_FACES.append(face_obj)
-            ui.globals.ui_target_thumbs.append(util.convert_to_gradio(face_data[1], is_rgb=True))
+            _thumb = util.convert_to_gradio(face_data[1], is_rgb=True)
+            if _thumb is not None:
+                ui.globals.ui_target_thumbs.append(_thumb)
             
             if state.list_files_process and state.selected_preview_index < len(state.list_files_process):
                 filename = os.path.basename(state.list_files_process[state.selected_preview_index].filename)
@@ -271,7 +273,9 @@ def on_preview_click(evt: gr.SelectData, frame_num):
 
         if not is_duplicate:
             roop.globals.TARGET_FACES.append(face_obj)
-            ui.globals.ui_target_thumbs.append(util.convert_to_gradio(face_data[1], is_rgb=True))
+            _thumb = util.convert_to_gradio(face_data[1], is_rgb=True)
+            if _thumb is not None:
+                ui.globals.ui_target_thumbs.append(_thumb)
             
             filename = os.path.basename(entry.filename)
             video_key = f"selected_face_ref_{filename}"
@@ -524,7 +528,7 @@ def wire_events(ui_comp):
             return [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False)
         
         roop.globals.INPUT_FACESETS, ui.globals.ui_input_thumbs = [], []
-        MIN_SRC_SIZE = 40 
+        MIN_SRC_SIZE = 64
         for f in files:
             f_path = f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
             faces_data = logic.extract_face_images(f_path, is_source_face=True)
@@ -533,11 +537,14 @@ def wire_events(ui_comp):
                 print(f"[UI] ⚠️ No se detectaron caras en {os.path.basename(f_path)}")
             for face_obj, face_img in faces_data:
                 if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE: continue
+                face_img = np.ascontiguousarray(face_img)
                 from roop.types import FaceSet
                 face_obj.face_img = face_img
                 face_obj.face_img_ref = face_img
                 roop.globals.INPUT_FACESETS.append(FaceSet(faces=[face_obj], name=os.path.basename(f_path)))
-                ui.globals.ui_input_thumbs.append(util.convert_to_gradio(face_img, is_rgb=True))
+                gradio_img = util.convert_to_gradio(face_img, is_rgb=True)
+                if gradio_img is not None:
+                    ui.globals.ui_input_thumbs.append(gradio_img)
         
         total_faces = len(ui.globals.ui_input_thumbs)
         _log(f"[LOAD] Fuentes: {total_faces} caras en {len(files)} archivo(s)")
@@ -609,12 +616,6 @@ def wire_events(ui_comp):
         ui_comp["bt_input_next"],
     ]
     ui_comp["bt_srcfiles"].upload(
-        fn=_safe_on_src_changed,
-        inputs=[ui_comp["bt_srcfiles"]],
-        outputs=_src_outputs,
-        show_progress="hidden",
-    )
-    ui_comp["bt_srcfiles"].change(
         fn=_safe_on_src_changed,
         inputs=[ui_comp["bt_srcfiles"]],
         outputs=_src_outputs,

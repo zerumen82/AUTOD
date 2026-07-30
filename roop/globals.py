@@ -67,12 +67,12 @@ use_color_matching = True  # REACTIVADO para tono de piel del origen
 enhancer_blend_factor = 0.92
 
 # Ajuste de brillo (0-1)
-# 0.15 para no lavar demasiado la cara original
-brightness_strength = 0.15
+# 0.0 = sin sangrado de brillo del target
+brightness_strength = 0.0
 
 # Matching de color (0-1)
-# 0.10 para preservar mejor el origen (source face)
-color_match_strength = 0.08
+# 0.0 = sin sangrado de color del target
+color_match_strength = 0.0
 # GFPGAN preserva mejor la identidad en face swap
 # CodeFormer suaviza demasiado perdiendo rasgos faciales
 default_enhancer = 'GFPGAN'  # GFPGAN para mejor preservación de identidad

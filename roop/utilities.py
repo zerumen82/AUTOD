@@ -87,16 +87,19 @@ def convert_to_gradio(image, is_rgb=False):
 
             # Asegurar que es un array numpy simple sin referencias circulares
             if isinstance(rgb_image, np.ndarray):
-                return rgb_image.copy()  # Retornar copia para evitar referencias
+                arr = rgb_image.copy()
+                if arr.dtype != np.uint8:
+                    arr = np.clip(arr, 0, 255).astype(np.uint8)
+                return np.ascontiguousarray(arr)
             return rgb_image
 
         elif isinstance(image, Image.Image):
-            # Convertir PIL Image a numpy array RGB
             if image.mode != 'RGB':
                 image = image.convert('RGB')
-            # Convertir a numpy array y retornar copia
-            rgb_array = np.array(image)
-            return rgb_array.copy() if isinstance(rgb_array, np.ndarray) else rgb_array
+            arr = np.array(image)
+            if isinstance(arr, np.ndarray):
+                return np.ascontiguousarray(arr)
+            return arr
 
         # Para cualquier otro tipo, intentar convertir a numpy array
         try:

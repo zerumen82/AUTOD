@@ -6,9 +6,11 @@ GGUF version optimized for consumer GPU (~6GB VRAM with Q4)
 """
 
 import os, sys, json, time, requests, io
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 from PIL import Image
 from dataclasses import dataclass
+
+from .comfy_progress import wait_for_comfy_image
 
 COMFY = "http://127.0.0.1:8188"
 
@@ -33,21 +35,23 @@ class ZImageEditComfyClient:
             return False
 
     def get_model_paths(self, version: str = "q4") -> dict:
-        """Rutas para Z-Image Turbo GGUF"""
+        """Rutas para Z-Image Turbo o Horus Lens GGUF"""
         base = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
         
-        # Modelos disponibles: Q4_K_M (~5GB), Q4_K_S, Q5, Q6, Q8
+        # Modelos disponibles
         version_map = {
             "q3": "z_image_turbo-Q3_K_S.gguf",
             "q4": "z_image_turbo-Q4_K_M.gguf",  # Recomendado para 8GB
             "q5": "z_image_turbo-Q5_K_M.gguf",
             "q6": "z_image_turbo-Q6_K.gguf",
-            "q8": "z_image_turbo-Q8_0.gguf"
+            "q8": "z_image_turbo-Q8_0.gguf",
+            "horus_lens": "Horus-Lens-1.0-Q4_K_M.gguf",
         }
         
+        # Usar GGUF quantizado (2.3 GB) en vez de FP16 (7.7 GB) para no saturar VRAM
         return {
             "zimage_unet": os.path.join(base, "unet", version_map.get(version, "z_image_turbo-Q4_K_M.gguf")),
-            "zimage_clip": os.path.join(base, "text_encoders", "qwen_3_4b.safetensors"),
+            "zimage_clip": os.path.join(base, "text_encoders", "qwen3-4b-abl-q4_0.gguf"),
             "zimage_vae": os.path.join(base, "vae", "ae.safetensors"),
             "zimage_version": version
         }
@@ -99,6 +103,8 @@ class ZImageEditComfyClient:
         width: int = 1024,
         height: int = 1024,
         negative_prompt: str = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[dict], None]] = None,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
@@ -108,16 +114,25 @@ class ZImageEditComfyClient:
         t0 = time.time()
         version = getattr(self, '_zimage_version', 'q4')
         
-        # Optimizado para velocidad
-        if num_inference_steps > 25:
-            num_inference_steps = 25
+        # Z-Image Turbo nativo = 8 pasos. Forzar máximo para 8GB VRAM.
+        max_steps = 8
+        if num_inference_steps > max_steps:
+            print(f"[ZImageEdit] Pasos reducidos {num_inference_steps}→{max_steps} (máx nativo Z-Image Turbo)", flush=True)
+            num_inference_steps = max_steps
         
         print(f"[ZImageEdit] Generando ({num_inference_steps} pasos, denoise={denoise})...", flush=True)
         print(f"[ZImageEdit] ✅ Modelo GGUF Z-Image Turbo ({version}) (~5-6GB)", flush=True)
         print(f"[ZImageEdit] ⏱️ Tiempo estimado: ~{num_inference_steps * 0.5:.0f} min", flush=True)
         
         try:
-            # 1. Redimensionar imagen
+            # 1. Redimensionar imagen — cap a 1024px máximo para 8GB VRAM
+            w, h = image.size
+            MAX_PX = 1024
+            if w > MAX_PX or h > MAX_PX:
+                ratio = min(MAX_PX / w, MAX_PX / h)
+                new_w, new_h = int(w * ratio), int(h * ratio)
+                image = image.resize((new_w, new_h), Image.LANCZOS)
+                print(f"[ZImageEdit] Resolución reducida {w}x{h} → {new_w}x{new_h} (max {MAX_PX}px)", flush=True)
             w, h = image.size
             new_w = (w // 64) * 64
             new_h = (h // 64) * 64
@@ -156,7 +171,7 @@ class ZImageEditComfyClient:
                     "inputs": {"unet_name": unet_name, "device": "default"}
                 },
                 "3": {
-                    "class_type": "CLIPLoader",
+                    "class_type": "CLIPLoaderGGUF",
                     "inputs": {"clip_name": clip_name, "type": "qwen_image"}
                 },
                 "4": {
@@ -185,8 +200,8 @@ class ZImageEditComfyClient:
                         "seed": seed or int(t0) % 1000000,
                         "steps": num_inference_steps,
                         "cfg": guidance_scale,
-                        "sampler_name": "euler_ancestral",  # Más rápido para img2img
-                        "scheduler": "simple",  # Más rápido que "normal"
+                        "sampler_name": "euler_ancestral",
+                        "scheduler": "simple",
                         "denoise": denoise
                     }
                 },
@@ -209,35 +224,29 @@ class ZImageEditComfyClient:
             if not prompt_id:
                 raise Exception(f"No prompt_id: {r.text}")
 
-            # Poll para resultado
-            for _ in range(600):  # 10 min max
-                time.sleep(1)
-                r = requests.get(f"{COMFY}/history/{prompt_id}")
-                if r.status_code == 200:
-                    data = r.json()
-                    if prompt_id in data:
-                        outputs = data[prompt_id].get("outputs", {})
-                        for node_id, node_out in outputs.items():
-                            if "images" in node_out:
-                                for im in node_out["images"]:
-                                    vr = requests.get(
-                                        f"{COMFY}/view?filename={im['filename']}&subfolder={im.get('subfolder', '')}"
-                                    )
-                                    if vr.status_code == 200:
-                                        elapsed = time.time() - t0
-                                        print(f"[ZImageEdit] OK en {elapsed:.1f}s", flush=True)
-                                        return (
-                                            GenResult(
-                                                image=Image.open(io.BytesIO(vr.content)),
-                                                time_taken=elapsed
-                                            ),
-                                            f"OK ({elapsed:.1f}s)"
-                                        )
-                        if data[prompt_id].get("status") == "failed":
-                            error_msg = data[prompt_id].get("runtime_object", {}).get("prompt", {}).get("errors", [])
-                            raise Exception(f"ComfyUI error: {error_msg}")
+            # Esperar resultado con cancel + progress vía shared utility
+            img_meta, wait_msg = wait_for_comfy_image(
+                COMFY, prompt_id,
+                timeout=600,
+                steps_hint=num_inference_steps,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+            )
+            if img_meta is None:
+                return None, wait_msg
 
-            raise Exception("Timeout (>5 min)")
+            vr = requests.get(
+                f"{COMFY}/view?filename={img_meta['filename']}&subfolder={img_meta.get('subfolder', '')}"
+            )
+            if vr.status_code != 200:
+                raise Exception(f"Error descargando resultado: {vr.status_code}")
+
+            elapsed = time.time() - t0
+            print(f"[ZImageEdit] OK en {elapsed:.1f}s", flush=True)
+            return (
+                GenResult(image=Image.open(io.BytesIO(vr.content)), time_taken=elapsed),
+                f"OK ({elapsed:.1f}s)"
+            )
             
         except Exception as e:
             print(f"[ZImageEdit] ERROR: {str(e)}", flush=True)

@@ -26,7 +26,7 @@ def on_cancel_animate():
 
 
 def wire_animate_events(ui):
-    def on_animate_click(img_data, p, l_name, l_strength, stabilize_face):
+    def on_animate_click(img_data, p, engine, l_name, l_strength, stabilize_face):
         clear_cancel(SCOPE_ANIMATE)
 
         if state.is_animating:
@@ -57,6 +57,7 @@ def wire_animate_events(ui):
             try:
                 video, msg = logic.generate_grok_animation(
                     img, p,
+                    engine=engine,
                     stabilize=stabilize_face,
                     progress_callback=progress_callback,
                     lora_name=l_name,
@@ -102,6 +103,7 @@ def wire_animate_events(ui):
         inputs=[
             ui["input_img"],
             ui["prompt"],
+            ui["engine"],
             ui["lora_name"],
             ui["lora_strength"],
             ui["face_stabilize"],

@@ -286,8 +286,8 @@ def create_ui():
             # Tab 4: Generation
             with gr.Tab("🚀 Generate"):
                 try:
-                    from ui.tabs.generation_tab import generation_tab
-                    generation_tab()
+                    from ui.tabs.gen.gen_tab import create_gen_tab
+                    create_gen_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
                 

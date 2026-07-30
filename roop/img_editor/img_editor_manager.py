@@ -98,10 +98,6 @@ class ImgEditorManager:
         if engine in ("longcat", "imagine"):
             denoise = 0.60 + (magnitude * 0.20)
             guidance = 2.0
-        elif engine == "zimage_turbo":
-            denoise = min(0.95, 0.35 + (magnitude * 0.80))
-            guidance = 4.5
-            steps = int(12 + (magnitude * 14))
         elif engine == "longcat_full":
             steps = int(20 + (magnitude * 10))
             guidance = 4.5
@@ -110,6 +106,10 @@ class ImgEditorManager:
         elif "qwen" in engine:
             steps = min(steps, 8) # Qwen es muy lento, limitamos por UX
             guidance = min(guidance, 4.0)
+        elif engine == "klein_9b":
+            steps = 4  # Klein 9B distilled, 4 pasos nativos
+            guidance = 1.0  # Forzado para modelos distilled
+            denoise = 0.85  # Denoise alto para edits fuertes
         elif "klein" in engine or "abliterated" in engine:
             steps = min(steps, 20) # Balance velocidad/calidad
         elif engine == "hart":
@@ -222,7 +222,6 @@ class ImgEditorManager:
         img_context = (img_context or "").strip()
         
         is_longcat = engine in ("longcat", "longcat_full", "imagine") or "longcat" in engine.lower()
-        is_zimage = engine == "zimage_turbo"
         is_hart = engine == "hart"
         mask_target = (mask_target or "subject").lower()
         background_focus = mask_target == "background" and not body_transform
@@ -239,13 +238,13 @@ class ImgEditorManager:
                 )
                 print(f"[ImgEditor] Modo mejora tier={tier}: sin prompt generativo (preserva foto)")
                 return base
-            base = f"Instruction: {raw}"
+            if magnitude < 0.62:
+                base = f"Instruction: Edit this exact photo: {raw}. Keep the face, identity, composition, background and style unchanged. Only apply the requested adjustment."
+            elif magnitude < 0.80:
+                base = f"Instruction: Edit this exact photo: {raw}. Keep the face and identity unchanged, preserve the overall composition. Apply the change as completely as possible."
+            else:
+                base = f"Instruction: Edit this exact photo: {raw}. Keep the face and identity identical. Apply the requested change as completely, strongly and obviously as possible."
             print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
-            return base
-        elif is_zimage:
-            raw = (user_prompt or img_context or "").strip()
-            base = f"Edit this photo: {raw}"
-            print(f"[ImgEditor] Z-Image Turbo Prompt: {base}")
             return base
         elif is_hart:
             # HART autoregressive - prompt as provided (user or context)
@@ -1190,12 +1189,6 @@ class ImgEditorManager:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
                     version = "LongCat-Image-Edit-Q4_K_S.gguf"
-                elif engine == "zimage_turbo":
-                    from roop.img_editor.zimage_edit_comfy_client import get_zimage_edit_comfy_client
-                    if not hasattr(self, '_zimage_client') or self._zimage_client is None:
-                        self._zimage_client = get_zimage_edit_comfy_client()
-                    client = self._zimage_client
-                    version = "q4"
                 elif engine == "flux_dev_abliterated":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_dev_abl_client is None:
@@ -1214,6 +1207,12 @@ class ImgEditorManager:
                         self.omnigen2_client = get_omnigen2_comfy_client()
                     client = self.omnigen2_client
                     version = None
+                elif engine == "klein_9b":
+                    from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
+                    if self.flux_klein_client is None:
+                        self.flux_klein_client = get_flux_edit_comfy_client()
+                    client = self.flux_klein_client
+                    version = "flux-2-klein-9b-Q4_K_S.gguf"
                 elif engine == "klein_base":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
@@ -1257,7 +1256,7 @@ class ImgEditorManager:
                         )
                     else:
                         self._release_local_gpu_before_comfy()
-                        load_params = {"zimage_version": version} if engine == "zimage_turbo" else ({"qwen_version": version} if "qwen" in engine else {"flux_version": version})
+                        load_params = {"qwen_version": version} if "qwen" in engine else {"flux_version": version}
                         success, msg = client.load(**load_params)
                         if not success:
                             return None, msg, final_mask
@@ -1295,7 +1294,7 @@ class ImgEditorManager:
                         if ref_method:
                             gen_params["reference_latents_method"] = ref_method
                             print(f"[ImgEditor] Kontext ref={ref_method}")
-                        if "qwen" not in engine and not flux_structural_override and engine != "zimage_turbo":
+                        if "qwen" not in engine and not flux_structural_override:
                             gen_params["mask_image"] = final_mask if mask_mode in ["manual", "global"] else None
 
                         if cancel_check and cancel_check():

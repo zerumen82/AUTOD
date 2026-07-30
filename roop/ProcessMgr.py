@@ -1,5 +1,5 @@
 print("\n" + "="*70)
-print(">>> [TRUE-INTEGRATION] v5.1035 - Forehead fix + mouth object detection + closeup tracking <<<")
+print(">>> [TRUE-INTEGRATION] v5.1040 - Source identity + oclusiones + perfiles + boca <<<")
 print("="*70 + "\n")
 
 import os
@@ -435,12 +435,21 @@ class ProcessMgr:
                 self._is_single_photo = False  # v5.1026: modo video
                 video_basename = os.path.basename(video_path)
                 frame_count_pre = getattr(self, f'_frame_count_{video_basename}', 0) + 1
-                self._update_closeup_state(valid_faces, frame.shape, video_basename)
+                try:
+                    self._update_closeup_state(valid_faces, frame.shape, video_basename)
+                except Exception as e:
+                    print(f"[PREPROC_ERR] _update_closeup_state: {e}")
+                    traceback.print_exc()
                 plan_smooth_until = getattr(self, f'_plan_change_smooth_until_{video_basename}', 0)
                 is_visual_cut, cut_diff = self._detect_visual_scene_cut(
                     frame, video_basename, frame_count_pre,
                 )
-                zoom_in = self._is_zoom_in_progress(valid_faces, video_basename)
+                try:
+                    zoom_in = self._is_zoom_in_progress(valid_faces, video_basename)
+                except Exception as e:
+                    print(f"[PREPROC_ERR] _is_zoom_in_progress: {e}")
+                    traceback.print_exc()
+                    zoom_in = False
                 if is_visual_cut and (zoom_in or frame_count_pre <= plan_smooth_until):
                     setattr(
                         self, f'_plan_change_smooth_until_{video_basename}',
@@ -463,21 +472,34 @@ class ProcessMgr:
                         f"[PLAN_CHANGE] Frame {frame_count_pre}: zoom suave activo "
                         f"(hasta frame {plan_smooth_until})"
                     )
-                if self._detect_closeup_plan_change(
-                    valid_faces, frame.shape, video_basename, frame_count_pre,
-                ):
-                    self._open_reacquire_window(video_basename, frame_count_pre, frames=60)
-                    print(
-                        f"[PLAN_CHANGE] Frame {frame_count_pre}: primer plano detectado "
-                        "— re-busqueda activa"
-                    )
+                try:
+                    if self._detect_closeup_plan_change(
+                        valid_faces, frame.shape, video_basename, frame_count_pre,
+                    ):
+                        self._open_reacquire_window(video_basename, frame_count_pre, frames=60)
+                        print(
+                            f"[PLAN_CHANGE] Frame {frame_count_pre}: primer plano detectado "
+                            "— re-busqueda activa"
+                        )
+                except Exception as e:
+                    print(f"[PREPROC_ERR] _detect_closeup_plan_change: {e}")
+                    traceback.print_exc()
 
                 if not hasattr(self, f'_reference_face_selected_{video_basename}'):
-                    self._setup_selected_faces_frame_for_video(video_path, valid_faces)
+                    try:
+                        self._setup_selected_faces_frame_for_video(video_path, valid_faces)
+                    except Exception as e:
+                        print(f"[PREPROC_ERR] _setup_selected_faces_frame_for_video: {e}")
+                        traceback.print_exc()
 
-                recovered = self._try_unassigned_reacquire(
-                    valid_faces, video_basename, frame_count_pre, frame.shape,
-                )
+                try:
+                    recovered = self._try_unassigned_reacquire(
+                        valid_faces, video_basename, frame_count_pre, frame.shape,
+                    )
+                except Exception as e:
+                    print(f"[PREPROC_ERR] _try_unassigned_reacquire: {e}")
+                    traceback.print_exc()
+                    recovered = None
                 if recovered is not None:
                     self._assign_recovered_face(recovered, video_basename)
                 
@@ -539,7 +561,9 @@ class ProcessMgr:
                     if not all_faces: continue
 
                     source_face = None
-                    is_target_profile = ProcessMgr._is_profile_face(getattr(target_face, 'kps', None))
+                    is_target_profile = ProcessMgr._is_profile_face(
+                        getattr(target_face, 'kps', None), getattr(target_face, 'det_score', None)
+                    )
                     if is_real_video and video_path:
                         lock_key, profile_lock_key = self._video_source_lock_keys(video_path)
                         if is_target_profile:
@@ -597,6 +621,7 @@ class ProcessMgr:
             return result_frame
         except Exception as e:
             print(f"Frame processing error: {e}")
+            traceback.print_exc()
             return frame
 
     def _score_source_face_quality(self, face):
@@ -1200,16 +1225,31 @@ class ProcessMgr:
         )
 
     def _resolve_swap_embedding(self, source_face, target_face, is_profile=False, video_basename=None):
-        """Embedding para inswapper: master frontal + refuerzo perfil/match en ángulos difíciles."""
+        """Embedding para inswapper: master frontal + refuerzo perfil/match en ángulos difíciles.
+        v5.1040: source_random ahora mezcla con master embedding para máximo parecido source."""
         if not hasattr(self, 'master_source_embedding') or self.master_source_embedding is None:
             return source_face
 
-        # SOURCE RANDOM: usar embedding real de la cara seleccionada, no master
+        master = self.master_source_embedding
+
+        # SOURCE RANDOM: v5.1040 — mezclar cara aleatoria con master embedding (70% master + 30% cara)
+        # para mantener identidad source fuerte incluso con selección aleatoria
         if getattr(roop.globals, 'source_random', False):
+            picked_emb = getattr(source_face, 'embedding', None)
+            if picked_emb is None:
+                return source_face
+            picked_arr = np.array(picked_emb, dtype=np.float32)
+            if picked_arr.shape == master.shape:
+                mixed = 0.70 * master + 0.30 * picked_arr
+                norm = np.linalg.norm(mixed)
+                if norm > 0:
+                    mixed = mixed / norm
+                class _SourceFaceWrap:
+                    embedding = mixed.tolist()
+                return _SourceFaceWrap()
             return source_face
 
         target_emb = getattr(target_face, 'embedding', None)
-        master = self.master_source_embedding
         profile_master = getattr(self, 'profile_master_embedding', None)
 
         if is_profile:
@@ -1224,7 +1264,7 @@ class ProcessMgr:
             match_sim = float(match_entry.get('sim', 0.0)) if match_entry else 0.0
             setattr(self, '_last_profile_match_sim', match_sim)  # v5.1033: guardar para ajuste de m_blend
             # v5.1024: Cuando match_sim < 0.20, el embedding de perfil es demasiado ruidoso
-            # y diluye la identidad. Usamos 100% master (frontal de máxima calidad).
+            # y diluye la identidad. v5.1040: Usamos 65% master + 35% profile (más identidad source).
             if match_emb is not None and match_sim >= 0.20 and profile_master is not None:
                 mixed = 0.25 * master + 0.30 * profile_master + 0.45 * match_emb
             elif match_emb is not None and match_sim >= 0.16:
@@ -1233,7 +1273,7 @@ class ProcessMgr:
                 else:
                     mixed = 0.55 * master + 0.45 * match_emb
             elif profile_master is not None:
-                mixed = 0.50 * master + 0.50 * profile_master
+                mixed = 0.65 * master + 0.35 * profile_master  # v5.1040: 50/50→65/35 más identidad source
             else:
                 mixed = master.copy()
 
@@ -1364,13 +1404,30 @@ class ProcessMgr:
             if not candidate_faces:
                 return None
 
-            # 0. SOURCE ALEATORIO: elige una cara al azar de todas las disponibles
+            # 0. SOURCE ALEATORIO: v5.1040 — rankea por calidad+similitud, elige aleatoriamente del top N
+            # Antes solo similitud al target → elegía caras de mala calidad. Ahora prioriza calidad source.
             if getattr(roop.globals, 'source_random', False):
                 import random
-                idx = random.randint(0, len(candidate_faces) - 1)
-                picked = candidate_faces[idx]
-                print(f"[SOURCE_RANDOM] Cara #{idx+1} de {len(candidate_faces)} seleccionada")
-                return picked
+                target_emb = getattr(target_face, 'embedding', None)
+                scored = []
+                for idx, src in enumerate(candidate_faces):
+                    src_emb = getattr(src, 'embedding', None)
+                    if target_emb is not None and src_emb is not None:
+                        sim = self._cosine_similarity(target_emb, src_emb)
+                    else:
+                        sim = 0.0
+                    # v5.1040: score combinado — 60% calidad source + 40% similitud al target
+                    qual = getattr(src, 'det_score', 0.5)
+                    face_w = int(getattr(src, 'bbox', [0,0,0,0])[2] - getattr(src, 'bbox', [0,0,0,0])[0])
+                    size_bonus = min(1.0, face_w / 200.0)  # caras grandes = mejor calidad
+                    quality = qual * 0.7 + size_bonus * 0.3
+                    combined = quality * 0.60 + sim * 0.40
+                    scored.append({'face': src, 'sim': sim, 'quality': quality, 'combined': combined, 'idx': idx})
+                scored.sort(key=lambda c: c['combined'], reverse=True)
+                top_n = max(1, min(5, len(scored)))
+                picked_c = random.choice(scored[:top_n])
+                print(f"[SOURCE_RANDOM] Top-{top_n} random — #{picked_c['idx']+1}/{len(scored)} (sim={picked_c['sim']:.4f}, qual={picked_c['quality']:.2f})")
+                return picked_c['face']
             
             # Solo matching por similitud + lock (sin fallback a otra source)
             if face_swap_mode in ['selected', 'selected_faces', 'auto', 'selected_faces_frame']:
@@ -2503,9 +2560,13 @@ class ProcessMgr:
             return candidate_faces[0] if candidate_faces else None
 
     @staticmethod
-    def _is_profile_face(kps):
+    def _is_profile_face(kps, det_score=None):
         """Detect if face is a profile/side view based on 5-point kps landmarks
-        v5.1024: Thresholds expandidos para capturar semi-perfiles (eye_ratio<0.25)."""
+        v5.1024: Thresholds expandidos para capturar semi-perfiles (eye_ratio<0.25).
+        v5.1040: det_score<0.30 fuerza perfil (RetinaFace da kps imprecisos en perfiles extremos)."""
+        # v5.1040: det_score muy bajo = kps poco fiables, tratar como perfil
+        if det_score is not None and det_score < 0.30:
+            return True
         if kps is None or len(kps) < 5:
             return False
         kps = np.array(kps)
@@ -2526,16 +2587,16 @@ class ProcessMgr:
         Slider enhancer alto (0.85-0.95) = poca mezcla GFPGAN = más identidad cruda del swap.
         """
         ui_identity = float(getattr(roop.globals, 'enhancer_blend_factor', 0.94))
-        gfpgan_mix = float(np.clip((1.0 - ui_identity) * 0.35, 0.10, 0.42))  # v5.1032: floor 0.06→0.10 — más nitidez
+        gfpgan_mix = float(np.clip((1.0 - ui_identity) * 0.35, 0.01, 0.42))  # floor 0.01 — máxima identidad source
         if is_closeup:
             gfpgan_mix = min(gfpgan_mix * 1.5, 0.30)  # v5.1024: más GFPGAN en closeups para textura de piel
         elif ui_identity >= 0.90:
             gfpgan_mix = min(gfpgan_mix, 0.28)
-        base_cm = float(getattr(roop.globals, 'color_match_strength', 0.10))
+        base_cm = float(getattr(roop.globals, 'color_match_strength', 0.0))
         color_match = min(0.12, base_cm * 0.80) if is_profile else base_cm
         if is_closeup:
             color_match *= 0.80
-        brightness = float(getattr(roop.globals, 'brightness_strength', 0.15))
+        brightness = float(getattr(roop.globals, 'brightness_strength', 0.0))
         brightness *= 1.20
         return gfpgan_mix, color_match, brightness
 
@@ -2765,30 +2826,24 @@ class ProcessMgr:
 
     @staticmethod
     def _apply_forehead_gradient(blend_mask, frame_shape, target_face, y1, face_h, is_profile):
-        """Gradiente frontal suave: reduce el swap en la parte superior de la frente
-        para preservar flequillo/cabello del target. Usa keypoints oculares (kps) como
-        referencia anatómica para determinar dónde termina la frente y empieza el cabello.
-        v5.1027: grad_start=0 para que el gradiente cubra TODA el área superior del frame
-        sin discontinuidad. El gradiente smoothstep va de 0 (máxima reducción en top del
-        frame) a 1 (sin reducción en línea de ojos). El área extendida por
-        _widen_mask_for_blend (GaussianBlur sobre XSeg) queda dentro del gradiente,
-        eliminando la línea visible en el borde superior del bbox."""
+        """Gradiente frontal suave: aplica únicamente en la zona de la línea de inserción
+        del cabello (top de bbox hasta frente alta) para integrar el pelo sin crear corte
+        horizontal sobre la piel de la frente."""
         h_f, w_f = frame_shape[:2]
         try:
+            forehead_top = max(0, int(y1 - face_h * 0.10))
+            forehead_bottom = min(h_f, int(y1 + face_h * 0.22))
             if hasattr(target_face, 'kps') and target_face.kps is not None and len(target_face.kps) >= 2:
                 kps = np.array(target_face.kps)
                 eye_y = float(min(kps[0][1], kps[1][1]))
-            else:
-                eye_y = y1 + face_h * 0.55
-            grad_start = 0  # v5.1027: cubre desde top del frame para evitar discontinuidad de widen_mask
-            grad_end = min(h_f, int(eye_y + int(face_h * 0.05)))
-            if grad_end > grad_start + 3:
-                grad_h = grad_end - grad_start
+                forehead_bottom = min(forehead_bottom, int(eye_y - face_h * 0.12))
+            if forehead_bottom > forehead_top + 3:
+                grad_h = forehead_bottom - forehead_top
                 t = np.linspace(0.0, 1.0, grad_h, dtype=np.float32)
                 smooth_t = t * t * (3.0 - 2.0 * t)
-                max_reduction = 0.50 if is_profile else 0.50  # v5.1035: max 50% reducción — evita efecto flequillo visible
+                max_reduction = 0.20 if is_profile else 0.22
                 reduction = max_reduction * (1.0 - smooth_t)
-                blend_mask[grad_start:grad_end, :] *= (1.0 - reduction[:, np.newaxis])
+                blend_mask[forehead_top:forehead_bottom, :] *= (1.0 - reduction[:, np.newaxis])
         except Exception:
             pass
         return blend_mask
@@ -2930,24 +2985,25 @@ class ProcessMgr:
             video_basename = video_key[6:] if video_key.startswith('video_') else video_key
 
             # Detectar perfil con hysteresis para evitar parpadeo
-            # raw_is_profile incrementa +2 por detección, decae -1 por no-detección
-            # Así una detección aislada da 2 frames de persistencia; una racha da más
             target_kps = getattr(target_face, 'kps', None)
-            raw_is_profile = ProcessMgr._is_profile_face(target_kps)
-            prof_key = f'_profile_hysteresis_{video_key}'
-            prof_state = getattr(self, prof_key, 0)
-            if raw_is_profile:
-                prof_state = min(prof_state + 2, 6)
-                is_profile = True
-            elif prof_state > 0:
-                prof_state -= 1
-                is_profile = True
+            raw_is_profile = ProcessMgr._is_profile_face(target_kps, getattr(target_face, 'det_score', None))
+            if enable_temporal_smoothing:
+                prof_key = f'_profile_hysteresis_{video_key}'
+                prof_state = getattr(self, prof_key, 0)
+                if raw_is_profile:
+                    prof_state = min(prof_state + 2, 6)
+                    is_profile = True
+                elif prof_state > 0:
+                    prof_state -= 1
+                    is_profile = True
+                else:
+                    prof_state = 0
+                    is_profile = False
+                setattr(self, prof_key, prof_state)
             else:
-                prof_state = 0
-                is_profile = False
-            setattr(self, prof_key, prof_state)
+                is_profile = raw_is_profile
             if is_profile:
-                print(f"[PROFILE] Frame {call_num}: Perfil detectado (raw={raw_is_profile}, sticky={prof_state})")
+                print(f"[PROFILE] Frame {call_num}: Perfil detectado (raw={raw_is_profile})")
             video_path = getattr(self.options, 'current_video_path', None)
             if enable_temporal_smoothing:
                 prev_bbox = getattr(self, '_prev_face_bbox', {}).get(video_key)
@@ -3124,9 +3180,9 @@ class ProcessMgr:
                     
                     # v5.1019: Histéresis más amplia — preservación solo con apertura real (elimina parpadeo)
                     if is_closeup:
-                        thresh = 0.28 if is_profile else (0.18 if prev_state else 0.22)  # v5.1028: deactivate 0.10→0.18 para que pueda desactivarse
+                        thresh = 0.20 if is_profile else (0.14 if prev_state else 0.18)
                     else:
-                        thresh = 0.32 if is_profile else (0.20 if prev_state else 0.26)  # v5.1028: deactivate 0.13→0.20
+                        thresh = 0.22 if is_profile else (0.15 if prev_state else 0.20)
                     mouth_open = mouth_open_ratio_smooth > thresh
                     # v5.1024: Hold sostenido — evita parpadeo al cerrar boca
                     if not hasattr(self, '_mouth_hold_count'): self._mouth_hold_count = {}
@@ -3366,13 +3422,13 @@ class ProcessMgr:
                             # v5.1024: Unsharp adaptativo — más nitidez en closeups (más resolución disponible)
                             face_h_us = max(1, y2 - y1)
                             if is_closeup and face_h_us > 250:
-                                unsharp_amt = 2.0
+                                unsharp_amt = 2.2
                                 unsharp_sigma = 1.0
                             elif is_closeup:
-                                unsharp_amt = 1.8
+                                unsharp_amt = 2.0
                                 unsharp_sigma = 0.7
                             else:
-                                unsharp_amt = 1.5
+                                unsharp_amt = 1.7
                                 unsharp_sigma = 0.5
                             blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), unsharp_sigma)
                             swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, unsharp_amt, blurred, -(unsharp_amt - 1.0), 0)
@@ -3519,42 +3575,39 @@ class ProcessMgr:
                 occ_mask_aligned = detect_foreground_occlusion(raw_swapped_aligned, reference_region)
                 
                 # v5.79: Oclusión adaptativa — más suave en caras pequeñas
-                occ_strength = (0.35 if is_small_face else (0.50 if is_profile else 0.60))  # v5.1028: small_face 0.25→0.35
+                # v5.1040: Fuerza elevada — frontal 0.80→0.88, perfil 0.65→0.78, small 0.50→0.70
+                occ_strength = (0.70 if is_small_face else (0.78 if is_profile else 0.88))
                 
                 if np.max(occ_mask_aligned) > 0.1:
                     occ_mask_frame = cv2.warpAffine(occ_mask_aligned, M_inv, (w_f, h_f), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
                     occ_mask_frame = cv2.GaussianBlur(occ_mask_frame, (31, 31), 0)
-                    # v5.1022: EMA único y rápido — 0.80 nuevo elimina ghosting en 2 frames
-                    prev_occ_frame = getattr(self, '_occ_frame_ema', {}).get(video_key)
-                    if prev_occ_frame is not None and prev_occ_frame.shape == occ_mask_frame.shape:
-                        occ_mask_frame = cv2.addWeighted(occ_mask_frame, 0.80, prev_occ_frame, 0.20, 0)
-                    self._occ_frame_ema[video_key] = occ_mask_frame.copy()
+                    if enable_temporal_smoothing and video_key:
+                        prev_occ_frame = getattr(self, '_occ_frame_ema', {}).get(video_key)
+                        if prev_occ_frame is not None and prev_occ_frame.shape == occ_mask_frame.shape:
+                            occ_mask_frame = cv2.addWeighted(occ_mask_frame, 0.80, prev_occ_frame, 0.20, 0)
+                        self._occ_frame_ema[video_key] = occ_mask_frame.copy()
                     reduction = occ_mask_frame * occ_strength
-                    # v5.1022b: Cap 0.20 evita flash breve sin causar ghosting
-                    reduction = np.minimum(reduction, 0.35)  # v5.1028: 0.55→0.35 — evita colapso de máscara por safety recovery
+                    reduction = np.minimum(reduction, 0.92)  # v5.1040: cap 0.75→0.92 — objeto grande casi elimina swap
                     final_mask = np.clip(final_mask - reduction, 0, 1.0)
                     if call_num % 100 == 1:
-                        print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f})")
+                        print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f}, cap=0.92)")
 
                 # v5.78: Erosión adaptativa — más suave en perfil / boca abierta / primer plano
                 ekernel = max(3, min(face_w, face_h) // 32) | 1
                 if is_profile:
-                    ekernel = max(3, ekernel - 1)  # v5.993: -2→-1 — menos contracción = menos marco visible en perfiles
+                    ekernel = max(3, ekernel - 1)
                 if is_closeup and min(face_w, face_h) >= 180:
                     ekernel = max(3, ekernel - 2)
                 if mouth_open and mouth_open_ratio <= 0.45:
                     ekernel = max(3, ekernel - 1)
                 blur_sz = int(max(5 if is_closeup else 3, min(face_w, face_h) // (85 if is_closeup else 75))) | 1
-                # v5.1029: Caras muy pequeñas (<60px) saltan erosión — la elipse warpeada se destruye
                 is_very_small_face = min(face_w, face_h) < 60
                 if is_profile or is_closeup or is_very_small_face:
-                    # v5.995: sin erosión en perfil/closeup (causa marco). Dilatación mínima + blur + feather.
                     dilate_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
                     final_mask = cv2.dilate(final_mask, dilate_k, iterations=1)
                     blur_sz = max(blur_sz, (min(face_w, face_h) // (7 if is_profile else 8)) | 1)
-                    blur_sz = min(blur_sz, 41)  # v5.1023: 27→41 — mayor suavizado en perfiles
+                    blur_sz = min(blur_sz, 41)
                     final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
-                    final_mask = self._feather_mask_edges(final_mask, feather_px=max(10, blur_sz // 2))
                 else:
                     kernel_e = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ekernel, ekernel))
                     final_mask = cv2.erode(final_mask, kernel_e, iterations=1)
@@ -3612,24 +3665,31 @@ class ProcessMgr:
             # ============================================
             # 5c. PRESERVACIÓN DE BOCA — con suelo de máscara (v5.79)
             # v5.1026: En fotos, saltar preservación para máxima identidad source
+            # v5.1040: Implementado — fotos solo preservan boca MUY abierta (ratio>0.35), resto swap puro
             # ============================================
+            is_single_photo = getattr(self, '_is_single_photo', False)
+            if is_single_photo and mouth_open and mouth_open_ratio <= 0.35:
+                # Foto con boca normal/ligera — saltar preservación, máxima identidad source
+                mouth_open = False
+                if call_num % 50 == 1:
+                    print(f"[MOUTH_PHOTO_SKIP] Foto boca ratio={mouth_open_ratio:.2f} — swap puro (máx identidad source)")
+
             if mouth_open and mouth_region is not None and mask_before_mouth is not None:
                 mouth_occ_score = 0.0
                 mouth_content_score = 0.0
                 if is_profile:
-                    m_blend = 0.46  # v5.1023: más protección oral en perfil
+                    m_blend = 0.40  # más swap en perfil para mantener identidad source
                 elif is_closeup:
-                    m_blend = 0.60  # v5.1025: 0.50→0.60 — preservación oral dominante en primer plano
+                    m_blend = 0.50  # balance: 50% swap en closeup
                 else:
-                    m_blend = 0.55  # v5.1025: 0.44→0.55 — más original en boca siempre
-                if mouth_open_ratio > 0.28:
-                    oral_strength = min(1.0, (mouth_open_ratio - 0.28) / 0.52)
-                    m_blend = min(0.88, m_blend * (1.0 + oral_strength * 0.80))  # v5.1025: cap 0.78→0.88 — más original en bocas muy abiertas
+                    m_blend = 0.45  # balance: 55% swap, 45% original en boca
+                if mouth_open_ratio > 0.15:
+                    oral_strength = min(1.0, (mouth_open_ratio - 0.15) / 0.40)
+                    m_blend = min(0.82, m_blend * (1.0 + oral_strength * 0.80))  # v5.1040: clip 0.78→0.82 boca muy abierta
                 if is_small_face:
-                    m_blend *= 0.80  # v5.1024b: 0.65→0.80 — menos penalización doble (small_face × low_mask hundía a 35%)
+                    m_blend *= 0.80
                 if mask_before_mouth.mean() < 0.04:
-                    m_blend *= 0.85  # v5.1024b: 0.75→0.85 — restore mínimo ~46% vs ~35% antes
-                # v5.1033: perfil con match bajo → más original (swap poco fiable)
+                    m_blend *= 0.85
                 if is_profile:
                     prof_sim = getattr(self, '_last_profile_match_sim', 0.0)
                     if prof_sim < 0.20:
@@ -3638,23 +3698,21 @@ class ProcessMgr:
                 try:
                     mouth_mask_aligned = create_mouth_preservation_mask(reference_region, mouth_region, blend_ratio=1.0)
                     mouth_occ_score = float(np.mean(cv2.bitwise_and(occ_mask_aligned, mouth_mask_aligned)))
-                    # v5.998: Solo computar content_diff en boca abierta (>0.25) para evitar
-                    # que la diferencia natural entre dos personas distintas dispare el paste.
-                    if mouth_open_ratio > 0.25:
+                    if mouth_open_ratio > 0.15:
                         mouth_content_score = self._detect_mouth_content_diff(raw_swapped_aligned, reference_region)
                     else:
                         mouth_content_score = 0.0
-                    mouth_signal = max(mouth_occ_score, mouth_content_score * 0.80)  # v5.1035: 0.50→0.80 — más peso al contenido oral
+                    mouth_signal = max(mouth_occ_score, mouth_content_score * 0.80)
                     if mouth_signal > 0.004:
                         occ_strength = min(1.0, mouth_signal * 12.0)
-                        m_blend = min(0.75, m_blend * (1.0 + occ_strength * 0.65))  # v5.1025: 0.65→0.75 — menos cap en boca con contenido oral
-                        # Umbral más alto para evitar paste en diferencias faciales naturales
-                        if mouth_content_score > 0.020 or mouth_occ_score > 0.015:  # v5.1035: 0.030→0.020 — detecta objetos más sutiles en boca
+                        m_blend = min(0.85, m_blend * (1.0 + occ_strength * 0.65))
+                        if mouth_content_score > 0.008 or mouth_occ_score > 0.010:
                             mouth_force_paste = True
                             mouth_paste_strength = min(
                                 0.96,
                                 0.82 + mouth_content_score * 0.55 + mouth_occ_score * 1.0,
                             )
+                            m_blend = max(m_blend, mouth_paste_strength)
                         if call_num % 50 == 1:
                             print(
                                 f"[MOUTH_OBJECT] Contenido oral (occ={mouth_occ_score:.3f}, "
@@ -4094,7 +4152,7 @@ class ProcessMgr:
         session_log_path = _os.path.join(r'D:\PROJECTS\AUTOAUTO\logs', session_log_name)
         _os.makedirs(r'D:\PROJECTS\AUTOAUTO\logs', exist_ok=True)
         self._session_log_file = open(session_log_path, 'w', encoding='utf-8')
-        self._session_log_file.write(f"=== AUTO-AUTO v5.1033 — M-EMA responsive + min_track dinámico + perfil m_blend boost ===\n")
+        self._session_log_file.write(f"=== AUTO-AUTO v5.1040 — Source identity + oclusiones + perfiles + boca ===\n")
         self._session_log_file.write(f"Start: {datetime.now()}\n")
         self._session_log_file.write(f"Video: {video_path}\n")
         self._session_log_file.write(f"Output: {output_path}\n\n")

@@ -355,7 +355,7 @@ def detect_mouth_open(target_face: Face, landmarks_106=None, target_image=None) 
             h_mouth = np.max(mouth_pts[:, 1]) - np.min(mouth_pts[:, 1])
             w_mouth = np.max(mouth_pts[:, 0]) - np.min(mouth_pts[:, 0])
             open_ratio = h_mouth / (w_mouth + 1e-6)
-            is_open = open_ratio > 0.20
+            is_open = open_ratio > 0.15  # v5.1040: 0.20→0.15 — detecta habla (boca ligeramente abierta)
             mouth_region = mouth_pts
         except Exception:
             pass
