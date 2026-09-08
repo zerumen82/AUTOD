@@ -1497,7 +1497,21 @@ class ImgEditorManager:
                         if ref_method:
                             gen_params["reference_latents_method"] = ref_method
                             print(f"[ImgEditor] Kontext ref={ref_method}")
-                        if body_transform and engine in ("longcat", "imagine", "longcat_full"):
+                        strong_edit = body_transform or (mag >= 0.75 and engine in ("longcat", "imagine", "longcat_full"))
+                        if strong_edit and engine in ("longcat", "imagine", "longcat_full"):
+                            # Bypass Kontext para cambios fuertes: sin nodos de latentes de referencia
+                            # (offset conserva demasiado, uxo rompe latentes → gris).
+                            # CON visión: Qwen-VL ve la foto para género/pose/proporciones correctas.
+                            gen_params["no_kontext"] = True
+                            gen_params["drop_edit_image_ref"] = False
+                            # Denoise casi total para cambios fuertes
+                            gen_params["denoise"] = min(0.98, max(params["denoise"], 0.95))
+                            print(f"[ImgEditor] Bypass Kontext strong edit (mag={mag:.2f}, body={body_transform})")
+                            if final_mask is not None:
+                                gen_params["grow_mask_by"] = 16
+                                gen_params["denoise"] = min(0.97, max(params["denoise"], 0.93))
+                                print("[ImgEditor] Inpaint focal: grow=16, denoise≥0.93")
+                        elif body_transform and engine in ("longcat", "imagine", "longcat_full"):
                             # Bypass Kontext para body: sin nodos de latentes de referencia
                             # (offset conserva la ropa, uxo rompe los latentes → gris).
                             # PERO con visión: Qwen-VL ve la foto para género/pose/
