@@ -191,6 +191,10 @@ class PromptRewriter:
                 'Assistant: {"prompt": "improve image quality, sharpness, detail and clarity", "magnitude": 0.3, "mask_target": "subject", "preserve_face": true, "is_global": true}\n'
                 'User: follando a cuatro patas\n'
                 'Assistant: {"prompt": "having sex from behind, doggy style position, penetrating", "magnitude": 0.9, "mask_target": "subject", "preserve_face": true, "is_global": false}\n'
+                'User: hazla ver como de 80 años\n'
+                'Assistant: {"prompt": "make her appear 80 years old, deeply wrinkled skin, age spots, sagging skin, thinning hair, aged elderly appearance", "magnitude": 0.7, "mask_target": "subject", "preserve_face": true, "is_global": true}\n'
+                'User: que tenga piel vieja con arrugas\n'
+                'Assistant: {"prompt": "old wrinkled skin texture, deep wrinkles and fine lines, aged weathered skin, realistic skin aging details", "magnitude": 0.6, "mask_target": "subject", "preserve_face": true, "is_global": true}\n'
             )
 
         full_prompt = (

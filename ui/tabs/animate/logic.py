@@ -17,8 +17,8 @@ def suggest_motion_prompt(image):
     return "gentle natural movement, subtle camera motion, realistic flow"
 
 
-def generate_grok_animation(image, prompt, engine="framepack", stabilize=False, progress_callback=None, lora_name=None, lora_strength=1.0,
-                            add_mmaudio=True, audio_prompt="", cancel_check=None):
+def generate_grok_animation(image, prompt, engine="wan_video", stabilize=False, progress_callback=None, lora_name=None, lora_strength=1.0,
+                            add_mmaudio=True, autoregressive_chunks=2, audio_prompt="", cancel_check=None):
     try:
         manager = get_animate_manager()
 
@@ -31,7 +31,7 @@ def generate_grok_animation(image, prompt, engine="framepack", stabilize=False, 
             face_stabilize=stabilize,
             steps=PRESET["steps"],
             cfg=PRESET["cfg"],
-            autoregressive_chunks=0,
+            autoregressive_chunks=autoregressive_chunks,
             mask_image=None,
             mask_mode="global",
             mask_prompt="",

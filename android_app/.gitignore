@@ -1,0 +1,16 @@
+# Android build artifacts
+local.properties
+.gradle/
+build/
+android_app/autoapp/app/build/
+android_app/autoapp/.gradle/
+android_app/autoapp/local.properties
+android_build_tools/
+*.apk
+captures/
+# Clave de firma (sensibles - no subir al repositorio)
+android_app/autoapp/release-keystore.jks
+android_app/autoapp/release-keystore.properties
+
+autoapp/release-keystore.jks
+autoapp/release-keystore.properties

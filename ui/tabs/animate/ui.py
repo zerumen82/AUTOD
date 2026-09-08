@@ -47,16 +47,26 @@ def build_animate_ui():
                     )
                     btn_cancel = gr.Button("⏹ CANCELAR", variant="stop", interactive=False, scale=1)
 
-                with gr.Accordion("⚙️ Avanzado (opcional)", open=False):
-                    gr.Markdown("*Defaults automáticos — no hace falta abrir esto.*")
+                with gr.Accordion("⚙️ Configuración y Autoregresión", open=False):
                     from animate_photo import AnimatePhoto
                     animator = AnimatePhoto()
                     lora_list = ["None"] + animator.get_available_loras()
                     engine = gr.Dropdown(
                         label="Motor de animación",
-                        choices=["framepack", "wan_video", "svd_turbo", "ltx_video"],
-                        value="framepack",
+                        choices=["wan_video", "framepack", "svd_turbo", "ltx_video"],
+                        value="wan_video",
                     )
+                    with gr.Row():
+                        autoregressive_chunks = gr.Slider(
+                            label="Bloques Autoregresivos (Duración)",
+                            minimum=1, maximum=5, step=1, value=2,
+                            info="1 bloque = ~4s, 2 bloques = ~8s (concatena manteniendo el último frame)."
+                        )
+                        add_audio = gr.Checkbox(
+                            label="🔊 Generar Audio (MMAudio + Voz Español)",
+                            value=True,
+                            info="Añade automáticamente sonido ambiente y voz si hay diálogo en el prompt."
+                        )
                     lora_name = gr.Dropdown(
                         label="LoRA WanVideo",
                         choices=lora_list,
@@ -88,6 +98,8 @@ def build_animate_ui():
         "input_img": input_img,
         "prompt": prompt,
         "engine": engine,
+        "autoregressive_chunks": autoregressive_chunks,
+        "add_audio": add_audio,
         "btn_animate": btn_animate,
         "btn_cancel": btn_cancel,
         "video_output": video_output,

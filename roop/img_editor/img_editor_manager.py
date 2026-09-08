@@ -96,8 +96,25 @@ class ImgEditorManager:
         quality_primary = bool(analysis.get("quality_primary", False))
 
         if engine in ("longcat", "imagine"):
-            denoise = 0.60 + (magnitude * 0.20)
-            guidance = 2.0
+            if body_transform:
+                # Grok Imagine versátil: denoise alto para cambios corporales/ropa completos
+                # intensity controla con qué fuerza el cuerpo cambia (0.0-1.0)
+                intensity = float(analysis.get("body_transform_intensity", 0.5))
+                denoise = 0.84 + (intensity * 0.08) + (magnitude * 0.04)  # 0.84-0.96
+                denoise = min(denoise, 0.96)
+                guidance = 4.5  # default nativo LongCat Full (docs Meituan)
+                steps = int(20 + (magnitude * 8))  # 20-28 pasos para calidad en body
+            else:
+                denoise = 0.60 + (magnitude * 0.20)
+                guidance = 2.5
+        elif engine == "kontext":
+            # FLUX.1 Kontext dev: 12B params, 20 steps, cfg 3.5
+            steps = 20
+            guidance = 3.5
+            if body_transform:
+                denoise = 0.82 + (magnitude * 0.06)
+            else:
+                denoise = 0.60 + (magnitude * 0.20)
         elif engine == "longcat_full":
             steps = int(20 + (magnitude * 10))
             guidance = 4.5
@@ -164,12 +181,16 @@ class ImgEditorManager:
         background_focus: bool,
         structural_inpaint: bool,
         engine: str,
+        body_transform: bool = False,
     ) -> Optional[str]:
-        if engine not in ("longcat", "imagine", "longcat_full"):
+        if engine not in ("longcat", "imagine", "longcat_full", "kontext"):
             return None
         structural_bias = str(analysis.get("structural_bias", "neutral"))
         if structural_inpaint and structural_bias == "remove":
             return "index"
+        # NOTA: "uxo/uno" es para arquitectura UNO, NO para LongCat/FLUX —
+        # rompe los latentes de referencia y sale imagen gris (std~11).
+        # Para body se usa el bypass no_kontext (img2img puro), no otro ref.
         return "offset"
 
     def _apply_prompt_rewriter(
@@ -218,11 +239,13 @@ class ImgEditorManager:
         body_transform: bool = False,
         mask_target: str = "subject",
         quality_hybrid: bool = False,
+        detected_age: int = None,
+        shot_type: str = "unknown",
     ) -> str:
         user_prompt = (user_prompt or "").strip()
         img_context = (img_context or "").strip()
         
-        is_longcat = engine in ("longcat", "longcat_full", "imagine") or "longcat" in engine.lower()
+        is_longcat = engine in ("longcat", "longcat_full", "imagine", "kontext") or "longcat" in engine.lower()
         is_hart = engine == "hart"
         mask_target = (mask_target or "subject").lower()
         background_focus = mask_target == "background" and not body_transform
@@ -239,14 +262,38 @@ class ImgEditorManager:
                 )
                 print(f"[ImgEditor] Modo mejora tier={tier}: sin prompt generativo (preserva foto)")
                 return base
-            if magnitude < 0.62:
+            if body_transform:
+                # Genérico para cualquier cambio corporal/ropa (quitar, poner o
+                # modificar): la fuerza del cambio la da mag/denoise, no el texto.
+                base = f"Instruction: {raw}. Keep the same person, same face, same apparent age, same body shape and pose, same background and composition. Only change the clothing exactly as requested. Apply the change as completely, strongly and obviously as possible."
+            elif magnitude < 0.62:
                 base = f"Instruction: Edit this exact photo: {raw}. Keep the face, identity, composition, background and style unchanged. Only apply the requested adjustment."
             elif magnitude < 0.80:
                 base = f"Instruction: Edit this exact photo: {raw}. Keep the face and identity unchanged, preserve the overall composition. Apply the change as completely as possible."
             else:
                 base = f"Instruction: Edit this exact photo: {raw}. Keep the face and identity identical. Apply the requested change as completely, strongly and obviously as possible."
             print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
-            return base
+            age_hint = ""
+            # Solo si claramente madura (InsightFace se equivoca ±10) y NUNCA en
+            # body_transform (el hint de arrugas + edición corporal = envejecido).
+            if detected_age is not None and detected_age >= 55 and not body_transform:
+                age_hint = (
+                    " The person appears to be around "
+                    + str(detected_age)
+                    + " years old. Preserve all natural age characteristics: "
+                    "wrinkles, fine lines, skin texture, age spots, and mature appearance. "
+                    "Do not smooth or remove any aging features."
+                )
+                print(f"[ImgEditor] Auto age-preservation (age={detected_age})")
+            composition_hint = ""
+            if not body_transform:
+                if shot_type == "closeup":
+                    composition_hint = " This is a close-up photo. Maintain the same tight framing and composition."
+                elif shot_type == "portrait":
+                    composition_hint = " This is a portrait photo. Maintain the same framing and head/shoulders composition."
+                elif shot_type == "fullbody":
+                    composition_hint = " This is a full-body photo. Maintain the same full-body framing."
+            return base + age_hint + composition_hint
         elif is_hart:
             # HART autoregressive - prompt as provided (user or context)
             base = user_prompt if user_prompt else img_context
@@ -770,6 +817,41 @@ class ImgEditorManager:
         else:
             img = Image.open(image.name).copy().convert("RGB")
 
+        detected_age = None
+        shot_type = "unknown"
+        try:
+            import cv2
+            from roop.face_util import get_face_analyser, detect_faces_robust
+            img_arr = np.array(img)
+            img_h, img_w = img_arr.shape[:2]
+            if len(img_arr.shape) == 3 and img_arr.shape[2] == 3:
+                img_bgr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
+                analyser = get_face_analyser()
+                if analyser is not None:
+                    faces = detect_faces_robust(img_bgr, analyser, 0.20)
+                    if faces:
+                        ages = [getattr(f, 'age', None) for f in faces if getattr(f, 'age', None) is not None]
+                        if ages:
+                            detected_age = int(sum(ages) / len(ages))
+                            print(f"[ImgEditor] Edad detectada: {detected_age} años ({len(ages)} cara(s))")
+                        best = max(faces, key=lambda f: float(getattr(f, 'det_score', 0.0) or 0.0))
+                        bx1, by1, bx2, by2 = best.bbox
+                        face_w = bx2 - bx1
+                        face_h = by2 - by1
+                        face_ratio = (face_w * face_h) / (img_w * img_h)
+                        face_top_ratio = by1 / img_h
+                        if face_ratio > 0.25:
+                            shot_type = "closeup"
+                        elif face_ratio > 0.06 and face_top_ratio < 0.35:
+                            shot_type = "portrait"
+                        elif face_ratio < 0.02 or face_top_ratio > 0.5:
+                            shot_type = "fullbody"
+                        else:
+                            shot_type = "midshot"
+                        print(f"[ImgEditor] Composición: {shot_type} (face_ratio={face_ratio:.3f}, top={face_top_ratio:.2f})")
+        except Exception as e:
+            print(f"[ImgEditor] Análisis de imagen no disponible: {e}")
+
         from roop.img_editor.prompt_translator import translate_prompt
         prompt_raw = (prompt or "").strip()
         quality_enhance = bool(quality_mode)
@@ -1071,6 +1153,7 @@ class ImgEditorManager:
             enhance_tier=enhance_tier, high_structural=high_structural,
             structural_bias=structural_bias, body_transform=body_transform,
             mask_target=mask_target, quality_hybrid=quality_hybrid,
+            detected_age=detected_age, shot_type=shot_type,
         )
         is_global = bool(analysis.get("is_global", False))
         mag_suggested = float(analysis.get("magnitude", mag_suggested))
@@ -1087,7 +1170,7 @@ class ImgEditorManager:
         elif body_transform:
             print(
                 f"[ImgEditor] Cambio corporal/ropa (semántico, intensity={body_transform_intensity:.2f}) "
-                "→ global + LongCat Full + ref offset"
+                "→ global + LongCat Full + bypass Kontext (img2img puro) + FacePreserver"
             )
         elif background_focus:
             print(
@@ -1118,37 +1201,69 @@ class ImgEditorManager:
 
         # Intentar máscara de ropa si los ejes semánticos indican cambio de atributo (ropa/color)
         # y NO cambio de pose. Así la decisión es semántica, sin hardcoding de targets.
-        # Para alta magnitud (>= 0.62) se salta la máscara: cambios de cuerpo necesitan
-        # edición global para que el modelo genere piel/tono consistentes sin mismatch de color.
+        # REGLA de cobertura (ver bloque do_cloth_mask abajo): la máscara solo se acepta
+        # si cubre una fracción real de la imagen (>=12% body / >5% attr). Si CLIPSeg
+        # apenas detecta ropa (planos generales, det 352px, personaje pequeño → 3-6%),
+        # se descarta y se usa edición GLOBAL (img2img puro), que es el diseño original:
+        # el modelo regenera el cuerpo completo con piel/tono consistentes, sin parches.
         skip_focal_cloth = (
             global_scene_realism
             or quality_primary
             or (quality_hybrid and is_global and has_quality_request)
         )
-        if (
-            final_mask is None
-            and 0.45 <= mag_suggested < 0.62
-            and not body_transform
-            and not skip_focal_cloth
-        ):
+        # Undress/body fuerte: SOLO si la máscara de ropa resulta fiable (cobertura >=12%)
+        # se enmascara la ropa y se inpaintsa esa zona (el resto de la foto queda intacto).
+        # Con cobertura baja el inpaint focal pinta un parche diminuto y la edición
+        # "no hace nada" o rompe la zona → descartar y caer a global.
+        do_cloth_mask = False
+        cloth_reason = ""
+        cloth_mask_rejected = False
+        if final_mask is None and not skip_focal_cloth:
             axes = analysis.get("axis_scores", {})
             attr_score = axes.get("attribute", 0)
             pose_score = axes.get("pose", 0)
-            is_attribute_change = attr_score > pose_score
-            if is_attribute_change or (attr_score > 0 and pose_score == 0):
-                try:
-                    seg = self._get_clothing_segmenter()
-                    if seg:
-                        cloth_mask, _ = seg.segment_clothing(img, threshold=0.45)
-                        if cloth_mask is not None and self._mask_coverage(cloth_mask) > 0.03:
-                            final_mask = cloth_mask
-                            print(f"[ImgEditor] Máscara de ropa para edit focalizado (attr={attr_score:.3f} > pose={pose_score:.3f})")
-                except Exception as e:
-                    print(f"[ImgEditor] ClothingSegmenter no disponible: {e}")
+            if body_transform and mag_suggested >= 0.62 and pose_score <= attr_score:
+                # Cambio corporal/ropa (no pose): solo repintar la ropa.
+                # Si domina pose, global: la pose necesita regenerar el cuerpo.
+                do_cloth_mask = True
+                cloth_reason = f"body mag={mag_suggested:.2f} → solo ropa"
+            elif 0.45 <= mag_suggested < 0.62 and not body_transform:
+                if attr_score > pose_score or (attr_score > 0 and pose_score == 0):
+                    do_cloth_mask = True
+                    cloth_reason = f"attr={attr_score:.3f} > pose={pose_score:.3f}"
+        if do_cloth_mask:
+            try:
+                seg = self._get_clothing_segmenter()
+                if seg:
+                    cloth_mask, _ = seg.segment_clothing(img, threshold=0.45)
+                    cov = self._mask_coverage(cloth_mask) if cloth_mask is not None else 0.0
+                    # Umbral de aceptación según tipo de cambio:
+                    #  - Cambio moderado (attr): basta >5% de la imagen (prenda real
+                    #    localizada: camisa, vestido, etc.).
+                    #  - Body/undress fuerte (body_transform): CLIPSeg va a 352px y en
+                    #    planos generales/fullbody casi no detecta ropa (3-6%). Con un
+                    #    umbral bajo la máscara-basura se acepta y el inpaint focal pinta
+                    #    un parche diminuto → la edición "no hace nada" o rompe esa zona.
+                    #    Exigimos cobertura >=12% (ropa real muy visible); si no llega,
+                    #    edición GLOBAL (img2img puro con bypass Kontext), que es el
+                    #    diseño original: el modelo regenera el cuerpo sin parches.
+                    min_cov = 0.12 if body_transform else 0.05
+                    if cloth_mask is not None and cov > min_cov:
+                        final_mask = cloth_mask
+                        print(f"[ImgEditor] Máscara de ropa para edit focalizado ({cloth_reason}, cobertura={cov:.1%})")
+                    else:
+                        cloth_mask_rejected = True
+                        destino = "GLOBAL (img2img puro)" if body_transform else "global (sin máscara)"
+                        print(
+                            f"[ImgEditor] Máscara de ropa insuficiente "
+                            f"(cobertura={cov:.1%}, mínimo {min_cov:.0%}) → {destino}"
+                        )
+            except Exception as e:
+                print(f"[ImgEditor] ClothingSegmenter no disponible: {e}")
 
         # force_global solo cuando NO hay máscara y es cambio estructural o quality_hybrid sin máscara exitosa.
-        # La máscara de ropa ya se intentó arriba; si existe, se usará.
-        # body_transform se maneja con máscara de sujeto (no global) para preservar la foto original.
+        # La máscara de ropa ya se intentó arriba (incluido undress/body); si existe, se usará
+        # como inpaint: solo la ropa se repinta, el resto de la foto queda intacto.
         force_global = final_mask is None and not background_focus and (
             high_structural
             or (quality_hybrid and has_quality_request and not quality_primary)
@@ -1167,7 +1282,7 @@ class ImgEditorManager:
             ref_label = "offset" if not high_structural else "index"
             print(f"[ImgEditor] Edición global ({reason}{bias_note}) — ref {ref_label}, denoise alto")
             final_mask = None
-        elif final_mask is None and not is_global:
+        elif final_mask is None and not is_global and not body_transform and not cloth_mask_rejected:
             try:
                 mask_query = mask_target
                 print(f"[ImgEditor] Intentando auto-máscara para: {mask_query}")
@@ -1194,6 +1309,12 @@ class ImgEditorManager:
         if final_mask is None and is_global:
              print(f"[ImgEditor] Edición global detectada (sin máscara)")
 
+        if final_mask is None and (body_transform or cloth_mask_rejected):
+             print(
+                 "[ImgEditor] Edición GLOBAL (img2img puro) — sin máscara focal "
+                 "(solo ropa insuficiente / cambio de cuerpo requiere regenerar el cuerpo)"
+             )
+
         try:
             result = None
             msg = ""
@@ -1219,7 +1340,7 @@ class ImgEditorManager:
                 version = None
                 flux_structural_override = False
 
-                if use_flux_structural_inpaint and engine in ("longcat", "imagine", "longcat_full"):
+                if use_flux_structural_inpaint and engine in ("longcat", "imagine", "longcat_full", "kontext"):
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     from roop.img_editor.icedit_comfy_client import ICEditComfyClient
                     if self.flux_dev_abl_client is None:
@@ -1240,7 +1361,18 @@ class ImgEditorManager:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
                     mag = analysis.get("magnitude", 0.0)
-                    version = "LongCat-Image-Edit-Q4_K_S.gguf" if mag >= 0.60 else "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                    # Grok Imagine versátil: Full para body_transform/edits fuertes, Turbo para sutiles
+                    is_body = bool(analysis.get("body_transform", False))
+                    if is_body or mag >= 0.70:
+                        version = "LongCat-Image-Edit-Q4_K_S.gguf"  # Full: 20-28 pasos, calidad
+                    else:
+                        version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"  # Turbo: 8 pasos, rápido
+                elif engine == "kontext":
+                    from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
+                    if self.flux_klein_client is None:
+                        self.flux_klein_client = get_flux_edit_comfy_client()
+                    client = self.flux_klein_client
+                    version = "flux1-kontext-dev-Q2_K.gguf"  # 3.8GB, fits in 8GB VRAM with T5 GGUF
                 elif engine == "longcat_full":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
@@ -1336,7 +1468,7 @@ class ImgEditorManager:
                             gen_params["mask_image"] = final_mask
                             gen_params["num_inference_steps"] = max(26, params["num_inference_steps"])
                             gen_params["guidance_scale"] = 1.0
-                        elif high_structural and engine in ("longcat", "imagine", "longcat_full"):
+                        elif high_structural and engine in ("longcat", "imagine", "longcat_full", "kontext"):
                             if structural_inpaint and structural_bias == "remove":
                                 gen_params["grow_mask_by"] = 40
                                 gen_params["denoise"] = min(0.98, max(params["denoise"], 0.97))
@@ -1348,10 +1480,25 @@ class ImgEditorManager:
                             background_focus=background_focus,
                             structural_inpaint=structural_inpaint,
                             engine=engine,
+                            body_transform=body_transform,
                         )
                         if ref_method:
                             gen_params["reference_latents_method"] = ref_method
                             print(f"[ImgEditor] Kontext ref={ref_method}")
+                        if body_transform and engine in ("longcat", "imagine", "longcat_full"):
+                            # Bypass Kontext para body: sin nodos de latentes de referencia
+                            # (offset conserva la ropa, uxo rompe los latentes → gris).
+                            # PERO con visión: Qwen-VL ve la foto para género/pose/
+                            # proporciones correctos (sin visión alucina otro cuerpo).
+                            gen_params["no_kontext"] = True
+                            gen_params["drop_edit_image_ref"] = False
+                            print("[ImgEditor] Bypass Kontext body (con visión, sin ancla estructural)")
+                            if final_mask is not None:
+                                # Inpaint de ropa: expandir zona + denoise casi total para
+                                # que no queden restos de prenda en los bordes.
+                                gen_params["grow_mask_by"] = 16
+                                gen_params["denoise"] = min(0.97, max(params["denoise"], 0.93))
+                                print("[ImgEditor] Inpaint ropa: grow=16, denoise≥0.93")
                         if "qwen" not in engine and not flux_structural_override:
                             gen_params["mask_image"] = final_mask if mask_mode in ["manual", "global"] else None
 
@@ -1365,6 +1512,23 @@ class ImgEditorManager:
                         result = result_obj.image
                         if result.size != img.size and engine != "hart":
                             result = result.resize(img.size, Image.LANCZOS)
+
+                        # Restaurar rostros originales (el bypass/body pierde identidad).
+                        # FacePreserver estaba implementado pero nunca se llamaba.
+                        if not quality_only and engine != "hart":
+                            try:
+                                from roop.img_editor.face_preserver import FacePreserver
+                                fp = FacePreserver()
+                                ok_fp, _ = fp.initialize()
+                                if ok_fp:
+                                    restored = fp.preserve_faces(
+                                        img.convert("RGB"), result.convert("RGB")
+                                    )
+                                    if restored is not None:
+                                        result = restored
+                                        print("[ImgEditor] FacePreserver: rostros restaurados")
+                            except Exception as e:
+                                print(f"[ImgEditor] FacePreserver omitido: {e}")
 
                         if final_mask and engine != "hart":
                             if flux_structural_override or structural_inpaint:

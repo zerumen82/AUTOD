@@ -27,6 +27,7 @@ class FluxEditComfyClient:
         self._is_longcat_turbo = False
         self._is_qwen_image_edit = False
         self._is_qwen_q5 = False  # v5.1040 fix: always defined to avoid AttributeError on klein/flux
+        self._is_kontext_dev = False
 
     def is_available(self):
         try:
@@ -39,6 +40,11 @@ class FluxEditComfyClient:
         path = os.path.join(get_models_base(), subdir, name)
         exists = os.path.exists(path)
         if not exists:
+            # GGUF models can be in unet/ instead of diffusion_models/
+            if subdir == "diffusion_models" and name.endswith(".gguf"):
+                alt_path = os.path.join(get_models_base(), "unet", name)
+                if os.path.exists(alt_path):
+                    return True
             print(f"[FluxClient] FALTA MODELO: {path}")
         return exists
 
@@ -97,6 +103,17 @@ class FluxEditComfyClient:
             self._is_longcat_turbo = False
             self._is_qwen_image_edit = True
             self._is_qwen_q5 = False
+        elif "kontext" in flux_version:
+            # FLUX.1 Kontext dev GGUF — dual CLIP (clip_l + t5-xxl GGUF)
+            # Use T5 GGUF (2.7GB) instead of T5 fp8 (3GB) to save VRAM
+            clip_name = "clip_l.safetensors"
+            clip_name2 = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
+            clip_type = "flux"
+            self._dual_clip = True
+            self._clip_name2 = clip_name2
+            self._is_longcat_turbo = False
+            self._is_qwen_image_edit = False
+            self._is_kontext_dev = True
         elif flux_version in (
             "ggml-model-Q4_K_M.gguf",
             "flux1-fill-dev-q4_k_m.gguf",
@@ -186,8 +203,16 @@ class FluxEditComfyClient:
             negative_prompt = "low quality, blurry, distorted, low resolution"
 
         is_longcat = "LongCat" in self._flux_version
+        is_kontext = self._is_kontext_dev
         is_qwen = self._is_qwen_image_edit or self._is_qwen_q5
         is_klein_9b = "klein-9b" in self._flux_version
+        is_klein = is_klein_9b or ("klein" in (self._flux_version or ""))
+        is_klein_edit = is_klein
+        # ImageEditor Klein = REAL EDIT (ReferenceLatent): latente vacío + la imagen
+        # de referencia se inyecta como conditioning("reference_latents") → el modelo
+        # regenera con composición/identidad de la ref aplicando la instrucción.
+
+        klein_empty_latent = None
 
         t0 = time.time()
         image = image.convert("RGB")
@@ -195,8 +220,8 @@ class FluxEditComfyClient:
         new_w, new_h = (w // 64) * 64, (h // 64) * 64
         if new_w != w or new_h != h:
             image = image.resize((new_w, new_h), Image.LANCZOS)
-        # LongCat hasta 1024px; Klein 9B hasta 1024px; Qwen-Image-Edit 640px (20B Q2_K apenas cabe en 8GB); otros 768px
-        max_dim = 1024 if (is_longcat or is_klein_9b) else (640 if is_qwen else 768)
+        # LongCat/Kontext hasta 1024px; Klein 9B hasta 1024px; Qwen-Image-Edit 640px; otros 768px
+        max_dim = 1024 if (is_longcat or is_kontext or is_klein_9b) else (640 if is_qwen else 768)
         if new_w > max_dim or new_h > max_dim:
             image.thumbnail((max_dim, max_dim), Image.LANCZOS)
             new_w, new_h = image.size
@@ -211,6 +236,10 @@ class FluxEditComfyClient:
             return None, f"Error subiendo imagen: {r.status_code}"
 
         mname = None
+        if is_klein_edit:
+            # El EDIT real de Klein usa la imagen COMPLETA como referencia (ReferenceLatent).
+            # Una máscara rompería el conditioning — ignorarla siempre aquí.
+            mask_image = None
         if mask_image:
             mname = f"mask_{int(t0)}.png"
             mbuf = io.BytesIO(); mask_image.convert("L").resize((new_w, new_h)).save(mbuf, "PNG"); mbuf.seek(0)
@@ -241,7 +270,13 @@ class FluxEditComfyClient:
             last_clip = ["20", 1]
 
         # LongCat Turbo es distilled (CFG=1.0 forzado, pasos nativos ~8).
-        if is_longcat and self._is_longcat_turbo:
+        if is_klein_edit:
+            # FLUX.2 Klein EDIT real: latente VACÍO + ReferenceLatent ( refs en
+            # conditioning) → denoise 1.0 obligatorio, 4 pasos nativos, CFG 1.0.
+            actual_cfg = 1.0
+            actual_denoise = 1.0
+            num_inference_steps = min(num_inference_steps, 4)
+        elif is_longcat and self._is_longcat_turbo:
             actual_cfg = 1.0
             actual_denoise = 1.0
             num_inference_steps = min(num_inference_steps, 12)
@@ -249,7 +284,18 @@ class FluxEditComfyClient:
             actual_cfg = guidance_scale
             actual_denoise = denoise
 
-        if is_longcat:
+        if is_kontext:
+            # FLUX.1 Kontext dev: standard FLUX img2img workflow
+            # No FluxKontextImageScale or FluxKontextMultiReferenceLatentMethod
+            model_input = last_model
+            wf["6"] = {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": prompt, "clip": last_clip},
+            }
+            wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
+            positive_input = ["6", 0]
+            negative_input = ["7", 0]
+        elif is_longcat:
             wf["16"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
             if self._is_longcat_turbo:
                 wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": last_model, "shift": 3.1}}
@@ -257,28 +303,42 @@ class FluxEditComfyClient:
             else:
                 model_input = last_model
 
-            # drop_edit_image_ref: la fuente no aporta croma útil al encode (señal de imagen).
-            encode_image = None if (no_kontext and drop_edit_image_ref) else ["16", 0]
-            wf["6"] = {
-                "class_type": "TextEncodeQwenImageEditPlus",
-                "inputs": {
-                    "clip": last_clip,
-                    "prompt": prompt,
-                    "vae": ["4", 0],
-                    "image1": encode_image,
-                    "image2": None,
-                    "image3": None,
-                },
-            }
             if no_kontext:
+                # Bypass de latentes de referencia (sin FluxKontextMultiReferenceLatentMethod).
+                # Con visión (drop=False): Qwen-VL VE la foto → género, pose y
+                # proporciones correctos, pero sin ancla estructural a la ropa.
+                # Sin visión (drop=True): solo-texto, más rápido pero alucina cuerpos.
                 if drop_edit_image_ref:
                     print("[FluxClient] Kontext BYPASS + text-encode sin image-ref")
+                    wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": last_clip}}
                 else:
-                    print("[FluxClient] Kontext BYPASS — conditioning directo a KSampler")
+                    print("[FluxClient] Kontext BYPASS con visión (ve la imagen, sin latentes ref)")
+                    wf["6"] = {
+                        "class_type": "TextEncodeQwenImageEditPlus",
+                        "inputs": {
+                            "clip": last_clip,
+                            "prompt": prompt,
+                            "vae": ["4", 0],
+                            "image1": ["16", 0],
+                            "image2": None,
+                            "image3": None,
+                        },
+                    }
                 wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
                 positive_input = ["6", 0]
                 negative_input = ["7", 0]
             else:
+                wf["6"] = {
+                    "class_type": "TextEncodeQwenImageEditPlus",
+                    "inputs": {
+                        "clip": last_clip,
+                        "prompt": prompt,
+                        "vae": ["4", 0],
+                        "image1": ["16", 0],
+                        "image2": None,
+                        "image3": None,
+                    },
+                }
                 ref_method = reference_latents_method or "index_timestep_zero"
                 if ref_method not in ("offset", "index", "uxo/uno", "index_timestep_zero"):
                     ref_method = "index_timestep_zero"
@@ -308,17 +368,34 @@ class FluxEditComfyClient:
         else:
             wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": last_clip}}
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
-            model_input = last_model
-            positive_input = ["6", 0]
-            negative_input = ["7", 0]
+            if is_klein_edit:
+                # ===== FLUX.2 Klein EDIT REAL (ReferenceLatent) =====
+                # Latente VACÍO del tamaño de la imagen + la imagen de referencia se
+                # inyecta COMO conditioning ("reference_latents") → el modelo regenera
+                # manteniendo composición/identidad de la ref y aplica la instrucción.
+                # (flujo oficial de FLUX.2 Klein edit / one-node)
+                wf["5d"] = {"class_type": "GetImageSize", "inputs": {"image": ["1", 0]}}
+                wf["5e"] = {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": ["5d", 0], "height": ["5d", 1], "batch_size": 1}}
+                wf["6r"] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["6", 0], "latent": ["5e", 0]}}
+                wf["7r"] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["7", 0], "latent": ["5e", 0]}}
+                wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"shift": 3.0, "model": last_model}}
+                model_input = ["17", 0]
+                positive_input = ["6r", 0]
+                negative_input = ["7r", 0]
+                klein_empty_latent = ["5e", 0]
+            else:
+                model_input = last_model
+                positive_input = ["6", 0]
+                negative_input = ["7", 0]
+                klein_empty_latent = None
 
         wf["8"] = {
             "class_type": "KSampler",
             "inputs": {
                 "model": model_input, "positive": positive_input, "negative": negative_input,
-                "latent_image": ["5", 0], "seed": seed or int(t0) % 1000000,
+                "latent_image": klein_empty_latent or ["5", 0], "seed": seed or int(t0) % 1000000,
                 "steps": num_inference_steps, "cfg": actual_cfg,
-                "sampler_name": "euler" if is_qwen else "euler_ancestral",
+                "sampler_name": ("er_sde" if is_klein_edit else ("euler" if is_qwen else "euler_ancestral")),
                 "scheduler": "simple",
                 "denoise": actual_denoise
             }
@@ -334,7 +411,7 @@ class FluxEditComfyClient:
         }
         wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FastEdit"}}
 
-        uses_kontext = (is_longcat or is_qwen) and not no_kontext
+        uses_kontext = is_longcat and not no_kontext  # Only LongCat uses FluxKontext nodes
         if mname:
             wf["14"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
             if uses_kontext:
@@ -358,14 +435,35 @@ class FluxEditComfyClient:
                 },
             }
 
-        if is_longcat:
+        def _wf_sort_key(k):
+            try:
+                return int(k)
+            except ValueError:
+                return int("".join(ch for ch in k if ch.isdigit()) or 0)
+
+        if is_klein_edit:
+            print(
+                "[FluxClient] FLUX.2 Klein EDIT workflow (ReferenceLatent + EmptyFlux2Latent): "
+                f"cfg=1.0, denoise=1.0, steps={num_inference_steps}, sampler=er_sde, "
+                f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
+                flush=True,
+            )
+        elif is_kontext:
+            print(
+                "[FluxClient] FLUX.1 Kontext dev workflow (standard FLUX img2img): "
+                f"cfg={wf['8']['inputs']['cfg']}, denoise={actual_denoise:.2f}, "
+                f"mask={'inpaint' if mname else 'global'}, "
+                f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
+                flush=True,
+            )
+        elif is_longcat:
             print(
                 "[FluxClient] LongCat edit workflow: "
                 f"cfg={wf['8']['inputs']['cfg']}, denoise={actual_denoise:.2f}, "
                 f"ref={ref_method}, "
                 f"drop_img_ref={drop_edit_image_ref}, "
                 f"mask={'inpaint' if mname else 'global'}, "
-                f"nodes={sorted(wf.keys(), key=int)}",
+                f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
                 flush=True,
             )
         elif is_qwen:
@@ -373,7 +471,7 @@ class FluxEditComfyClient:
                 "[FluxClient] Qwen-Image-Edit workflow: "
                 f"cfg={wf['8']['inputs']['cfg']}, steps={num_inference_steps}, "
                 f"mask={'inpaint' if mname else 'global'}, "
-                f"nodes={sorted(wf.keys(), key=int)}",
+                f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
                 flush=True,
             )
 

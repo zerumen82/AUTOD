@@ -71,6 +71,16 @@ CONCEPTS: Dict[str, list] = {
         "nude naked undressed bare skin body exposure remove clothes desnuda sin ropa",
         "quitar ropa exposición corporal piel descubierta desnudo undress strip",
     ],
+    "attribute_age": [
+        "age appear older younger aged elderly juvenile mature wrinkle wrinkle aged skin",
+        "appear old aged elderly mature senior wrinkle lines aged skin texture",
+        "piel arrugas envejecido mayor edad textura piel arrugas líneas",
+        "parecer mayor joven envejecido textura piel arrugas",
+    ],
+    "attribute_skin": [
+        "skin texture rough smooth flawless blemish freckle mole scar tattoo",
+        "piel textura áspera suave perfecta marca lunar cicatriz tatuaje",
+    ],
     "target_background": [
         "background environment scenery landscape surroundings fondo entorno escenario",
     ],
@@ -97,6 +107,8 @@ _AXIS_KEYS = {
         "attribute_recolor",
         "attribute_quality",
         "attribute_body",
+        "attribute_age",
+        "attribute_skin",
     ],
 }
 

@@ -388,6 +388,12 @@ def batch_process_regular(
         
         # Construir ruta de salida
         output_filename = os.path.basename(filename)
+        # v5.1042: OpenCV no tiene writer para .jfif/.jpe/.jpeg → imwrite falla silenciosamente
+        # (log: "could not find a writer for the specified extension" en 505735164.jfif).
+        # Normalizar a .jpg, que cv2.imwrite soporta siempre.
+        output_ext = os.path.splitext(output_filename)[1].lower()
+        if output_ext in ('.jfif', '.jpe', '.jpeg'):
+            output_filename = os.path.splitext(output_filename)[0] + '.jpg'
         output_path = os.path.join(roop.globals.output_path, output_filename)
         
         # Asegurar que el directorio de salida existe
@@ -474,6 +480,11 @@ def batch_process_with_options(list_files_process, options, progress_callback):
         
         # Construir ruta de salida
         output_filename = os.path.basename(filename)
+        # v5.1042: OpenCV no tiene writer para .jfif/.jpe/.jpeg → imwrite falla silenciosamente.
+        # Normalizar a .jpg, que cv2.imwrite soporta siempre.
+        output_ext = os.path.splitext(output_filename)[1].lower()
+        if output_ext in ('.jfif', '.jpe', '.jpeg'):
+            output_filename = os.path.splitext(output_filename)[0] + '.jpg'
         output_path = os.path.join(roop.globals.output_path, output_filename)
         
         # Asegurar que el directorio de salida existe

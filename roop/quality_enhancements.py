@@ -82,6 +82,12 @@ def match_color_histogram(
 def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray) -> np.ndarray:
     """
     Detecta pelo, flequillo, manos u objetos sobre la cara para protegerlos durante el swap.
+
+    v5.1045: TODAS las señales son SOLO del target (swap-independientes). Antes comparaban
+    el swapped con el original: |swap − original| ES el efecto del swap, así que cualquier
+    swap fuerte marcaba 66-86% del crop como "oclusión" y restaba 0.88 de la máscara
+    (probe_ab: A/B/D finales 1.3-1.6 vs raw 10.7). Ahora los bordes/textura se miden sobre
+    target_region — el original YA contiene pelo/manos/objetos si existen.
     """
     try:
         if face_img is None or target_region is None:
@@ -91,17 +97,18 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
 
         h, w = face_img.shape[:2]
 
-        # 1. Análisis de texturas y bordes (Sobel)
-        src_gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+        # 1. Análisis de texturas y bordes (Sobel) — SOLO del target (v5.1045)
+        # El target ya contiene pelo/manos/objetos: sus bordes se detectan directo
+        # sobre target_region, sin comparar con el swapped (que disparaba falsos
+        # positivos: cualquier swap fuerte altera los bordes → "oclusión" falsa).
         tgt_gray = cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY)
 
         tgt_sob = cv2.Sobel(tgt_gray, cv2.CV_32F, 1, 1, ksize=3)
-        src_sob = cv2.Sobel(src_gray, cv2.CV_32F, 1, 1, ksize=3)
-        diff_sob = cv2.absdiff(tgt_sob, src_sob)
+        tgt_sob_mag = np.abs(tgt_sob)
 
-        sob_mean = np.mean(diff_sob)
+        sob_mean = np.mean(tgt_sob_mag)
         sob_thresh = max(25, min(40, sob_mean * 1.5))
-        _, texture_mask = cv2.threshold(diff_sob.astype(np.uint8), sob_thresh, 255, cv2.THRESH_BINARY)
+        _, texture_mask = cv2.threshold(tgt_sob_mag.astype(np.uint8), sob_thresh, 255, cv2.THRESH_BINARY)
 
         # 2. Análisis de color (piel)
         tgt_hsv = cv2.cvtColor(target_region, cv2.COLOR_BGR2HSV)
@@ -118,18 +125,12 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
         # 3. Oclusión base: textura extra donde no es piel
         occlusion = cv2.bitwise_and(texture_mask, not_skin_mask)
 
-        # v5.1040: Detección por diferencia de color DIRECTA (swap vs original)
-        # Cuando un objeto cubre la cara, el swap genera piel limpia pero el original tiene el objeto.
-        # La diferencia de color grande = oclusión. Captura objetos que Sobel/LAB no detectan.
-        color_diff = cv2.absdiff(face_img, target_region)
-        color_diff_gray = cv2.cvtColor(color_diff, cv2.COLOR_BGR2GRAY)
-        _, color_occ_mask = cv2.threshold(color_diff_gray, 35, 255, cv2.THRESH_BINARY)
-        color_occ_mask = cv2.bitwise_and(color_occ_mask, center_mask)
-        # Solo donde el original NO es piel (objetos no-cutáneos) o donde la diferencia es muy alta
-        high_diff = cv2.threshold(color_diff_gray, 60, 255, cv2.THRESH_BINARY)[1]
-        high_diff = cv2.bitwise_and(high_diff, center_mask)
-        color_occ_mask = cv2.bitwise_or(color_occ_mask, high_diff)
-        occlusion = cv2.bitwise_or(occlusion, color_occ_mask)
+        # v5.1045: ELIMINADA la detección por diferencia de color v5.1040 (swap vs original).
+        # Era autodestructiva: |swapped − original| ES el efecto del swap. Cualquier swap fuerte
+        # (>35 de diff) marcaba el 68-86% de la cara como "oclusión" y restaba 0.88 de la
+        # máscara (ProcessMgr), dejando el swap casi invisible (FINAL 1.3-1.6 vs raw 10.7).
+        # Verificado en probe_ab: A/B/D débiles (occ 68-86%) vs C fuerte (occ 52%, fuerza 0.70).
+        # Las señales Sobel/LAB/Laplaciano restantes comparan solo el target (swap-independiente).
 
         # 4. Oclusiones con tono de piel (manos) + objetos
         tgt_lab = cv2.cvtColor(target_region, cv2.COLOR_BGR2LAB).astype(np.float32)
@@ -148,12 +149,16 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
 
             occlusion = cv2.bitwise_or(occlusion, cv2.bitwise_or(skin_occ_mask, object_mask))
 
-        # 5. Detalle fino (Laplaciano)
-        swp_lap = cv2.Laplacian(src_gray, cv2.CV_32F)
+        # 5. Detalle fino (Laplaciano) — SOLO del target (v5.1045)
+        # Antes: diff_lap = |tgt_lap| − |swp_lap|×1.5 → el swapped (upscale 128→256 del
+        # inswapper) es MÁS SUAVE que el original, así que |tgt_lap| > |swp_lap|×1.5 en
+        # toda la cara → detail_mask cubría el 60-85% → máscara restada 0.88 → swap casi
+        # invisible (probe_ab: A=1.43, B=1.30, D=1.63). Ahora solo la textura propia del
+        # target (micrófonos, gafas, manos, objetos) genera detalle a proteger.
         tgt_lap = cv2.Laplacian(tgt_gray, cv2.CV_32F)
-        diff_lap = np.clip(np.abs(tgt_lap) - np.abs(swp_lap) * 1.5, 0, 255)
-        lap_thresh = max(35, np.mean(diff_lap[diff_lap > 0]) * 0.6 if np.any(diff_lap > 0) else 40)
-        _, detail_mask = cv2.threshold(diff_lap.astype(np.uint8), lap_thresh, 255, cv2.THRESH_BINARY)
+        tgt_lap_abs = np.abs(tgt_lap)
+        lap_thresh = max(35, np.mean(tgt_lap_abs[tgt_lap_abs > 0]) * 0.6 if np.any(tgt_lap_abs > 0) else 40)
+        _, detail_mask = cv2.threshold(tgt_lap_abs.astype(np.uint8), lap_thresh, 255, cv2.THRESH_BINARY)
 
         protect_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(protect_mask, (int(w * 0.35), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)

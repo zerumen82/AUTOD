@@ -1,5 +1,18 @@
 from typing import List
 
+import sys
+
+# v5.1043: Consolas Windows (cp1252) crashean en print con caracteres Unicode
+# (→, —, í...). El error se propagaba hasta matar el swap en silencio
+# (log real: UnicodeEncodeError 'charmap' en _select_source_face_by_similarity).
+# Reconfigure UTF-8 + errors='replace' para que ningún print pueda romper el pipeline.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+del _stream
+
 from settings import Settings
 
 # Configuración global

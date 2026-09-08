@@ -315,7 +315,7 @@ def start(
         if vram_gb <= 8:
             vram_mode = "--normalvram"
         else:
-            vram_mode = "--normalvram"
+            vram_mode = "--highvram"
         print(f"[ComfyLauncher] VRAM detectada: {vram_gb}GB → usando {vram_mode}")
         cmd = [python_exe, "-u", exe, "--port", str(port), vram_mode]
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")

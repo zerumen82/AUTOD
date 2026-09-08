@@ -35,19 +35,6 @@ env/
 .idea/
 *.swp
 *.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Large binary files (models, checkpoints)
-checkpoints/
-models/
-*.h5
-*.onnx
-*.pt
-*.pth
 *.bin
 
 # Output files
@@ -59,20 +46,6 @@ out-voice/
 
 # Temporary files
 *.tmp
-*.bak
-
-# Third party compiled
-third_party/onnxruntime/*.so
-third_party/onnxruntime/*.pyd
-
-# Large binary files - DLLs
-dll/
-
-# Large binary files - FFmpeg
-ffmpeg/
-
-# Third party
-third_party/
 
 # Video files
 *.mp4
@@ -95,4 +68,22 @@ debug_swap/*.jpg
 
 # Gradio
 .gradio/
+
+
+# Probe outputs (fotos/imagenes de test - no subir)
+.probe_v5d_out/
+probe_repro_out/
+verify_batch/
+img_editor/edit_*.png
+
+# Large binary files & backups
+dll_BACKUP/
+dll/
+ffmpeg/
+checkpoints/
+models/
+*.dll
+*.onnx
+*.pt
+*.pth
 

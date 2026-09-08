@@ -285,6 +285,100 @@ def detect_faces_robust(img_rgb, analyser, thresh_override=None):
         return []
 
 
+def _has_face_geometry(face):
+    """v5.1050+1052: Valida geometría real de kps (5 landmarks: ojos, nariz, boca).
+
+    Rechaza falsos positivos de RetinaFace en caras de origen (texto, manos, objetos,
+    cuerpos) que pasan con det_score bajo. Los 5 kps de una cara real siguen un orden
+    anatómico. v5.1052: TOLERANTE A PERFILES/POSES — la v5.1050 exigía orden estricto
+    (ojos < nariz < boca en Y + le[0] < re[0] + eye_dist 0.10-1.5) y rechazaba caras
+    COMPLETAS válidas: en perfil los ojos se superponen en X (le[0]≈re[0]) y el bbox
+    incluye nuca/oreja → eye_dist/face_w < 0.10 → falso negativo. Ahora la guardia
+    real es "ojos arriba de la boca + nariz entre ojos y boca" (universal en caras),
+    con tolerancias para cabeza inclinada. El orden horizontal solo se exige si hay
+    separación real (>2% del ancho); en perfiles casi-verticales no penaliza.
+    """
+    try:
+        kps = getattr(face, 'kps', None)
+        if kps is None or not hasattr(kps, 'shape') or kps.shape != (5, 2):
+            return False
+        kpsf = kps.astype(np.float32)
+        if not np.all(np.isfinite(kpsf)):
+            return False
+        le, re, nose, lm, rm = kpsf
+        fw = face.bbox[2] - face.bbox[0]
+        fh = face.bbox[3] - face.bbox[1]
+        if fw <= 0 or fh <= 0:
+            return False
+        tol_v = 0.20 * fh  # tolerancia vertical: cabeza inclinada / mirando abajo
+        # 1. Ojos arriba de la boca (universal, incluso en perfiles)
+        if not (le[1] < lm[1] + tol_v and re[1] < rm[1] + tol_v):
+            return False
+        # 2. Nariz entre ojos y boca (con margen generoso)
+        if not (nose[1] > min(le[1], re[1]) - tol_v and nose[1] < max(lm[1], rm[1]) + tol_v):
+            return False
+        # 3. Orden horizontal: solo si hay separación real (perfil ≈ vertical no penaliza)
+        eye_sep_x = abs(re[0] - le[0])
+        if eye_sep_x > 0.02 * fw and le[0] >= re[0]:
+            return False
+        # 4. Distancia interocular razonable — perfil casi de canto: ojos a <1% del ancho.
+        #    Piso 0.005 (0.5px en cara de 100px): rechaza "ojos en el mismo píxel",
+        #    acepta perfiles extremos. Techo 1.5: rechaza bboxes mal alineados.
+        if not (0.005 < eye_sep_x / max(1.0, fw) < 1.5):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_face_complete(face, img_w, img_h):
+    """v5.1055: Rechaza caras de source INCOMPLETAS.
+
+    El usuario exige que las caras de origen sean COMPLETAS (de frente o de
+    perfil, pero enteras). RetinaFace a veces detecta MEDIA cara cortada por el
+    borde de la foto (bbox pegado al borde) o un recorte donde la cara sobresale
+    (kps tocando los bordes del bbox). Ambas producen swaps de baja calidad.
+    """
+    try:
+        bbox = getattr(face, 'bbox', None)
+        if bbox is None or len(bbox) != 4:
+            return False
+        x1, y1, x2, y2 = [float(v) for v in bbox]
+        fw = x2 - x1
+        fh = y2 - y1
+        if fw <= 0 or fh <= 0:
+            return False
+        # 1. bbox tocando el borde de la imagen = cara cortada por la foto
+        edge_margin = max(2.0, 0.005 * min(img_w, img_h))
+        if x1 <= edge_margin or y1 <= edge_margin:
+            return False
+        if x2 >= img_w - edge_margin or y2 >= img_h - edge_margin:
+            return False
+        # 2. kps dentro del bbox con margen = cara sobresaliendo del recorte
+        kps = getattr(face, 'kps', None)
+        if kps is None:
+            return True  # sin kps el check de borde ya validó la foto
+        if not hasattr(kps, 'shape'):
+            kps = np.asarray(kps, dtype=np.float32)
+        if kps.shape != (5, 2):
+            return True
+        min_top = max(2.0, 0.04 * fh)
+        min_bottom = max(2.0, 0.06 * fh)
+        min_side = max(2.0, 0.03 * fw)
+        eyes_y = min(float(kps[0][1]), float(kps[1][1]))
+        if eyes_y < y1 + min_top:
+            return False
+        mouth_y = max(float(kps[3][1]), float(kps[4][1]))
+        if mouth_y > y2 - min_bottom:
+            return False
+        for p in kps:
+            if p[0] < x1 + min_side or p[0] > x2 - min_side:
+                return False
+        return True
+    except Exception:
+        return True  # ante duda no bloquear (la geometría ya filtra)
+
+
 def extract_face_images(
     image_path,
     options: tuple = (False, 0),
@@ -406,18 +500,42 @@ def extract_face_images(
 
             if faces:
                 # Filtrar ruido: tamaño mínimo, aspecto razonable, confianza mínima, nitidez
+                # v5.1050: + geometría de kps (ojos/nariz/boca) para rechazar falsos positivos
+                # (texto, manos, objetos, cuerpos) que RetinaFace marca como "cara" con
+                # det_score 0.30-0.50 en la cascada permisiva.
+                # v5.1052: det 0.30→0.22 — la cascada detecta caras COMPLETAS de perfil/
+                # difíciles con det 0.22-0.30 y el filtro final las descartaba (falso
+                # negativo). La geometría de kps es ahora la guardia real contra falsos
+                # positivos; el det bajo + geometría válida = cara real difícil.
                 valid_source_faces = []
                 for f in faces:
                     fw = f.bbox[2] - f.bbox[0]
                     fh = f.bbox[3] - f.bbox[1]
                     aspect = fw / fh if fh > 0 else 0
                     det = getattr(f, 'det_score', 0.0) or 0.0
-                    if not (fw > 24 and fh > 24 and 0.25 < aspect < 3.5 and det >= 0.30):
+                    if not (fw > 24 and fh > 24 and 0.25 < aspect < 3.5 and det >= 0.22):
+                        if det < 0.22:
+                            print(f"[SOURCE_DETECT] ⚠️ det={det:.2f} < 0.22 — cara descartada ({fw}x{fh}px)")
+                        continue
+                    if not _has_face_geometry(f):
+                        print(
+                            f"[SOURCE_DETECT] ❌ Sin geometría de cara (kps no anatómicos) "
+                            f"det={det:.2f}. Omitiendo."
+                        )
+                        continue
+                    # v5.1055: cara debe estar COMPLETA (no cortada por borde de foto,
+                    # no sobresaliendo del bbox). De frente o perfil, pero entera.
+                    if not _is_face_complete(f, w, h):
+                        print(
+                            f"[SOURCE_DETECT] ❌ Cara INCOMPLETA (cortada/saliendo del recorte) "
+                            f"bbox=({f.bbox[0]:.0f},{f.bbox[1]:.0f},{f.bbox[2]:.0f},{f.bbox[3]:.0f}) "
+                            f"img={w}x{h} det={det:.2f}. Omitiendo."
+                        )
                         continue
                     valid_source_faces.append(f)
                 faces = valid_source_faces
                 if not faces:
-                    print("[SOURCE_DETECT] Caras filtradas por tamaño/aspecto/confianza (ninguna válida)")
+                    print("[SOURCE_DETECT] Caras filtradas por tamaño/aspecto/confianza/geometría (ninguna válida)")
 
             if faces:
                 # Procesar todas las caras detectadas

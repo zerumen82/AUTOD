@@ -316,6 +316,164 @@ def create_ui():
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
         
+
+
+def stop_comfyui():
+    from ui.tabs.comfy_launcher import stop
+    stop()
+    return check_comfy_status()
+
+
+# ============== SD Launcher Functions ==============
+
+def check_sd_status():
+    """Verifica si SD WebUI está corriendo"""
+    from ui.tabs.sd_launcher import get_last_url
+    import socket
+    
+    # Verificar puertos comunes de SD
+    for port in [9871, 9872, 9873, 9874, 9875]:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                if s.connect_ex(('127.0.0.1', port)) == 0:
+                    return f"🟢 running (port {port})"
+        except:
+            pass
+    
+    url = get_last_url()
+    if url:
+        return f"🟡 {url}"
+    return "🔴 stopped"
+
+
+def start_sd():
+    """Inicia SD WebUI"""
+    from ui.tabs.sd_launcher import start as sd_start
+    sd_start()
+    return check_sd_status()
+
+
+def stop_sd():
+    """Detiene SD WebUI"""
+    from ui.tabs.sd_launcher import stop as sd_stop
+    sd_stop()
+    return check_sd_status()
+
+
+def open_sd_webview():
+    """Abre SD en navegador/webview"""
+    from ui.tabs.sd_launcher import get_last_url
+    import webbrowser
+    
+    url = get_last_url()
+    if url:
+        webbrowser.open(url)
+        return f"Abriendo: {url}"
+    
+    # Intentar puertos comunes
+    for port in [9871, 9872, 9873]:
+        url = f"http://127.0.0.1:{port}"
+        try:
+            import urllib.request
+            urllib.request.urlopen(url, timeout=2)
+            webbrowser.open(url)
+            return f"Abriendo: {url}"
+        except:
+            pass
+    
+    return "SD no está disponible"
+
+
+def create_ui():
+    atexit.register(cleanup_comfyui)
+    
+    css = """
+        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+        .main-tabs { width: 100% !important; }
+    """
+    with gr.Blocks(title="AutoAuto - AI Editor", css=css) as demo:
+        # Header simple
+        gr.Markdown("# AutoAuto")
+        
+        # Controles ComfyUI - compacto, mitad del ancho
+        with gr.Row(elem_id="comfy-controls", variant="compact"):
+            # Incognito toggle
+            gr.HTML(INCOGNITO_HTML, elem_id="incognito-toggle")
+            # Status pequeno a la izquierda
+            comfy_status = gr.Text(
+                value=check_comfy_status(),
+                interactive=False,
+                elem_id="comfy-status",
+                show_label=False,
+                min_width=100
+            )
+            # Botones pegados a la derecha
+            with gr.Group(elem_id="comfy-buttons"):
+                btn_refresh = gr.Button("↻", size="xs", variant="secondary")
+                btn_start = gr.Button("▶", size="xs", variant="primary")
+                btn_stop = gr.Button("⏹", size="xs", variant="stop")
+        
+        gr.Markdown("---")
+        
+        # Tabs
+        with gr.Tabs() as tabs:
+            # Tab 1: Face Swap
+            with gr.Tab("Face Swap"):
+                try:
+                    from ui.tabs.faceswap_tab import faceswap_tab
+                    faceswap_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+            
+            # Tab 2: Animate Image
+            with gr.Tab("Animate Image"):
+                try:
+                    from ui.tabs.animate_photo_tab import animate_photo_tab
+                    animate_photo_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+            
+            # Tab 3: Image Editor
+            with gr.Tab("🎨 Image Editor"):
+                try:
+                    create_img_editor_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+            
+            # Tab 4: Generation
+            with gr.Tab("🚀 Generate"):
+                try:
+                    from ui.tabs.gen.gen_tab import create_gen_tab
+                    create_gen_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+                
+                with gr.Accordion("🔌 Server Controls", open=False):
+                    with gr.Row():
+                        sd_status = gr.Text(
+                            value=check_sd_status(),
+                            label="Estado del Servidor",
+                            interactive=False,
+                            scale=2
+                        )
+                        sd_btn_refresh = gr.Button("↻", size="sm", variant="secondary", scale=1)
+                    
+                    with gr.Row():
+                        sd_btn_start = gr.Button("▶ Iniciar Servidor", variant="primary", scale=1)
+                        sd_btn_stop = gr.Button("⏹ Detener Servidor", variant="stop", scale=1)
+                        sd_btn_open = gr.Button("🌐 Abrir WebUI Completa", variant="secondary", scale=1)
+                    
+                    sd_msg = gr.Textbox(label="Mensaje", interactive=False, visible=False)
+            
+            # Tab 5: Settings
+            with gr.Tab("Settings"):
+                try:
+                    from ui.tabs.settings_tab import settings_tab
+                    settings_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+        
         # Eventos de ComfyUI
         btn_refresh.click(fn=check_comfy_status, outputs=[comfy_status], queue=False)
         btn_start.click(fn=start_comfyui, outputs=[comfy_status], queue=False)
@@ -325,6 +483,7 @@ def create_ui():
         sd_btn_refresh.click(fn=check_sd_status, outputs=[sd_status])
         sd_btn_start.click(fn=start_sd, outputs=[sd_status])
         sd_btn_stop.click(fn=stop_sd, outputs=[sd_status])
+        
         sd_btn_open.click(fn=open_sd_webview, outputs=[sd_msg])
     
     return demo
@@ -335,35 +494,43 @@ def main():
     from ui.globals import start_capturing_prints
     start_capturing_prints()
     
-    available_port = find_available_port()
+    import roop.globals
+    server_name = getattr(roop.globals.CFG, "server_name", "") or "0.0.0.0"
+    server_port = getattr(roop.globals.CFG, "server_port", 7861) or 7861
+    server_share = getattr(roop.globals.CFG, "server_share", False)
+
+    available_port = find_available_port(server_port)
     demo = create_ui()
-    # Habilitado - necesario para el funcionamiento de los botones
-    # Varios workers evitan que una edición larga (8K, LongCat…) congele toda la UI.
     demo.queue()
     
-    # Intentar lanzar en el puerto disponible
-    allowed = [os.path.join(os.getcwd(), ".autodeep_temp")]
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    autodeep_temp = os.path.join(project_root, ".autodeep_temp")
+    allowed = [
+        autodeep_temp,
+        os.path.abspath(".autodeep_temp"),
+        project_root,
+    ]
     try:
+        print(f"[UI] Iniciando servidor en {server_name}:{available_port} (share={server_share})...")
         demo.launch(
-            server_name="127.0.0.1",
+            server_name=server_name,
             server_port=available_port,
-            share=False,
+            share=server_share,
             show_error=True,
-            quiet=True,
+            quiet=False,
             allowed_paths=allowed,
         )
     except OSError as e:
         if "Cannot find empty port" in str(e):
-            # Si falla, buscar otro puerto automaticamente
             print(f"[WARNING] Puerto {available_port} ocupado, buscando otro...")
-            available_port = find_available_port(7870, 20)  # Empezar desde 7870
+            available_port = find_available_port(7870, 20)
             print(f"[INFO] Usando puerto alternativo: {available_port}")
             demo.launch(
-                server_name="127.0.0.1",
+                server_name=server_name,
                 server_port=available_port,
-                share=False,
+                share=server_share,
                 show_error=True,
-                quiet=True,
+                quiet=False,
                 allowed_paths=allowed,
             )
         else:

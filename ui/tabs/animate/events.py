@@ -26,7 +26,7 @@ def on_cancel_animate():
 
 
 def wire_animate_events(ui):
-    def on_animate_click(img_data, p, engine, l_name, l_strength, stabilize_face):
+    def on_animate_click(img_data, p, engine, l_name, l_strength, stabilize_face, ar_chunks, add_audio):
         clear_cancel(SCOPE_ANIMATE)
 
         if state.is_animating:
@@ -62,7 +62,8 @@ def wire_animate_events(ui):
                     progress_callback=progress_callback,
                     lora_name=l_name,
                     lora_strength=l_strength,
-                    add_mmaudio=True,
+                    add_mmaudio=add_audio,
+                    autoregressive_chunks=ar_chunks,
                     cancel_check=lambda: is_cancelled(SCOPE_ANIMATE),
                 )
                 result["video"] = video
@@ -77,7 +78,7 @@ def wire_animate_events(ui):
         thread.start()
 
         try:
-            yield None, _status("Generando animación autoregresiva..."), *btn_running()
+            yield None, _status("Generando animación autoregresiva con audio..."), *btn_running()
             while True:
                 if is_cancelled(SCOPE_ANIMATE):
                     break
@@ -107,6 +108,8 @@ def wire_animate_events(ui):
             ui["lora_name"],
             ui["lora_strength"],
             ui["face_stabilize"],
+            ui["autoregressive_chunks"],
+            ui["add_audio"],
         ],
         outputs=[ui["video_output"], ui["progress_html"], ui["btn_animate"], ui["btn_cancel"]],
     )
