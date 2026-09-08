@@ -44,20 +44,22 @@ def fake_wait(comfy_url, pid, progress_callback=None, timeout=600, **kwargs):
     return {"filename": "tmp.png", "type": "output", "subfolder": ""}, "mock"
 
 
-# ---- Klein 9B EDIT ----
+# ---- Klein 4B EDIT ----
 c = FluxEditComfyClient()
 c._loaded = True
-c._flux_version = "flux-2-klein-9b-Q4_K_S.gguf"
-c._clip_name = "clip_l.safetensors"
-c._clip_name2 = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
-c._clip_type = "flux"
-c._dual_clip = True
+c._flux_version = "flux-2-klein-base-4b-Q4_K_S.gguf"
+c._clip_name = "qwen3-4b-abl-q4_0.gguf"
+c._clip_name2 = None
+c._clip_type = "flux2"
+c._dual_clip = False
 c._vae_name = "vae.safetensors"
-c._is_gguf_clip = False
+c._is_gguf_clip = True
 c._is_kontext_dev = False
 c._is_longcat_turbo = False
 c._is_qwen_image_edit = False
 c._is_qwen_q5 = False
+c._is_klein_4b = True
+c._is_klein_9b = False
 
 img = Image.new("RGB", (768, 768), (128, 128, 128))
 captured = {}
@@ -84,7 +86,7 @@ finally:
 
 print("generate result:", res, err)
 wf = captured.get("prompt", {})
-print("=== KLEIN EDIT NODES ===")
+print("=== KLEIN 4B EDIT NODES ===")
 for nid in sorted(wf.keys(), key=lambda x: str(x)):
     node = wf[nid]
     print(f"  {nid}: {node['class_type']}")

@@ -9,6 +9,56 @@
 - GPU RTX 3060 Ti 8 GB, CUDA 12.4, providers: CUDAExecutionProvider, CPUExecutionProvider.
 
 ## Progress
+### v5.1075 — Image Editor: fix undress/body con máscara de ropa basura (2026-09-08)
+- **CAUSA (log real `edit_1788873076`, prompt "ella va desnuda y descalza", composición fullbody face_ratio=0.004)**: usuario reporta "no hace bien la edicion, ahora desaparece". CLIPSeg (det 352px) en un plano general casi no detecta ropa → `Máscara de ropa ... cobertura=4.2%`. El umbral `cov > 0.03` (img_editor_manager.py) aceptaba esa máscara-basura → se activaba `Inpaint ropa: grow=16, denoise≥0.93` → ComfyUI repintaba SOLO ese parche diminuto (VAEEncodeForInpaint, `mask=inpaint`) → la edición no cambiaba el cuerpo y, con denoise 0.93, rompía/desvanecía esa zona. El propio print de diseño decía "→ global + LongCat Full + bypass Kontext (img2img puro)" (l.1170) pero la rama focal lo secuestraba.
+- **Fix en `roop/img_editor/img_editor_manager.py` (bloque `do_cloth_mask`)**: la aceptación de la máscara ahora exige cobertura según el tipo de cambio:
+  - **Body/undress fuerte** (`body_transform`): `min_cov = 0.12` (la ropa debe cubrir ≥12% real de la imagen). Por debajo → máscara descartada → **edición GLOBAL** (mask=None + bypass Kontext + denoise 0.91 = img2img puro), que regenera el cuerpo completo con piel/tono consistentes, sin parches. Log: `[ImgEditor] Máscara de ropa insuficiente (cobertura=4.2%, mínimo 12%) → GLOBAL (img2img puro)`.
+  - **Cambio moderado attr** (no body): `min_cov = 0.03 → 0.05` (prenda real localizada sigue siendo focales; basura <5% → global).
+  - Si la máscara SÍ cubre bien (≥12% body / >5% attr) el inpaint focal se conserva (el resto de la foto intacto = "usa mi imagen").
+- **Fix 2 (mismo commit, cierre del gap — "es en Image Editor también")**: tras descartar la máscara, el flujo caía en la **auto-máscara "subject"** (`clipseg_masker.generate_mask`, l.1285) y volvía a generar un parche focal sobre la persona diminuta → el inpaint con denoise 0.93 la rompía igual (el "→ GLOBAL (img2img puro)" del log quedaba en mentira). Ahora la rama de auto-máscara se salta si `body_transform` (cambio de cuerpo sin máscara fiable = regenerar cuerpo completo) o `cloth_mask_rejected` (máscara de ropa rechazada). Log nuevo: `[ImgEditor] Edición GLOBAL (img2img puro) — sin máscara focal (solo ropa insuficiente / cambio de cuerpo requiere regenerar el cuerpo)`.
+- **Verificación**: `py_compile` OK + simulación de la cadena completa con valores del log (cov=4.2%+body → final_mask=None, auto-máscara NO corre, mask_image=None → GLOBAL puro; 42%+body → focal de ropa conservado) + AST confirma el guard `not body_transform and not cloth_mask_rejected` en `generate_intelligent`. Pendiente: re-run del MISMO prompt/imagen para confirmar el cuerpo regenerado completo (sin parches) + FacePreserver manteniendo el rostro.
+### v5.1074 — BOCA + PERFIL + OCLUSIÓN + SOURCE FACES + APK GENERATE (2026-09-07)
+- **CAUSA**: usuario reporta "las bocas no están del todo bien, algunas oclusiones, 0 caras de origen, APK sin Generate".
+- **Boca — 4 fixes**:
+  1. **`m_blend_safe` en safety recovery** (ProcessMgr.py l.4761): subido 0.28/0.32→0.32/0.38 con small_face ×0.80 (antes ×0.65). Safety recovery ahora preserva boca correctamente en caras pequeñas (antes 18-31% restore, ahora 32-58%).
+  2. **`min_mouth_residual`** (ProcessMgr.py l.4581): subido 0.10→0.25. Impide que safety recovery sobreescriba la boca (antes max +0.06 al mask, ahora +0.25 — suficiente para superar threshold de safety ~0.25).
+  3. **Profile mouth thresholds** (ProcessMgr.py l.3923-3932): perfiles ahora usan MISMOS umbrales que frontales (0.16/0.20 closeup, 0.17/0.22 normal). Antes perfiles tenían 0.22/0.24 — necesitaban boca MÁS abierta para activar preservación.
+  4. **Photo `m_blend` base** (ProcessMgr.py l.4504): subido 0.28→0.32. Fotos estáticas: boca más visible (~48% restore con ratio 0.5 vs 41% antes).
+- **Perfil — 4 fixes**:
+  1. **M-EMA** (ProcessMgr.py l.4102): cambiado ×0.85→×1.15. Perfiles necesitan MÁS agilidad (15% más rápido), no menos — la rotación de cabeza cambia la transformada rápidamente.
+  2. **Color match** (ProcessMgr.py l.3249): cambiado `min(0.12, base×0.80)`→`min(0.16, base×0.90)`. Eliminada doble penalización que causaba mismatch de color visible en perfiles.
+  3. **Embedding blend** (ProcessMgr.py l.2642): subido 5%→12% por frame. Tracking se adapta ~2.4× más rápido a ángulos de perfil (antes ~20 frames para corregir 50%, ahora ~8).
+  4. **`det_score` profile threshold** (ProcessMgr.py l.3222): subido 0.18→0.12. Frames borrosos/movidos (det 0.15-0.17) ya no se clasifican como perfil falsamente → M-EMA + máscara + swap no se degradan innecesariamente.
+- **Oclusión — 2 fixes**:
+  1. **Gate unificado** (ProcessMgr.py l.4379): cambiado `>0.01 and <0.35`→`>=0.01 and <=0.60`. Oclusiones reales 35-60% (manos/genitales cubriendo cara) ahora se aplican correctamente. Antes el rango 0.35-0.60 caía al gap sin apply ni log.
+  2. **Sin gaps en bordes**: `>=0.01` y `<=0.60` eliminan edge cases en 0.01 exacto y 0.35 exacto.
+- **Source faces — 3 fixes** (face_util.py):
+  1. **`_is_face_complete()` relajado** (l.356-391): borde imagen `≤1px` (antes `≤0.5%×min(w,h)` = ~5px), kps margins 1-2% (antes 4-6%). Selfies, close-ups y fotos de perfil con cara cerca del borde ya no se rechazan como "incompleta".
+  2. **Laplacian normalizado** (l.639-650): `lap_norm = var/mean²` con threshold 1.5 (antes `lap_var < 15` absoluto). Fotos de 6000px daban lap_var~3.0 (falso borroso); ahora dan lap_norm~12 (correcto).
+  3. **`_has_face_geometry()` acepta listas** (l.312-317): el padding fallback guardaba kps como `.tolist()` (lista Python) → la función rechazaba TODAS esas caras por no tener `.shape`. Ahora convierte a numpy automáticamente.
+- **Image Editor quality** (top_tier_finish.py + image_quality_pipeline.py): generative blend 30-45%→42-62%, LongCat steps 16-22→22-30, denoise boost, face restore cap 12-36%→18-48%, per-face blend ×0.18→×0.22, sharpen 1.22-1.55→1.28-1.65, depixelize 28-72%→35-82%, color enhance 12-24%→16-32%.
+- **APK Android — pestaña Generate + flow Gen→Edit + auto-resize**:
+  - **Pestañas Edit/Generate**: switcher arriba, cada modo con su panel (Generate: orientación Paisaje/Retrato, modelo FLUX, enhance ESRGAN + rewriter).
+  - **Flow Gen→Edit**: botón "Usar" en modo Generate cambia a pestaña Edit con la imagen cargada como input. Status muestra "Listo - toca 'Usar' para editarlo".
+  - **Auto-resize**: imágenes >1024px se escalan antes de subir al servidor (~3× más rápido, sin pérdida de calidad visible).
+  - **Persistencia**: pestaña activa, settings de cada modo, último resultado — todo se recuerda.
+  - **APK**: `android_app\autoapp\app\build\outputs\apk\release\app-release.apk` (firmado, ~2.6 MB).
+- **Verificación**: `py_compile` OK (ProcessMgr.py + face_util.py + top_tier_finish.py + image_quality_pipeline.py), import ProcessMgr OK, _has_face_geometry acepta numpy+listas OK, APK build SUCCESSFUL.
+
+### v5.1069 — ANTIPARPADEO: pops de swap en tramos sin seguimiento (2026-08-24)
+- **CAUSA (revisión logs batch 23-24 ago, 10 runs)**: usuario reporta "parpadeos raros cuando no hay swap". Cuantificado con análisis de pops (Success débil aislado entre Lost): edxvidx_222035 = **67 pops (48 con salto entre caras)**, maxmaximin_092753 = 42/29, femdom244_054044 = 31/14, femdom244_030450 = 9/5. Dos mecanismos combinados:
+  1. **`spatial_lock` sin suelo de score (single-face)**: aceptaba CUALQUIER cara a <150-220px del ancla aunque la similitud compuesta fuera NEGATIVA. Log real (092753 f6893/f6903): `Ghost Activo → Success (score=-0.11, dist=176-184px)` = contenido equivocado pintado 1 frame → el gate normal lo rechaza al siguiente (Lost) → ghost → otro pop → ciclo accept/reject.
+  2. **Salto entre caras diminutas**: escenas con varias caras ~40px donde cada frame detecta "1 cara" (distinta) → sin gate de identidad multi-face → el loop sigue a quien aparezca → swap salta de cara en cara cada 1-3 frames.
+- **Fix en `roop/ProcessMgr.py`** (loop principal de `_find_target_face_for_selected_mode`, antes del gate de aceptación):
+  - **Floor de spatial_lock**: `if spatial_lock and best_score <= 0.06: spatial_lock = False`. Un follow legítimo siempre suma el término de distancia (hasta 0.40/0.22 de peso) → score > 0.10; por debajo de 0.06 el embedding rechazó Y está lejos = basura.
+  - **Guard salto de cara**: si `best_match` salta > `max(90, 1.15×face_w, 1.15×face_h)` px desde `_last_swap_bbox`/assigned Y sim cruda < 0.30 → rechazado (`best_match=None`) → cae a Lost → ghost → hold-fade (v5.1054c, continuidad visual) → RE-BUSQUEDA con sus gates. Movimiento brusco real ya dispara SCENE_CUT (reset + reacquire propio). Log `[TRACK] Frame N: candidato SALTO DE CARA RECHAZADO (salto=Xpx > Y, sim_cruda=Z < 0.30)`.
+- **Verificación**: `py_compile` OK + AST (floor l.2351 y guard l.2405-2447 antes del gate l.2448, indent=20) + simulación con bboxes reales del log: f6893 (-0.11, salto 160>116) → RECHAZADO; follow legítimo 12px → pasa; pan rápido de closeup grande (255px, thr escala con cara 575px) → pasa. Clase REAL importada con CUDA OK.
+- **Fix b — RE-BUSQUEDA espacial lejana (`_reacquire_face_global` antes del reset del contador)**: la aceptación `mode=spatial` (sim < min_sim) pintaba vía `_apply_reacquired_face` SIN pasar por el guard del loop principal. Log real (maxmaximin f4207-4209): SCENE_CUT vel=996 → RE-BUSQUEDA global (sim=0.27, spatial, bbox diminuto lejos) → pintado → f4209 Lost = pop. Ahora: si el candidato está a > `max(120, 1.30×face_w/h)` px de `_last_swap_bbox` Y sim < 0.30 → rechazado (`return None`, SIN resetear re_fails para no perder el umbral progresivo v5.1005). Retorno legítimo tras corte = sim ≥ min_sim (mode=emb, sin gate) o cerca de la última posición. Perfiles duros (sim 0.15-0.22): se recuperan cuando el umbral progresivo baja min_sim → mode pasa a emb. Cubre las 2 rutas que delegan: post-lost/escape-hatch y `_try_unassigned_reacquire`. Log `[TRACK] Frame N: RE-BUSQUEDA espacial lejana RECHAZADA (...)`.
+- **Revisado y DESCARTADO como causa**: histéresis de perfil funciona (flips EFECTIVOS 2-34/vídeo tras simular la máquina de estados con resets; los 456-747 "flips raw" son prints de decaimiento, no cambios de estado); boca on/off estable (0 toggles ≤4f en 5 logs); MASK_SAFETY escaso con stats sanas. Fallback espacial final (~10/vídeo) ya con 4 gates (mini-cara/cortada/identidad/dist) — intacto para no romper anti-congelación.
+- **Cobertura final de caminos de pintado**: loop principal ✓ (guard v5.1069), RE-BUSQUEDA post-lost/unassigned/escape-hatch ✓ (v5.1069b), ghost/holds = blend con fade (sin identidad nueva, seguros), fallback espacial final = gated por diseño. Reducción esperada de pops ~70-85%. Pendiente: re-run para confirmar con `[TRACK] ... SALTO DE CARA RECHAZADO` / `espacial lejana RECHAZADA` donde antes había pops.
+- **Banner**: actualizado "v5.1062" (stale) → "v5.1069" en el header del log de sesión (l.4791).
+- **Nota adicional del review**: run 203825 (edxvidx abortado f435) falló 100% frames con `raw_swapped_aligned is not defined` ×83 + `m_alpha unbound` ×352 — código intermedio ya no presente (re-run 222035 limpio). No editar ProcessMgr.py con proceso corriendo.
+
 ### v5.1068 — Fix oclusión por falso positivo de sombras + mejora de la preservación bucal (2026-08-15)
 - **CAUSA**:
   1. **Oclusión (falsos positivos)**: El gate de oclusión `occ_frac < 0.60` dejaba pasar coberturas de hasta el 60%, lo cual en rostros reales capturaba sombras profundas, barbas o texturas faciales propias y restaba hasta un 75% de la máscara del swap, dejando parches o el swap borroso/dañado.
@@ -559,16 +609,17 @@
 - enhancer_blend via slider (default 0.95) en ProcessMgr.py:1736
 
 ## Relevant Files
-- `roop/ProcessMgr.py`: Pipeline principal — v5.1066 gate cortadas con `allow_partial_overflow=True` en readquisición/fallbacks + area sin tope en primer plano (`_is_large_face`, l.3007-3090; call sites l.1193/1258/1277/1983/2501/2632; gate plan-change loop estricto l.2360); (l.1255/1274, hueco del log 132244 RE-BUSQUEDA 605) + boca base 0.30/0.24 y boost oral 1.00 cap 0.62 (l.4073-4081); v5.1059 FIX CRÍTICO tracking (`elif frame_count % 30 == 1:` re-indentado ind16→ind20 — empareja con `if best_score < 0` l.2397; antes a ind16 tragaba TODA la sección "Tracking truly lost" → ghost tracking muerto + UnboundLocalError `best_score` en `%30==1`); v5.1054 ESCAPE HATCH (fin hold eterno: l.2626 escape hatch candidato rechazado → lost_count++ → reset+RE-BUSQUEDA tras ghost_limit); v5.1053d TRACKING EXQUISITO (recovery distancia rechazado + hot-spot ellipse): closeup recovery l.2374 (si best_score<0.30 y best_distance>=base_threshold → HOLD, nunca otra persona; single-face legit recovery intact por identity_ok_exp + margin); hot-spot ellipse l.4029 (max>0.3 & mean<0.08 → `_widen_mask_for_blend(force=True)` + blur+feather); `_widen_mask_for_blend` l.2983 (nuevo param `force=`); fallback ampliado l.1557 (emb 0.30/0.34/0.42, espacial solo single-face), `_reacquire_face_global` l.979 (floors 0.24-0.30, scene_cut 0.26/0.18, espacial 0.22/0.20, post-corte 0.20/0.26, extremo 0.22; multi alineado 0.48/0.50 + margin 0.08/0.10 + bypass mayor-área solo misma cara física); l.385 `prefer_fast=closeup or is_video` (640-first con fallback 1024); v5.1049 gates occ/boca caras lejanas; v5.1048 fix crash l.507 ndarray
-- `roop/face_util.py`: `_has_face_geometry()` (v5.1050) — filtro de geometría kps en caras de source (rechaza falsos positivos de la cascada permisiva); extracción source con cascada 0.35→0.22→0.12→0.08 + preproceso + padding + CPU fallback
-- `roop/quality_enhancements.py`: `detect_foreground_occlusion()` — v5.1045 señales SOLO del target (Sobel/Laplaciano target-only, sin color-diff swap vs original); mouth revisa 3 señales (object+skin_occ+texture_mask)
+- `roop/ProcessMgr.py`: Pipeline principal — v5.1074 boca (m_blend_safe 0.32/0.38 l.4761, min_mouth_residual 0.25 l.4581, profile thresholds 0.16/0.20 l.3923-3932, photo base 0.32 l.4504) + perfil (M-EMA ×1.15 l.4102, color_match min(0.16,base×0.90) l.3249, embedding blend 12% l.2642, det_score 0.12 l.3222) + oclusión (gate ≥0.01 and ≤0.60 l.4379)
+- `roop/face_util.py`: v5.1074 `_is_face_complete()` relajado (borde ≤1px l.366, kps margins 1-2% l.379-381) + Laplacian normalizado (var/mean² threshold 1.5 l.639-650) + `_has_face_geometry()` acepta listas Python (l.312-317)
+- `roop/quality_enhancements.py`: `detect_foreground_occlusion()` — v5.1045 señales SOLO del target; mouth revisa 3 señales
+- `roop/img_editor/top_tier_finish.py`: v5.1074 generative blend 42-62% (l.172), LongCat steps 22-30 (l.169), face restore cap 18-48% (l.232), per-face blend ×0.22 (l.235), sharpen cap 1.18 (l.347), color enhance 16-32% (l.299)
+- `roop/img_editor/image_quality_pipeline.py`: v5.1074 face_enhance_cap 18-48% (l.538), sharpen_amt 1.28-1.65 (l.557), depixelize 35-82% (l.502), detail_boost 12-45% (l.503), color blend cap 0.50 (l.647)
+- `roop/img_editor/img_editor_manager.py`: quality_use_generative=True para quality_only (l.787)
 - `ui/tabs/faceswap/ui.py`: slider enhancer_blend default 0.95
-- `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas; v5.1053 `prefer_fast` → detección 640-first con fallback 1024; `_same_face_boxes()` (v5.1053) dedup a distinta escala en `filter_duplicate_faces` y paso 3
-- `ui/tabs/img_editor/`: Image Editor modular — `ui.py` + `events.py` + `state.py` + entry point `img_editor_tab.py`
-- `ui/tabs/img_editor/ui.py`: UI simplificada (sin face_preserve/enhance/quality/LoRA)
-- `ui/tabs/img_editor/events.py`: Eventos con modo autoregresivo (1-20 iteraciones)
-- `ui/tabs/img_editor/state.py`: Estado aislado (sin dependencia de roop.globals)
-- `roop/img_editor/img_editor_manager.py`: `generate_intelligent()` — Z-Image Turbo como engine prioritario
+- `roop/face_util_rotation.py`: RetinaFace + MediaPipe fallback + rotaciones forzadas; `_same_face_boxes()` dedup
+- `android_app/autoapp/app/src/main/java/com/autoauto/app/GradioClient.kt`: callGenerate() para Generate tab + callEdit() para Edit tab + parseEventData() para Gradio 6.x SSE
+- `android_app/autoapp/app/src/main/java/com/autoauto/app/MainActivity.kt`: pestañas Edit/Generate + flow Gen→Edit (botón Usar) + auto-resize 1024px + persistencia settings
+- `android_app/autoapp/app/src/main/res/layout/activity_main.xml`: tab switcher + generatePanel + orientation buttons + genEngineSpinner
 
 ---
 
@@ -974,7 +1025,8 @@ Expect next run with similar prompt to show face at correct scale + better integ
 | **LongCat Edit Full** | `LongCat-Image-Edit-Q4_K_S.gguf` | GGUF Q4 | 35 | ~3.7 GB | Mag≥0.62, body transform, quality polish |
 | **Z-Image Turbo Q4** | `z_image_turbo-Q4_K_M.gguf` | GGUF Q4 | 8 | ~4.0 GB | **No integrado aún** — rápido + realista |
 | **Z-Image Turbo Q3-Q8** | Varios (`z_image_turbo-Q*.gguf`) | GGUF | 8 | 2.5-7.2 GB | Tenemos Q4_K_M ✅ |
-| **Flux2 Klein 4B** | `flux-2-klein-base-4b-Q4_K_S.gguf` | GGUF Q4 | 4-8 | ~3.0 GB | **No integrado como editor** (solo txt2img) |
+| **Flux2 Klein 4B** | `flux-2-klein-base-4b-Q4_K_S.gguf` | GGUF Q4 | 4-8 | ~3.0 GB | **Integrado como editor img2img (ReferenceLatent)** |
+| **FLUX.2 Klein 9B** | `flux-2-klein-9b-Q4_K_S.gguf` | GGUF Q4 | 4 | ~10-12 GB | **NO entra en 8GB — requiere >=12GB VRAM** |
 | **FLUX.1 Dev Abliterated** | `T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf` | GGUF Q4 | 25 | ~6.8 GB | Para txt2img puro (Generate tab) |
 | **FLUX.1 Dev Q2-Q4** | `flux1-dev-Q*.gguf` | GGUF | 4-25 | 2.1-6.8 GB | Alternativas FLUX.1 |
 | **Qwen Image Edit** | `Qwen_Image_Edit-Q2_K.gguf` | GGUF Q2 | 20+ | ~3.0 GB | Integrado, experimental |
@@ -1059,13 +1111,12 @@ Expect next run with similar prompt to show face at correct scale + better integ
 - Agregar opción en `img_editor_tab.py` dropdown
 - Probar con edits simples y undress para comparar
 
-#### 2. Usar FLUX.2 Klein como editor img2img (MEDIA prioridad)
-**Por qué**: Klein 4B soporta nativamente img2img editing. Ya tenemos el modelo. Solo 4 pasos. Podría dar mejor calidad que LongCat Turbo en escenarios de cambios moderados.
+#### 2. FLUX.2 Klein 4B como editor img2img (YA INTEGRADO)
+**Por qué**: Klein 4B soporta nativamente img2img editing. Ya tenemos el modelo (`flux-2-klein-base-4b-Q4_K_S.gguf`). Solo 4 pasos, ~3GB VRAM. Entra holgado en 8GB.
 
-**Qué hacer**:
-- Investigar si `flux_edit_comfy_client.py` puede cargar Klein con workflow de edición (no solo txt2img)
-- Probar img2img con Klein = cambiar `_flux_version_map` a usar Klein + clip flux2 + vae flux2
-- Agregar al dropdown del UI
+**Estado**: Integrado como engine `"klein"` en `flux_edit_comfy_client.py` + `img_editor_manager.py`. Workflow ReferenceLatent + EmptyFlux2LatentImage.
+
+**Nota**: FLUX.2 Klein 9B **NO entra en 8GB** (~10-12GB mínimo con Q4 + T5 offload). Queda como opción solo para GPUs >=12GB.
 
 #### 3. Buscar/descargar Z-Image-Edit GGUF (MEDIA prioridad)
 **Por qué**: Si existe, es directamente fine-tuned para edición, mejor que Z-Image Turbo base para img2img instructivo.
@@ -1101,9 +1152,9 @@ Expect next run with similar prompt to show face at correct scale + better integ
 
 | Que queremos | Mejor opción actual | Alternativa a integrar |
 |---|---|---|
-| Edit img2img rápido | LongCat Turbo (8 pasos) | **Z-Image Turbo** (8 pasos, más rápido) |
-| Edit img2img fuerte (undress, body) | LongCat Full (35 pasos) | Z-Image Turbo + denoise alto |
-| Edit de fondo/local | LongCat Turbo + inpaint | Z-Image Turbo + mask |
+| Edit img2img rápido | **FLUX.2 Klein 4B** (4 pasos, ~3GB) | LongCat Turbo (8 pasos, ~3.5GB) |
+| Edit img2img fuerte (undress, body) | LongCat Full (35 pasos) | FLUX.2 Klein 4B + denoise alto |
+| Edit de fondo/local | LongCat Turbo + inpaint | FLUX.2 Klein 4B + mask |
 | Preservación de rostro | FacePreserver (manual) | El mismo — funciona |
 | txt2img ultra realista | FLUX.2 Klein 4B (4 pasos) | FLUX Dev Abliterated (25 pasos) |
 | txt2img rápido | FLUX.1 Schnell Q4 | Klein 4B (mejor calidad) |
