@@ -81,7 +81,8 @@ def build_img_editor_ui():
                     engine = gr.Dropdown(
                         choices=[
                             ("🎨 LongCat Edit (sigue instrucciones, preserva la imagen original)", "longcat"),
-                            ("✨ FLUX.2 Klein 9B (img2img rápido, 4 pasos)", "klein_9b"),
+                             ("✨ FLUX.2 Klein 4B (img2img rápido, 4 pasos, entra en 8GB)", "klein"),
+                             ("⚠️ FLUX.2 Klein 9B (NO entra en 8GB, usar solo con 12GB+)", "klein_9b"),
                             ("🎨 LongCat Full fijo (35 pasos, sin auto)", "longcat_full"),
                             ("🧩 Qwen-Image-Edit Q5 (20B, edición precisa, ~4.4GB)", "qwen_edit"),
                             ("🎯 FLUX.1 Kontext Q2 (12B, ~3.8GB, calidad reducida)", "kontext"),

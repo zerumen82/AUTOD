@@ -67,6 +67,8 @@ class FluxEditComfyClient:
         self._dual_clip = False
         self._is_gguf_clip = False
         self._clip_name2 = None
+        self._is_klein_9b = False
+        self._is_klein_4b = False
 
         if flux_version == "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf":
             clip_name = "clip_l.safetensors"
@@ -129,6 +131,11 @@ class FluxEditComfyClient:
             clip_name, clip_type = clip_map[flux_version]
             if clip_name.endswith(".gguf"):
                 self._is_gguf_clip = True
+
+        if "klein-9b" in flux_version:
+            self._is_klein_9b = True
+        elif "klein" in flux_version:
+            self._is_klein_4b = True
 
         checks = [
             ("diffusion_models", flux_version, f"Modelo FLUX {flux_version}"),
@@ -205,9 +212,9 @@ class FluxEditComfyClient:
         is_longcat = "LongCat" in self._flux_version
         is_kontext = self._is_kontext_dev
         is_qwen = self._is_qwen_image_edit or self._is_qwen_q5
-        is_klein_9b = "klein-9b" in self._flux_version
-        is_klein = is_klein_9b or ("klein" in (self._flux_version or ""))
-        is_klein_edit = is_klein
+        is_klein_9b = getattr(self, '_is_klein_9b', False)
+        is_klein_4b = getattr(self, '_is_klein_4b', False)
+        is_klein_edit = is_klein_9b or is_klein_4b
         # ImageEditor Klein = REAL EDIT (ReferenceLatent): latente vacío + la imagen
         # de referencia se inyecta como conditioning("reference_latents") → el modelo
         # regenera con composición/identidad de la ref aplicando la instrucción.
@@ -220,8 +227,8 @@ class FluxEditComfyClient:
         new_w, new_h = (w // 64) * 64, (h // 64) * 64
         if new_w != w or new_h != h:
             image = image.resize((new_w, new_h), Image.LANCZOS)
-        # LongCat/Kontext hasta 1024px; Klein 9B hasta 1024px; Qwen-Image-Edit 640px; otros 768px
-        max_dim = 1024 if (is_longcat or is_kontext or is_klein_9b) else (640 if is_qwen else 768)
+        # LongCat/Kontext hasta 1024px; Klein 4B/9B hasta 1024px; Qwen-Image-Edit 640px; otros 768px
+        max_dim = 1024 if (is_longcat or is_kontext or is_klein_9b or is_klein_4b) else (640 if is_qwen else 768)
         if new_w > max_dim or new_h > max_dim:
             image.thumbnail((max_dim, max_dim), Image.LANCZOS)
             new_w, new_h = image.size
@@ -441,9 +448,16 @@ class FluxEditComfyClient:
             except ValueError:
                 return int("".join(ch for ch in k if ch.isdigit()) or 0)
 
-        if is_klein_edit:
+        if is_klein_9b:
             print(
-                "[FluxClient] FLUX.2 Klein EDIT workflow (ReferenceLatent + EmptyFlux2Latent): "
+                "[FluxClient] FLUX.2 Klein 9B EDIT workflow (ReferenceLatent + EmptyFlux2Latent): "
+                f"cfg=1.0, denoise=1.0, steps={num_inference_steps}, sampler=er_sde, "
+                f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
+                flush=True,
+            )
+        elif is_klein_4b:
+            print(
+                "[FluxClient] FLUX.2 Klein 4B EDIT workflow (ReferenceLatent + EmptyFlux2Latent): "
                 f"cfg=1.0, denoise=1.0, steps={num_inference_steps}, sampler=er_sde, "
                 f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
                 flush=True,

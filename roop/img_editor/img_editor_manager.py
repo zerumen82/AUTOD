@@ -127,7 +127,10 @@ class ImgEditorManager:
             steps = 4  # Klein 9B distilled, 4 pasos nativos
             guidance = 1.0  # Forzado para modelos distilled
             denoise = 0.85  # Denoise alto para edits fuertes
-        elif "klein" in engine or "abliterated" in engine:
+        elif engine == "klein" or "klein" in engine:
+            steps = min(steps, 4)  # Klein 4B distilled, 4 pasos nativos
+            guidance = 1.0
+            denoise = min(denoise, 0.85)
             steps = min(steps, 20) # Balance velocidad/calidad
         elif engine == "hart":
             # HART es autoregresivo puro. Usa guidance alto y pasos limitados.
@@ -1398,11 +1401,20 @@ class ImgEditorManager:
                     client = self.omnigen2_client
                     version = None
                 elif engine == "klein_9b":
+                    vram = get_vram_gb()
+                    if vram < 12:
+                        return None, f"FLUX.2 Klein 9B necesita >=12GB VRAM (detectado {vram:.1f}GB). Usá Klein 4B o LongCat en 8GB."
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
                     version = "flux-2-klein-9b-Q4_K_S.gguf"
+                elif engine == "klein":
+                    from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
+                    if self.flux_klein_client is None:
+                        self.flux_klein_client = get_flux_edit_comfy_client()
+                    client = self.flux_klein_client
+                    version = "flux-2-klein-base-4b-Q4_K_S.gguf"
                 elif engine == "klein_base":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
