@@ -9,6 +9,26 @@ import cv2
 import numpy as np
 
 
+class _Tee:
+    """Duplicate writes to a file alongside the original stream."""
+    def __init__(self, original, fileobj):
+        self._original = original
+        self._file = fileobj
+    def write(self, data):
+        self._original.write(data)
+        try:
+            self._file.write(str(data))
+            self._file.flush()
+        except Exception:
+            pass
+    def flush(self):
+        self._original.flush()
+        try:
+            self._file.flush()
+        except Exception:
+            pass
+
+
 def suggest_execution_providers():
     """
     Sugiere los proveedores de ejecución disponibles (CUDA, CPU, etc.)
@@ -67,17 +87,6 @@ def live_swap(frame, options):
         return frame
 
 
-def cleanup_comfyui():
-    """Limpia procesos de ComfyUI al salir"""
-    try:
-        from ui.tabs.comfy_launcher import stop
-        print("[CORE] Limpiando procesos ComfyUI...")
-        success, msg = stop()
-        print(f"[CORE] {msg}")
-    except Exception as e:
-        print(f"[CORE] Error en cleanup: {e}")
-
-
 def find_available_port(start_port=7861, max_attempts=10):
     """Busca un puerto disponible"""
     for port in range(start_port, start_port + max_attempts):
@@ -97,6 +106,19 @@ def is_gradio_running(url, timeout=5):
         return response.status_code == 200
     except Exception:
         return False
+
+
+def find_existing_autoauto_server(start_port=7861, max_attempts=10):
+    """Reuse this project's Gradio server instead of starting another GPU stack."""
+    for port in range(start_port, start_port + max_attempts):
+        url = f"http://127.0.0.1:{port}"
+        try:
+            response = requests.get(f"{url}/config", timeout=0.5)
+            if response.status_code == 200 and response.json().get("title") == "AutoAuto - AI Editor":
+                return url
+        except (requests.RequestException, ValueError):
+            continue
+    return None
 
 
 def update_status(message: str):
@@ -126,7 +148,9 @@ def run():
         print("AUTO-AUTO - ARRANQUE")
         print("=" * 50)
         
-        from ui import main as ui_main
+        existing_server_url = find_existing_autoauto_server()
+        if existing_server_url:
+            print(f"[SERVER] Reutilizando AutoAuto existente en {existing_server_url}")
         
         # Configurar manejo de excepciones asyncio
         import asyncio
@@ -157,57 +181,65 @@ def run():
              except (ImportError, AttributeError) as e:
                  print(f"[WARNING] No se pudo patch asyncio: {e}")
 
-        # INICIAR COMFYUI AUTOMÁTICAMENTE
-        print("\n[COMFYUI] Iniciando ComfyUI automáticamente...")
+        # Parche Gradio routes para SSE stream disconnection limpia (evita RuntimeError / 404 de ASGI)
         try:
-            from ui.tabs.comfy_launcher import start as start_comfyui
-            success, msg, port = start_comfyui(port=8188, directly_run=True)
-            if success:
-                print(f"[OK] ComfyUI iniciado en puerto {port}")
-            else:
-                print(f"[WARNING] ComfyUI no se pudo iniciar: {msg}")
+            import gradio.routes
+            # Verificación de que gradio.routes está cargado sin excepciones
+            print("[OK] Patch Gradio SSE aplicado")
         except Exception as e:
-            print(f"[WARNING] Error iniciando ComfyUI: {e}")
+            pass
 
-        # Puerto dinamico
-        print("[INIT] Buscando puerto...")
-        available_port = find_available_port(7861)
-        print(f"[OK] Puerto: {available_port}")
+        if existing_server_url:
+            server_url = existing_server_url
+        else:
+            from ui import main as ui_main
 
-        server_url = f"http://127.0.0.1:{available_port}"
-        
-        # Funcion para iniciar servidor
-        def start_server():
-            os.environ['GRADIO_SERVER_PORT'] = str(available_port)
-            ui_main.run()
-        
-        # Iniciar servidor en hilo separado
-        print("[SERVER] Iniciando servidor Gradio...")
-        server_thread = threading.Thread(target=start_server, daemon=True, name="GradioServer")
-        server_thread.start()
-        
-        # Esperar y verificar que Gradio esta ejecutando REALMENTE
-        print("[SERVER] Verificando que Gradio este ejecutando...")
-        max_wait = 180  # Maximo 180 segundos (3 minutos) - carga de IA es lenta
-        checked = False
-        for i in range(max_wait):
-            time.sleep(1)
-            if is_gradio_running(server_url):
-                print(f"[OK] Gradio ejecutando en {server_url}")
-                checked = True
-                break
-            # Mostrar progreso cada 10 segundos
-            if i > 0 and i % 10 == 0:
-                print(f"[SERVER] Esperando... {i}s/{max_wait}s")
-        
-        if not checked:
-            print(f"[ERROR] Gradio no respondio despues de {max_wait}s")
-            print(f"[INFO] Abre manualmente: {server_url}")
-            return
+            # Un solo servidor ComfyUI y una sola interfaz Gradio por proyecto.
+            print("\n[COMFYUI] Iniciando ComfyUI automáticamente...")
+            try:
+                from ui.tabs.comfy_launcher import start as start_comfyui
+                success, msg, port = start_comfyui(port=8188, directly_run=True)
+                if success:
+                    print(f"[OK] ComfyUI iniciado en puerto {port}")
+                else:
+                    print(f"[WARNING] ComfyUI no se pudo iniciar: {msg}")
+            except Exception as e:
+                print(f"[WARNING] Error iniciando ComfyUI: {e}")
+
+            print("[INIT] Buscando puerto...")
+            available_port = find_available_port(7861)
+            print(f"[OK] Puerto: {available_port}")
+            server_url = f"http://127.0.0.1:{available_port}"
+
+            def start_server():
+                os.environ['GRADIO_SERVER_PORT'] = str(available_port)
+                ui_main.run()
+
+            print("[SERVER] Iniciando servidor Gradio...")
+            server_thread = threading.Thread(target=start_server, daemon=True, name="GradioServer")
+            server_thread.start()
+
+            print("[SERVER] Verificando que Gradio este ejecutando...")
+            max_wait = 180  # Carga inicial de modelos.
+            checked = False
+            for i in range(max_wait):
+                time.sleep(1)
+                if is_gradio_running(server_url):
+                    print(f"[OK] Gradio ejecutando en {server_url}")
+                    checked = True
+                    break
+                if i > 0 and i % 10 == 0:
+                    print(f"[SERVER] Esperando... {i}s/{max_wait}s")
+
+            if not checked:
+                print(f"[ERROR] Gradio no respondio despues de {max_wait}s")
+                print(f"[INFO] Abre manualmente: {server_url}")
+                return
         
         # AHORA si abrir pywebview
         print("[UI] Abriendo pywebview...")
         import webview
+
         _icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
 
         def _set_window_icon(uid):
@@ -286,8 +318,8 @@ def run():
         threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
         webview.start(debug=False, func=None)
         
-        print("[EXIT] Ventana cerrada")
-        cleanup_comfyui()
+        print("[EXIT] Ventana cerrada; ComfyUI permanece disponible para otras sesiones")
+        return existing_server_url is not None
         
     except ImportError as e:
         print(f"[ERROR] Pywebview no instalado: {e}")
@@ -331,9 +363,45 @@ def batch_process_regular(
     if total_files == 0:
         yield (100, "No hay archivos para procesar")
         return
+
+    if getattr(roop.globals, 'face_swap_mode', None) in ('selected', 'selected_faces', 'selected_faces_frame'):
+        from roop.destination_selection import missing_video_references
+        video_paths = [entry.filename for entry in list_files_process
+                       if util.is_video(entry.filename) or entry.filename.lower().endswith('.gif')]
+        missing_targets = missing_video_references(
+            video_paths, getattr(roop.globals, 'selected_face_references', {}),
+        )
+        if missing_targets:
+            names = ', '.join(os.path.basename(path) for path in missing_targets)
+            message = f"ERROR: falta seleccionar cara destino en {len(missing_targets)} vídeo(s): {names}"
+            print(f"[BATCH] {message}")
+            yield (0, message)
+            return
     
     # Asegurar que processing está activo
     roop.globals.processing = True
+    
+    # Session log for photo batches (video batches have their own in run_batch_inmem)
+    _batch_log_file = None
+    from datetime import datetime
+    batch_has_photos = any(not (util.is_video(e.filename) or e.filename.lower().endswith('.gif')) for e in list_files_process)
+    if batch_has_photos:
+        try:
+            os.makedirs(r'D:\PROJECTS\AUTOAUTO\logs', exist_ok=True)
+            _log_name = f"process_{datetime.now():%Y%m%d_%H%M%S}.log"
+            _log_path = os.path.join(r'D:\PROJECTS\AUTOAUTO\logs', _log_name)
+            _batch_log_file = open(_log_path, 'w', encoding='utf-8')
+            _batch_log_file.write(f"=== AUTO-AUTO v5.1190 — BATCH FOTOS ===\n")
+            _batch_log_file.write(f"Start: {datetime.now()}\n")
+            _batch_log_file.write(f"Files: {total_files}\n\n")
+            _batch_log_file.flush()
+        except Exception:
+            _batch_log_file = None
+
+    # Redirect stdout to tee into batch log
+    _orig_stdout = sys.stdout
+    if _batch_log_file:
+        sys.stdout = _Tee(sys.stdout, _batch_log_file)
     
     # Inicializar ProcessMgr
     process_mgr = ProcessMgr()
@@ -349,7 +417,7 @@ def batch_process_regular(
         getattr(roop.globals, 'distance_threshold', 0.6),    # face_distance
         getattr(roop.globals, 'blend_ratio', 0.95),          # blend_ratio
         roop.globals.face_swap_mode if hasattr(roop.globals, 'face_swap_mode') else 'all',  # swap_mode
-        selected_input_face_index if selected_input_face_index else 0,  # selected_index
+        0,  # selected_index: source automatica, solo se elige destino
         clip_text if clip_text else "",                       # masking_text
         mask_data,                                            # imagemask
         num_swap_steps if num_swap_steps else 1,              # num_steps
@@ -372,6 +440,7 @@ def batch_process_regular(
         return
     
     processed_files = 0
+    photos_without_swap = []
     
     for entry in list_files_process:
         if not roop.globals.processing:
@@ -427,23 +496,50 @@ def batch_process_regular(
                 if frame is not None:
                     processed_frame = process_mgr.process_frame(frame, file_path=filename)
                     if processed_frame is not None:
-                        cv2.imwrite(output_path, processed_frame)
+                        if np.array_equal(processed_frame, frame):
+                            photos_without_swap.append(output_filename)
+                            print(f"[FOTO] SIN_SWAP {os.path.basename(filename)}: salida idéntica al original; revisar los mensajes [FOTO] y [SWAP_SKIP] anteriores", flush=True)
+                        if not cv2.imwrite(output_path, processed_frame):
+                            print(f"[FOTO] ERROR al guardar {output_path}", flush=True)
                     else:
                         # Si no se procesó, copiar original
-                        cv2.imwrite(output_path, frame)
+                        photos_without_swap.append(output_filename)
+                        print(f"[FOTO] SIN_SWAP {os.path.basename(filename)}: procesador devolvió None", flush=True)
+                        if not cv2.imwrite(output_path, frame):
+                            print(f"[FOTO] ERROR al guardar {output_path}", flush=True)
                 else:
                     print(f"[WARNING] No se pudo leer: {filename}")
+                    photos_without_swap.append(output_filename)
                     
         except Exception as e:
             print(f"[ERROR] Procesando {filename}: {e}")
+            if not is_video:
+                photos_without_swap.append(output_filename)
             import traceback
             traceback.print_exc()
         
         processed_files += 1
     
     # Finalizar
-    process_mgr.Release()
-    yield (100, f"Procesamiento completado: {processed_files} archivos")
+    try:
+        process_mgr.Release()
+    except Exception:
+        pass
+    # Restore stdout and close batch log
+    try:
+        sys.stdout = _orig_stdout
+    except Exception:
+        pass
+    if _batch_log_file:
+        try:
+            _batch_log_file.write(f"\n=== END: {processed_files} files ===\n")
+            _batch_log_file.close()
+        except Exception:
+            pass
+    if photos_without_swap:
+        yield (100, f"Procesados {processed_files} archivos; {len(photos_without_swap)} foto(s) sin swap: {', '.join(photos_without_swap[:5])}")
+    else:
+        yield (100, f"Procesamiento completado: {processed_files} archivos")
 
 
 def batch_process_with_options(list_files_process, options, progress_callback):

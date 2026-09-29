@@ -374,7 +374,73 @@ def assemble_generation_prompt(
         body_parts.append(weighted_scene)
     body_parts.extend(tail_parts)
 
+    # v5.1140: dedup a nivel de SEGMENTO (por comas) — el prefijo del modelo
+    # ('photorealistic RAW photograph') y los modificadores UI ('photorealistic
+    # RAW photo, film grain, realistic skin') + photoreal_tail ('film grain...')
+    # se SOLAPAN: cada token duplicado gasta presupuesto CLIP (~77) sin añadir
+    # nada (medido: 65→52 tokens en el caso típico). Stemming barato (5 primeras
+    # letras) para que 'photo'/'photograph' colisionen. La ESCENA del usuario
+    # SIEMPRE se conserva intacta (posición 1, nunca pasa por el filtro).
+    def _stem_w(w: str) -> str:
+        return w[:5] if len(w) > 5 else w
+
+    def _seg_words(seg: str) -> frozenset:
+        return frozenset(_stem_w(w) for w in re.findall(r"\w+", seg.lower()))
+
+    _prefix_norm = re.sub(r",\s*,", ",", prefix).strip().strip(",").strip()
+    _seen_frags = set()
+    _clean_parts = []
+    for _pi, _p in enumerate(body_parts):
+        _p = re.sub(r",\s*,", ",", _p).strip().strip(",").strip()
+        if not _p:
+            continue
+        if _pi == 0:  # escena del usuario: NUNCA se filtra
+            _clean_parts.append(_p)
+            _seen_frags |= set(_seg_words(_p))
+            continue
+        _segs = [s.strip() for s in _p.split(",") if s.strip()]
+        _kept = []
+        for _s in _segs:
+            _sw = _seg_words(_s)
+            if _sw and _sw <= _seen_frags:
+                continue  # segmento ya cubierto: duplicado
+            # v5.1140b: solape PARCIAL en segmentos cortos (boilerplate de config:
+            # prefijo/tail/extras — la escena del usuario no pasa por aquí).
+            # 'photorealistic RAW photograph' junto a escena 'photorealistic
+            # portrait' compartía stem 'photo' pero no 'raw' → el dedup estricto
+            # lo dejaba pasar. Regla: segmento <=5 palabras con CUALQUIER stem
+            # significativo (>=4 letras) ya visto = redundante.
+            _sig = {w for w in _sw if len(w) >= 4}
+            _words_in_seg = [w.strip() for w in re.findall(r"\w+", _s.lower())]
+            if len(_words_in_seg) <= 5 and _sig and (_sig & _seen_frags):
+                continue  # solape parcial en cola corta: duplicado
+            if _sw:
+                _seen_frags |= set(_sw)
+            _kept.append(_s)
+        if _kept:
+            _clean_parts.append(", ".join(_kept))
+    body_parts = _clean_parts
+
     body = ", ".join(p for p in body_parts if p)
+    # Prefijo: mismos filtros que la cola (segmentos cortos con solape parcial
+    # contra la escena = duplicados; los tags nsfw/explicit nunca solapan y
+    # SIEMPRE sobreviven).
+    _prefix_parts = [s.strip() for s in _prefix_norm.split(",") if s.strip()]
+    _kept_prefix = []
+    for _s in _prefix_parts:
+        _sw = _seg_words(_s)
+        if _sw and _sw <= _seen_frags:
+            continue
+        _sig = {w for w in _sw if len(w) >= 4}
+        _words_in_seg = re.findall(r"\w+", _s.lower())
+        if len(_words_in_seg) <= 5 and _sig and (_sig & _seen_frags):
+            continue
+        if _sw:
+            _seen_frags |= set(_sw)
+        _kept_prefix.append(_s)
+    prefix = ", ".join(_kept_prefix)
+    if prefix:
+        prefix = f"{prefix}, "
     final = f"{prefix}{body}" if prefix else body
 
     est = _estimate_clip_tokens(final)

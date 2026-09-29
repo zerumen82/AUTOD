@@ -7,7 +7,6 @@ Main UI - Interfaz Gradio principal
 import os
 import sys
 import gradio as gr
-import atexit
 import socket
 import threading
 
@@ -115,13 +114,8 @@ find_free_port = find_available_port
 
 
 def cleanup_comfyui():
-    from ui.tabs.comfy_launcher import stop
-    try:
-        print("[CLEANUP] atexit: limpiando ComfyUI...")
-        success, msg = stop()
-        print(f"[CLEANUP] {msg}")
-    except Exception as e:
-        print(f"[CLEANUP] Error (ignorado): {e}")
+    """Keep the shared backend alive when a UI process closes."""
+    print("[CLEANUP] ComfyUI compartido conservado al cerrar esta interfaz")
 
 
 def check_comfy_status():
@@ -228,7 +222,6 @@ def open_sd_webview():
 
 
 def create_ui():
-    atexit.register(cleanup_comfyui)
     
     css = """
         .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
@@ -386,7 +379,6 @@ def open_sd_webview():
 
 
 def create_ui():
-    atexit.register(cleanup_comfyui)
     
     css = """
         .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
@@ -493,6 +485,16 @@ def main():
     # Start capturing prints for console export
     from ui.globals import start_capturing_prints
     start_capturing_prints()
+
+    # Silenciar excepciones inofensivas de uvicorn/starlette en streaming SSE (desconexión de clientes/APK)
+    import logging
+    class _SuppressSSEStreamFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            return "Caught handled exception, but response already started" not in msg and "fastapi.exceptions.HTTPException: 404" not in msg
+
+    logging.getLogger("uvicorn.error").addFilter(_SuppressSSEStreamFilter())
+    logging.getLogger("starlette.error").addFilter(_SuppressSSEStreamFilter())
     
     import roop.globals
     server_name = getattr(roop.globals.CFG, "server_name", "") or "0.0.0.0"
@@ -539,6 +541,10 @@ def main():
 
 def run():
     """Alias for main()"""
+    import logging
+    logging.getLogger("uvicorn.error").addFilter(
+        lambda record: "Caught handled exception, but response already started" not in record.getMessage()
+    )
     main()
 
 

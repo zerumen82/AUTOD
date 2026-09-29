@@ -70,9 +70,9 @@
   "schnell": {
     "name": "Flux Schnell Q4",
     "explicit": false,
-    "steps": 8,
-    "cfg": 3.5,
-    "sampler": "euler_ancestral",
+    "steps": 4,
+    "cfg": 1.0,
+    "sampler": "euler",
     "scheduler": "simple",
     "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed"
   },

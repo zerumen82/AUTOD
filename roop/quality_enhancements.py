@@ -187,7 +187,15 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
         occlusion = cv2.bitwise_or(occlusion, detail_mask)
 
         kernel_open = np.ones((3, 3), np.uint8)
-        occlusion = cv2.morphologyEx(occlusion, cv2.MORPH_OPEN, kernel_open, iterations=2)
+        _occ_open2 = cv2.morphologyEx(occlusion, cv2.MORPH_OPEN, kernel_open, iterations=2)
+        # En la elipse bucal, limpieza suave (×1): los bordes de un palo fino
+        # (polo) sobreviven; fuera, ×2 sigue limpiando ruido. Geométrico, sin
+        # vocabulario: la boca es la única zona donde un objeto fino importa.
+        _occ_open1 = cv2.morphologyEx(occlusion, cv2.MORPH_OPEN, kernel_open, iterations=1)
+        try:
+            occlusion = np.where(mouth_area > 0, _occ_open1, _occ_open2).astype(np.uint8)
+        except Exception:
+            occlusion = _occ_open2
         kernel_dilate = np.ones((7, 7), np.uint8)
         occlusion = cv2.dilate(occlusion, kernel_dilate, iterations=1)
         occlusion = cv2.GaussianBlur(occlusion, (11, 11), 0)
@@ -298,8 +306,23 @@ def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray,
         return result
     except Exception as e:
         print(f"[WARN] Poisson failed ({e}), using alpha fallback")
-        mask_3ch = cv2.cvtColor(original_mask if 'original_mask' in locals() else mask, cv2.COLOR_GRAY2BGR) / 255.0
-        return (source * mask_3ch + target * (1.0 - mask_3ch)).astype(np.uint8)
+        # v5.1072b: fallback usa target crop del mismo tamaño que source para evitar shape mismatch
+        use_mask = original_mask if 'original_mask' in locals() else mask
+        if use_mask.dtype != np.uint8:
+            use_mask = (use_mask * 255).astype(np.uint8)
+        x, y, bw, bh = cv2.boundingRect(use_mask)
+        if bw > 1 and bh > 1:
+            pad = 18
+            sh, sw = source.shape[:2]
+            x1 = max(0, x - pad); y1 = max(0, y - pad)
+            x2 = min(sw, x + bw + pad); y2 = min(sh, y + bh + pad)
+            target_crop = target[y1:y2, x1:x2]
+            mask_crop = use_mask[y1:y2, x1:x2]
+            if target_crop.shape[:2] == source.shape[:2]:
+                mask_3ch = cv2.cvtColor(mask_crop, cv2.COLOR_GRAY2BGR) / 255.0
+                return (source * mask_3ch + target_crop * (1.0 - mask_3ch)).astype(np.uint8)
+        # Ultimate fallback: return source as-is
+        return source.astype(np.uint8) if source.dtype != np.uint8 else source
 
 
 def adjust_face_brightness(face: np.ndarray, target_region: np.ndarray, strength: float = 0.2) -> np.ndarray:

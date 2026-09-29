@@ -1,83 +1,630 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scrollRoot"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#FF020617"
+    android:fillViewport="true"
+    android:clipToPadding="false"
+    android:overScrollMode="never">
 
-    <!-- WebView del ImgEditor del servidor -->
-    <WebView
-        android:id="@+id/webview"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
-
-    <!-- Boton de ajustes (IP/URL manual) siempre visible -->
-    <Button
-        android:id="@+id/btnSettings"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_gravity="top|end"
-        android:layout_marginTop="16dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/settings_bg"
-        android:text="⚙"
-        android:textSize="22sp"
-        android:textColor="#ffffff"
-        android:gravity="center" />
-
-
-    <!-- Pantalla de conexión / descubrimiento -->
     <LinearLayout
-        android:id="@+id/loadingLayout"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:gravity="center"
-        android:background="@color/bg_dark">
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="24dp">
 
-        <ProgressBar
-            android:id="@+id/progress"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-
+        <!-- HEADER -->
         <TextView
-            android:id="@+id/statusText"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/connecting"
-            android:textColor="#e2e8f0"
-            android:textSize="16sp"
-            android:layout_marginTop="16dp"
-            android:paddingLeft="24dp"
-            android:paddingRight="24dp"
-            android:gravity="center" />
-    </LinearLayout>
-
-    <!-- Pantalla de error: servidor no encontrado -->
-    <LinearLayout
-        android:id="@+id/errorLayout"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:background="@color/bg_dark"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/errorText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#f87171"
-            android:textSize="16sp"
+            android:text="AUTOAUTO AI"
+            android:textColor="#FF22D3EE"
+            android:textSize="20sp"
+            android:textStyle="bold"
             android:gravity="center"
-            android:padding="24dp"
-            android:text="@string/error_notfound" />
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="6dp" />
 
+        <!-- TOP TAB SWITCHER (Edit | Generate) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp"
+            android:background="#FF0F172A"
+            android:padding="3dp">
+
+            <Button
+                android:id="@+id/tabEdit"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="EDITAR"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:background="#FF06B6D4"
+                android:textColor="#FFFFFFFF"
+                android:foreground="?android:attr/selectableItemBackground" />
+
+            <Button
+                android:id="@+id/tabGenerate"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="GENERAR"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:background="#FF1E293B"
+                android:textColor="#FF94A3B8"
+                android:foreground="?android:attr/selectableItemBackground" />
+        </LinearLayout>
+
+        <!-- Server status bar -->
+        <LinearLayout
+            android:id="@+id/serverBar"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#FF0F172A"
+            android:paddingStart="10dp"
+            android:paddingEnd="6dp"
+            android:layout_marginBottom="10dp">
+
+            <View
+                android:id="@+id/statusDot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/settings_bg" />
+
+            <TextView
+                android:id="@+id/serverStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Sin conexion"
+                android:textColor="#FF94A3B8"
+                android:textSize="12sp"
+                android:layout_marginStart="8dp"
+                android:singleLine="true"
+                android:ellipsize="middle" />
+
+            <Button
+                android:id="@+id/btnConnect"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:text="..."
+                android:textSize="11sp"
+                android:minWidth="48dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:minHeight="0dp" />
+        </LinearLayout>
+
+        <!-- INPUT IMAGE (smaller for mobile) — EDIT MODE -->
+        <FrameLayout
+            android:id="@+id/inputImageFrame"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:background="#FF0F172A"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?android:attr/selectableItemBackground">
+
+            <ImageView
+                android:id="@+id/inputImage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop" />
+
+            <TextView
+                android:id="@+id/inputPlaceholder"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="Toca para seleccionar"
+                android:textColor="#FF475569"
+                android:textSize="14sp" />
+        </FrameLayout>
+
+        <!-- GENERATE PANEL (hidden by default) -->
+        <LinearLayout
+            android:id="@+id/generatePanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="8dp">
+
+            <!-- Orientation -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:orientation="horizontal"
+                android:background="#FF0F172A"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Forma:"
+                    android:textColor="#FF94A3B8"
+                    android:textSize="13sp"
+                    android:layout_marginEnd="12dp" />
+
+                <Button
+                    android:id="@+id/btnOrientationH"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="Paisaje"
+                    android:textSize="12sp"
+                    android:textAllCaps="false"
+                    android:background="#FF06B6D4"
+                    android:textColor="#FFFFFFFF"
+                    android:layout_marginEnd="4dp"
+                    android:foreground="?android:attr/selectableItemBackground" />
+
+                <Button
+                    android:id="@+id/btnOrientationV"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="Retrato"
+                    android:textSize="12sp"
+                    android:textAllCaps="false"
+                    android:background="#FF1E293B"
+                    android:textColor="#FF94A3B8"
+                    android:foreground="?android:attr/selectableItemBackground" />
+            </LinearLayout>
+
+            <!-- Engine -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <Spinner
+                    android:id="@+id/genEngineSpinner"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:background="#FF0F172A"
+                    android:popupBackground="#FF1E293B"
+                    android:paddingStart="10dp" />
+            </LinearLayout>
+
+            <!-- Enhance checkboxes -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <CheckBox
+                    android:id="@+id/genEnhanceCheck"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Nitidez ESRGAN"
+                    android:textColor="#FF94A3B8"
+                    android:textSize="12sp"
+                    android:buttonTint="#FFA855F7"
+                    android:gravity="center_vertical" />
+
+                <CheckBox
+                    android:id="@+id/genRewriterCheck"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Rewriter LLM"
+                    android:textColor="#FF94A3B8"
+                    android:textSize="12sp"
+                    android:buttonTint="#FFA855F7"
+                    android:gravity="center_vertical" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- PROMPT (compact) -->
+        <EditText
+            android:id="@+id/promptInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Colorea, cambia el fondo... o describe lo que quieres generar"
+            android:textColor="#FFE2E8F0"
+            android:textColorHint="#FF475569"
+            android:background="#FF0F172A"
+            android:padding="12dp"
+            android:textSize="14sp"
+            android:inputType="textMultiLine"
+            android:minLines="2"
+            android:maxLines="4"
+            android:gravity="top"
+            android:layout_marginTop="8dp" />
+
+        <!-- ENGINE + DENOISE row (EDIT MODE) -->
+        <LinearLayout
+            android:id="@+id/editSettingsRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Spinner
+                android:id="@+id/engineSpinner"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:background="#FF0F172A"
+                android:popupBackground="#FF1E293B"
+                android:paddingStart="10dp"
+                android:layout_marginEnd="6dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="6dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Fuerza"
+                        android:textColor="#FF94A3B8"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/denoiseValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Auto"
+                        android:textColor="#FF22D3EE"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/denoiseSlider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="20"
+                    android:progress="0"
+                    android:progressTint="#FF22D3EE"
+                    android:thumbTint="#FF22D3EE" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- CHECKBOXES ROW (larger touch targets) — EDIT MODE -->
+        <LinearLayout
+            android:id="@+id/editCheckboxesRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp">
+
+            <CheckBox
+                android:id="@+id/qualityCheck"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="Calidad"
+                android:textColor="#FF94A3B8"
+                android:textSize="13sp"
+                android:buttonTint="#FFA855F7"
+                android:gravity="center_vertical" />
+
+            <CheckBox
+                android:id="@+id/autoCheck"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="Autoregresivo"
+                android:textColor="#FF94A3B8"
+                android:textSize="13sp"
+                android:buttonTint="#FFA855F7"
+                android:gravity="center_vertical" />
+        </LinearLayout>
+
+        <!-- TIER (visible when quality checked) -->
+        <RadioGroup
+            android:id="@+id/tierGroup"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            android:gravity="center">
+
+            <RadioButton android:id="@+id/tierHd"
+                android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="HD" android:textColor="#FF94A3B8" android:textSize="13sp"
+                android:checked="true" android:buttonTint="#FF22D3EE"
+                android:gravity="center" />
+
+            <RadioButton android:id="@+id/tier4k"
+                android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="4K" android:textColor="#FF94A3B8" android:textSize="13sp"
+                android:buttonTint="#FF22D3EE"
+                android:gravity="center" />
+
+            <RadioButton android:id="@+id/tier8k"
+                android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="8K" android:textColor="#FF94A3B8" android:textSize="13sp"
+                android:buttonTint="#FF22D3EE"
+                android:gravity="center" />
+        </RadioGroup>
+
+        <CheckBox
+            android:id="@+id/qualityFaceRestoreCheck"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:visibility="gone"
+            android:checked="true"
+            android:text="Restaurar caras (puede alterar rasgos)"
+            android:textColor="#FF94A3B8"
+            android:textSize="12sp"
+            android:buttonTint="#FFA855F7"
+            android:gravity="center_vertical" />
+
+        <!-- ITERATIONS (visible when autoregressive checked) -->
+        <LinearLayout
+            android:id="@+id/iterationsRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone"
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Iteraciones"
+                android:textColor="#FF94A3B8"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/iterationsValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="3"
+                android:textColor="#FFA855F7"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/iterationsSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="19"
+            android:progress="2"
+            android:visibility="gone"
+            android:progressTint="#FFA855F7"
+            android:thumbTint="#FFA855F7" />
+
+        <!-- TRANSFORM BUTTON (large touch target) -->
         <Button
-            android:id="@+id/btnRetry"
+            android:id="@+id/btnTransform"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="TRANSFORMAR"
+            android:textColor="#FFFFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08"
+            android:layout_marginTop="10dp"
+            android:background="#FF06B6D4"
+            android:foreground="?android:attr/selectableItemBackground" />
+
+        <!-- PROGRESS -->
+        <LinearLayout
+            android:id="@+id/progressLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="10dp"
+            android:padding="10dp"
+            android:background="#FF1E293B">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <ProgressBar
+                    android:id="@+id/progressBar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="8dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progressTint="#FF22D3EE"
+                    android:progressBackgroundTint="#FF334155" />
+
+                <TextView
+                    android:id="@+id/progressPercent"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0%"
+                    android:textColor="#FF22D3EE"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="8dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/progressText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Procesando..."
+                android:textColor="#FF94A3B8"
+                android:textSize="12sp"
+                android:layout_marginTop="6dp" />
+
+            <TextView
+                android:id="@+id/progressElapsed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#FF64748B"
+                android:textSize="11sp"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <!-- RESULT / MASK TABS -->
+        <LinearLayout
+            android:id="@+id/resultSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="12dp">
+
+            <!-- Tab buttons (48dp touch targets) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:orientation="horizontal"
+                android:background="#FF0F172A">
+
+                <Button
+                    android:id="@+id/tabResult"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="RESULTADO"
+                    android:textSize="12sp"
+                    android:textAllCaps="false"
+                    android:background="#FF06B6D4"
+                    android:textColor="#FFFFFFFF"
+                    android:foreground="?android:attr/selectableItemBackground" />
+
+                <Button
+                    android:id="@+id/tabMask"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="MASCARA"
+                    android:textSize="12sp"
+                    android:textAllCaps="false"
+                    android:background="#FF1E293B"
+                    android:textColor="#FF94A3B8"
+                    android:foreground="?android:attr/selectableItemBackground" />
+            </LinearLayout>
+
+            <!-- Result image (adaptive height) -->
+            <ImageView
+                android:id="@+id/resultImage"
+                android:layout_width="match_parent"
+                android:layout_height="260dp"
+                android:scaleType="fitCenter"
+                android:background="#FF0F172A"
+                android:contentDescription="Resultado" />
+
+            <!-- Mask image -->
+            <ImageView
+                android:id="@+id/maskImage"
+                android:layout_width="match_parent"
+                android:layout_height="260dp"
+                android:scaleType="fitCenter"
+                android:background="#FF0F172A"
+                android:visibility="gone"
+                android:contentDescription="Mascara" />
+
+            <!-- Status -->
+            <TextView
+                android:id="@+id/statusMessage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FF64748B"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:layout_marginTop="6dp"
+                android:singleLine="true"
+                android:ellipsize="end" />
+
+            <!-- Action buttons (48dp touch targets) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <Button android:id="@+id/btnSave"
+                    android:layout_width="0dp" android:layout_height="48dp"
+                    android:layout_weight="1" android:text="Guardar"
+                    android:textSize="13sp" android:layout_marginEnd="4dp"
+                    android:background="#FF1E293B" android:textColor="#FFE2E8F0"
+                    android:foreground="?android:attr/selectableItemBackground" />
+
+                <Button android:id="@+id/btnShare"
+                    android:layout_width="0dp" android:layout_height="48dp"
+                    android:layout_weight="1" android:text="Compartir"
+                    android:textSize="13sp" android:layout_marginStart="4dp" android:layout_marginEnd="4dp"
+                    android:background="#FF1E293B" android:textColor="#FFE2E8F0"
+                    android:foreground="?android:attr/selectableItemBackground" />
+
+                <Button android:id="@+id/btnUseAsInput"
+                    android:layout_width="0dp" android:layout_height="48dp"
+                    android:layout_weight="1" android:text="Usar"
+                    android:textSize="13sp" android:layout_marginStart="4dp"
+                    android:background="#FF1E293B" android:textColor="#FFE2E8F0"
+                    android:foreground="?android:attr/selectableItemBackground" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- GALLERY -->
+        <TextView
+            android:id="@+id/galleryLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/retry"
-            android:layout_marginTop="8dp" />
-    </LinearLayout>
+            android:text="Galeria"
+            android:textColor="#FF94A3B8"
+            android:textSize="13sp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="6dp"
+            android:visibility="gone" />
 
-</FrameLayout>
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:fadingEdgeLength="24dp"
+            android:requiresFadingEdge="horizontal">
+
+            <LinearLayout
+                android:id="@+id/galleryRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="16dp" />
+
+    </LinearLayout>
+</ScrollView>

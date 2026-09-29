@@ -16,11 +16,20 @@ from roop.utils import get_vram_gb
 
 # Puerto por defecto
 DEFAULT_PORTS = [8188, 8189]
+# v5.1095: NUESTRO ComfyUI va FIJO en 8188 (con nodos GGUF del venv propio).
+# Nunca reutilizar instancias ajenas (p.ej. 8189 con Python del sistema).
+OUR_PORT = 8188
 COMFYUI_PORT = None  # Se detectará automáticamente
 
 # Detectar ruta de ComfyUI
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 COMFYUI_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "tob", "ComfyUI"))
+# La instalación heredó una ACL denegada en ComfyUI\temp. Mantener los
+# temporales de servidor en el área temporal del proyecto evita que el arranque
+# dependa de esa carpeta y deja a ComfyUI limpiar únicamente su propio subárbol.
+COMFYUI_TEMP_ROOT = os.path.abspath(
+    os.path.join(SCRIPT_DIR, "..", "..", ".autodeep_temp", "comfyui_runtime")
+)
 
 # Usar el venv_flux (GPU) por defecto para ComfyUI
 if sys.platform == "win32":
@@ -223,30 +232,54 @@ def get_comfy_url() -> str:
     return f"http://127.0.0.1:{COMFYUI_PORT}"
 
 
+def _is_our_comfyui(port: int) -> bool:
+    """Verifica que el ComfyUI del puerto sea el NUESTRO (tiene nodos GGUF).
+
+    v5.1095: fingerprint mínimo — el venv propio tiene ComfyUI-GGUF
+    (UnetLoaderGGUF). Una instancia ajena (p.ej. 8189) no lo tiene.
+    """
+    try:
+        r = requests.get(
+            f"http://127.0.0.1:{port}/object_info/UnetLoaderGGUF", timeout=3
+        )
+        return r.status_code == 200 and "UnetLoaderGGUF" in r.json()
+    except Exception:
+        return False
+
+
 def detect_comfyui_port() -> Optional[int]:
-    """Detectar si ComfyUI está corriendo en algún puerto - DEBUG VERSION"""
+    """Detectar NUESTRO ComfyUI (fijo en OUR_PORT=8188) - DEBUG VERSION.
+
+    v5.1095: solo acepta el 8188 y únicamente si tiene nodos GGUF.
+    Un ComfyUI ajeno (aunque responda /system_stats) se ignora.
+    """
     print(f"[DEBUG] detect_comfyui_port() llamado")
-    
-    for port in DEFAULT_PORTS:
-        print(f"[DEBUG] Verificando puerto {port}...")
-        
-        # First check if there's a LISTENING process
-        if not is_port_in_use(port):
-            print(f"[DEBUG] Puerto {port}: no hay LISTENING, saltando")
-            continue
-        
-        # Then verify it's actually ComfyUI
-        try:
-            print(f"[DEBUG] Haciendo request HTTP a puerto {port}...")
-            response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=2)
-            print(f"[DEBUG] HTTP response: {response.status_code}")
-            if response.status_code == 200:
-                print(f"[ComfyLauncher] ✓ ComfyUI detectado en puerto {port}")
+    port = OUR_PORT
+    print(f"[DEBUG] Verificando puerto {port} (fijo nuestro)...")
+
+    # First check if there's a LISTENING process
+    if not is_port_in_use(port):
+        print(f"[DEBUG] Puerto {port}: no hay LISTENING, saltando")
+        print(f"[DEBUG] No se encontró NUESTRO ComfyUI en puerto {port}")
+        return None
+
+    # Then verify it's actually ComfyUI
+    try:
+        print(f"[DEBUG] Haciendo request HTTP a puerto {port}...")
+        response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=2)
+        print(f"[DEBUG] HTTP response: {response.status_code}")
+        if response.status_code == 200:
+            if _is_our_comfyui(port):
+                print(f"[ComfyLauncher] ✓ NUESTRO ComfyUI detectado en puerto {port}")
                 return port
-        except Exception as e:
-            print(f"[DEBUG] HTTP error en puerto {port}: {e}")
-    
-    print(f"[DEBUG] No se encontró ComfyUI en puertos {DEFAULT_PORTS}")
+            print(
+                f"[ComfyLauncher] ⚠ Puerto {port} ocupado por un ComfyUI AJENO "
+                f"(sin nodos GGUF) — se ignora"
+            )
+    except Exception as e:
+        print(f"[DEBUG] HTTP error en puerto {port}: {e}")
+
+    print(f"[DEBUG] No se encontró NUESTRO ComfyUI en puerto {port}")
     return None
 
 
@@ -277,16 +310,24 @@ def start(
     """Start ComfyUI - VERBOSE"""
     global comfy_process, COMFYUI_PORT
     
-    # Primero detectar si ya está corriendo
+    # Primero detectar si ya está corriendo EL NUESTRO (fijo 8188 con GGUF)
     detected_port = detect_comfyui_port()
     if detected_port is not None:
         COMFYUI_PORT = detected_port
         print(f"[ComfyLauncher] ComfyUI ya detectado en puerto {COMFYUI_PORT}")
         return True, "ComfyUI ya esta corriendo", COMFYUI_PORT
-    
-    # Si no está corriendo, usar el puerto especificado o el primero disponible
+
+    # v5.1095: puerto FIJO nuestro. Si está ocupado por algo ajeno, NO lanzar
+    # encima ni usar otro puerto: error claro para liberar el 8188.
     if port is None:
-        port = int(os.environ.get('COMFYUI_PORT', DEFAULT_PORTS[0]))
+        port = int(os.environ.get('COMFYUI_PORT', OUR_PORT))
+    if is_port_in_use(port):
+        msg = (
+            f"Puerto {port} ocupado por un proceso ajeno (no es nuestro ComfyUI). "
+            f"Cerrá ese programa y reintentá."
+        )
+        print(f"[ComfyLauncher] ERROR: {msg}")
+        return False, msg, port
     COMFYUI_PORT = port
     
     comfy_url = get_comfy_url()
@@ -313,11 +354,26 @@ def start(
         
         vram_gb = get_vram_gb()
         if vram_gb <= 8:
+            # El servidor es compartido por Image Editor, Generate y Animate.
+            # LowVRAM global hace lentas las ediciones normales, así que dejamos
+            # el planificador de ComfyUI en normal: Wan ya va limitado a bloques
+            # pequeños y Comfy hará offload solo si ese modelo lo necesita.
             vram_mode = "--normalvram"
         else:
             vram_mode = "--highvram"
         print(f"[ComfyLauncher] VRAM detectada: {vram_gb}GB → usando {vram_mode}")
         cmd = [python_exe, "-u", exe, "--port", str(port), vram_mode]
+        try:
+            os.makedirs(COMFYUI_TEMP_ROOT, exist_ok=True)
+            cmd.extend(["--temp-directory", COMFYUI_TEMP_ROOT])
+        except OSError as e:
+            print(f"[ComfyLauncher] Aviso: temp aislado no disponible ({e}); usando el predeterminado")
+        # v5.1114 — ComfyUI 0.19.0 activa "async weight offloading" (2 streams) por
+        # defecto en Nvidia. Con torch 2.6 (sin DynamicVRAM, requiere 2.8) +
+        # cudaMallocAsync el offload asíncrono thrashea: kontext Q4 pasó de
+        # ~10-17s/it (v5.1105) a 56→80s/it degradando intra-run (25 min/run).
+        # El flag lo apaga: mismo offload legacy ModelPatcher de siempre.
+        cmd.append("--disable-async-offload")
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
         print(f"[ComfyLauncher] Directorio: {COMFYUI_DIR}")
         print(f"[ComfyLauncher] Python: {python_exe}")
@@ -497,6 +553,16 @@ def stop() -> Tuple[bool, str]:
     global comfy_process, COMFYUI_PORT
     
     print(f"\n[DEBUG] stop() llamado - COMFYUI_PORT={COMFYUI_PORT}")
+    # Diagnóstico de ciclo de vida: cuando un backend se detiene entre el
+    # arranque de la UI y una edición, el origen exacto importa más que matar
+    # silenciosamente el árbol. La traza es deliberadamente corta y no altera
+    # el comportamiento de detener solicitado.
+    try:
+        import traceback
+        _stop_origin = "".join(traceback.format_stack(limit=6)).strip()
+        print(f"[DEBUG] stop() origen:\n{_stop_origin}")
+    except Exception:
+        pass
     
     actions = []
     killed_any = False

@@ -155,8 +155,8 @@ class FacePreserver:
                 # Si encontramos un match razonable (>0.30), restauramos la cara original usando manual paste (más confiable para preserve después de edición fuerte)
                 # Evitamos swapper.get porque falla (rank error en source) cuando las caras vienen de imágenes diferentes.
                 if best_match is not None and max_sim > 0.30:
-                    if max_sim > 0.78:
-                        print(f"  [SKIP] Alta similitud ({max_sim:.4f}), mantenemos la cara generada para evitar problemas de escala")
+                    if max_sim > 0.92:
+                        print(f"  [SKIP] Similitud muy alta ({max_sim:.4f}), cara generada es prácticamente idéntica")
                     else:
                         print(f"  [MATCH] Restaurando identidad con sim={max_sim:.4f} (manual paste)")
                         try:
@@ -178,16 +178,17 @@ class FacePreserver:
                                     else:
                                         o_w, o_h = gen_w, gen_h
 
-                                    # Use the LARGER of original face size and generated head size (plus slight boost).
+                                    # Use the LARGER of original face size and generated head size (plus boost).
                                     # Guarantees the pasted face is never smaller than the generated head area.
+                                    # v5.1086: boost mayor para body edits (cuerpo regenerado necesita cara proporcional).
                                     aspect = o_w / max(1.0, float(o_h))
                                     base = max(o_w, gen_w)
-                                    target_w = int(base * 1.15)  # higher boost when we have to paste (low sim) to make face more prominent
+                                    target_w = int(base * 1.25)
                                     target_h = int(target_w / aspect)
 
-                                    # Safety clamp
-                                    if target_w > gen_w * 1.35 or target_h > gen_h * 1.35:
-                                        scale = min( (gen_w * 1.15) / target_w , (gen_h * 1.15) / target_h )
+                                    # Safety clamp (ampliado: 1.35→1.60 para cuerpos regenerados)
+                                    if target_w > gen_w * 1.60 or target_h > gen_h * 1.60:
+                                        scale = min( (gen_w * 1.30) / target_w , (gen_h * 1.30) / target_h )
                                         scale = max(0.85, scale)
                                         target_w = int(target_w * scale)
                                         target_h = int(target_h * scale)
@@ -286,7 +287,12 @@ class FacePreserver:
                     print(f"  [SKIP] Similitud insuficiente ({max_sim:.4f} <= 0.30)")
             
             print(f"[FacePreserver] Se restauraron {swapped_count} identidad(es) facial(es)")
-            
+
+            # v5.1091: si no se restauró ninguna cara, devolver None para que el
+            # manager no imprima "cara original restaurada" en falso.
+            if swapped_count == 0:
+                return None
+
             # Convertir de vuelta a PIL
             return Image.fromarray(cv2.cvtColor(result_cv2, cv2.COLOR_BGR2RGB))
             

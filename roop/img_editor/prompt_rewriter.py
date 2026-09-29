@@ -123,6 +123,53 @@ class PromptRewriter:
             except:
                 pass
 
+    def fix_typos(self, text: str) -> str:
+        """Corrige SOLO ortografía del raw (típicamente español con typos).
+        El LLM propone y el ALGORITMO dispone: se acepta únicamente si conserva
+        las mismas palabras con distancia de edición pequeña (typos, nunca
+        reescritura/paráfrasis/traducción). Cero vocabulario: la puerta es
+        Damerau-Levenshtein por palabra. Si el LLM alucina, se devuelve el
+        original intacto (fail-safe: nunca peor que antes)."""
+        if not text or not text.strip():
+            return text
+        if self._llm is None or self._llm == "heuristic":
+            return text
+        try:
+            sys_msg = (
+                "Corrige UNICAMENTE la ortografía del texto en español. "
+                "No traduzcas a otro idioma, no añadas ni quites palabras, "
+                "no cambies el orden ni el significado, no expliques nada. "
+                "Devuelve SOLO el texto corregido en una línea."
+            )
+            resp = self._llm.create_completion(
+                f"<|im_start|>system\n{sys_msg}<|im_end|>\n"
+                f"<|im_start|>user\n{text.strip()}<|im_end|>\n"
+                "<|im_start|>assistant\n",
+                max_tokens=120, temperature=0.0,
+                echo=False, stop=["<|im_end|>"],
+                repeat_penalty=1.1,
+            )
+            fixed = resp["choices"][0]["text"].strip().strip("\"'").split("\n")[0].strip()
+            if not fixed:
+                return text
+            from roop.img_editor.prompt_translator import _damerau_leven
+            w0, w1 = text.split(), fixed.split()
+            if len(w0) != len(w1) or not w1:
+                return text
+            total = 0
+            for a, b in zip(w0, w1):
+                d = _damerau_leven(a.lower(), b.lower())
+                if d > 2:
+                    return text
+                total += d
+            if total == 0 or total > 8:
+                return text
+            print(f"[PromptRewriter] Typos corregidos: '{text[:60]}' -> '{fixed[:60]}'", flush=True)
+            return fixed
+        except Exception as e:
+            print(f"[PromptRewriter] fix_typos omitido: {e}")
+            return text
+
     def rewrite(self, prompt: str, image_context: str = "", mode: str = "img2img") -> Dict:
         """Devuelve un diccionario con el análisis completo del LLM.
         NOTA: image_context debe ser metadata estructurada (no descripción generada por VLM) para evitar alucinaciones.
@@ -141,6 +188,8 @@ class PromptRewriter:
             "prompt": prompt,
             "magnitude": 0.5,
             "mask_target": "subject",
+            "affected_regions": [],
+            "requires_scene_regeneration": False,
             "reasoning": "Fallback mode"
         }
     
@@ -151,8 +200,96 @@ class PromptRewriter:
             "prompt": prompt,
             "magnitude": 0.5,
             "mask_target": "subject",
+            "affected_regions": [],
+            "requires_scene_regeneration": False,
             "reasoning": "LLM unavailable"
         }
+
+    @staticmethod
+    def _classify_affected_regions(prompt: str, llm) -> List[str]:
+        """Ask a narrow, independent scope question when the main plan omits it.
+
+        The main rewriter is optimized for translation and often emits its old,
+        compact JSON schema even after new optional fields are added.  This
+        classifier only describes spatial scope; it does not inspect verbs or
+        alter the user instruction.
+        """
+        if not prompt or llm is None:
+            return []
+        try:
+            system_msg = (
+                "You classify the spatial scope of an image editing request. "
+                "Reply ONLY with valid JSON in this exact form: "
+                '{"affected_regions":["region one","region two"]}. '
+                "List every distinct visual region explicitly requested to change. "
+                "Use concise region names and do not infer hidden changes."
+            )
+            response = llm.create_completion(
+                f"<|im_start|>system\n{system_msg}<|im_end|>\n"
+                f"<|im_start|>user\nRequest: {prompt.strip()}<|im_end|>\n"
+                "<|im_start|>assistant\n",
+                max_tokens=80, temperature=0.0, echo=False,
+                stop=["<|im_end|>", "\n\n"], repeat_penalty=1.05,
+            )
+            text = response["choices"][0]["text"].strip()
+            data = _extract_first_json(text)
+            if isinstance(data, dict):
+                raw_regions = data.get("affected_regions", [])
+            else:
+                # Qwen 0.5B suele emitir directamente el array aunque se le
+                # pida un objeto envoltorio; ambos formatos expresan el mismo
+                # plan estructural y no requieren interpretar lenguaje libre.
+                try:
+                    raw_regions = json.loads(text)
+                except Exception:
+                    raw_regions = []
+            if not isinstance(raw_regions, list):
+                return []
+            regions = []
+            for raw_region in raw_regions:
+                region = str(raw_region or "").strip().lower()
+                if region and region not in regions:
+                    regions.append(region)
+            print(f"[PromptRewriter] Plan de regiones: {regions}", flush=True)
+            return regions
+        except Exception as exc:
+            print(f"[PromptRewriter] Plan de regiones omitido: {exc}", flush=True)
+            return []
+
+    @staticmethod
+    def _classify_subject_query(prompt: str, llm) -> str:
+        """Return the visual entity named by a local edit, without action rules.
+
+        Spatial regions such as "head" say *where* a change lands but not
+        *whose* region it is when several faces are present.  This small query
+        extracts only the visible entity description so the vision segmenter
+        can ground it in the actual image.
+        """
+        if not prompt or llm is None:
+            return ""
+        try:
+            system_msg = (
+                "Identify the visible subject explicitly named to be changed in an image editing request. "
+                "Reply ONLY valid JSON in this exact form: {\"subject_query\":\"short visual noun phrase\"}. "
+                "Return an empty string only when the request names no particular visible subject. "
+                "Do not describe the requested change."
+            )
+            response = llm.create_completion(
+                f"<|im_start|>system\n{system_msg}<|im_end|>\n"
+                f"<|im_start|>user\nRequest: {prompt.strip()}<|im_end|>\n"
+                "<|im_start|>assistant\n",
+                max_tokens=40, temperature=0.0, echo=False,
+                stop=["<|im_end|>", "\n\n"], repeat_penalty=1.05,
+            )
+            data = _extract_first_json(response["choices"][0]["text"].strip())
+            query = str(data.get("subject_query", "") or "").strip().lower() if isinstance(data, dict) else ""
+            if len(query) > 80:
+                query = ""
+            print(f"[PromptRewriter] Consulta de sujeto: {query or '(sin sujeto único)'}", flush=True)
+            return query
+        except Exception as exc:
+            print(f"[PromptRewriter] Consulta de sujeto omitida: {exc}", flush=True)
+            return ""
 
     def _rewrite_with_llm(self, prompt: str, llm, image_context: str = "", mode: str = "img2img") -> Dict:
         ctx = image_context[:200] if len(image_context) > 200 else image_context
@@ -170,19 +307,32 @@ class PromptRewriter:
             )
         else:
             # Prompt para EDICIÓN (img2img)
+            # v5.1108 — los prompts traen MÁS DE UNA condición ("desnuda Y
+            # descalza") y los ejemplos eran todos de condición única: el 0.5B
+            # aprendía el formato "una petición → una descripción" y OMITÍA la
+            # segunda mitad (log 11:57). Se añade instrucción + ejemplo multi-
+            # condición. Esto enseña el FORMATO (no ramifica por palabras del
+            # usuario: vale para cualquier combinación).
             system_msg = (
                 "You analyze image editing requests. Translate Spanish to English accurately. "
                 "Make the English prompt vivid and richly descriptive — it directly controls a diffusion model.\n"
+                "CRITICAL: requests usually contain SEVERAL conditions at once. Translate EVERY single one of them into the prompt. "
+                "Dropping any part of the request is a failure — if the user asks for two or three changes, the prompt must describe all of them.\n"
                 "For body edits (naked, undress, masturbating, sex, etc.) describe the action clearly and anatomically.\n"
+                "Classify geometry semantically: requires_scene_regeneration is true only when the requested final image needs a new spatial arrangement, body configuration, interaction, or viewpoint. It is false when the requested result can be made by changing appearance while preserving the existing geometry.\n"
                 "Output ONLY valid JSON with these fields:\n"
                 '- "prompt": English translation, vivid and descriptive\n'
                 '- "magnitude": number 0.0-1.0 estimating how much change is requested (0.1=tiny, 0.5=moderate, 0.9=extreme)\n'
-                '- "mask_target": "subject" (person/people), "background", or "clothes"\n'
+                 '- "mask_target": "subject" (person/people), "background", or "clothes"\n'
+                 '- "affected_regions": array of every distinct visual region independently changed by the request; use one item for one region and include all regions for a compound request\n'
                 '- "preserve_face": true (keep faces unchanged) or false\n'
                 '- "is_global": true (edit whole image) or false (edit only target area)\n'
+                '- "requires_scene_regeneration": true or false, using the geometric criterion above\n'
                 'Examples:\n'
                 'User: ella debe ir desnuda sin ropa\n'
                 'Assistant: {"prompt": "she must go completely naked, bare skin, no clothes, full body nudity, visible vagina, exposed pubic area, bare breasts, completely nude", "magnitude": 0.9, "mask_target": "subject", "preserve_face": true, "is_global": true}\n'
+                'User: debe ir desnuda y descalza\n'
+                'Assistant: {"prompt": "she must go completely naked, bare skin, no clothes, and barefoot, bare feet, no shoes, no footwear", "magnitude": 0.9, "mask_target": "subject", "preserve_face": true, "is_global": true}\n'
                 'User: se esta masturbando\n'
                 'Assistant: {"prompt": "she is masturbating, touching her genitals, sexual act", "magnitude": 0.8, "mask_target": "subject", "preserve_face": true, "is_global": false}\n'
                 'User: ponle un sombrero azul\n'
@@ -204,8 +354,9 @@ class PromptRewriter:
         )
 
         response = llm.create_completion(
-            full_prompt, max_tokens=250, temperature=0.1,
-            echo=False, stop=["<|im_end|>", "\n\n"]
+            full_prompt, max_tokens=250, temperature=0.0,
+            echo=False, stop=["<|im_end|>", "\n\n"],
+            repeat_penalty=1.15, min_p=0.05, typical_p=0.15
         )
         
         try:
@@ -240,6 +391,17 @@ class PromptRewriter:
                         except: pass
                 try: return float(val)
                 except: return default
+
+            def extract_bool(val, default=False):
+                if isinstance(val, bool):
+                    return val
+                if isinstance(val, (int, float)):
+                    return bool(val)
+                if isinstance(val, str):
+                    normalized = val.strip().lower()
+                    if normalized in ("true", "yes", "1"): return True
+                    if normalized in ("false", "no", "0", ""): return False
+                return default
 
             def get_flexible(d, keys):
                 """Busca una clave en un dict ignorando mayúsculas, espacios y guiones bajos."""
@@ -282,6 +444,40 @@ class PromptRewriter:
             
             if p_val:
                 translated_prompt = extract_text(p_val)
+
+            # Regiones independientes: una propiedad estructural del plan, no
+            # una tabla de acciones. Se acepta solo un array para que una frase
+            # libre del modelo no convierta accidentalmente un edit local en
+            # recomposición global.
+            affected_regions = []
+            regions_val = get_flexible(data, ["affected_regions", "edit_regions", "regions"])
+            if regions_val is None:
+                mt = get_flexible(data, ["mandatory tasks", "tasks"])
+                if mt:
+                    regions_val = get_flexible(mt, ["affected_regions", "edit_regions", "regions"])
+            if isinstance(regions_val, list):
+                for region in regions_val:
+                    value = extract_text(region).strip().lower()
+                    if value and value not in affected_regions:
+                        affected_regions.append(value)
+            if not affected_regions:
+                affected_regions = self._classify_affected_regions(prompt, llm)
+
+            subject_query = get_flexible(data, ["subject_query", "edit_subject", "visual_subject"])
+            subject_query = extract_text(subject_query).strip().lower() if subject_query is not None else ""
+            if not subject_query:
+                subject_query = self._classify_subject_query(prompt, llm)
+            
+            # VALIDATION: rechazar prompts con repetición excesiva de palabras
+            _words = translated_prompt.lower().split()
+            if len(_words) > 5:
+                from collections import Counter
+                _counts = Counter(_words)
+                _most_common, _most_freq = _counts.most_common(1)[0]
+                if _most_freq > 3 and _most_freq / len(_words) > 0.3:
+                    print(f"[PromptRewriter] ⚠️ Repetición detectada ('{_most_common}' x{_most_freq}/{len(_words)}) → usando prompt original", flush=True)
+                    translated_prompt = prompt
+                    magnitude = extract_float(None, 0.5)
             
             # 4. PRESERVE FACE
             preserve_face = True
@@ -299,7 +495,18 @@ class PromptRewriter:
                 mt = get_flexible(data, ["mandatory tasks", "tasks"])
                 if mt: g_val = get_flexible(mt, ["scope", "is_global"])
             if g_val is not None:
-                is_global = bool(g_val)
+                is_global = extract_bool(g_val)
+
+            # El router consume una propiedad semántica abstracta, no un listado
+            # de verbos. Así una petición de acción, pose, interacción o nueva
+            # composición llega al régimen de regeneración aunque use vocabulario
+            # nunca visto por el código.
+            regen_val = get_flexible(data, ["requires_scene_regeneration", "scene_regeneration"])
+            if regen_val is None:
+                mt = get_flexible(data, ["mandatory tasks", "tasks"])
+                if mt:
+                    regen_val = get_flexible(mt, ["requires_scene_regeneration", "scene_regeneration"])
+            requires_scene_regeneration = extract_bool(regen_val, False)
 
             # If LLM says no change but user typed a real request, it likely missed it
             if magnitude < 0.1 and len(prompt.strip()) > 2:
@@ -309,17 +516,20 @@ class PromptRewriter:
                 "prompt": translated_prompt,
                 "magnitude": magnitude,
                 "mask_target": mask_target,
+                "affected_regions": affected_regions,
+                "subject_query": subject_query,
                 "preserve_face": preserve_face,
                 "is_global": is_global,
+                "requires_scene_regeneration": requires_scene_regeneration,
                 "reasoning": data.get("reasoning", "Semantic analysis completed")
             }
-            
-            print(f"[PromptRewriter] Analysis: '{result['prompt'][:50]}...' | Mag: {result['magnitude']} | Global: {result['is_global']} | Preserve: {result['preserve_face']}")
+
+            print(f"[PromptRewriter] Analysis: '{result['prompt'][:50]}...' | Mag: {result['magnitude']} | Regions: {result['affected_regions']} | Global: {result['is_global']} | Regen: {result['requires_scene_regeneration']} | Preserve: {result['preserve_face']}")
             
             return result
         except Exception as e:
             print(f"[PromptRewriter] Error parsing LLM JSON: {e}")
-            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True, "is_global": True}
+            return {"prompt": prompt, "magnitude": 0.5, "mask_target": "subject", "preserve_face": True, "is_global": True, "requires_scene_regeneration": False}
 
 def _fix_malformed_json(s: str) -> str:
     """Preprocessa JSON malformado donde el LLM usa { 'valor' } en vez de 'valor' o valor."""

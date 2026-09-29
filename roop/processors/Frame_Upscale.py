@@ -84,45 +84,58 @@ class Frame_Upscale():
         return tile_frames, pad_width, pad_height
 
 
-    @staticmethod
-    def _tile_blend_mask(h: int, w: int, feather: int) -> np.ndarray:
-        f = max(6, min(int(feather), h // 2, w // 2))
-        ramp = 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, f, dtype=np.float32))
-        mask_y = np.ones(h, dtype=np.float32)
-        mask_x = np.ones(w, dtype=np.float32)
-        mask_y[:f] *= ramp
-        mask_y[-f:] *= ramp[::-1]
-        mask_x[:f] *= ramp
-        mask_x[-f:] *= ramp[::-1]
-        return mask_y[:, None] * mask_x[None, :]
-
     def merge_tile_frames(self, tile_frames, temp_width : int, temp_height : int, pad_width : int, pad_height : int, size) -> Frame:
-        tile_width = tile_frames[0].shape[1] - 2 * size[2]
-        tiles_per_row = max(1, min(pad_width // max(tile_width, 1), len(tile_frames)))
-        first_core = tile_frames[0][size[2]:-size[2], size[2]:-size[2]]
-        th, tw = first_core.shape[:2]
-        feather = max(32, min(th, tw) // 3, size[2] * 14)
+        """
+        Merge con solape REAL: cada tile incluye 2*size[2] px de contexto y los tiles
+        vecinos COMPARTEN esa banda. Se coloca cada tile en su posición verdadera del
+        lienzo y se funde solo sobre la banda de solape, con un ramp coseno con SUELO
+        (>0 siempre). Antes los tiles se colocaban ABUTTING con un feather que llegaba
+        a peso exacto 0 en el borde => acc/weight = 0/eps = 0 => REJILLA NEGRA con
+        cruces en las intersecciones (bug v5.1132 y anteriores).
+        """
+        full_h, full_w = tile_frames[0].shape[:2]
+        step_h = full_h - 2 * size[2]   # paso entre orígenes de tiles (núcleo sin pad), escalado
+        step_w = full_w - 2 * size[2]
+        cols = 1 + int(np.ceil(max(0, pad_width - full_w) / max(step_w, 1) - 1e-6))
+
+        # Feather SOLO en la banda de solape real (2*size[2] escalado), con suelo 0.02:
+        # píxel cubierto por un solo tile => normalización devuelve su propio valor;
+        # píxel en solape => media suave de ambos (mismo contexto, costura invisible).
+        feather = max(2, min(2 * size[2], step_h // 4, step_w // 4))
+        ramp = 0.02 + 0.98 * (0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, feather, dtype=np.float32)))
 
         acc = np.zeros((pad_height, pad_width, 3), dtype=np.float64)
         weight = np.zeros((pad_height, pad_width), dtype=np.float64)
 
         for index, tile_frame in enumerate(tile_frames):
-            core = tile_frame[size[2]:-size[2], size[2]:-size[2]]
-            th, tw = core.shape[:2]
-            row_index = index // tiles_per_row
-            col_index = index % tiles_per_row
-            top = row_index * th
-            left = col_index * tw
-            bottom = top + th
-            right = left + tw
-            mask = self._tile_blend_mask(th, tw, feather)
-            acc[top:bottom, left:right, :] += core.astype(np.float64) * mask[..., None]
-            weight[top:bottom, left:right] += mask
+            row_index = index // cols
+            col_index = index % cols
+            top = min(row_index * step_h, pad_height - full_h) if pad_height >= full_h else 0
+            left = min(col_index * step_w, pad_width - full_w) if pad_width >= full_w else 0
+            bottom = min(top + full_h, pad_height)
+            right = min(left + full_w, pad_width)
+            tile = tile_frame[: bottom - top, : right - left].astype(np.float64)
+            th, tw = bottom - top, right - left
+
+            my = np.ones(th, dtype=np.float64)
+            mx = np.ones(tw, dtype=np.float64)
+            f_h = min(feather, th // 2)
+            f_w = min(feather, tw // 2)
+            my[:f_h] *= ramp[:f_h]
+            my[th - f_h:] *= ramp[:f_h][::-1]
+            mx[:f_w] *= ramp[:f_w]
+            mx[tw - f_w:] *= ramp[:f_w][::-1]
+            m = my[:, None] * mx[None, :]
+
+            acc[top:bottom, left:right, :] += tile * m[..., None]
+            weight[top:bottom, left:right] += m
 
         weight = np.maximum(weight, 1e-6)
         merge_frame = (acc / weight[..., None]).clip(0, 255).astype(np.uint8)
-        merge_frame = merge_frame[size[1]: size[1] + temp_height, size[1]: size[1] + temp_width, :]
-        return merge_frame
+        # Contenido de la imagen en el lienzo: pads exterior (size[1]) + interior (size[2]).
+        y0 = size[1] + size[2]
+        x0 = size[1] + size[2]
+        return merge_frame[y0 : y0 + temp_height, x0 : x0 + temp_width, :]
 
 
     @staticmethod
@@ -140,7 +153,10 @@ class Frame_Upscale():
             return (384, 14, 12)
         if max_dim >= 640:
             return (256, 12, 10)
-        return (128, 8, 4)
+        # x2 on small photos was split into 20-30 tiny tiles, spending more
+        # time in ONNX calls and stitching than in useful detail recovery.
+        # 256px is already used safely by the same model on larger photos.
+        return (256, 12, 10)
 
     def Run(self, temp_frame: Frame) -> Frame:
         temp_height, temp_width = temp_frame.shape[:2]
@@ -178,4 +194,3 @@ class Frame_Upscale():
         self.model_upscale = None
         del self.io_binding
         self.io_binding = None
-

@@ -26,7 +26,8 @@ def auto_connect_server():
 
 ACTIVE_SERVER_URL = auto_connect_server()
 
-def send_image_edit(image_pil, prompt_text, engine_val, denoise_val, quality_mode, autoregressive):
+def send_image_edit(image_pil, prompt_text, engine_val, denoise_val, quality_mode,
+                    autoregressive, enhance_tier, quality_preserve_faces):
     if image_pil is None:
         return None, "❌ Sube o haz una foto primero"
     if not prompt_text and not quality_mode:
@@ -46,16 +47,18 @@ def send_image_edit(image_pil, prompt_text, engine_val, denoise_val, quality_mod
         image_pil.save(temp_img_path)
 
         client = Client(url)
+        try:
+            info = requests.get(f"{url}/gradio_api/info", timeout=3).json()
+            has_options = "/edit_options" in info.get("named_endpoints", {})
+        except Exception:
+            has_options = False
+        args = (
+            handle_file(temp_img_path), prompt_text, engine_val, denoise_val,
+            autoregressive, 1, quality_mode, enhance_tier,
+        )
         res = client.predict(
-            handle_file(temp_img_path),
-            prompt_text,
-            engine_val,
-            denoise_val,
-            autoregressive,
-            1,
-            quality_mode,
-            "hd",
-            api_name="/on_generate"
+            *args, *([quality_preserve_faces] if has_options else []),
+            api_name="/edit_options" if has_options else "/edit",
         )
         if res and isinstance(res, (tuple, list)):
             out_img_path = res[0]
@@ -78,19 +81,21 @@ def build_app():
         prompt = gr.Textbox(label="Instrucción de Edición", placeholder="Ej: vestido rojo, cambia el fondo, hazlo más nítido...", lines=3)
 
         with gr.Row():
-            engine = gr.Dropdown(choices=[("LongCat Edit", "longcat"), ("FLUX.2 Klein", "klein_9b")], value="longcat", label="Motor IA")
+            engine = gr.Dropdown(choices=[("LongCat Turbo", "longcat"), ("LongCat Full (lento)", "longcat_full")], value="longcat", label="Motor IA")
             denoise = gr.Slider(minimum=0.0, maximum=1.0, step=0.05, value=0.0, label="Fuerza (0 = Auto)")
 
         with gr.Row():
             quality_mode = gr.Checkbox(label="🎨 Modo Calidad", value=False)
             autoregressive = gr.Checkbox(label="🔁 Autoregresivo", value=False)
+        enhance_tier = gr.Radio(choices=[("HD", "hd"), ("4K", "4k"), ("8K", "8k")], value="hd", label="Resolución de salida")
+        quality_preserve_faces = gr.Checkbox(label="Restaurar caras (puede alterar rasgos)", value=True)
 
         btn = gr.Button("✨ TRANSFORMAR IMAGEN", variant="primary", size="lg")
         status = gr.Markdown("🟢 Conectado con el servidor de tu PC")
 
         btn.click(
             fn=send_image_edit,
-            inputs=[input_img, prompt, engine, denoise, quality_mode, autoregressive],
+            inputs=[input_img, prompt, engine, denoise, quality_mode, autoregressive, enhance_tier, quality_preserve_faces],
             outputs=[output_img, status]
         )
 

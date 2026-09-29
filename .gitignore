@@ -76,6 +76,22 @@ probe_repro_out/
 verify_batch/
 img_editor/edit_*.png
 
+# Keep diagnostic scripts, not local renders or machine-specific scan output.
+diagnostics/*
+!diagnostics/*.py
+!diagnostics/*.ps1
+!diagnostics/*.json
+
+# Local experiments and extracted dependencies.
+third_party/
+comfyui_error.txt
+comfyui_output.txt
+_patch_manager.py
+_patch_strong_edit.py
+ui/tabs/img_editor/*.bak
+ui/tabs/img_editor/ui_original.py
+ui/tabs/img_editor/ui_works.py
+
 # Large binary files & backups
 dll_BACKUP/
 dll/

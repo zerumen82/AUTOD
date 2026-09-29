@@ -3,6 +3,7 @@ import sys
 import time
 import gc
 import traceback
+import numpy as np
 from PIL import Image
 
 import gradio as gr
@@ -12,6 +13,33 @@ from roop.output_paths import get_img_editor_output_dir
 from . import state
 
 RETRY_ATTEMPTS = 2
+
+
+def _extract_painted_mask(editor_value, background):
+    """Extract an optional alpha selection painted in Gradio's ImageEditor."""
+    if not isinstance(editor_value, dict) or background is None:
+        return None
+    layers = editor_value.get("layers") or []
+    if not layers:
+        return None
+    try:
+        width, height = background.size
+        combined = np.zeros((height, width), dtype=np.uint8)
+        for layer in layers:
+            if not isinstance(layer, Image.Image):
+                continue
+            rgba = layer.convert("RGBA")
+            if rgba.size != (width, height):
+                rgba = rgba.resize((width, height), Image.Resampling.NEAREST)
+            combined = np.maximum(combined, np.asarray(rgba, dtype=np.uint8)[:, :, 3])
+        coverage = float((combined > 0).mean()) if combined.size else 0.0
+        if coverage <= 0.0001:
+            return None
+        print(f"[ImgEditor] Selección manual recibida (cobertura={coverage:.1%})", flush=True)
+        return Image.fromarray(combined).convert("L")
+    except Exception as exc:
+        print(f"[ImgEditor] Selección manual omitida: {exc}", flush=True)
+        return None
 
 
 def open_output_folder():
@@ -39,8 +67,61 @@ def _cleanup_vram():
     gc.collect()
 
 
+def on_free_memory():
+    """v5.1137 — botón LIBERAR MEMORIA: purga a FULL.
+    1) Caches ONNX del proceso principal (CodeFormer/ESRGAN/rewriter/CLIPSeg).
+    2) Unload SINCRONO del modelo residente en ComfyUI (el cache de reutilización
+       se sacrifica voluntariamente — esto es una purga manual, no automática).
+    Devuelve un HTML de status con la VRAM libre antes/después para feedback visual."""
+    def _vram_mb():
+        try:
+            import requests
+            from roop.comfy_workflows import get_comfyui_url
+            r = requests.get(f"{get_comfyui_url()}/system_stats", timeout=5).json()
+            d = r.get("devices", [{}])[0]
+            return int(d.get("vram_free", 0)) / (1024 * 1024), int(d.get("vram_total", 0)) / (1024 * 1024)
+        except Exception:
+            return None, None
+
+    _before, _total = _vram_mb()
+
+    # 1) Proceso principal (idempotente: recrea bajo demanda en el próximo uso)
+    try:
+        get_img_editor_manager()._release_local_gpu_before_comfy()
+    except Exception as e:
+        print(f"[ImgEditor] FreeMemory: release local falló: {e}", flush=True)
+
+    # 2) ComfyUI: unload sincrono del modelo residente
+    _unloaded = False
+    try:
+        import requests
+        from roop.comfy_workflows import get_comfyui_url
+        r = requests.post(f"{get_comfyui_url()}/autoauto/unload", json={}, timeout=60)
+        if r.status_code == 200 and r.json().get("ok"):
+            _unloaded = True
+    except Exception as e:
+        print(f"[ImgEditor] FreeMemory: unload ComfyUI falló: {e}", flush=True)
+
+    _cleanup_vram()
+    _after, _total = _vram_mb()
+
+    if _after is not None:
+        _msg = (
+            f"Memoria liberada{' (modelo ComfyUI descargado)' if _unloaded else ''} — "
+            f"VRAM: {_after:.0f}MB libres de {_total:.0f}MB"
+            + (f" (antes: {_before:.0f}MB)" if _before is not None else "")
+        )
+    else:
+        _msg = "Memoria liberada (VRAM del servidor no disponible)"
+    print(f"[ImgEditor] FreeMemory: {_msg}", flush=True)
+    return f"<div style='text-align:center; color:#22d3ee; padding:10px;'>{_msg}</div>"
+
+
 def on_generate(img_data, p_text, engine_val, denoise_val,
-                autoregressive, auto_iterations, quality_mode, enhance_tier):
+                autoregressive, auto_iterations, quality_mode, enhance_tier,
+                quality_preserve_faces=True,
+                quality_deposter=True, quality_upscale=True,
+                quality_color=True, quality_realism=True):
     with state._generation_lock:
         if state.is_generating:
             return None, "Ya hay una transformacion en proceso", None
@@ -68,6 +149,12 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         state.is_generating = False
         return None, "Formato de imagen no soportado", None
 
+    manual_mask = _extract_painted_mask(img_data, img)
+    # ImageEditor entrega un fondo RGBA. El gestor y FaceAnalysis reciben RGB;
+    # conservar alpha aquí haría que el detector omitiera las caras antes del
+    # preflight, aunque la selección manual fuese válida.
+    if img.mode != "RGB":
+        img = img.convert("RGB")
     cancel_check = lambda: not state.is_generating
 
     try:
@@ -86,13 +173,26 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
 
             print(f"[ImgEditor] Iteracion autoregresiva {i+1}/{iterations}")
 
+            best_hair_candidate = None
             for attempt in range(RETRY_ATTEMPTS):
                 res_img, msg, mask_img = manager.generate_intelligent(
                     image=current_img, prompt=p_text,
                     engine=engine_val,
+                    mask_image=manual_mask,
+                    mask_mode="manual" if manual_mask is not None else "global",
                     enhance_faces=True,
                     quality_mode=quality_mode,
                     enhance_tier=enhance_tier,
+                    quality_preserve_faces=quality_preserve_faces,
+                    quality_steps=(
+                        {
+                            "deposter": bool(quality_deposter),
+                            "upscale": bool(quality_upscale),
+                            "color": bool(quality_color),
+                            "realism": bool(quality_realism),
+                        }
+                        if quality_mode else None
+                    ),
                     # Rewriter real: el manager lo activa solo si mag/pose/structural/recolor
                     # lo piden (sin hardcode de intención). use_rewriter=True = permitir.
                     use_rewriter=True,
@@ -102,10 +202,49 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                     auto_upscale=False,
                     cancel_check=cancel_check,
                 )
+                compliance = getattr(manager, "_last_instruction_compliance", None) or {}
+                hair_unmet = (res_img is not None
+                              and compliance.get("source") == "hair_mask"
+                              and compliance.get("compliant") is False)
+                if hair_unmet:
+                    score = float(compliance.get("hair_after", 1.0))
+                    if best_hair_candidate is None or score < best_hair_candidate[4]:
+                        best_hair_candidate = (res_img, msg, mask_img, compliance, score)
+                    if attempt + 1 < RETRY_ATTEMPTS:
+                        print(
+                            "[ImgEditor] Pelo residual medido; se intenta otra muestra focal",
+                            flush=True,
+                        )
+                        continue
+                if (res_img is not None and compliance.get("compliant") is False
+                        and not hair_unmet):
+                    # Un VLM pequeño puede no resolver un sujeto lejano o una
+                    # composición con varias zonas. Repetir el MISMO prompt,
+                    # modelo y parámetros no es una alternativa independiente:
+                    # duplica minutos de GPU sin nueva evidencia. El veredicto
+                    # se conserva como aviso en el resultado, pero el reintento
+                    # queda reservado a fallos reales de generación.
+                    print(
+                        "[ImgEditor] Verificación visual no confirmada; "
+                        "se conserva el candidato y no se repite ciegamente.",
+                        flush=True,
+                    )
                 if res_img is not None:
                     break
+                if "no se reintenta" in str(msg).lower() and best_hair_candidate is None:
+                    return None, msg, final_mask
                 if attempt == 0:
                     print(f"[ImgEditor] Reintentando iteracion {i+1}...")
+
+            if best_hair_candidate is not None and (
+                    res_img is None or (
+                        compliance.get("source") == "hair_mask"
+                        and compliance.get("compliant") is False
+                        and best_hair_candidate[4] < float(compliance.get("hair_after", 1.0))
+                    )):
+                res_img, msg, mask_img, best_compliance, _ = best_hair_candidate
+                manager._last_instruction_compliance = best_compliance
+                print("[ImgEditor] Se conserva la muestra con menos pelo residual", flush=True)
 
             if res_img is None:
                 return None, f"Error iteracion {i+1}: {msg}", final_mask
@@ -116,6 +255,15 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             current_img = res_img
 
             _cleanup_vram()
+            if str(msg).startswith("Omitida:"):
+                # La imagen sin cambios es una advertencia, no una edición
+                # terminada. Tampoco repitas una localización imposible en las
+                # iteraciones autorregresivas ni guardes un falso resultado.
+                try:
+                    manager._release_local_gpu_before_comfy()
+                except Exception:
+                    pass
+                return current_img, msg, final_mask
 
         output_dir = get_img_editor_output_dir()
         ts = int(time.time())
@@ -124,6 +272,17 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
 
         state.last_result_image = current_img
         print(f"[ImgEditor] Imagen guardada: {out_path}")
+
+        # v5.1136 — liberación POST-petición: CodeFormer/ESRGAN/rewriter del
+        # proceso principal quedaban residentes entre edits y el pool de VRAM
+        # menguaba run a run (4987MB → 1624MB libres en el log 07:17) → la 2ª/3ª
+        # edición pagaba offload dance al cargar ComfyUI. Liberando al FINAL, cada
+        # petición nueva arranca con el pool máximo y el modelo ComfyUI residente
+        # (que SÍ conservamos para reutilización rápida) tiene holgura.
+        try:
+            manager._release_local_gpu_before_comfy()
+        except Exception as _e:
+            print(f"[ImgEditor] Release post-petición omitido: {_e}", flush=True)
 
         label = f"{last_msg}"
         if iterations > 1:
@@ -139,16 +298,49 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         state.is_generating = False
 
 
+def _show_quality_options(enabled):
+    return gr.update(visible=bool(enabled))
+
+
 def wire_events(ui_comp):
-    ui_comp["gen_btn"].click(
-        on_generate,
-        [ui_comp["input_img"], ui_comp["prompt"],
-         ui_comp["engine"], ui_comp["denoise"],
-         ui_comp["autoregressive"], ui_comp["auto_iterations"],
-         ui_comp["quality_mode"], ui_comp["enhance_tier"]],
-        [ui_comp["output_img"], ui_comp["status"], ui_comp["mask_preview"]],
-        concurrency_limit=None,
+    desktop_inputs = [
+        ui_comp["input_img"], ui_comp["prompt"],
+        ui_comp["engine"], ui_comp["denoise"],
+        ui_comp["autoregressive"], ui_comp["auto_iterations"],
+        ui_comp["quality_mode"], ui_comp["enhance_tier"],
+        ui_comp["quality_preserve_faces"],
+        ui_comp["quality_deposter"], ui_comp["quality_upscale"],
+        ui_comp["quality_color"], ui_comp["quality_realism"],
+    ]
+    outputs = [ui_comp["output_img"], ui_comp["status"], ui_comp["mask_preview"]]
+    # concurrency_limit was added in Gradio 4.  The running installation can
+    # still be 3.x, where passing it prevents the whole tab from wiring.  The
+    # generation lock in on_generate protects both versions.
+    try:
+        import inspect
+        click_params = inspect.signature(ui_comp["gen_btn"].click).parameters
+    except (TypeError, ValueError):
+        click_params = {}
+    generate_kwargs = {"api_name": "edit_select"}
+    if "concurrency_limit" in click_params:
+        generate_kwargs["concurrency_limit"] = None
+    ui_comp["gen_btn"].click(on_generate, desktop_inputs, outputs, **generate_kwargs)
+    # Nine arguments, ending in Restaurar caras. The phone app posts this list.
+    # The four step checkboxes stay off this endpoint so that call still works;
+    # missing steps mean every finish step stays on.
+    ui_comp["legacy_options_btn"].click(
+        on_generate, desktop_inputs[:-4], outputs,
+        api_name="edit_options",
+    )
+    # Eight arguments, without Restaurar caras. Older installed apps use this.
+    ui_comp["legacy_api_btn"].click(
+        on_generate, desktop_inputs[:-5], outputs,
         api_name="edit",
+    )
+    ui_comp["quality_mode"].change(
+        fn=_show_quality_options,
+        inputs=[ui_comp["quality_mode"]],
+        outputs=[ui_comp["quality_options"]],
     )
 
     ui_comp["bt_use_as_input"].click(
@@ -162,5 +354,15 @@ def wire_events(ui_comp):
         inputs=[],
         outputs=[],
     )
+
+    # La UI restaurada no muestra la purga manual. Mantener el handler opcional
+    # permite abrir tanto esa versión como la variante que sí incluía el botón.
+    free_memory_button = ui_comp.get("bt_free_memory")
+    if free_memory_button is not None:
+        free_memory_button.click(
+            fn=on_free_memory,
+            inputs=[],
+            outputs=[ui_comp["status"]],
+        )
 
     print("[ImgEditor] Eventos conectados (versátil: color/pose/add-remove, rewriter mag-driven)")

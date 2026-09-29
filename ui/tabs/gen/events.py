@@ -255,6 +255,7 @@ def wire_events(ui_comp):
             ui_comp["skin_finish"], ui_comp["enhance_quality"], ui_comp["use_rewriter"],
         ],
         outputs=[ui_comp["output_img"], ui_comp["status_html"], ui_comp["gen_btn"], ui_comp["btn_cancel"]],
+        api_name="generate_image",
     )
 
     ui_comp["btn_cancel"].click(

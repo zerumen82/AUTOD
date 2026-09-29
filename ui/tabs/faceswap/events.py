@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import time
 import threading
+import json
 import roop.globals
 import ui.globals
 import ui.tabs.faceswap.state as state
@@ -15,6 +16,8 @@ import roop.face_util as face_util
 DETECTED_FACES_GALLERY_COLUMNS = 10
 is_deleting_input_face = False
 is_deleting_target_face = False
+
+_target_load_lock = threading.Lock()
 
 def _write_console(msg: str):
     for fd in (1, 2):
@@ -95,6 +98,136 @@ def _warmup_face_analyser_async():
         print(f"[FaceWarmup] Warmup falló: {e}")
 
 
+# Banco de caras destino por archivo (máx 3): frontal + perfil + ... El tracker
+# usa max-sim contra el banco, así un corte a otro ángulo re-engancha con su ref.
+_MAX_REFS_PER_FILE = 3
+
+def _get_file_bank(filename, source_path=None):
+    """Lista de refs destino de un archivo (migra forma legacy dict → lista)."""
+    try:
+        refs = getattr(roop.globals, 'selected_face_references', {}) or {}
+        bank = refs.get(f"selected_face_ref_{filename}")
+        if isinstance(bank, dict):
+            bank = [bank]
+        if isinstance(bank, (list, tuple)):
+            valid = [r for r in bank if isinstance(r, dict) and r.get('embedding') is not None]
+            if source_path:
+                exact = os.path.normcase(os.path.abspath(source_path))
+                return [r for r in valid if r.get('source_path') == exact]
+            return valid
+    except Exception:
+        pass
+    return []
+
+def _store_destination_reference(filename, face_obj, source_path=None):
+    """Acumula ref destino para un archivo. Devuelve (n, estado):
+    ok / dup (ya estaba) / full (3/3)."""
+    if not hasattr(roop.globals, 'selected_face_references'):
+        roop.globals.selected_face_references = {}
+    refs = roop.globals.selected_face_references
+    key = f"selected_face_ref_{filename}"
+    bank = _get_file_bank(filename)
+    try:
+        new_bbox = np.asarray(face_obj.bbox, dtype=np.float32).reshape(-1)
+        if new_bbox.size != 4 or not np.isfinite(new_bbox).all():
+            new_bbox = None
+    except (TypeError, ValueError):
+        new_bbox = None
+    normalized_path = os.path.normcase(os.path.abspath(source_path)) if source_path else None
+    file_bank = _get_file_bank(filename, source_path) if source_path else bank
+    for r in file_bank:
+        try:
+            old_bbox = np.asarray(r.get('bbox'), dtype=np.float32).reshape(-1)
+            if (new_bbox is not None and old_bbox.size == 4
+                    and r.get('source_path') == normalized_path
+                    and np.array_equal(old_bbox, new_bbox)):
+                return len(file_bank), 'dup'
+        except (TypeError, ValueError):
+            continue
+    if len(file_bank) >= _MAX_REFS_PER_FILE:
+        return len(file_bank), 'full'
+    bank.append({
+        'face_obj': face_obj,
+        'embedding': face_obj.embedding,
+        'bbox': face_obj.bbox,
+        'source_path': normalized_path,
+    })
+    refs[key] = bank
+    return len(file_bank) + 1, 'ok'
+
+
+def _register_destination_face(entry, face_obj, face_thumb):
+    """Persist the file selection before updating the display gallery."""
+    filename = os.path.basename(entry.filename)
+    count, status = _store_destination_reference(filename, face_obj, entry.filename)
+    if status == 'ok':
+        roop.globals.TARGET_FACES.append(face_obj)
+        thumb = util.convert_to_gradio(face_thumb, is_rgb=True)
+        if thumb is not None:
+            ui.globals.ui_target_thumbs.append(thumb)
+    return filename, count, status
+
+
+def _face_detection_key(file_path, frame_idx):
+    """A detection belongs to one destination file and one frame."""
+    return os.path.normcase(os.path.abspath(file_path)), int(frame_idx)
+
+def _drop_source_file_faces(global_idx):
+    """Quita de la galería la cara elegida y las demás del mismo archivo."""
+    facesets = roop.globals.INPUT_FACESETS
+    thumbs = ui.globals.ui_input_thumbs
+    if not (0 <= global_idx < len(facesets)):
+        return 0
+    name = getattr(facesets[global_idx], 'name', None)
+    if not name:
+        facesets.pop(global_idx)
+        if global_idx < len(thumbs):
+            thumbs.pop(global_idx)
+        return 1
+    kept_faces, kept_thumbs = [], []
+    removed = 0
+    for index, faceset in enumerate(facesets):
+        if getattr(faceset, 'name', None) == name:
+            removed += 1
+            continue
+        kept_faces.append(faceset)
+        if index < len(thumbs):
+            kept_thumbs.append(thumbs[index])
+    facesets[:] = kept_faces
+    thumbs[:] = kept_thumbs
+    print(f"[UI] Origen eliminado: {name} ({removed} cara(s))", flush=True)
+    return removed
+
+
+def _purge_bank_by_face(face_obj):
+    """Remove only the gallery selection being deleted, even across equal embeddings."""
+    try:
+        refs = getattr(roop.globals, 'selected_face_references', {}) or {}
+        for key in list(refs.keys()):
+            bank = refs.get(key)
+            items = bank if isinstance(bank, (list, tuple)) else ([bank] if isinstance(bank, dict) else [])
+            kept = [r for r in items if r.get('face_obj') is not face_obj]
+            if len(kept) != len(items):
+                if kept:
+                    refs[key] = kept
+                else:
+                    refs.pop(key, None)
+    except Exception as e:
+        print(f"[UI] Purga de banco omitida: {e}")
+
+def _file_indicator_text():
+    """Texto del indicador de archivo + nº de caras destino (🎯 k/3)."""
+    try:
+        if not state.list_files_process:
+            return "📂 **Archivo:** Ninguno seleccionado"
+        entry = state.list_files_process[state.selected_preview_index]
+        base = f"📂 **Archivo ({state.selected_preview_index+1}/{len(state.list_files_process)}):** {os.path.basename(entry.filename)}"
+        n = len(_get_file_bank(os.path.basename(entry.filename), entry.filename))
+        return f"{base} — 🎯 destino: {n}/{_MAX_REFS_PER_FILE}"
+    except Exception:
+        return "📂 **Archivo:** Ninguno seleccionado"
+
+
 def on_face_selection_click(evt: gr.SelectData, frame_num):
     """Maneja el clic en galería, sincroniza el slider, añade la cara y actualiza el feedback visual."""
     if not evt or evt.index is None:
@@ -112,46 +245,14 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
         face_data = state.SELECTION_FACES_DATA[face_index]
         face_obj = face_data[0]
         
-        is_duplicate = False
-        current_file = os.path.basename(state.list_files_process[state.selected_preview_index].filename) if state.list_files_process else ""
-        current_frame = int(frame_num or 1)
-        
-        for existing in roop.globals.TARGET_FACES:
-            existing_source = getattr(existing, 'source_image', '')
-            
-            if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
-                emb1 = getattr(existing, 'normed_embedding', None)
-                emb2 = getattr(face_obj, 'normed_embedding', None)
-                
-                if emb1 is not None and emb2 is not None:
-                    similarity = np.dot(emb1, emb2)
-                else:
-                    similarity = np.dot(existing.embedding, face_obj.embedding)
-                
-                if similarity > 0.9999 and existing_source == current_file:
-                    is_duplicate = True; break
-                
-                if similarity > 0.99999:
-                    is_duplicate = True; break
-            
-            if existing.bbox == face_obj.bbox and existing_source == current_file:
-                is_duplicate = True; break
-
-        if not is_duplicate:
-            roop.globals.TARGET_FACES.append(face_obj)
-            _thumb = util.convert_to_gradio(face_data[1], is_rgb=True)
-            if _thumb is not None:
-                ui.globals.ui_target_thumbs.append(_thumb)
-            
-            if state.list_files_process and state.selected_preview_index < len(state.list_files_process):
-                filename = os.path.basename(state.list_files_process[state.selected_preview_index].filename)
-                video_key = f"selected_face_ref_{filename}"
-                if not hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references = {}
-                roop.globals.selected_face_references[video_key] = {'face_obj': face_obj, 'embedding': face_obj.embedding, 'bbox': face_obj.bbox}
-            
-            print("[UI] ✅ Cara añadida")
+        entry = state.list_files_process[state.selected_preview_index]
+        filename, n, st = _register_destination_face(entry, face_obj, face_data[1])
+        if st == 'ok':
+            print(f"[UI] ✅ Cara añadida — destino {filename}: {n}/{_MAX_REFS_PER_FILE}" + (" (tip: añade frontal + perfil para vídeos con cortes)" if n == 1 else ""))
+        elif st == 'dup':
+            print(f"[UI] ℹ️ Esa cara ya es destino de {filename} ({n}/{_MAX_REFS_PER_FILE})")
         else:
-            print("[UI] ℹ️ Ya está en Destino")
+            print(f"[UI] ℹ️ {filename} ya tiene {n}/{_MAX_REFS_PER_FILE} caras destino")
 
         # Actualizar feedback visual con caja verde
         entry = state.list_files_process[state.selected_preview_index]
@@ -176,13 +277,15 @@ def on_preview_click(evt: gr.SelectData, frame_num):
     frame_idx = max(1, int(frame_num or 1))
 
     # 1. AUTO-DETECCIÓN: Si no hay caras o cambiamos de frame, detectamos primero
-    is_new_frame = getattr(state, 'CURRENT_DETECTED_FRAME', -1) != frame_idx
+    detection_key = _face_detection_key(entry.filename, frame_idx)
+    is_new_frame = getattr(state, 'CURRENT_DETECTED_KEY', None) != detection_key
     if not state.SELECTION_FACES_DATA or is_new_frame:
         print(f"[FaceSelection] Auto-detectando caras para frame {frame_idx} (Nuevo={is_new_frame})...")
         detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
         state.ALL_DETECTED_FACES_DATA = detected_faces
         state.SELECTION_FACES_DATA = detected_faces
         state.CURRENT_DETECTED_FRAME = frame_idx
+        state.CURRENT_DETECTED_KEY = detection_key
 
     if not state.SELECTION_FACES_DATA:
         print("[UI] ⚠️ No se detectaron caras.")
@@ -237,54 +340,13 @@ def on_preview_click(evt: gr.SelectData, frame_num):
         # Sincronizar índice para preview del enhancer
         state.TEMP_SELECTED_FACE_INDEX = best_face_idx
 
-        # Verificar duplicados (solo si es exactamente la misma cara en el mismo archivo/frame)
-        is_duplicate = False
-        current_file = os.path.basename(state.list_files_process[state.selected_preview_index].filename) if state.list_files_process else ""
-        current_frame = int(frame_num or 1)
-        
-        for existing in roop.globals.TARGET_FACES:
-            # Para ser duplicado, debe venir de la misma fuente O tener un embedding virtualmente idéntico
-            existing_source = getattr(existing, 'source_image', '')
-            
-            # Comparación por embedding (muy estricta: 0.9999)
-            # Solo bloqueamos por embedding si sospechamos que es el mismo archivo (o muy muy parecido)
-            if hasattr(existing, 'embedding') and hasattr(face_obj, 'embedding') and existing.embedding is not None and face_obj.embedding is not None:
-                # Usar dot product sobre embeddings normalizados (si están disponibles)
-                emb1 = getattr(existing, 'normed_embedding', None)
-                emb2 = getattr(face_obj, 'normed_embedding', None)
-                
-                if emb1 is not None and emb2 is not None:
-                    similarity = np.dot(emb1, emb2)
-                else:
-                    # Fallback a dot product normal (asumiendo que están normalizados)
-                    similarity = np.dot(existing.embedding, face_obj.embedding)
-                
-                # Si son idénticos y vienen del mismo archivo -> DUPLICADO
-                if similarity > 0.9999 and existing_source == current_file:
-                    is_duplicate = True; break
-                
-                # Si son idénticos (0.99999) incluso si no sabemos el origen -> PROBABLE DUPLICADO
-                if similarity > 0.99999:
-                    is_duplicate = True; break
-            
-            # Comparación por BBox (solo si es el mismo archivo)
-            if existing.bbox == face_obj.bbox and existing_source == current_file:
-                is_duplicate = True; break
-
-        if not is_duplicate:
-            roop.globals.TARGET_FACES.append(face_obj)
-            _thumb = util.convert_to_gradio(face_data[1], is_rgb=True)
-            if _thumb is not None:
-                ui.globals.ui_target_thumbs.append(_thumb)
-            
-            filename = os.path.basename(entry.filename)
-            video_key = f"selected_face_ref_{filename}"
-            if not hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references = {}
-            roop.globals.selected_face_references[video_key] = {'face_obj': face_obj, 'embedding': face_obj.embedding, 'bbox': face_obj.bbox}
-            
-            print(f"[UI] ✅ Cara añadida a Destino ({filename})")
+        filename, n, st = _register_destination_face(entry, face_obj, face_data[1])
+        if st == 'ok':
+            print(f"[UI] ✅ Cara añadida a Destino ({filename}: {n}/{_MAX_REFS_PER_FILE})" + (" (tip: añade frontal + perfil para vídeos con cortes)" if n == 1 else ""))
+        elif st == 'dup':
+            print(f"[UI] ℹ️ Esa cara ya es destino de {filename} ({n}/{_MAX_REFS_PER_FILE})")
         else:
-            print("[UI] ℹ️ Esta cara ya está en la lista de Destino")
+            print(f"[UI] ℹ️ {filename} ya tiene {n}/{_MAX_REFS_PER_FILE} caras destino")
 
         total_faces = len(ui.globals.ui_target_thumbs)
         
@@ -340,7 +402,7 @@ def wire_events(ui_comp):
         
         entry = state.list_files_process[state.selected_preview_index]
         preview_img, msg = logic.get_enhancer_preview(entry.filename, int(frame_num or 1), face_idx, enhancer, blend)
-        if preview_img:
+        if preview_img is not None:
             return gr.update(value=preview_img, visible=True), gr.update(value=msg)
         return gr.update(visible=False), gr.update(value=msg)
 
@@ -357,10 +419,9 @@ def wire_events(ui_comp):
         rel_index = _resolve_gallery_index(evt.index, total_items, columns=3)
         if rel_index is not None:
             selected_input_face_idx = state.current_input_page * state.FACES_PER_PAGE + rel_index
-            # NUEVO: Marcar esta cara como la identidad origen seleccionada
-            import roop.globals as roop_globals
-            roop_globals.source_face_index = selected_input_face_idx
-            print(f"[SOURCE_SELECT] Cara origen seleccionada: índice #{selected_input_face_idx}")
+            # Solo marca la miniatura para inspección o eliminación.
+            # La source del swap se elige automáticamente frente al destino.
+        return logic.update_pagination_info(ui.globals.ui_input_thumbs, "input")
 
     def on_input_face_delete(evt=None):
         global is_deleting_input_face, selected_input_face_idx
@@ -383,25 +444,22 @@ def wire_events(ui_comp):
             global_idx = state.current_input_page * state.FACES_PER_PAGE + rel_index
     
         is_deleting_input_face = True
-        if 0 <= global_idx < len(roop.globals.INPUT_FACESETS):
-            roop.globals.INPUT_FACESETS.pop(global_idx)
-            ui.globals.ui_input_thumbs.pop(global_idx)
-            selected_input_face_idx = None
-            
-            total_faces = len(ui.globals.ui_input_thumbs)
-            max_pages = max(0, (total_faces - 1) // state.FACES_PER_PAGE)
-            if state.current_input_page > max_pages: 
-                state.current_input_page = max_pages
-        
-        total_faces = len(ui.globals.ui_input_thumbs)
-        is_deleting_input_face = False
+        try:
+            if _drop_source_file_faces(global_idx):
+                selected_input_face_idx = None
+                total_faces = len(ui.globals.ui_input_thumbs)
+                max_pages = max(0, (total_faces - 1) // state.FACES_PER_PAGE)
+                if state.current_input_page > max_pages:
+                    state.current_input_page = max_pages
+        finally:
+            is_deleting_input_face = False
         return (
             logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), 
             logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), 
             *logic.update_pagination_buttons(total_faces, "input")
         )
 
-    ui_comp["input_faces"].select(fn=on_input_face_select)
+    ui_comp["input_faces"].select(fn=on_input_face_select, outputs=[ui_comp["input_page_info"]])
 
     def on_target_face_delete(evt=None):
         global is_deleting_target_face, selected_target_face_idx
@@ -424,25 +482,26 @@ def wire_events(ui_comp):
             global_idx = state.current_target_page * state.FACES_PER_PAGE + rel_index
             
         is_deleting_target_face = True
-        if 0 <= global_idx < len(roop.globals.TARGET_FACES):
-            roop.globals.TARGET_FACES.pop(global_idx)
-            ui.globals.ui_target_thumbs.pop(global_idx)
-            selected_target_face_idx = None
-            
-            total_faces = len(ui.globals.ui_target_thumbs)
-            max_pages = max(0, (total_faces - 1) // state.FACES_PER_PAGE)
-            if state.current_target_page > max_pages: 
-                state.current_target_page = max_pages
-        
-        total_faces = len(ui.globals.ui_target_thumbs)
-        is_deleting_target_face = False
+        try:
+            if 0 <= global_idx < len(roop.globals.TARGET_FACES):
+                _purged = roop.globals.TARGET_FACES[global_idx]
+                roop.globals.TARGET_FACES.pop(global_idx)
+                ui.globals.ui_target_thumbs.pop(global_idx)
+                selected_target_face_idx = None
+                _purge_bank_by_face(_purged)
+                total_faces = len(ui.globals.ui_target_thumbs)
+                max_pages = max(0, (total_faces - 1) // state.FACES_PER_PAGE)
+                if state.current_target_page > max_pages:
+                    state.current_target_page = max_pages
+        finally:
+            is_deleting_target_face = False
         return (
             logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), 
             logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), 
             *logic.update_pagination_buttons(total_faces, "target")
         )
 
-    def on_target_face_select(evt: gr.SelectData, is_delete_mode):
+    def on_target_face_select(evt: gr.SelectData):
         global selected_target_face_idx
         total_items = len(logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"))
         rel_index = _resolve_gallery_index(evt.index, total_items, columns=3)
@@ -451,24 +510,21 @@ def wire_events(ui_comp):
             global_idx = state.current_target_page * state.FACES_PER_PAGE + rel_index
             selected_target_face_idx = global_idx
             
-            # Si el modo borrado está activo, borrar inmediatamente
-            if is_delete_mode:
-                return on_target_face_delete(evt)
         
         return gr.update(), gr.update(), gr.update(), gr.update()
 
     ui_comp["target_faces"].select(
         fn=on_target_face_select, 
-        inputs=[ui_comp["delete_mode"]], 
         outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]
     )
-    # Nota: .delete() no existe en Gradio 3.x.
-    # El borrado funciona mediante el checkbox "Modo Borrado" + on_target_face_select.
 
     ui_comp["previewimage"].select(
         fn=on_preview_click,
         inputs=[ui_comp["preview_frame_num"]],
         outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["previewimage"]]
+    ).then(
+        fn=lambda: _file_indicator_text(),
+        outputs=[ui_comp["file_indicator"]]
     )
 
     def detect_faces_in_frame(frame_num):
@@ -481,6 +537,8 @@ def wire_events(ui_comp):
         detected_faces = logic.extract_face_images(entry.filename, (True, frame_idx), target_face_detection=True, ui_padding=0.5)
         state.ALL_DETECTED_FACES_DATA = detected_faces
         state.SELECTION_FACES_DATA = detected_faces
+        state.CURRENT_DETECTED_FRAME = frame_idx
+        state.CURRENT_DETECTED_KEY = _face_detection_key(entry.filename, frame_idx)
         
         if not detected_faces:
             print(f"[FACES] ⚠️ No se detectaron caras en frame {frame_idx}")
@@ -514,8 +572,11 @@ def wire_events(ui_comp):
         outputs=[ui_comp["face_selector_slider"], ui_comp["previewimage"]], 
         queue=False
     ).then(
-        fn=lambda: (gr.update(visible=True), logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(len(ui.globals.ui_target_thumbs), "target")), 
+        fn=lambda: (gr.update(visible=True), logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(len(ui.globals.ui_target_thumbs), "target")),
         outputs=[ui_comp["dynamic_face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]
+    ).then(
+        fn=lambda: _file_indicator_text(),
+        outputs=[ui_comp["file_indicator"]]
     )
     
     # ARCHIVOS ORIGEN/DESTINO
@@ -541,16 +602,20 @@ def wire_events(ui_comp):
             return False
 
     def on_src_changed(files):
+        global selected_input_face_idx
         files = files or []
         _log(f"[TEST_CONSOLE] on_src_changed INICIO - {len(files)} archivo(s)")
         state.current_input_page = 0
+        state.source_load_summary = ""
+        selected_input_face_idx = None
         if not files:
             roop.globals.INPUT_FACESETS, ui.globals.ui_input_thumbs = [], []
             return [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False)
 
         roop.globals.INPUT_FACESETS, ui.globals.ui_input_thumbs = [], []
-        MIN_SRC_SIZE = 64
         handled = 0
+        no_face = 0
+        invalid_crop = 0
         for raw in files:
             f_path = _resolve_src_path(raw)
             if not f_path or not _is_image_path(f_path):
@@ -558,22 +623,32 @@ def wire_events(ui_comp):
             handled += 1
             faces_data = logic.extract_face_images(f_path, is_source_face=True)
             if not faces_data:
+                no_face += 1
                 print(f"[FACES] ⚠️ No se detectaron caras en: {os.path.basename(f_path)}")
                 print(f"[UI] ⚠️ No se detectaron caras en {os.path.basename(f_path)}")
             for face_obj, face_img in faces_data:
-                if face_img.shape[0] < MIN_SRC_SIZE or face_img.shape[1] < MIN_SRC_SIZE:
+                # El swap usa el embedding detectado. El tamaño de la
+                # miniatura no debe quitar una cara válida del banco.
+                if face_img is None or face_img.size == 0:
+                    invalid_crop += 1
                     continue
                 face_img = np.ascontiguousarray(face_img)
                 from roop.types import FaceSet
                 face_obj.face_img = face_img
                 face_obj.face_img_ref = face_img
-                roop.globals.INPUT_FACESETS.append(FaceSet(faces=[face_obj], name=os.path.basename(f_path)))
                 gradio_img = util.convert_to_gradio(face_img, is_rgb=True)
-                if gradio_img is not None:
-                    ui.globals.ui_input_thumbs.append(gradio_img)
+                if gradio_img is None:
+                    invalid_crop += 1
+                    continue
+                roop.globals.INPUT_FACESETS.append(FaceSet(faces=[face_obj], name=os.path.basename(f_path)))
+                ui.globals.ui_input_thumbs.append(gradio_img)
 
         total_faces = len(ui.globals.ui_input_thumbs)
-        _log(f"[LOAD] Fuentes: {total_faces} caras en {handled} archivo(s) válidos de {len(files)} recibidos")
+        state.source_load_summary = (
+            f"{total_faces} caras cargadas de {len(files)} archivos recibidos "
+            f"({handled} imágenes válidas, {no_face} sin cara, {invalid_crop} recortes inválidos)"
+        )
+        _log(f"[LOAD] Fuentes: {state.source_load_summary}")
         return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total_faces, "input"))
     
     _src_processing = False
@@ -645,27 +720,69 @@ def wire_events(ui_comp):
         fn=_safe_on_src_changed,
         inputs=[ui_comp["bt_srcfiles"]],
         outputs=_src_outputs,
+        show_progress="full",
+    )
+
+    def _direct_paths(value):
+        value = (value or "").strip()
+        try:
+            parsed = json.loads(value)
+            paths = parsed if isinstance(parsed, list) else [value]
+        except (ValueError, TypeError):
+            paths = [value.strip('"').strip("'")]
+        return [p for p in paths if isinstance(p, str) and os.path.isfile(p)]
+
+    def on_add_source_paths(value):
+        paths = [p for p in _direct_paths(value) if _is_image_path(p)]
+        if not paths:
+            return (gr.update(value=""), *_src_pagination_outputs())
+        return (gr.update(value=""), *_safe_on_src_changed(paths))
+
+    ui_comp["bt_add_source_paths"].click(
+        fn=on_add_source_paths,
+        inputs=[ui_comp["source_path_input"]],
+        outputs=[ui_comp["source_path_input"], *_src_outputs],
         show_progress="hidden",
     )
 
-    def on_dest_changed(files):
+    def _resolve_target_path(f):
+        return f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
+
+    def _target_empty_outputs():
+        return (gr.update(maximum=1, value=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
+
+    def _target_unchanged_outputs():
+        return tuple(gr.update() for _ in range(10))
+
+    def _load_target_files(paths):
+        loaded_entries = []
+        first_preview = None
+        logic.initialize_thread_pools()
+        pool = state._target_thread_pool
+
+        t0 = time.time()
+        futures = [pool.submit(logic.process_target_file_async, p) for p in paths]
+        for fut in futures:
+            entry, preview_img, _ = fut.result()
+            if entry:
+                loaded_entries.append(entry)
+                if preview_img is not None and first_preview is None:
+                    first_preview = preview_img
+        _log(f"[LOAD] {len(loaded_entries)} archivo(s) cargado(s) en {time.time() - t0:.2f}s")
+
+        if not loaded_entries:
+            gr.Warning("No se pudo abrir ningún archivo de destino; se conserva la selección anterior.")
+            return _target_unchanged_outputs(), 0
+
         state.current_target_page = 0
+        state.SELECTION_FACES_DATA = []
+        state.ALL_DETECTED_FACES_DATA = []
+        state.CURRENT_DETECTED_FRAME = -1
+        state.CURRENT_DETECTED_KEY = None
         roop.globals.TARGET_FACES.clear()
         ui.globals.ui_target_thumbs.clear()
         if hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references.clear()
-        
-        if not files: 
-            return gr.update(maximum=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False)
-        
-        state.list_files_process = []
-        first_preview = None
-        for i, f in enumerate(files):
-            f_path = f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
-            entry, preview_img, _ = logic.process_target_file_async(f_path)
-            if entry:
-                state.list_files_process.append(entry)
-                if i == 0: first_preview = preview_img
-        
+        state.list_files_process = loaded_entries
         state.selected_preview_index = 0
         roop.globals.face_swap_mode = 'selected'
         first_entry = state.list_files_process[0]
@@ -682,19 +799,68 @@ def wire_events(ui_comp):
             logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), 
             logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), 
             *logic.update_pagination_buttons(0, "target")
-        )
+        ), len(loaded_entries)
+
+    def on_dest_changed(files):
+        if not files:
+            return _target_empty_outputs()
+        with _target_load_lock:
+            outputs, _ = _load_target_files([_resolve_target_path(f) for f in files])
+            return outputs
+
+    def on_add_target_path(ruta):
+        paths = _direct_paths(ruta)
+        if not paths:
+            _log(f"[LOAD] Ruta no existe en el servidor: {ruta}")
+            gr.Warning("La ruta no existe en el servidor; se conserva el destino cargado.")
+            return (gr.update(), *_target_unchanged_outputs(), gr.update())
+        _log(f"[LOAD] Cargando por ruta (sin subida por red): {len(paths)} archivo(s)")
+        with _target_load_lock:
+            outs, loaded_count = _load_target_files(paths)
+        if not loaded_count:
+            return (gr.update(), *outs, gr.update())
+        return (gr.update(value=f"✅ {loaded_count} archivo(s) añadido(s) por ruta directa", label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)"), *outs, _file_indicator_text())
+
+    def on_browse_and_load():
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            path = filedialog.askopenfilename(
+                title="Selecciona el video/imagen en este PC (se carga por ruta, sin subida)",
+                filetypes=[("Videos e imágenes", "*.mp4 *.mkv *.avi *.mov *.webm *.gif *.m4v *.wmv *.flv *.mpeg *.mpg *.jpg *.jpeg *.png *.bmp *.webp *.heic"), ("Todos los archivos", "*.*")]
+            )
+            root.destroy()
+            if not path:
+                return (gr.update(), *_target_unchanged_outputs(), gr.update())
+            _log(f"[LOAD] Diálogo nativo → ruta: {path}")
+            with _target_load_lock:
+                outs, loaded_count = _load_target_files([path])
+            if not loaded_count:
+                return (gr.update(), *outs, gr.update())
+            return (gr.update(value=f"✅ {os.path.basename(path)} cargado por ruta directa (sin subida)", label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)"), *outs, f"📂 **Archivo ({state.selected_preview_index+1}/{len(state.list_files_process)}):** {os.path.basename(state.list_files_process[0].filename)}")
+        except Exception as e:
+            _log(f"[BROWSE] Error abriendo diálogo: {e}")
+            gr.Warning(f"No se pudo abrir el diálogo: {e}")
+            return (gr.update(), *_target_unchanged_outputs(), gr.update())
 
     # NAVEGACIÓN Y INDICADORES
     def update_file_indicator():
-        if not state.list_files_process: return "📂 **Archivo:** Ninguno"
-        entry = state.list_files_process[state.selected_preview_index]
-        return f"📂 **Archivo ({state.selected_preview_index+1}/{len(state.list_files_process)}):** {os.path.basename(entry.filename)}"
+        return _file_indicator_text()
 
     def update_source_random_state():
         has_video = any(util.is_video(entry.filename) for entry in state.list_files_process) if state.list_files_process else False
-        return gr.update(interactive=not has_video, value=False)
+        if has_video:
+            return gr.update(interactive=False, value=False)
+        return gr.update(interactive=True)
 
-    ui_comp["bt_destfiles"].change(on_dest_changed, [ui_comp["bt_destfiles"]], [ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]).then(update_file_indicator, None, ui_comp["file_indicator"]).then(update_source_random_state, None, ui_comp["source_random"])
+    _path_outputs = [ui_comp["target_path_input"], ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["file_indicator"]]
+    ui_comp["bt_destfiles"].change(on_dest_changed, [ui_comp["bt_destfiles"]], [ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]], queue=False).then(update_file_indicator, None, ui_comp["file_indicator"]).then(update_source_random_state, None, ui_comp["source_random"])
+    ui_comp["bt_add_target_path"].click(fn=on_add_target_path, inputs=[ui_comp["target_path_input"]], outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
+    ui_comp["target_path_input"].submit(fn=on_add_target_path, inputs=[ui_comp["target_path_input"]], outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
+    ui_comp["bt_browse_path"].click(fn=on_browse_and_load, outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
 
     def jump_frame(current_f, delta):
         if not state.list_files_process: return gr.update(), None
@@ -704,12 +870,12 @@ def wire_events(ui_comp):
         frame = get_video_frame(entry.filename, new_f)
         return gr.update(value=new_f), util.convert_to_gradio(frame)
 
-    ui_comp["bt_prev_frame"].click(fn=lambda f: jump_frame(f, -1), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]])
-    ui_comp["bt_next_frame"].click(fn=lambda f: jump_frame(f, 1), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]])
-    ui_comp["bt_jump_back_10"].click(fn=lambda f: jump_frame(f, -10), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]])
-    ui_comp["bt_jump_fwd_10"].click(fn=lambda f: jump_frame(f, 10), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]])
-    ui_comp["bt_jump_back_100"].click(fn=lambda f: jump_frame(f, -100), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]])
-    ui_comp["bt_jump_fwd_100"].click(fn=lambda f: jump_frame(f, 100), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]])
+    ui_comp["bt_prev_frame"].click(fn=lambda f: jump_frame(f, -1), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]], queue=False)
+    ui_comp["bt_next_frame"].click(fn=lambda f: jump_frame(f, 1), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]], queue=False)
+    ui_comp["bt_jump_back_10"].click(fn=lambda f: jump_frame(f, -10), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]], queue=False)
+    ui_comp["bt_jump_fwd_10"].click(fn=lambda f: jump_frame(f, 10), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]], queue=False)
+    ui_comp["bt_jump_back_100"].click(fn=lambda f: jump_frame(f, -100), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]], queue=False)
+    ui_comp["bt_jump_fwd_100"].click(fn=lambda f: jump_frame(f, 100), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]], queue=False)
 
     def on_frame_change(frame_num):
         if not state.list_files_process: return None, gr.update()
@@ -726,13 +892,14 @@ def wire_events(ui_comp):
         entry = state.list_files_process[state.selected_preview_index]
         roop.globals.target_path = entry.filename
         state.CURRENT_DETECTED_FRAME = -1
+        state.CURRENT_DETECTED_KEY = None
         state.SELECTION_FACES_DATA = None
         from roop.capturer import get_video_frame, get_image_frame
         frame = get_video_frame(entry.filename, 1) if util.is_video(entry.filename) else get_image_frame(entry.filename)
         return gr.update(maximum=entry.endframe, value=1), util.convert_to_gradio(frame), gr.update(interactive=state.selected_preview_index>0), gr.update(interactive=state.selected_preview_index<len(state.list_files_process)-1)
 
-    ui_comp["bt_prev_file"].click(fn=lambda: navigate_file("prev"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]]).then(update_file_indicator, None, ui_comp["file_indicator"])
-    ui_comp["bt_next_file"].click(fn=lambda: navigate_file("next"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]]).then(update_file_indicator, None, ui_comp["file_indicator"])
+    ui_comp["bt_prev_file"].click(fn=lambda: navigate_file("prev"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]], queue=False).then(update_file_indicator, None, ui_comp["file_indicator"])
+    ui_comp["bt_next_file"].click(fn=lambda: navigate_file("next"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]], queue=False).then(update_file_indicator, None, ui_comp["file_indicator"])
 
     # PAGINACIÓN
     ui_comp["bt_input_prev"].click(fn=lambda: on_input_page_change(-1), outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
@@ -741,37 +908,66 @@ def wire_events(ui_comp):
     ui_comp["bt_target_next"].click(fn=lambda: on_target_page_change(1), outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
 
     # BORRADO Y OTROS
-    def clear_all_target_faces():
-        roop.globals.TARGET_FACES.clear()
-        ui.globals.ui_target_thumbs.clear()
-        total = 0
-        return ([], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
-    
-    def remove_selected_input_face(evt=None):
+    def clear_source():
         global selected_input_face_idx
-        if selected_input_face_idx is not None:
-            idx = selected_input_face_idx
-            if 0 <= idx < len(roop.globals.INPUT_FACESETS):
-                roop.globals.INPUT_FACESETS.pop(idx)
-                ui.globals.ui_input_thumbs.pop(idx)
-                selected_input_face_idx = None
-        total = len(ui.globals.ui_input_thumbs)
-        return (logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"), logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"), *logic.update_pagination_buttons(total, "input"))
-    
-    def remove_selected_target_face(evt=None):
+        nonlocal _src_last_key, _src_last_finished_at
+        roop.globals.INPUT_FACESETS.clear()
+        ui.globals.ui_input_thumbs.clear()
+        state.source_filenames = []
+        state.source_load_summary = ""
+        state.current_input_page = 0
+        state.SELECTED_FACE_INDEX = 0
+        selected_input_face_idx = None
+        _src_last_key = None
+        _src_last_finished_at = 0.0
+        _log("[CLEAR] Origen: todos los archivos y caras retirados de la UI")
+        return (None, gr.update(value=""), *_src_pagination_outputs(),
+                gr.update(value=None, visible=False))
+
+    def clear_target():
         global selected_target_face_idx
-        if selected_target_face_idx is not None:
-            idx = selected_target_face_idx
-            if 0 <= idx < len(roop.globals.TARGET_FACES):
-                roop.globals.TARGET_FACES.pop(idx)
-                ui.globals.ui_target_thumbs.pop(idx)
-                selected_target_face_idx = None
-        total = len(ui.globals.ui_target_thumbs)
-        return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total, "target"))
-    
-    ui_comp["bt_clear_all_target"].click(fn=clear_all_target_faces, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
-    ui_comp["bt_remove_selected_input_face"].click(fn=remove_selected_input_face, outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
-    ui_comp["bt_remove_selected_target_face"].click(fn=remove_selected_target_face, outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]])
+        with _target_load_lock:
+            state.list_files_process = []
+            state.selected_preview_index = 0
+            state.current_target_page = 0
+            state.SELECTION_FACES_DATA = []
+            state.ALL_DETECTED_FACES_DATA = []
+            state.CURRENT_DETECTED_FACES = []
+            state.CURRENT_DETECTED_FRAME = -1
+            state.CURRENT_DETECTED_KEY = None
+            state.TEMP_SELECTED_FACE_INDEX = None
+            state.SELECTED_TARGET_FACE_INDEX = 0
+            state.selected_face_references.clear()
+            state.FACE_DETECTION_CACHE.clear()
+            state.is_video_processing = False
+            state.is_image_processing = False
+            selected_target_face_idx = None
+            roop.globals.TARGET_FACES.clear()
+            ui.globals.ui_target_thumbs.clear()
+            if hasattr(roop.globals, 'selected_face_references'):
+                roop.globals.selected_face_references.clear()
+            roop.globals.target_path = None
+        _log("[CLEAR] Destino: todos los archivos, caras y previews retirados de la UI")
+        return (None, gr.update(value=""), *_target_empty_outputs(),
+                "📂 **Archivo:** Ninguno seleccionado",
+                gr.update(value=None, visible=False),
+                "### ✨ Busca caras en el frame",
+                gr.update(value="🔍 BUSCAR CARAS EN ESTE FRAME"),
+                gr.update(maximum=1, value=1))
+
+    ui_comp["bt_clear_source"].click(
+        fn=clear_source,
+        outputs=[ui_comp[k] for k in ("bt_srcfiles", "source_path_input", "input_faces",
+                 "input_page_info", "bt_input_prev", "bt_input_next", "preview_result")],
+    )
+    ui_comp["bt_clear_target"].click(
+        fn=clear_target,
+        outputs=[ui_comp[k] for k in ("bt_destfiles", "target_path_input", "preview_frame_num",
+                 "previewimage", "bt_prev_file", "bt_next_file", "dynamic_face_selection",
+                 "face_selection", "target_faces", "target_page_info", "bt_target_prev",
+                 "bt_target_next", "file_indicator", "preview_result", "face_detection_title",
+                 "bt_use_face_from_preview", "face_selector_slider")],
+    ).then(update_source_random_state, None, ui_comp["source_random"])
 
     # AJUSTES EXPERTOS
     ui_comp["enhancer"].change(fn=lambda v: setattr(roop.globals, 'selected_enhancer', v) or setattr(roop.globals, 'use_enhancer', v != "None"), inputs=[ui_comp["enhancer"]])

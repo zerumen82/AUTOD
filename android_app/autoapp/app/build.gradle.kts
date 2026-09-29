@@ -23,8 +23,8 @@ android {
         applicationId = "com.autoauto.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     signingConfigs {
@@ -64,4 +64,3 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
-

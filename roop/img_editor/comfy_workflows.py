@@ -10,19 +10,57 @@ import requests
 import time
 from typing import Dict, Any, Optional, Tuple
 
+# Puerto FIJO de NUESTRO ComfyUI (venv propio, con nodos GGUF).
+OUR_PORT = '8188'
+
 # Puerto dinamico con deteccion automatica
 def get_comfyui_port() -> str:
-    """Detecta el puerto de ComfyUI automaticamente"""
+    """Detecta el puerto de ComfyUI.
+
+    v5.1095: NUESTRO ComfyUI va FIJO en 8188. Se devuelve 8188 si responde
+    y tiene nodos GGUF; si no, fallback a COMFYUI_PORT/detección como antes
+    (para no romper otros flujos que usen otro puerto a propósito).
+    """
+    try:
+        r = requests.get("http://127.0.0.1:8188/system_stats", timeout=1)
+        if r.status_code == 200:
+            try:
+                oi = requests.get(
+                    "http://127.0.0.1:8188/object_info/UnetLoaderGGUF", timeout=3
+                )
+                if oi.status_code == 200 and "UnetLoaderGGUF" in oi.json():
+                    return OUR_PORT
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if os.environ.get('COMFYUI_PORT'):
+        return os.environ.get('COMFYUI_PORT')
+
     possible_ports = ['8188', '8189', '8190', '8888', '8000']
-    
+
+    first_ok = None
     for port in possible_ports:
         try:
             response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=1)
             if response.status_code == 200:
-                return port
-        except:
+                if first_ok is None:
+                    first_ok = port
+                try:
+                    oi = requests.get(
+                        f"http://127.0.0.1:{port}/object_info/UnetLoaderGGUF",
+                        timeout=3,
+                    )
+                    if oi.status_code == 200 and "UnetLoaderGGUF" in oi.json():
+                        return port
+                except Exception:
+                    pass
+        except Exception:
             continue
-    
+
+    if first_ok is not None:
+        return first_ok
     # Si no se detecta, usar variable de entorno o defecto
     return os.environ.get('COMFYUI_PORT', '8188')
 

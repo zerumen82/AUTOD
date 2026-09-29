@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v5.1158: FileProvider para compartir resultados (share vía ACTION_SEND
+     con permiso de lectura garantizado en todas las apps destino). -->
+<paths>
+    <cache-path name="share" path="share/" />
+</paths>

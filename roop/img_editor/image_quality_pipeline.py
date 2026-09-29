@@ -55,6 +55,25 @@ class ImageQualityFinisher:
         self._upscaler = None
         self._upscale_subtype = None
 
+    def release_gpu_caches(self):
+        """v5.1133d — libera las sesiones ONNX cacheadas (ESRGAN/LSDIR) del proceso
+        principal. Compiten con ComfyUI por la VRAM durante la carga del modelo
+        (2ª petición más lenta). Se recrean bajo demanda en el próximo uso."""
+        if self._upscaler is not None:
+            try:
+                del self._upscaler
+            except Exception:
+                pass
+            self._upscaler = None
+            self._upscale_subtype = None
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            print("[QualityFinisher] Sesiones ONNX de upscale liberadas (se recargan bajo demanda)", flush=True)
+
     @staticmethod
     def _estimate_noise_level(gray: np.ndarray) -> float:
         blur = cv2.GaussianBlur(gray, (0, 0), 1.4)
@@ -359,11 +378,76 @@ class ImageQualityFinisher:
         elif max_dim >= 640:
             tile_size, pad = 256, 10
         else:
-            tile_size, pad = 128, 4
+            tile_size, pad = 256, 10
         core = max(32, tile_size - 2 * pad)
         cols = max(1, int(np.ceil(w / float(core))))
         rows = max(1, int(np.ceil(h / float(core))))
         return cols * rows
+
+    def _fit_esrgan_work_size(self, w: int, h: int, max_tiles: int = 48) -> Tuple[int, int]:
+        """Reduce la foto hasta que ESRGAN x2 quepa en pocos bloques."""
+        est = self._estimate_tile_count(w, h, "esrganx2")
+        if est <= max_tiles:
+            return int(w), int(h)
+        scale = ((float(max_tiles) / float(est)) ** 0.5) * 0.96
+        scale = max(0.22, min(0.98, scale))
+        ww = max(64, int(round(w * scale)))
+        hh = max(64, int(round(h * scale)))
+        if self._estimate_tile_count(ww, hh, "esrganx2") > max_tiles:
+            scale *= 0.85
+            ww = max(64, int(round(w * scale)))
+            hh = max(64, int(round(h * scale)))
+        return ww, hh
+
+    def budgeted_esrgan_at_size(
+        self,
+        image: Image.Image,
+        out_size: Tuple[int, int],
+        *,
+        blend: float = 0.42,
+        max_tiles: int = 48,
+    ) -> Tuple[Image.Image, str]:
+        """ESRGAN x2 en un tamaño que cabe en la GPU, mezclado al tamaño pedido.
+
+        La mezcla baja en los bordes fuertes para no dibujar un halo alrededor
+        de las personas. Si el modelo no está, devuelve la imagen de entrada.
+        """
+        mix = float(np.clip(blend, 0.0, 0.55))
+        if mix <= 0.02:
+            return image, ""
+        model_path = self._upscale_model_path("esrganx2")
+        if not os.path.isfile(model_path):
+            return image, ""
+        w, h = image.size
+        ww, hh = self._fit_esrgan_work_size(w, h, max_tiles)
+        work = image if (ww, hh) == (w, h) else image.resize((ww, hh), Image.LANCZOS)
+        try:
+            enhanced, note = self.upscale(work, scale=2, force=True)
+        except Exception as exc:
+            print(f"[QualityFinisher] ESRGAN reducido omitido: {exc}", flush=True)
+            return image, ""
+        if not note or "lanczos" in note.lower() or "omitido" in note.lower():
+            return image, ""
+        target_w, target_h = int(out_size[0]), int(out_size[1])
+        detail = enhanced.resize((target_w, target_h), Image.LANCZOS)
+        base = image if image.size == (target_w, target_h) else image.resize(
+            (target_w, target_h), Image.LANCZOS,
+        )
+        base_bgr = cv2.cvtColor(np.array(base.convert("RGB")), cv2.COLOR_RGB2BGR).astype(np.float32)
+        detail_bgr = cv2.cvtColor(np.array(detail.convert("RGB")), cv2.COLOR_RGB2BGR).astype(np.float32)
+        gray = cv2.cvtColor(base_bgr.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
+        mag = np.sqrt(
+            cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3) ** 2
+            + cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3) ** 2
+        )
+        edge = np.clip((mag - 28.0) / 90.0, 0.0, 1.0)
+        edge = cv2.GaussianBlur(edge, (0, 0), 1.4)
+        weight = (mix * (1.0 - 0.82 * edge))[..., None]
+        mixed = np.clip(base_bgr * (1.0 - weight) + detail_bgr * weight, 0, 255).astype(np.uint8)
+        tiles = self._estimate_tile_count(ww, hh, "esrganx2")
+        label = f"ESRGAN textura {tiles} bloques {ww}×{hh} ({int(mix * 100)}%)"
+        print(f"[QualityFinisher] {label}", flush=True)
+        return Image.fromarray(cv2.cvtColor(mixed, cv2.COLOR_BGR2RGB)), label
 
     def _pick_upscale_plan(
         self,
@@ -597,11 +681,31 @@ class ImageQualityFinisher:
 
     @staticmethod
     def sharpen(image: Image.Image, amount: float = 1.35) -> Image.Image:
-        """Unsharp mask suave — halos mínimos, sin textura inventada."""
+        """Unsharp mask suave — halos mínimos, sin textura inventada.
+        v5.1134 — anti-halo: sobre BORDES FUERTES ya existentes (contornos de
+        sujetos) el unsharp produce overshoot visible ('borde'). El amount se
+        atenúa donde el gradiente local ya es alto: nitidez en detalle fino,
+        contornos limpios sin doble línea."""
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
         blurred = cv2.GaussianBlur(bgr, (0, 0), 1.0)
-        sharp = cv2.addWeighted(bgr, amount, blurred, -(amount - 1.0), 0)
-        return Image.fromarray(cv2.cvtColor(np.clip(sharp, 0, 255).astype(np.uint8), cv2.COLOR_BGR2RGB))
+        amt = float(amount)
+        sharp_flat = cv2.addWeighted(bgr, amt, blurred, -(amt - 1.0), 0).astype(np.float32)
+        try:
+            g = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
+            gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+            mag = np.sqrt(gx * gx + gy * gy)
+            # solo CONTORNOS FUERTES (sujeto vs fondo, mag 100+): la textura fina
+            # (piel, 20-80) se afila normal; el halo de contorno es lo que se corta.
+            edge = np.clip((mag - 80.0) / 120.0, 0.0, 1.0)
+            edge = cv2.GaussianBlur(edge, (0, 0), 1.2)
+            # en bordes fuertes el sharpen efectivo baja (mín 40% del amount)
+            factor = (1.0 - 0.6 * edge)[..., None]
+            sharp = (bgr.astype(np.float32) + (sharp_flat - bgr.astype(np.float32)) * factor)
+            sharp = np.clip(sharp, 0, 255).astype(np.uint8)
+        except Exception:
+            sharp = np.clip(sharp_flat, 0, 255).astype(np.uint8)
+        return Image.fromarray(cv2.cvtColor(sharp, cv2.COLOR_BGR2RGB))
 
     @staticmethod
     def light_denoise(image: Image.Image, strength: str = "normal") -> Image.Image:
@@ -852,7 +956,19 @@ class ImageQualityFinisher:
                             except Exception as e:
                                 print(f"[QualityFinisher] ESRGAN pre-Lanczos fallback: {e}", flush=True)
                         else:
-                            print(f"[QualityFinisher] ESRGAN {est}tiles omitido (too many) → Lanczos", flush=True)
+                            tw = max(1, int(round(out.size[0] * remaining)))
+                            th = max(1, int(round(out.size[1] * remaining)))
+                            textured, tex_note = self.budgeted_esrgan_at_size(
+                                out, (tw, th), blend=0.46, max_tiles=48,
+                            )
+                            if tex_note:
+                                notes.append(tex_note)
+                                out = textured
+                                break
+                            print(
+                                f"[QualityFinisher] ESRGAN {est} bloques sin modelo → Lanczos",
+                                flush=True,
+                            )
                     nw, nh = max(1, int(out.size[0] * remaining)), max(1, int(out.size[1] * remaining))
                     out = out.resize((nw, nh), Image.LANCZOS)
                     notes.append(f"lanczos {remaining:.2f}x")
@@ -875,6 +991,14 @@ class ImageQualityFinisher:
             nw, nh = max(1, int(ow * ratio)), max(1, int(oh * ratio))
             out = out.resize((nw, nh), Image.LANCZOS)
             notes.append(f"cap {tier}")
+        elif ms < int(target_side * 0.92):
+            # The configured number of AI passes may stop well short of the
+            # requested tier (for example 600→1200 in HD). Keep the detail
+            # produced by the upscaler and finish at the advertised size.
+            ratio = target_side / float(ms)
+            nw, nh = max(1, int(round(ow * ratio))), max(1, int(round(oh * ratio)))
+            out = out.resize((nw, nh), Image.LANCZOS)
+            notes.append(f"cola Lanczos {ratio:.2f}x")
 
         return out, f"upscale {tier.upper()} ({' → '.join(notes)})"
 

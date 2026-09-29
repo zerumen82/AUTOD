@@ -30,15 +30,22 @@ class AnimateManager:
 
     def _check_models(self, engine):
         available = []
+        model_files = []
         models_dir = get_models_dir()
         if os.path.exists(models_dir):
             for root, dirs, files in os.walk(models_dir):
                 available.extend(d.lower() for d in dirs)
-                available.extend(f.lower() for f in files if f.endswith((".gguf", ".safetensors")))
+                for f in files:
+                    if f.endswith((".gguf", ".safetensors")):
+                        available.append(f.lower())
+                        model_files.append(os.path.join(root, f).lower())
         unet_dir = os.path.join(os.path.dirname(models_dir), "unet")
         if os.path.exists(unet_dir):
             for root, dirs, files in os.walk(unet_dir):
-                available.extend(f.lower() for f in files if f.endswith(".gguf"))
+                for f in files:
+                    if f.endswith(".gguf"):
+                        available.append(f.lower())
+                        model_files.append(os.path.join(root, f).lower())
         if engine == "framepack":
             needed = []
         elif engine == "wan_video":
@@ -50,7 +57,24 @@ class AnimateManager:
         else:
             needed = []
         if engine == "wan_video":
-            missing = [] if any(n in a for n in needed for a in available) else ["wan2.2/wan2.1 (GGUF o safetensors)"]
+            # Una carpeta llamada Wan no es un modelo. Antes bastaba el nombre del
+            # directorio vacío tras una descarga interrumpida y el UI lanzaba un
+            # workflow condenado a fallar. Exigir pesos reales y VAE real.
+            has_wan_weights = any(
+                any(n in path for n in needed) for path in model_files
+            )
+            vae_dir = os.path.join(os.path.dirname(models_dir), "vae")
+            has_wan_vae = False
+            if os.path.isdir(vae_dir):
+                has_wan_vae = any(
+                    "wan" in name.lower() and name.lower().endswith(".safetensors")
+                    for name in os.listdir(vae_dir)
+                )
+            missing = []
+            if not has_wan_weights:
+                missing.append("pesos Wan 2.2/2.1 (GGUF o safetensors)")
+            if not has_wan_vae:
+                missing.append("VAE Wan")
         elif engine == "framepack":
             missing = []
         else:
@@ -86,10 +110,16 @@ class AnimateManager:
         vram_gb = get_vram_gb()
         if vram_gb > 0 and vram_gb <= 8:
             if engine == "wan_video":
-                if base["frames"] > 81:
-                    base["frames"] = 81
-                if base["steps"] > 28:
-                    base["steps"] = 28
+                # Wan TI2V puede trabajar con offload, pero en una RTX de 8 GB
+                # 81 frames/28 pasos provoca picos de VRAM, swaps y bloqueos.
+                # La duración se obtiene por bloques AR, no agrandando un único
+                # latente: mantiene el pico comparable a FramePack.
+                if base["frames"] > 49:
+                    base["frames"] = 49
+                if base["steps"] > 20:
+                    base["steps"] = 20
+                if base["cfg"] > 4.5:
+                    base["cfg"] = 4.5
             elif engine == "framepack":
                 if base["frames"] > 49:
                     base["frames"] = 49
@@ -127,8 +157,15 @@ class AnimateManager:
                 if pose_score > 0.08:
                     mag = max(mag, 0.70 + pose_score * 0.15)
             self._last_magnitude = mag
-            if hasattr(nlp, "get_speech_intensity"):
-                self._last_speech_intensity = float(nlp.get_speech_intensity(translated))
+            # v5.1141: get_speech_intensity NO existe en el analizador ligero (siempre 0.0 -> XTTS muerto).
+            # Señal estructural: patrones de diálogo ya existentes en audio_pipeline (comillas /
+            # que diga X / saying X). Sin voz detectada = 0.0, con diálogo = 1.0.
+            try:
+                from roop.animate.audio_pipeline import extract_speech_text
+                speech = extract_speech_text(prompt) or extract_speech_text(translated)
+                self._last_speech_intensity = 1.0 if speech else 0.0
+            except Exception:
+                self._last_speech_intensity = 0.0
             print(
                 f"[AnimateManager] Semantic: Magnitude={mag:.2f}, "
                 f"Speech={self._last_speech_intensity:.2f}"
@@ -349,7 +386,46 @@ class AnimateManager:
             animator = AnimatePhoto()
             autoregressive_chunks = max(1, int(autoregressive_chunks or 1))
 
-            if engine == "framepack":
+            if engine in ("framepack", "wan_video") and autoregressive_chunks > 1:
+                # FramePack también admite continuar desde el último frame. Antes
+                # el control AR de su propia interfaz se ignoraba y siempre salía
+                # un único bloque corto; ambos motores comparten ahora la misma
+                # continuidad y concat segura.
+                print(f"[AnimateManager] Autoregressive mode ({engine}): {autoregressive_chunks} chunks x {p['frames']} frames")
+                chunk_paths = []
+                current_image = image
+                for chunk_index in range(autoregressive_chunks):
+                    if cancel_check and cancel_check():
+                        elapsed = time.time() - t0
+                        return None, f"Cancelado tras {elapsed:.0f}s"
+                    chunk_path = output_path.replace(".mp4", f"_chunk{chunk_index + 1:02d}.mp4")
+                    chunk_prompt = self._build_autoregressive_chunk_prompt(
+                        final_prompt, chunk_index, autoregressive_chunks
+                    )
+                    self._emit_progress(progress_callback, f"Generando bloque AR {chunk_index + 1}/{autoregressive_chunks}...")
+                    ok = animator.animate_image(
+                        image_pil=current_image, prompt=chunk_prompt,
+                        output_path=chunk_path, model=engine,
+                        frames=p["frames"], fps=p["fps"], steps=p["steps"], cfg=p["cfg"],
+                        lora_name=lora_name, lora_strength=lora_strength,
+                        progress_callback=progress_callback, cancel_check=cancel_check,
+                    )
+                    if cancel_check and cancel_check():
+                        elapsed = time.time() - t0
+                        return None, f"Cancelado tras {elapsed:.0f}s"
+                    if not ok or not self._video_has_frames(chunk_path):
+                        elapsed = time.time() - t0
+                        return None, f"Error en chunk AR {chunk_index + 1}/{autoregressive_chunks} tras {elapsed:.0f}s"
+                    chunk_paths.append(chunk_path)
+                    if chunk_index < autoregressive_chunks - 1:
+                        self._emit_progress(progress_callback, f"Preparando continuidad desde el bloque {chunk_index + 1}...")
+                        current_image = self._extract_last_frame(chunk_path)
+                        if current_image is None:
+                            elapsed = time.time() - t0
+                            return None, f"No se pudo extraer último frame del chunk {chunk_index + 1} tras {elapsed:.0f}s"
+                self._emit_progress(progress_callback, "Uniendo bloques AR...")
+                ok = self._concat_video_chunks(chunk_paths, output_path, p["fps"])
+            elif engine == "framepack":
                 self._emit_progress(progress_callback, "Generando animación con FramePack...")
                 ok = animator.animate_image(
                     image_pil=image, prompt=final_prompt,
@@ -359,56 +435,6 @@ class AnimateManager:
                     progress_callback=progress_callback,
                     cancel_check=cancel_check,
                 )
-            elif engine == "wan_video" and autoregressive_chunks > 1:
-                print(f"[AnimateManager] Autoregressive mode: {autoregressive_chunks} chunks x {p['frames']} frames")
-                chunk_paths = []
-                current_image = image
-                for chunk_index in range(autoregressive_chunks):
-                    if cancel_check and cancel_check():
-                        elapsed = time.time() - t0
-                        return None, f"Cancelado tras {elapsed:.0f}s"
-                    chunk_path = output_path.replace(".mp4", f"_chunk{chunk_index + 1:02d}.mp4")
-                    chunk_prompt = self._build_autoregressive_chunk_prompt(
-                        final_prompt,
-                        chunk_index,
-                        autoregressive_chunks
-                    )
-
-                    print(f"[AnimateManager] AR chunk {chunk_index + 1}/{autoregressive_chunks}: {chunk_path}")
-                    print(f"[AnimateManager] AR prompt {chunk_index + 1}: {chunk_prompt[:220]}...")
-                    self._emit_progress(
-                        progress_callback,
-                        f"Generando bloque AR {chunk_index + 1}/{autoregressive_chunks}..."
-                    )
-                    ok = animator.animate_image(
-                        image_pil=current_image, prompt=chunk_prompt,
-                        output_path=chunk_path, model=engine,
-                        frames=p["frames"], fps=p["fps"],
-                        steps=p["steps"], cfg=p["cfg"],
-                        lora_name=lora_name, lora_strength=lora_strength,
-                        progress_callback=progress_callback,
-                        cancel_check=cancel_check,
-                    )
-                    if cancel_check and cancel_check():
-                        elapsed = time.time() - t0
-                        return None, f"Cancelado tras {elapsed:.0f}s"
-                    if not ok or not os.path.exists(chunk_path):
-                        elapsed = time.time() - t0
-                        return None, f"Error en chunk AR {chunk_index + 1}/{autoregressive_chunks} tras {elapsed:.0f}s"
-
-                    chunk_paths.append(chunk_path)
-                    if chunk_index < autoregressive_chunks - 1:
-                        self._emit_progress(
-                            progress_callback,
-                            f"Preparando continuidad desde el bloque {chunk_index + 1}..."
-                        )
-                        current_image = self._extract_last_frame(chunk_path)
-                        if current_image is None:
-                            elapsed = time.time() - t0
-                            return None, f"No se pudo extraer último frame del chunk {chunk_index + 1} tras {elapsed:.0f}s"
-
-                self._emit_progress(progress_callback, "Uniendo bloques AR...")
-                ok = self._concat_video_chunks(chunk_paths, output_path, p["fps"])
             else:
                 self._emit_progress(progress_callback, "Generando animación...")
                 ok = animator.animate_image(

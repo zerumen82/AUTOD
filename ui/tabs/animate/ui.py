@@ -53,8 +53,9 @@ def build_animate_ui():
                     lora_list = ["None"] + animator.get_available_loras()
                     engine = gr.Dropdown(
                         label="Motor de animación",
-                        choices=["wan_video", "framepack", "svd_turbo", "ltx_video"],
-                        value="wan_video",
+                        choices=["framepack", "wan_video", "svd_turbo", "ltx_video"],
+                        value="framepack",
+                        info="FramePack: único con modelo instalado (~5GB). wan_video requiere descargar Wan2.2 (scripts/download_animate_models).",
                     )
                     with gr.Row():
                         autoregressive_chunks = gr.Slider(

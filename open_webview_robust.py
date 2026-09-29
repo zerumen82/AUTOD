@@ -111,7 +111,7 @@ def open_webview():
     
     try:
         import webview
-        
+
         window = webview.create_window(
             'AUTO-DEEP v2',
             GRADIO_URL,

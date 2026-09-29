@@ -61,6 +61,19 @@ class PromptAnalyzer:
         "saltando", "jumping", "walking", "caminando"
     ]
 
+    # Palabras clave para cambio de ángulo/POV (vista no vista → regenerar + FacePreserver)
+    ANGLE_KEYWORDS = [
+        "desde atras", "desde atrás", "desde la derecha", "desde la izquierda",
+        "de espaldas", "de lado", "de perfil",
+        "desde arriba", "desde abajo", "cenital", "picado", "contrapicado",
+        "angulo", "ángulo", "pov", "vista", "perspectiva", "plano",
+        "back view", "side view", "from behind", "from the side",
+        "from the right", "from the left", "opposite view",
+        "top view", "bottom view", "low angle", "high angle",
+        "camera angle", "angle", "viewpoint", "camera view", "perspective",
+        "over the shoulder", "por encima del hombro",
+    ]
+
     # Palabras clave para cambios de atributo (color, textura, ropa)
     ATTRIBUTE_KEYWORDS = [
         "color", "textura", "ropa", "clothes", "vestido", "dress",
@@ -72,11 +85,44 @@ class PromptAnalyzer:
     def __init__(self):
         self._build_patterns()
     
+    @staticmethod
+    def _create_pattern(keywords):
+        """Crea un patron regex de palabras clave"""
+        escaped = [re.escape(kw) for kw in keywords]
+        return re.compile(r'\b(' + '|'.join(escaped) + r')\b', re.IGNORECASE)
+
+    def subset_hits(self, prompt: str, keywords) -> int:
+        """Matching tolerante a typos SOBRE LAS LISTAS EXISTENTES (cero palabras
+        nuevas): una keyword compuesta vale si TODOS sus tokens con contenido
+        aparecen en el prompt, aunque el pegamento se haya roto por typo
+        ('DD RODILLAS' no casa 'de rodillas', pero 'rodillas' sí está).
+        Las de un token casan exacto (igual que el regex)."""
+        try:
+            from roop.img_editor.prompt_translator import _ES_FUNC
+        except Exception:
+            _ES_FUNC = frozenset()
+        try:
+            toks = set(re.findall(r"[a-záéíóúñü]+", (prompt or "").lower()))
+            if not toks:
+                return 0
+            n = 0
+            for kw in (keywords or []):
+                content = [
+                    w for w in re.findall(r"[a-záéíóúñü]+", kw.lower())
+                    if w not in _ES_FUNC and len(w) > 2
+                ]
+                if content and all(w in toks for w in content):
+                    n += 1
+            return n
+        except Exception:
+            return 0
+
     def _build_patterns(self):
         """Construye patrones regex para deteccion"""
         self._outpaint_pattern = self._create_pattern(self.OUTPAINT_KEYWORDS)
         self._inpaint_pattern = self._create_pattern(self.INPAINT_KEYWORDS)
         self._pose_pattern = self._create_pattern(self.POSE_KEYWORDS)
+        self._angle_pattern = self._create_pattern(self.ANGLE_KEYWORDS)
         self._structural_pattern = self._create_pattern(self.STRUCTURAL_KEYWORDS)
         self._attribute_pattern = self._create_pattern(self.ATTRIBUTE_KEYWORDS)
 
@@ -95,6 +141,7 @@ class PromptAnalyzer:
         # Conteo de intenciones
         structural_count = len(self._structural_pattern.findall(prompt_lower))
         pose_count = len(self._pose_pattern.findall(prompt_lower))
+        angle_count = len(self._angle_pattern.findall(prompt_lower))
         attribute_count = len(self._attribute_pattern.findall(prompt_lower))
         outpaint_count = len(self._outpaint_pattern.findall(prompt_lower))
         
@@ -103,6 +150,7 @@ class PromptAnalyzer:
         
         # Escalamiento por complejidad (No hardcoded if-else, sino acumulativo)
         magnitude += (pose_count * 0.25)       # Las poses requieren mucho denoise
+        magnitude += (angle_count * 0.30)      # POV requiere regeneración casi total
         magnitude += (structural_count * 0.15) # Estructuras requieren denoise
         magnitude += (outpaint_count * 0.10)   # Outpainting requiere espacio para crear
         magnitude += (attribute_count * 0.05)  # Atributos son ligeros

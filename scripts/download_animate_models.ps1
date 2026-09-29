@@ -13,7 +13,7 @@ function Show-Header {
 
 function Show-Menu {
     Write-Host "Selecciona los modelos a descargar:" -ForegroundColor Yellow
-    Write-Host "1) Wan 2.2 (14B GGUF) - Máxima calidad (~8GB) + VAE"
+    Write-Host "1) Wan 2.2 TI2V 5B - compatible con 8GB mediante offload (~10GB)"
     Write-Host "2) LTX Video 0.9.5 - Velocidad (~6GB)"
     Write-Host "3) Ambos (Wan + LTX)"
     Write-Host ""
@@ -58,11 +58,18 @@ Show-Menu
 $choice = Read-Host "Opción (1-3)"
 
 $base = Resolve-Path (Join-Path $PSScriptRoot "..\ui\tob\ComfyUI\models")
+# El repositorio Comfy-UI usado antes fue retirado (404). Esta variante oficial
+# TI2V 5B es la que el flujo prioriza en GPUs de 8 GB; el UMT5 y VAE se cargan
+# desde text_encoders/ y vae/ existentes.
+$wanUrl = "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors"
+$wanOut = "$base\diffusion_models\wan2.2_ti2v_5B_fp16.safetensors"
+$wanVaeUrl = "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors"
+$wanVaeOut = "$base\vae\wan2.2_vae.safetensors"
 
 switch ($choice) {
     "1" {
-        Download-File "https://huggingface.co/Comfy-UI/Wan2.2-I2V-14B-480P-Q4_K_M/resolve/main/Wan2.2-I2V-14B-480P-Q4_K_M.safetensors" "$base\diffusion_models\Wan2.2-I2V-14B-480P-Q4_K_M\Wan2.2-I2V-14B-480P-Q4_K_M.safetensors" "Wan 2.2 (8GB)"
-        Download-File "https://huggingface.co/Comfy-UI/Wan2.2-VAE/resolve/main/Wan2.2_VAE.safetensors" "$base\vae\Wan2.2_VAE.safetensors" "Wan VAE (50MB)"
+        Download-File $wanUrl $wanOut "Wan 2.2 TI2V 5B (offload 8GB)"
+        if (-not (Test-Path $wanVaeOut)) { Download-File $wanVaeUrl $wanVaeOut "Wan 2.2 VAE" }
         break
     }
     "2" {
@@ -70,8 +77,8 @@ switch ($choice) {
         break
     }
     "3" {
-        Download-File "https://huggingface.co/Comfy-UI/Wan2.2-I2V-14B-480P-Q4_K_M/resolve/main/Wan2.2-I2V-14B-480P-Q4_K_M.safetensors" "$base\diffusion_models\Wan2.2-I2V-14B-480P-Q4_K_M\Wan2.2-I2V-14B-480P-Q4_K_M.safetensors" "Wan 2.2 (8GB)"
-        Download-File "https://huggingface.co/Comfy-UI/Wan2.2-VAE/resolve/main/Wan2.2_VAE.safetensors" "$base\vae\Wan2.2_VAE.safetensors" "Wan VAE (50MB)"
+        Download-File $wanUrl $wanOut "Wan 2.2 TI2V 5B (offload 8GB)"
+        if (-not (Test-Path $wanVaeOut)) { Download-File $wanVaeUrl $wanVaeOut "Wan 2.2 VAE" }
         Download-File "https://huggingface.co/Comfy-UI/LTX-Video-0.9.5/resolve/main/ltxvideo.safetensors" "$base\checkpoints\ltx-video-0.9.5\ltxvideo.safetensors" "LTX Video 0.9.5 (6GB)"
         break
     }

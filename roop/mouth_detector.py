@@ -123,17 +123,45 @@ class MouthDetector:
             mouth_right = mouth_points[291]
             mouth_width = abs(mouth_right[0] - mouth_left[0])
             
+            # v5.1100: Corrección de foreshortening de perfil — con la cabeza girada ~50°+
+            # el ancho de boca PROYECTADO colapsa (la boca se ve de canto) → h/w se infla
+            # con la boca REAL cerrada → falsa preservación oral constante en perfiles
+            # (boca target asomando). Los CANTOS EXTERNOS de los ojos (landmarks 33/263
+            # de Face Mesh — OJO: 37/267 son curvas del labio superior, no ojos) apenas
+            # se comprimen con el yaw → denomidador estable. Frontal: eye_outer ≈ 2.0×
+            # mouth_width. Solo corregimos si la boca está claramente colapsada
+            # (eye/mouth > 2.6 = yaw > ~45°) y a un factor conservador (2.0).
+            try:
+                _eye_l = face_landmarks.landmark[33]
+                _eye_r = face_landmarks.landmark[263]
+                eye_outer_span = abs(_eye_r.x * width - _eye_l.x * width)
+                if eye_outer_span > 2 and eye_outer_span > mouth_width * 2.6:
+                    mouth_width = eye_outer_span / 2.2
+            except Exception:
+                pass
+            
             # Calcular ratio de apertura
-            if mouth_width > 0:
+            if mouth_width > 1:
                 open_ratio = mouth_height / mouth_width
             else:
                 open_ratio = 0.0
+            
+            # v5.1070: Cap a 1.0 — la boca no puede ser más alta que ancha.
+            # En vídeos closeup con papada/doble mentón, MediaPipe mide
+            # correctamente labios PERO el ratio ancho/altura se infla >1.0
+            # (ratio 1.08-1.33 en logs reales amor_cuckold). Esto provoca
+            # que oral_strength se sature al máximo y la boca se vea forzada.
+            open_ratio = min(open_ratio, 1.0)
             
             # Umbral para considerar boca abierta
             # 0.12 = boca ligeramente abierta
             # 0.20 = boca claramente abierta
             # 0.30+ = boca muy abierta
-            is_open = open_ratio > 0.12
+            # v5.1100: 0.12→0.16 — con landmarks MediaPipe, el reposo real (labios
+            # entrecerrados/sonrisa leve) mide 0.10-0.15. El umbral 0.12 activaba
+            # preservación en reposo → boca target visible + flicker al togglear.
+            # La histéresis de ProcessMgr (0.16/0.20) cubre la transición.
+            is_open = open_ratio > 0.16
             
             # Datos adicionales (con puntos intermedios para máscara más precisa)
             mouth_data = {

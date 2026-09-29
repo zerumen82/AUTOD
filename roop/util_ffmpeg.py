@@ -45,5 +45,30 @@ def restore_audio(intermediate_video: str, original_video: str, trim_frame_start
 			commands.extend([ '-to', format(end_time, ".2f")])
 		commands.extend([ '-i', original_video, '-c', 'copy' ])
 
-	commands.extend([ '-map', '0:v', '-map', '1:a', final_video ])
+	# Algunos clips de móvil no tienen audio. El map opcional conserva la
+	# pista si existe sin convertir un vídeo correcto en un fallo al finalizar.
+	commands.extend([ '-map', '0:v', '-map', '1:a?', final_video ])
 	run_ffmpeg(commands)
+
+
+def encode_face_swap_video(intermediate_video: str, original_video: str, final_video: str,
+                           skip_audio: bool = False, start_frame: int = 0,
+                           end_frame: int = None, fps: float = None) -> None:
+    """Encode a lossless working video once with the project's delivery codec."""
+    commands = ['-y', '-i', intermediate_video]
+    if not skip_audio:
+        if fps and fps > 0 and start_frame:
+            commands.extend(['-ss', f'{start_frame / fps:.6f}'])
+        if fps and fps > 0 and end_frame is not None:
+            duration = max(0.0, (end_frame - start_frame) / fps)
+            commands.extend(['-t', f'{duration:.6f}'])
+        commands.extend(['-i', original_video])
+    commands.extend(['-map', '0:v:0'])
+    if not skip_audio:
+        commands.extend(['-map', '1:a?'])
+    commands.extend([
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '14',
+        '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart',
+        final_video,
+    ])
+    run_ffmpeg(commands)

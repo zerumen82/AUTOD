@@ -314,7 +314,10 @@ if __name__ == "__main__":
     try:
         # Importamos roop.core al final para que vea todos los parches anteriores
         import roop.core
-        roop.core.run()
+        reused_server = roop.core.run()
+        if reused_server:
+            print("[EXIT] Ventana secundaria cerrada; servidor principal conservado")
+            sys.exit(0)
     except Exception as e:
         print("\n" + "!"*60)
         print(" [ERROR CRITICO EN EL MOTOR]")

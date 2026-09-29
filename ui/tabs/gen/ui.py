@@ -52,27 +52,28 @@ def build_gen_ui():
             elem_classes=["prompt-box-gen"],
         )
 
-        with gr.Row():
-            image_style = gr.Dropdown(
-                choices=get_dropdown_choices("image_type"),
-                value="photoreal",
-                label="Tipo de imagen",
-            )
-            lighting = gr.Dropdown(
-                choices=get_dropdown_choices("lighting"),
-                value="natural",
-                label="Iluminación",
-            )
-            shot_framing = gr.Dropdown(
-                choices=get_dropdown_choices("framing"),
-                value="auto",
-                label="Plano / encuadre",
-            )
-            skin_finish = gr.Dropdown(
-                choices=get_dropdown_choices("skin_finish"),
-                value="detailed",
-                label="Piel",
-            )
+        with gr.Accordion("🎨 Estilo (opcional — los defaults ya son lo más realista)", open=False):
+            with gr.Row():
+                image_style = gr.Dropdown(
+                    choices=get_dropdown_choices("image_type"),
+                    value="photoreal",
+                    label="Tipo de imagen",
+                )
+                lighting = gr.Dropdown(
+                    choices=get_dropdown_choices("lighting"),
+                    value="natural",
+                    label="Iluminación",
+                )
+                shot_framing = gr.Dropdown(
+                    choices=get_dropdown_choices("framing"),
+                    value="auto",
+                    label="Plano / encuadre",
+                )
+                skin_finish = gr.Dropdown(
+                    choices=get_dropdown_choices("skin_finish"),
+                    value="detailed",
+                    label="Piel",
+                )
 
         modifier_preview = gr.HTML("")
 
@@ -84,6 +85,21 @@ def build_gen_ui():
             )
             _engines = get_installed_generation_engines()
             _default = get_default_generation_engine()
+            # v5.1131f — asegurar que las opciones que envía la APK móvil
+            # ('flux_dev_abliterated', 'schnell', 'klein_base') SIEMPRE están en
+            # choices: Gradio rechaza valores fuera de la lista en preprocess
+            # (mismo fallo que 'imagine' en Edit). 'klein_base' no sale de
+            # get_installed_generation_engines (es GGUF diffusion, no checkpoint)
+            # pero el gen client lo soporta nativo (flux_alias_map).
+            _apk_choices = [
+                ("FLUX Abliterated (ultra realista)", "flux_dev_abliterated"),
+                ("FLUX Schnell (rápido ~8 pasos)", "schnell"),
+                ("FLUX.2 Klein 4B base", "klein_base"),
+            ]
+            _existing = {v for _, v in (_engines or [])}
+            for _c in _apk_choices:
+                if _c[1] not in _existing:
+                    _engines.append(_c)
             engine_model = gr.Dropdown(
                 choices=_engines or [("FLUX Abliterated (ultra realista)", "flux_dev_abliterated")],
                 value=_default,
@@ -92,13 +108,15 @@ def build_gen_ui():
 
         with gr.Row():
             enhance_quality = gr.Checkbox(
-                label="Mejorar nitidez (ESRGAN, más lento)",
+                label="✨ Mejorar nitidez (ESRGAN, más lento)",
                 value=False,
             )
             use_rewriter = gr.Checkbox(
-                label="Rewriter LLM (mejor prompt, +5-15s)",
+                label="🧠 Rewriter LLM (mejor prompt, +5-15s)",
                 value=False,
             )
+
+        gr.Markdown("_👆 Prompt + GENERAR ya funciona: los defaults (photoreal, natural, piel detallada) son los más realistas. Los extras son opcionales._")
 
         width = gr.Slider(minimum=512, maximum=1536, step=64, value=1152, visible=False)
         height = gr.Slider(minimum=512, maximum=1536, step=64, value=768, visible=False)

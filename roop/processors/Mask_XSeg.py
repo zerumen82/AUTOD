@@ -77,7 +77,16 @@ class Mask_XSeg:
             outputs = self.model_xseg.run(None, inputs)
             
             # Post-procesamiento
-            mask = outputs[0][0][0]  # El modelo devuelve [1, 1, 256, 256]
+            raw_mask = outputs[0]
+            if raw_mask.ndim != 4 or raw_mask.shape[0] != 1:
+                raise ValueError(f"Salida XSeg inesperada: {raw_mask.shape}")
+            if raw_mask.shape[-1] == 1:
+                # xseg.onnx del proyecto devuelve NHWC [1, 256, 256, 1].
+                mask = raw_mask[0, :, :, 0]
+            elif raw_mask.shape[1] == 1:
+                mask = raw_mask[0, 0, :, :]
+            else:
+                raise ValueError(f"Canal XSeg no encontrado: {raw_mask.shape}")
             
             # Limpieza de máscara: Sigmoide manual simplificada
             mask = np.clip(mask, 0, 1.0)

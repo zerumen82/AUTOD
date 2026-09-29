@@ -30,6 +30,7 @@ def polish_result_image(
     restore = float(scores.get("restore", scores.get("soft_need", 0.0)))
     poster = float(scores.get("poster", 0.0))
     sharp = float(scores.get("sharpness", 0.5))
+    global_restore = bool(profile.get("global_restore", False))
     max_side = max(image.size)
     tier_target = TIER_TARGET_SIDE.get(tier, 1920)
     already_at_tier = max_side >= int(tier_target * 0.92)
@@ -47,6 +48,13 @@ def polish_result_image(
         boost = min(boost, 0.12)
     if already_at_tier:
         boost = min(boost, 0.14)
+    # La métrica de posterización global indica bloques/bandas, no falta de
+    # microdetalle.  Realzar high-pass en ese caso hace precisamente más
+    # visibles los artefactos (piel granulada, halos y textura de plástico).
+    # El tratamiento de limpieza posterior decide si una reparación es una
+    # mejora medible; aquí no se inventa detalle encima de una señal dudosa.
+    if global_restore:
+        boost = min(boost, 0.08)
     use_clahe = poster < 0.35 and max(out.size) <= 3200 and not fast
     if boost > 0.09:
         out = finisher.detail_boost(out, blend=boost, use_clahe=use_clahe)
@@ -55,6 +63,8 @@ def polish_result_image(
     amt = sharpen * _lerp(0.88, 1.0, need)
     amt = max(1.05, min(1.32, amt))
     if fast:
+        amt = min(amt, 1.08)
+    if global_restore:
         amt = min(amt, 1.08)
     if amt > 1.04:
         out = finisher.sharpen(out, amount=amt)

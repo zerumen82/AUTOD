@@ -66,21 +66,57 @@ def build_img_editor_ui():
                     gen_btn = gr.Button("✨ TRANSFORMAR", variant="primary", elem_classes=["btn-transform-main"], scale=3)
 
                 with gr.Row():
-                    quality_mode = gr.Checkbox(label="🎨 Modo Calidad", value=False,
-                                               info="Elimina posterización, artefactos, mejora nitidez, restaura caras y upscale ESRGAN. El contenido no se edita.")
+                    quality_mode = gr.Checkbox(
+                        label="🎨 Modo Calidad",
+                        value=False,
+                        info=(
+                            "Elige los pasos. Sin texto solo corre el acabado; "
+                            "con texto edita primero y luego aplica los pasos marcados. "
+                            "Ampliar no inventa detalle."
+                        ),
+                    )
 
-                with gr.Row(visible=True):
+                with gr.Group(visible=False) as quality_options:
+                    quality_deposter = gr.Checkbox(
+                        label="Desposterizar",
+                        value=True,
+                        info="Suaviza bloques y bandas. En una foto ya nítida la fuerza es baja.",
+                    )
+                    quality_upscale = gr.Checkbox(
+                        label="Ampliar",
+                        value=True,
+                        info="Sube a HD, 4K u 8K si la foto es más pequeña. Desmarcado, conserva el tamaño.",
+                    )
                     enhance_tier = gr.Radio(
                         choices=[("HD (1920px)", "hd"), ("4K (3840px)", "4k"), ("8K (7680px)", "8k")],
                         value="hd",
-                        label="Resolución de salida (Modo Calidad)",
-                        info="HD: mejora calidad sin upscale. 4K/8K: upscale ESRGAN (IA) con detalle real, fallback Lanczos si el modelo no está"
+                        label="Tamaño si Ampliar está marcado",
+                        info="Lado mayor: HD 1920, 4K 3840 o 8K 7680 px. Ampliar no recupera detalle ausente.",
                     )
+                    quality_color = gr.Checkbox(
+                        label="Color y luz",
+                        value=True,
+                        info="Ajusta contraste, color y luz sobre la misma foto.",
+                    )
+                    quality_realism = gr.Checkbox(
+                        label="Realismo",
+                        value=True,
+                        info="Añade detalle local y un poco de nitidez. No lanza otra generación.",
+                    )
+                    quality_preserve_faces = gr.Checkbox(
+                        label="Restaurar caras (puede alterar rasgos)",
+                        value=True,
+                        info="Desactívalo si las caras originales ya se ven bien o si cambia la identidad.",
+                    )
+                legacy_api_btn = gr.Button(visible=False)
+                legacy_options_btn = gr.Button(visible=False)
 
                 with gr.Accordion("⚙️ Opciones", open=False):
                     engine = gr.Dropdown(
                         choices=[
-                            ("🎨 LongCat Edit (sigue instrucciones, preserva la imagen original)", "longcat"),
+                            ("🎨 Auto: LongCat rápido; Qwen si pides otro ángulo", "longcat"),
+                            ("📷 Qwen Cámara (POV/ángulos, ~1152px en 8 GB)", "qwen_camera"),
+                            ("Compatibilidad app antigua (LongCat)", "imagine"),
                              ("✨ FLUX.2 Klein 4B (img2img rápido, 4 pasos, entra en 8GB)", "klein"),
                              ("⚠️ FLUX.2 Klein 9B (NO entra en 8GB, usar solo con 12GB+)", "klein_9b"),
                             ("🎨 LongCat Full fijo (35 pasos, sin auto)", "longcat_full"),
@@ -136,7 +172,15 @@ def build_img_editor_ui():
         "autoregressive": autoregressive,
         "auto_iterations": auto_iterations,
         "quality_mode": quality_mode,
+        "quality_options": quality_options,
+        "quality_deposter": quality_deposter,
+        "quality_upscale": quality_upscale,
+        "quality_color": quality_color,
+        "quality_realism": quality_realism,
         "enhance_tier": enhance_tier,
+        "quality_preserve_faces": quality_preserve_faces,
+        "legacy_api_btn": legacy_api_btn,
+        "legacy_options_btn": legacy_options_btn,
         "bt_use_as_input": bt_use_as_input,
         "bt_open_folder": bt_open_folder,
     }

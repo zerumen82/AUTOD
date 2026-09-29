@@ -109,6 +109,7 @@ def build_faceswap_ui():
                 line-height: 1.2 !important;
             }
             .frame-btn { min-width: 45px !important; font-weight: bold !important; }
+            .native-drop-control { display: none !important; }
         </style>
     """)
 
@@ -134,7 +135,7 @@ def build_faceswap_ui():
                         with gr.Row():
                             bt_input_prev = gr.Button("⬅", size="sm")
                             bt_input_next = gr.Button("➡", size="sm")
-                        bt_remove_selected_input_face = gr.Button("🗑 Quitar seleccionada", size="sm", variant="secondary")
+                        bt_clear_source = gr.Button("🗑 Vaciar origen", size="sm", variant="stop")
 
                     # Destino
                     with gr.Column():
@@ -149,16 +150,19 @@ def build_faceswap_ui():
                         with gr.Row():
                             bt_target_prev = gr.Button("⬅", size="sm")
                             bt_target_next = gr.Button("➡", size="sm")
-                        with gr.Row():
-                            delete_mode = gr.Checkbox(label="🚫 Modo Borrado (Clic para quitar)", value=False)
-                            bt_remove_selected_target_face = gr.Button("🗑 Quitar", size="sm", variant="secondary")
-                            bt_clear_all_target = gr.Button("🧹 Todas", size="sm", variant="stop")
+                        bt_clear_target = gr.Button("🗑 Vaciar destino", size="sm", variant="stop")
 
                 with gr.Row(variant="panel"):
                     with gr.Column():
-                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", height=200)
+                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", height=200, elem_id="srcfiles")
+                        source_path_input = gr.Textbox(label="Rutas de origen", elem_id="source_path_input", elem_classes=["native-drop-control"])
+                        bt_add_source_paths = gr.Button("Añadir rutas de origen", elem_id="bt_add_source_paths", elem_classes=["native-drop-control"])
                     with gr.Column():
-                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=200)
+                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=200, elem_id="destfiles")
+                        with gr.Row():
+                            bt_browse_path = gr.Button("📂 Buscar\nen el PC", size="sm", scale=1)
+                            target_path_input = gr.Textbox(label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)", placeholder='D:\\videos\\video.mp4  o  \\\\servidor\\share\\video.mp4', scale=4, elem_id="target_path_input")
+                            bt_add_target_path = gr.Button("➕ Añadir", size="sm", scale=1, elem_id="bt_add_target_path")
 
             # COLUMNA DERECHA: Preview y Control
             with gr.Column(scale=3):
@@ -192,7 +196,7 @@ def build_faceswap_ui():
                                 gender_filter = gr.Dropdown(["Todos", "Hombres", "Mujeres"], value="Todos", label="Género", scale=1)
                                 size_filter = gr.Dropdown(["Todos", "Grandes", "Medianas", "Pequeñas"], value="Todos", label="Tamaño", scale=1)
                         
-                        gr.Markdown("👆 Haz clic en una cara para añadirla a Destino o usa 👁️ para probar el enhancer.")
+                        gr.Markdown("👆 Haz clic en una cara para añadirla a Destino o usa 👁️ para probar el enhancer. Puedes añadir **hasta 3 caras por vídeo** (p. ej. frontal + perfil): en cada frame se usa la que mejor matchee — ideal para vídeos con cortes. El contador 🎯 sale junto al nombre del archivo.\n\n🎲 **Con Source Aleatorio activado (solo fotos):** selecciona **2-3 caras de la MISMA imagen** → las 2-3 se swappean en el resultado (cada una con su source aleatorio).")
                         
                         with gr.Row():
                             face_selection = gr.Gallery(
@@ -219,12 +223,12 @@ def build_faceswap_ui():
                         autorotate = gr.Checkbox(label="🔄 Auto-Rotar (Mejora Perfiles/Inclinadas)", value=True)
                         smoothing = gr.Checkbox(label="🛡️ Suavizado Temporal (Anti-Parpadeo)", value=True)
                     with gr.Row():
-                        source_random = gr.Checkbox(label="🎲 Source Aleatorio (solo Fotos)", value=False, interactive=False)
+                        source_random = gr.Checkbox(label="🎲 Source Aleatorio (solo Fotos · multi-destino)", value=False, interactive=False)
                     with gr.Row():
                         face_distance = gr.Slider(0.01, 1.0, value=0.20, step=0.01, label="📏 Umbral de Similitud (Bajo = Más Estricto)")
                         blend_ratio = gr.Slider(0.0, 1.0, value=1.0, step=0.01, label="🎨 Mezcla de Piel (1.0 = máximo parecido source)")
                     with gr.Row():
-                        enhancer_blend = gr.Slider(0.0, 1.0, value=0.94, step=0.01, label="👤 Parecido Source (0.94 = máximo, menos GFPGAN)")
+                        enhancer_blend = gr.Slider(0.0, 1.0, value=0.70, step=0.01, label="👤 Parecido Source (0.70 = 70% swap + 30% GFPGAN)")
                     with gr.Row():
                         enhancer = gr.Dropdown(
                             choices=["None", "CodeFormer", "GFPGAN", "Restoreformer++"],
@@ -239,8 +243,11 @@ def build_faceswap_ui():
                 metrics_display = gr.HTML(logic.get_metrics_html(0, 0, 0, "00:00", "--:--", "Listo"))
 
 
+
     return {
         "input_faces": input_faces, "target_faces": target_faces, "bt_srcfiles": bt_srcfiles, "bt_destfiles": bt_destfiles,
+        "target_path_input": target_path_input, "bt_add_target_path": bt_add_target_path, "bt_browse_path": bt_browse_path,
+        "source_path_input": source_path_input, "bt_add_source_paths": bt_add_source_paths,
         "previewimage": previewimage, "preview_frame_num": preview_frame_num, "face_detection_title": face_detection_title, 
         "bt_prev_frame": bt_prev_frame, "bt_next_frame": bt_next_frame,
         "bt_jump_back_10": bt_jump_back_10, "bt_jump_fwd_10": bt_jump_fwd_10,
@@ -253,8 +260,7 @@ def build_faceswap_ui():
         "bt_start": bt_start, "bt_stop": bt_stop, "bt_open_output": bt_open_output,
         "metrics_display": metrics_display, "input_page_info": input_page_info, "target_page_info": target_page_info,
         "bt_input_prev": bt_input_prev, "bt_input_next": bt_input_next, "bt_target_prev": bt_target_prev, "bt_target_next": bt_target_next,
-        "bt_remove_selected_input_face": bt_remove_selected_input_face, "bt_remove_selected_target_face": bt_remove_selected_target_face, "bt_clear_all_target": bt_clear_all_target,
-        "delete_mode": delete_mode,
+        "bt_clear_source": bt_clear_source, "bt_clear_target": bt_clear_target,
         "file_indicator": file_indicator, "gender_filter": gender_filter, "size_filter": size_filter,
         "bt_enhancer_preview": bt_enhancer_preview, "preview_result": preview_result
     }

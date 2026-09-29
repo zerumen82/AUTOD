@@ -325,7 +325,7 @@ class FaceSwap:
         self.model = None
 
 
-def detect_mouth_open(target_face: Face, landmarks_106=None, target_image=None) -> tuple:
+def detect_mouth_open(target_face: Face, landmarks_106=None, target_image=None, face_bbox=None) -> tuple:
     """
     Detecta si la boca está abierta y devuelve la región y el ratio de apertura. (v5.65)
     Utiliza MediaPipe Face Mesh para máxima precisión (95%+).
@@ -354,13 +354,54 @@ def detect_mouth_open(target_face: Face, landmarks_106=None, target_image=None) 
             mouth_pts = pts[52:72]
             h_mouth = np.max(mouth_pts[:, 1]) - np.min(mouth_pts[:, 1])
             w_mouth = np.max(mouth_pts[:, 0]) - np.min(mouth_pts[:, 0])
-            open_ratio = h_mouth / (w_mouth + 1e-6)
+            # v5.1074c: el ancho de boca proyectado se colapsa en PERFIL (la boca se ve
+            # de canto) → h/w se infla 3-5× aunque la boca esté cerrada (mide el grosor
+            # de labios proyectado, no la abertura real). Log real Corn1982vzla: ratio
+            # 0.33-0.78 todo el vídeo → boca target "activa" 269/277 frames (97%) con
+            # la boca REAL cerrada (MediaPipe con padding: 0.05, max 0.17 en 73 frames).
+            # Normalizar por el ancho de cara (bbox, escala estable): cerrado 0.05-0.18,
+            # boca muy abierta cantando ~0.28+. El thresh 0.28/0.30 de ProcessMgr
+            # funciona igual que con MediaPipe.
+            if face_bbox is not None:
+                fw = max(1.0, float(face_bbox[2] - face_bbox[0]))
+                open_ratio = h_mouth / fw
+            else:
+                open_ratio = h_mouth / (w_mouth + 1e-6)
             is_open = open_ratio > 0.15  # v5.1040: 0.20→0.15 — detecta habla (boca ligeramente abierta)
             mouth_region = mouth_pts
         except Exception:
             pass
         
     return is_open, mouth_region, open_ratio
+
+
+MOUTH_OUTER_LANDMARK_INDICES = (
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
+    291, 375, 321, 405, 314, 17, 84, 181, 91, 146,
+)
+
+
+def mouth_region_to_frame_points(mouth_data: Any, frame_shape,
+                                 crop_origin=(0, 0), crop_size=None) -> Optional[np.ndarray]:
+    """Return lip contour in full-frame pixels for MediaPipe or 106 landmarks."""
+    if isinstance(mouth_data, np.ndarray):
+        points = np.asarray(mouth_data, dtype=np.float32).reshape(-1, 2)
+        return points if len(points) >= 3 and np.isfinite(points).all() else None
+    if not isinstance(mouth_data, dict) or 'landmarks_468' not in mouth_data:
+        return None
+    height, width = frame_shape[:2]
+    if crop_size is not None:
+        width, height = crop_size
+    ox, oy = crop_origin
+    try:
+        landmarks = mouth_data['landmarks_468'].landmark
+        points = np.asarray([
+            [landmarks[index].x * width + ox, landmarks[index].y * height + oy]
+            for index in MOUTH_OUTER_LANDMARK_INDICES
+        ], dtype=np.float32)
+        return points if np.isfinite(points).all() else None
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return None
 
 
 def create_mouth_preservation_mask(frame: np.ndarray, mouth_data: Any, blend_ratio: float = 1.0) -> np.ndarray:
@@ -373,13 +414,17 @@ def create_mouth_preservation_mask(frame: np.ndarray, mouth_data: Any, blend_rat
     try:
         if isinstance(mouth_data, dict) and 'landmarks_468' in mouth_data:
             # Usar MediaPipe 468 landmarks (precisión sub-pixel)
-            indices = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146] 
             pts = []
             landmarks = mouth_data['landmarks_468'].landmark
-            for idx in indices:
+            for idx in MOUTH_OUTER_LANDMARK_INDICES:
                 lm = landmarks[idx]
                 pts.append([int(lm.x * w), int(lm.y * h)])
             cv2.fillPoly(mask, [np.array(pts, dtype=np.int32)], 1.0)
+            # v5.1100: margen + feather — el polígono exacto de labios al 100% hasta el
+            # borde = línea de costura visible entre boca source y target. Dilatación 3px
+            # + blur cubre el micro-offset de la alineación 128→256.
+            mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)), iterations=1)
+            mask = cv2.GaussianBlur(mask, (5, 5), 0)
             
         elif isinstance(mouth_data, np.ndarray):
             # Fallback a 106 landmarks (cascara externa de labios)

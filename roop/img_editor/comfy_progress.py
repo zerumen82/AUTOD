@@ -64,6 +64,34 @@ def _infer_phase(prog: Dict[str, Any], elapsed: float, steps_hint: int) -> str:
     return "Preparando generación"
 
 
+def stop_comfy_prompt(base_url: str, prompt_id: str, timeout: float = 45) -> bool:
+    """Stop only this prompt and wait until ComfyUI releases its queue slot."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(f"{base_url}/queue", timeout=5)
+            response.raise_for_status()
+            queue = response.json()
+            running = any(item[1] == prompt_id for item in queue.get("queue_running", []))
+            pending = any(item[1] == prompt_id for item in queue.get("queue_pending", []))
+            if not running and not pending:
+                return True
+            if pending:
+                requests.post(
+                    f"{base_url}/queue", json={"delete": [prompt_id]}, timeout=5
+                ).raise_for_status()
+            if running:
+                # This ComfyUI version accepts prompt_id and will not interrupt
+                # a different task if the queue changes between GET and POST.
+                requests.post(
+                    f"{base_url}/interrupt", json={"prompt_id": prompt_id}, timeout=5
+                ).raise_for_status()
+        except Exception as exc:
+            print(f"[ComfyUI] No se pudo detener {prompt_id}: {exc}", flush=True)
+        time.sleep(0.5)
+    return False
+
+
 def wait_for_comfy_image(
     base_url: str,
     prompt_id: str,
@@ -73,6 +101,7 @@ def wait_for_comfy_image(
     steps_hint: int = 0,
     progress_callback: Optional[ProgressCallback] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    stall_timeout: float = 0,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     """Espera hasta que /history tenga imágenes. Devuelve (img_meta, mensaje)."""
     t0 = time.time()
@@ -80,25 +109,32 @@ def wait_for_comfy_image(
     last_phase = ""
     last_console_phase = ""
     last_log = 0.0
+    started_sampling = False
 
     while True:
         if cancel_check and cancel_check():
-            try:
-                requests.post(f"{base_url}/interrupt", timeout=5)
-                requests.post(f"{base_url}/queue", json={"delete": [prompt_id]}, timeout=5)
-            except Exception:
-                pass
-            return None, "Cancelado"
+            stopped = stop_comfy_prompt(base_url, prompt_id)
+            return None, (
+                "Cancelado" if stopped else
+                "Cancelado; ComfyUI sigue ocupado por esta tarea"
+            )
 
         elapsed = time.time() - t0
-        if elapsed > timeout:
-            try:
-                requests.post(f"{base_url}/queue", json={"delete": [prompt_id]}, timeout=5)
-            except Exception:
-                pass
-            return None, f"Timeout ({int(timeout)}s)"
-
         prog = check_comfy_progress(base_url, prompt_id) or {"running": True, "progress": 0}
+        if int(prog.get("step") or 0) > 0:
+            started_sampling = True
+        if stall_timeout and not started_sampling and not prog.get("done") and elapsed > stall_timeout:
+            stopped = stop_comfy_prompt(base_url, prompt_id)
+            return None, (
+                f"Sin muestreo ({int(elapsed)}s)" if stopped else
+                f"Sin muestreo ({int(elapsed)}s); ComfyUI sigue ocupado por esta tarea"
+            )
+        if elapsed > timeout:
+            stopped = stop_comfy_prompt(base_url, prompt_id)
+            return None, (
+                f"Timeout ({int(timeout)}s)" if stopped else
+                f"Timeout ({int(timeout)}s); ComfyUI sigue ocupado por esta tarea"
+            )
         if prog.get("done"):
             prog["progress"] = 1.0
             prog["phase"] = "Completado"

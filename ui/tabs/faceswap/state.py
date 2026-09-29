@@ -14,6 +14,7 @@ last_target_folder = None
 
 # Variables para almacenar archivos seleccionados
 source_filenames = []
+source_load_summary = ""
 
 # Variables para trackear tipo de procesamiento
 is_video_processing = False
@@ -30,6 +31,7 @@ SELECTED_TARGET_FACE_INDEX = 0
 IS_INPUT = True
 SELECTION_FACES_DATA = []
 CURRENT_DETECTED_FACES = []
+CURRENT_DETECTED_KEY = None
 TEMP_SELECTED_FACE_INDEX = 0
 
 # Flags para prevenir eventos de selección automáticos de Gradio

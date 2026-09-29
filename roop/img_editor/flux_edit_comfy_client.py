@@ -15,6 +15,48 @@ def get_project_root():
 def get_models_base():
     return os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
 
+
+def _server_vram_free_mb(comfy_url):
+    """v5.1133b — VRAM libre del servidor ComfyUI (free_mb, total_mb) o (None, None)."""
+    try:
+        _ss = requests.get(f"{comfy_url}/system_stats", timeout=10).json()
+        _d = _ss.get("devices", [{}])[0]
+        return int(_d.get("vram_free", 0)) / (1024 * 1024), int(_d.get("vram_total", 0)) / (1024 * 1024)
+    except Exception:
+        return None, None
+
+
+def _sync_unload(comfy_url, reason: str) -> bool:
+    """v5.1133b — unload SINCRONO con resultado VERIFICADO y LOG (antes silencioso)."""
+    try:
+        _r = requests.post(f"{comfy_url}/autoauto/unload", json={}, timeout=60)
+        if _r.status_code == 200 and _r.json().get("ok"):
+            _vf = _r.json().get("vram_free_mb", 0)
+            _vt = _r.json().get("vram_total_mb", 0)
+            print(f"[FluxClient] Unload sincrono ({reason}): OK — {_vf:.0f}MB libres de {_vt:.0f}MB", flush=True)
+            return True
+        print(f"[FluxClient] Unload sincrono ({reason}): endpoint respondió {_r.status_code} — fallback /free lazy", flush=True)
+    except Exception as _e:
+        print(f"[FluxClient] Unload sincrono ({reason}) FALLÓ: {_e} — fallback /free lazy", flush=True)
+    try:
+        requests.post(
+            f"{comfy_url}/free",
+            json={"unload_models": True, "free_memory": True},
+            timeout=15,
+        )
+        return False
+    except Exception:
+        return False
+
+
+def _queue_is_idle(comfy_url) -> bool:
+    """No descargar pesos mientras ComfyUI atiende otra petición."""
+    try:
+        queue = requests.get(f"{comfy_url}/queue", timeout=5).json()
+        return not queue.get("queue_running") and not queue.get("queue_pending")
+    except Exception:
+        return False
+
 @dataclass
 class GenResult:
     image: Image.Image
@@ -52,10 +94,79 @@ class FluxEditComfyClient:
         comfy_url = get_comfyui_url()
         if not self.is_available():
             return False, f"ComfyUI no responde en {comfy_url}. ¿Está iniciado?"
+        # v5.1094: verificar que esta instancia tenga nodos GGUF. Si el servidor
+        # enganchó un ComfyUI ajeno (p.ej. puerto 8189 con Python del sistema),
+        # el workflow falla con "UnetLoaderGGUF no encontrado". Error claro en vez
+        # de un fallo críptico después.
+        try:
+            _oi = requests.get(f"{comfy_url}/object_info/UnetLoaderGGUF", timeout=5)
+            if _oi.status_code != 200 or "UnetLoaderGGUF" not in _oi.json():
+                raise ValueError("sin UnetLoaderGGUF")
+        except Exception:
+            return False, (
+                f"El ComfyUI de {comfy_url} NO tiene nodos GGUF (falta UnetLoaderGGUF). "
+                "Seguramente es otra instalación (p.ej. puerto 8189). Cerrá ese ComfyUI "
+                "y reiniciá el servidor para que use el propio (puerto 8188)."
+            )
 
-        # Avoid re-checking and "reloading" logs if already loaded the same version
+        # v5.1133b — chequeo de VRAM ANTES del early-return de reutilización:
+        # incluso con la MISMA versión, si el servidor quedó con la VRAM sucia
+        # (stack residente + ESRGAN/CodeFormer del proceso principal), la run
+        # siguiente hace thrash de preparación (450s+ observado en la 2ª petición
+        # con el MISMO LongCat Full). Mejor pagar ~45-60s de recarga que 8min de
+        # ping-pong VAE↔TE↔UNet.
+        _pre_vram_free, _pre_vram_total = _server_vram_free_mb(comfy_url)
+        # LongCat mantiene el UNet en VRAM tras la primera edición. En una
+        # RTX 3060 Ti, el encoder de 7.9 GB de la siguiente petición compite
+        # con ese UNet: 5198 MB libres parecían suficientes, pero el segundo
+        # muestreo pasó de 7 s/paso a decenas de segundos/paso. Una recarga
+        # limpia cuesta menos que ese intercambio continuo de pesos.
+        _reuse_floor_mb = (
+            5600 if flux_version.startswith("LongCat-") and _pre_vram_total is not None
+            and _pre_vram_total <= 10000 else 2200
+        )
+        _low_vram = (
+            _pre_vram_free is not None
+            and _pre_vram_free < _reuse_floor_mb
+        )
+        _version_change = bool(getattr(self, '_flux_version', None) and self._flux_version != flux_version)
+
         if self._loaded and getattr(self, '_flux_version', None) == flux_version:
-            return True, f"FLUX {flux_version} ya cargado (reutilizado)"
+            if _low_vram and _queue_is_idle(comfy_url):
+                _sync_unload(comfy_url, f"VRAM baja ({_pre_vram_free:.0f}MB libres) — misma versión, recarga limpia")
+            else:
+                if _pre_vram_free is not None:
+                    _state = "cola ocupada; sin descarga" if _low_vram else "reutilizando modelo"
+                    print(f"[FluxClient] VRAM servidor: {_pre_vram_free:.0f}MB libres de {_pre_vram_total:.0f}MB — {_state}", flush=True)
+                return True, f"FLUX {flux_version} ya cargado (reutilizado)"
+        elif self._loaded:
+            # El cliente YA tiene un modelo, pero se pide otro. Dejar ambos
+            # residentes en una RTX 3060 Ti de 8 GB provoca offload continuo:
+            # el log parece avanzar, pero el primer paso puede tardar minutos.
+            # `/free` no sirve aquí porque ComfyUI lo consume demasiado tarde;
+            # el custom endpoint descarga SINCRÓNICAMENTE antes de encolar el
+            # workflow nuevo.
+            _vf, _vt = _server_vram_free_mb(comfy_url)
+            if _vf is not None:
+                print(f"[FluxClient] Cambio de versión {self._flux_version} -> {flux_version} (VRAM servidor antes: {_vf:.0f}MB de {_vt:.0f}MB)", flush=True)
+            _sync_unload(
+                comfy_url,
+                f"cambio de versión {self._flux_version} -> {flux_version}",
+            )
+            self._loaded = False
+        elif _version_change or _low_vram:
+            # (a) cambio de modelo (v5.1132) o (b) primera carga del cliente con
+            # VRAM sucia de una sesión anterior: descargar antes de cargar.
+            _reason = "cambio de modelo" if _version_change else f"VRAM baja ({_pre_vram_free:.0f}MB libres)"
+            _sync_unload(comfy_url, _reason)
+
+        # v5.1131c — CAMBIO DE MODELO: diagnóstico de VRAM del servidor. NOTA
+        # verificada en el fuente de este ComfyUI 0.19.0: /free es LAZY (server.py
+        # l.1016 solo pone flags en la cola; main.py l.341 los consume tras
+        # ejecutar el próximo prompt). El unload REAL sucede si la run ANTERIOR
+        # envió /free al completar (_free_server_vram en generate). Aquí solo
+        # medimos y avisamos: si la run anterior no lo envió (p.ej. crash o 1ª
+        # run tras restart con cola), la nueva carga convive con el modelo viejo.
 
         clip_map = {
             "flux2-klein-4b-Q4_K_S.gguf": ("qwen_3_4b_fp4_flux2.safetensors", "flux2"),
@@ -69,6 +180,14 @@ class FluxEditComfyClient:
         self._clip_name2 = None
         self._is_klein_9b = False
         self._is_klein_4b = False
+        # Reset total de flags de motor: el singleton se reutiliza entre runs
+        # con versiones distintas (Turbo/Kontext/Klein). Sin esto, el flag del
+        # run anterior sobrevivía y generate() entraba en la rama de workflow
+        # equivocada (1º bien, siguientes deformados).
+        self._is_longcat_turbo = False
+        self._is_qwen_image_edit = False
+        self._is_qwen_q5 = False
+        self._is_kontext_dev = False
 
         if flux_version == "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf":
             clip_name = "clip_l.safetensors"
@@ -173,6 +292,11 @@ class FluxEditComfyClient:
         arr = np.array(image.convert("RGB"), dtype=np.float32)
         luma = arr.mean(axis=2)
         channel_spread = np.abs(arr[:, :, 0] - arr[:, :, 1]).mean() + np.abs(arr[:, :, 1] - arr[:, :, 2]).mean()
+        # v5.1091: el ruido puro del bug ReferenceLatent daba std global ~5 con
+        # spread de color alto (estática RGB) → el gate viejo no lo cazaba.
+        # Una foto natural tiene std global ~40-70. std < 12 = gris/ruido seguro.
+        if float(arr.std()) < 12.0:
+            return True
         return luma.std() < 8.0 and channel_spread < 8.0
 
     def generate(
@@ -201,9 +325,22 @@ class FluxEditComfyClient:
         # También aceptado vía kwargs por llamadas genéricas del manager
         drop_edit_image_ref = bool(drop_edit_image_ref or kwargs.get("drop_edit_image_ref", False))
         no_kontext = bool(no_kontext or kwargs.get("no_kontext", False))
+        # v5.1104 — img2img PURO para uncover (solo lo pasa el manager en
+        # kontext+uncover): KSampler sobre el latente de la foto con denoise
+        # alto, SIN ReferenceLatent. None = modo EDIT (ReferenceLatent).
+        _img2img_denoise = kwargs.get("kontext_img2img_denoise", None)
+        try:
+            _img2img_denoise = float(_img2img_denoise) if _img2img_denoise else None
+        except (TypeError, ValueError):
+            _img2img_denoise = None
+        if _img2img_denoise:
+            _img2img_denoise = max(0.80, min(0.90, _img2img_denoise))
         ref_method = reference_latents_method or "index_timestep_zero"
         if no_kontext:
             ref_method = "none"
+        # ControlNet Pose (garantía de postura)
+        cn_pose_image = kwargs.get("controlnet_pose_image", None)
+        cn_strength = float(kwargs.get("controlnet_strength", 0.75))
 
         # Prompt negativo base (mínimo para calidad)
         if not negative_prompt:
@@ -224,28 +361,74 @@ class FluxEditComfyClient:
         t0 = time.time()
         image = image.convert("RGB")
         w, h = image.size
-        new_w, new_h = (w // 64) * 64, (h // 64) * 64
-        if new_w != w or new_h != h:
+
+        if is_longcat:
+            # v5.1125 — LongCat (Qwen-VL) opera a 1 Megapíxel (1024*1024 píxeles totales).
+            # TextEncodeQwenImageEditPlus en nodes_qwen.py reescala internamente los ref_latents
+            # usando: scale_by = sqrt((1024*1024) / (w * h)).
+            # Con thumbnail((1024, 1024)) una imagen vertical (p.ej. 640x1024) tenía solo 655k px,
+            # forzando a Qwen a escalar ref_latents a 808x1296 (1.265x) mientras EmptySD3LatentImage
+            # permanecía a 640x1024 → recorte forzado del 26.5% y zoom en formatos no cuadrados.
+            # Al normalizar la imagen a 1MP preservando su relación de aspecto nativa (múltiplos de 16):
+            # scale_by en Qwen es exactamente 1.0 y ref_latents coincide 1:1 con el canvas.
+            total_px = 1024 * 1024
+            scale = (total_px / float(w * h)) ** 0.5
+            new_w = round(w * scale / 16.0) * 16
+            new_h = round(h * scale / 16.0) * 16
+            new_w = max(512, min(1536, new_w))
+            new_h = max(512, min(1536, new_h))
+            print(
+                f"[FluxClient] Resolución efectiva LongCat: {w}x{h} -> {new_w}x{new_h} "
+                f"({new_w * new_h / 1_000_000:.2f} MP)",
+                flush=True,
+            )
             image = image.resize((new_w, new_h), Image.LANCZOS)
-        # LongCat/Kontext hasta 1024px; Klein 4B/9B hasta 1024px; Qwen-Image-Edit 640px; otros 768px
-        max_dim = 1024 if (is_longcat or is_kontext or is_klein_9b or is_klein_4b) else (640 if is_qwen else 768)
-        if new_w > max_dim or new_h > max_dim:
-            image.thumbnail((max_dim, max_dim), Image.LANCZOS)
-            new_w, new_h = image.size
-            new_w, new_h = (new_w // 64) * 64, (new_h // 64) * 64
-            image = image.resize((new_w, new_h), Image.LANCZOS)
+        else:
+            new_w, new_h = (w // 64) * 64, (h // 64) * 64
+            if new_w != w or new_h != h:
+                image = image.resize((new_w, new_h), Image.LANCZOS)
+            # Kontext hasta 1024px; Klein 4B/9B hasta 1024px; Qwen-Image-Edit 640px; otros 768px
+            # v5.1144 — Kontext 1024→768px: el UNet Q4_K_M (6.6GB) NO cabe en 8GB
+            # (5642MB loaded + 1004MB offloaded) y el coste de sampling escala ~cuadrático
+            # con los píxeles. Log real (2026-09-15): 9.1→48 s/it (×5.2 de degradación
+            # intra-run, +2.4 s/it por paso) y run completo de 10+ min. A 768px (~56% de
+            # los píxeles) el run baja a ~la mitad manteniendo la adherencia del Q4.
+            max_dim = 768 if is_kontext else (1024 if is_klein_9b or is_klein_4b else (640 if is_qwen else 768))
+            if new_w > max_dim or new_h > max_dim:
+                image.thumbnail((max_dim, max_dim), Image.LANCZOS)
+                new_w, new_h = image.size
+                new_w, new_h = (new_w // 64) * 64, (new_h // 64) * 64
+                image = image.resize((new_w, new_h), Image.LANCZOS)
 
         iname = f"fast_{int(t0)}.png"
         buf = io.BytesIO(); image.save(buf, "PNG"); buf.seek(0)
         comfy_url = get_comfyui_url()
-        r = requests.post(f"{comfy_url}/upload/image", files={"image": (iname, buf, "image/png")})
+        try:
+            r = requests.post(
+                f"{comfy_url}/upload/image",
+                files={"image": (iname, buf, "image/png")},
+                timeout=60,
+            )
+        except requests.RequestException as exc:
+            return None, f"Error subiendo imagen a ComfyUI: {exc}; no se reintenta automáticamente"
         if r.status_code != 200:
-            return None, f"Error subiendo imagen: {r.status_code}"
+            detail = (r.text or "").strip().replace("\n", " ")[:160]
+            return None, (
+                f"Error subiendo imagen a ComfyUI ({r.status_code}): {detail}; "
+                "no se reintenta automáticamente"
+            )
 
         mname = None
-        if is_klein_edit:
-            # El EDIT real de Klein usa la imagen COMPLETA como referencia (ReferenceLatent).
-            # Una máscara rompería el conditioning — ignorarla siempre aquí.
+        if is_klein_edit or is_kontext:
+            # El EDIT real (ReferenceLatent) usa la imagen COMPLETA como referencia
+            # y arranca de latente vacío — una máscara de inpaint no puede aplicar
+            # aquí (rompería el conditioning). Ignorada siempre en klein/kontext.
+            if mask_image is not None:
+                print(
+                    "[FluxClient] Máscara recibida pero no compatible con el workflow "
+                    f"{'Kontext' if is_kontext else 'Klein'}; se omite",
+                    flush=True,
+                )
             mask_image = None
         if mask_image:
             mname = f"mask_{int(t0)}.png"
@@ -277,7 +460,24 @@ class FluxEditComfyClient:
             last_clip = ["20", 1]
 
         # LongCat Turbo es distilled (CFG=1.0 forzado, pasos nativos ~8).
-        if is_klein_edit:
+        if is_kontext:
+            # v5.1099 — FLUX.1 Kontext dev es un MODELO DE EDICIÓN, no img2img.
+            # Workflow nativo: VAEEncode de la foto SOLO como ReferenceLatent en el
+            # conditioning + KSampler desde latente VACÍO + FluxGuidance (2.0-5.0).
+            # Antes (img2img estándar): denoise alto destruía la foto (no hacía caso
+            # al prompt) y denoise bajo la congelaba (ignoraba el prompt).
+            # Con ReferenceLatent la imagen SIEMPRE se preserva como ancla y el
+            # guidance es el único control de adherencia — como el dev original.
+            actual_denoise = 1.0  # irrelevante: arranca de latente vacío
+            actual_cfg = 1.0      # negative vía FluxGuidance, no CFG
+            num_inference_steps = max(20, min(num_inference_steps, 28))
+            # guidance_scale del manager (2.5-4.5) mapea directo al rango nativo
+            # de Kontext dev (FluxGuidance 2.0-5.0).
+            _kg = max(2.0, min(5.0, float(guidance_scale)))
+            # Referencia: VAEEncode de la foto real (el foto real, no el vacío).
+            # ref_method "none" (no_kontext) significa también sin latente-ref.
+            _use_img_ref = ref_method != "none"
+        elif is_klein_edit:
             # FLUX.2 Klein EDIT real: latente VACÍO + ReferenceLatent ( refs en
             # conditioning) → denoise 1.0 obligatorio, 4 pasos nativos, CFG 1.0.
             actual_cfg = 1.0
@@ -287,53 +487,137 @@ class FluxEditComfyClient:
             actual_cfg = 1.0
             actual_denoise = 1.0
             num_inference_steps = min(num_inference_steps, 12)
+        elif is_longcat and no_kontext:
+            # Edición fuerte de LongCat. La foto sigue siendo el latente inicial
+            # y la referencia visual: un latente vacío convierte el edit en
+            # text-to-image y degrada composición, color y textura.
+            # v5.1126 — CFG clamp 1.5-2.0 era DEMASIADO BAJO: en bypass el TEXTO es
+            # la única autoridad y el CFG bajo diluyó la instrucción (log 11:37:
+            # 'the boy must be bald' con cfg=2.0 → no ejecutó). La receta oficial
+            # Full es CFG 2.0-3.5; CFGNorm (nodo 17) estabiliza la norma del latente,
+            # así que el rango alto NO quema colores. Clamp 2.0-3.5.
+            # v5.1149 — REVERSIÓN parcial de v5.1148: el CFG 3.0 da piel de
+            # cera/muñeco (el CFG alto aplana la micro-textura de piel; el
+            # usuario reporta "parecen muñecos y no personas"). La textura se
+            # gana con steps (suelo 36 intacto) + el acabado con grano, no con
+            # CFG. Vuelta a 2.0-2.5, receta que no plastifica. CFGNorm sigue.
+            actual_cfg = max(2.0, min(2.5, float(guidance_scale))) if guidance_scale else 2.5
+            actual_denoise = 1.0
+            # v5.1126 — 24-30 steps eran cortos para following complejo (log 11:37:
+            # 'EL CHICO ES CALVO' no ejecutado a 29 steps). 36-40 pasos Full.
+            num_inference_steps = max(36, min(num_inference_steps, 40))
         else:
             actual_cfg = guidance_scale
             actual_denoise = denoise
 
         if is_kontext:
-            # FLUX.1 Kontext dev: standard FLUX img2img workflow
-            # No FluxKontextImageScale or FluxKontextMultiReferenceLatentMethod
+            # v5.1099 — Workflow EDIT nativo de Kontext dev (guía oficial ComfyUI):
+            #   photo → VAEEncode → ReferenceLatent(conditioning) + FluxGuidance
+            #   KSampler desde latente VACÍO del tamaño de la foto.
+            # Antes era img2img estándar (denoise<1.0 anclando el latente original):
+            #   denoise alto = foto destruida, denoise bajo = prompt ignorado.
+            wf["5d"] = {"class_type": "GetImageSize", "inputs": {"image": ["1", 0]}}
+            wf["5e"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": ["5d", 0], "height": ["5d", 1], "batch_size": 1}}
             model_input = last_model
             wf["6"] = {
                 "class_type": "CLIPTextEncode",
                 "inputs": {"text": prompt, "clip": last_clip},
             }
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
-            positive_input = ["6", 0]
+            wf["6g"] = {
+                "class_type": "FluxGuidance",
+                "inputs": {"conditioning": ["6", 0], "guidance": _kg},
+            }
+            if _img2img_denoise and _use_img_ref:
+                # v5.1104 — img2img PURO (solo uncover): la evidencia (Q2+offset
+                # =copia, Q4+offset=copia, Q4+uxo=débil sin cambio) demuestra que
+                # CUALQUIER ReferenceLatent con tokens limpios ancla demasiado
+                # para quitar ropa: el modelo siempre resuelve "foto + desnuda"
+                # a favor de la foto. Sin tokens limpios, el latente con ruido
+                # (denoise 0.80-0.90) deja regenerar la ropa manteniendo layout
+                # aproximado. La cara puede derivar (preferencia del usuario:
+                # adherencia > preservación facial).
+                actual_denoise = _img2img_denoise
+                positive_input = ["6g", 0]
+                klein_empty_latent = None  # KSampler usa ["5", 0] (foto real)
+            elif _use_img_ref:
+                wf["6r"] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["6g", 0], "latent": ["5", 0]}}
+                # v5.1101 — método de referencia EXPLÍCITO (nodo 6m tras 6r).
+                # Sin este nodo el DiT usa default_ref_method="offset" implícito.
+                # v5.1102: el método lo decide el manager (uxo/uno u offset);
+                # el valor por defecto aquí es "offset" = default oficial.
+                _ctx_method = ref_method if ref_method in ("offset", "index", "uxo/uno", "index_timestep_zero") else "offset"
+                wf["6m"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6r", 0], "reference_latents_method": _ctx_method}}
+                positive_input = ["6m", 0]
+                klein_empty_latent = ["5e", 0]
+            else:
+                # no_kontext: sin ancla de imagen (el texto manda en todo)
+                positive_input = ["6g", 0]
+                klein_empty_latent = ["5e", 0]
             negative_input = ["7", 0]
         elif is_longcat:
-            wf["16"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
+            # LongCat no debe usar FluxKontextImageScale porque recorta al centro ("center" crop)
+            # y fuerza buckets fijos (672..1568) provocando zoom y recorte de los bordes.
+            # Qwen-VL / LongCat procesa ["1", 0] directamente a la resolución nativa.
             if self._is_longcat_turbo:
                 wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": last_model, "shift": 3.1}}
+                model_input = ["17", 0]
+            elif actual_cfg > 1.0:
+                # CFGNorm estabiliza la norma del latente en CFG > 1.0 evitando colores quemados
+                wf["17"] = {"class_type": "CFGNorm", "inputs": {"model": last_model, "strength": 1.0}}
                 model_input = ["17", 0]
             else:
                 model_input = last_model
 
             if no_kontext:
-                # Bypass de latentes de referencia (sin FluxKontextMultiReferenceLatentMethod).
-                # Con visión (drop=False): Qwen-VL VE la foto → género, pose y
-                # proporciones correctos, pero sin ancla estructural a la ropa.
-                # Sin visión (drop=True): solo-texto, más rápido pero alucina cuerpos.
+                # Edición fuerte guiada por referencia. La foto sigue entrando en
+                # el conditioning y en el sampler: sin ello LongCat genera una
+                # escena nueva de baja fidelidad en lugar de editar la existente.
                 if drop_edit_image_ref:
-                    print("[FluxClient] Kontext BYPASS + text-encode sin image-ref")
+                    print("[FluxClient] LongCat edición fuerte sin imagen de referencia")
                     wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": last_clip}}
+                    wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
+                    positive_input = ["6", 0]
+                    negative_input = ["7", 0]
                 else:
-                    print("[FluxClient] Kontext BYPASS con visión (ve la imagen, sin latentes ref)")
+                    print("[FluxClient] LongCat edición fuerte: imagen inicial + referencia index")
                     wf["6"] = {
                         "class_type": "TextEncodeQwenImageEditPlus",
                         "inputs": {
                             "clip": last_clip,
                             "prompt": prompt,
                             "vae": ["4", 0],
-                            "image1": ["16", 0],
+                            "image1": ["1", 0],
                             "image2": None,
                             "image3": None,
                         },
                     }
-                wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
-                positive_input = ["6", 0]
-                negative_input = ["7", 0]
+                    wf["7"] = {
+                        "class_type": "TextEncodeQwenImageEditPlus",
+                        "inputs": {
+                            "clip": last_clip,
+                            "prompt": negative_prompt,
+                        },
+                    }
+                    wf["11"] = {
+                        "class_type": "FluxKontextMultiReferenceLatentMethod",
+                        "inputs": {"conditioning": ["6", 0], "reference_latents_method": "index"},
+                    }
+                    wf["12"] = {
+                        "class_type": "FluxKontextMultiReferenceLatentMethod",
+                        "inputs": {"conditioning": ["7", 0], "reference_latents_method": "index"},
+                    }
+                    positive_input = ["11", 0]
+                    negative_input = ["12", 0]
+                    # La foto ya entra por el conditioning positivo y por el
+                    # latente inicial del sampler. Repetir VAE+Qwen con la misma
+                    # imagen en el negativo duplica el trabajo de 1 MP y, en
+                    # 8 GB, puede provocar intercambio continuo TE/UNet en la
+                    # segunda edición fuerte. La rama negativa solo necesita
+                    # el texto, igual que la ruta LongCat Full normal.
+                # El nodo 5 (VAEEncode de la foto) se crea al final del workflow.
+                # El sampler debe usarlo y no arrancar de EmptySD3LatentImage.
+                klein_empty_latent = None
             else:
                 wf["6"] = {
                     "class_type": "TextEncodeQwenImageEditPlus",
@@ -341,7 +625,7 @@ class FluxEditComfyClient:
                         "clip": last_clip,
                         "prompt": prompt,
                         "vae": ["4", 0],
-                        "image1": ["16", 0],
+                        "image1": ["1", 0],
                         "image2": None,
                         "image3": None,
                     },
@@ -353,9 +637,36 @@ class FluxEditComfyClient:
                     "class_type": "FluxKontextMultiReferenceLatentMethod",
                     "inputs": {"conditioning": ["6", 0], "reference_latents_method": ref_method},
                 }
-                wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
                 positive_input = ["11", 0]
-                negative_input = ["7", 0]
+                if self._is_longcat_turbo:
+                    # Turbo usa CFG=1.0: en classifier-free guidance la rama
+                    # incondicional tiene peso cero. Codificar de nuevo foto +
+                    # Qwen para el negativo no cambia el resultado, pero en 8GB
+                    # obliga a alternar VAE/Qwen y añade varios minutos de carga.
+                    # Reusar el conditioning positivo conserva el workflow de
+                    # edición con referencia sin convertirlo en img2img.
+                    negative_input = positive_input
+                    print("[FluxClient] LongCat Turbo CFG=1: omitida codificación negativa redundante", flush=True)
+                else:
+                    # Full sí usa CFG > 1, así que conserva una rama negativa
+                    # real. La referencia visual ya viaja íntegra en positivo;
+                    # repetir foto+VAE en negativo no añade información y, con
+                    # 8GB, fuerza el ping-pong VAE↔Qwen que bloqueaba minutos.
+                    # El encoder Qwen recibe el texto negativo en su formato
+                    # nativo, pero no una segunda imagen de referencia.
+                    wf["7"] = {
+                        "class_type": "TextEncodeQwenImageEditPlus",
+                        "inputs": {
+                            "clip": last_clip,
+                            "prompt": negative_prompt,
+                        },
+                    }
+                    wf["12"] = {
+                        "class_type": "FluxKontextMultiReferenceLatentMethod",
+                        "inputs": {"conditioning": ["7", 0], "reference_latents_method": ref_method},
+                    }
+                    negative_input = ["12", 0]
+                    print("[FluxClient] LongCat Full: negativo textual; referencia visual codificada una vez", flush=True)
         elif is_qwen:
             wf["16"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
             model_input = last_model
@@ -377,14 +688,16 @@ class FluxEditComfyClient:
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
             if is_klein_edit:
                 # ===== FLUX.2 Klein EDIT REAL (ReferenceLatent) =====
-                # Latente VACÍO del tamaño de la imagen + la imagen de referencia se
-                # inyecta COMO conditioning ("reference_latents") → el modelo regenera
-                # manteniendo composición/identidad de la ref y aplica la instrucción.
+                # KSampler arranca de latente VACÍO (ruido) del tamaño de la imagen,
+                # y la FOTO REAL se inyecta como conditioning vía ReferenceLatent
+                # (tokens de referencia = VAEEncode de la imagen ["5", 0]).
+                # v5.1091 FIX: antes se pasaba ["5e", 0] (vacío) al ReferenceLatent
+                # → el modelo nunca veía la foto → ruido puro (std~5). Ahora ["5",0].
                 # (flujo oficial de FLUX.2 Klein edit / one-node)
                 wf["5d"] = {"class_type": "GetImageSize", "inputs": {"image": ["1", 0]}}
                 wf["5e"] = {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": ["5d", 0], "height": ["5d", 1], "batch_size": 1}}
-                wf["6r"] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["6", 0], "latent": ["5e", 0]}}
-                wf["7r"] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["7", 0], "latent": ["5e", 0]}}
+                wf["6r"] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["6", 0], "latent": ["5", 0]}}
+                wf["7r"] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["7", 0], "latent": ["5", 0]}}
                 wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"shift": 3.0, "model": last_model}}
                 model_input = ["17", 0]
                 positive_input = ["6r", 0]
@@ -396,13 +709,42 @@ class FluxEditComfyClient:
                 negative_input = ["7", 0]
                 klein_empty_latent = None
 
+        # ControlNet Pose: aplicar condicionamiento de postura si se pasa pose map
+        if cn_pose_image is not None:
+            try:
+                cn_name = f"pose_{int(t0)}.png"
+                cbuf = io.BytesIO()
+                if hasattr(cn_pose_image, 'convert'):
+                    cn_pose_image.convert("RGB").resize((new_w, new_h)).save(cbuf, "PNG")
+                else:
+                    Image.fromarray(cn_pose_image).convert("RGB").resize((new_w, new_h)).save(cbuf, "PNG")
+                cbuf.seek(0)
+                requests.post(f"{comfy_url}/upload/image", files={"image": (cn_name, cbuf, "image/png")})
+                wf["cn_img"] = {"class_type": "LoadImage", "inputs": {"image": cn_name, "upload": "image"}}
+                wf["cn_load"] = {"class_type": "ControlNetLoader", "inputs": {"control_net_name": "flux-union-pro2-fp8.safetensors"}}
+                wf["cn_apply"] = {
+                    "class_type": "ControlNetApplyAdvanced",
+                    "inputs": {
+                        "positive": positive_input, "negative": negative_input,
+                        "control_net": ["cn_load", 0], "image": ["cn_img", 0],
+                        "vae": ["4", 0],
+                        "strength": max(0.1, min(1.0, cn_strength)),
+                        "start_percent": 0.0, "end_percent": 1.0,
+                    },
+                }
+                positive_input = ["cn_apply", 0]
+                negative_input = ["cn_apply", 1]
+                print(f"[FluxClient] ControlNet Pose activo (strength={cn_strength:.2f})", flush=True)
+            except Exception as e:
+                print(f"[FluxClient] ControlNet Pose falló, sin ControlNet: {e}", flush=True)
+
         wf["8"] = {
             "class_type": "KSampler",
             "inputs": {
                 "model": model_input, "positive": positive_input, "negative": negative_input,
                 "latent_image": klein_empty_latent or ["5", 0], "seed": seed or int(t0) % 1000000,
                 "steps": num_inference_steps, "cfg": actual_cfg,
-                "sampler_name": ("er_sde" if is_klein_edit else ("euler" if is_qwen else "euler_ancestral")),
+                "sampler_name": ("er_sde" if is_klein_edit else ("euler" if (is_qwen or is_kontext or is_longcat) else "euler_ancestral")),
                 "scheduler": "simple",
                 "denoise": actual_denoise
             }
@@ -418,16 +760,14 @@ class FluxEditComfyClient:
         }
         wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FastEdit"}}
 
-        uses_kontext = is_longcat and not no_kontext  # Only LongCat uses FluxKontext nodes
+        uses_kontext = False  # LongCat no debe usar FluxKontextImageScale (recorta al centro)
         if mname:
             wf["14"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
-            if uses_kontext:
-                wf["19"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["14", 0]}}
-            wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["19", 0] if uses_kontext else ["14", 0], "channel": "red"}}
+            wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["14", 0], "channel": "red"}}
             wf["5"] = {
                 "class_type": "VAEEncodeForInpaint",
                 "inputs": {
-                    "pixels": ["16", 0] if uses_kontext else ["1", 0],
+                    "pixels": ["1", 0],
                     "vae": ["4", 0],
                     "mask": ["15", 0],
                     "grow_mask_by": max(0, int(grow_mask_by)),
@@ -437,7 +777,7 @@ class FluxEditComfyClient:
             wf["5"] = {
                 "class_type": "VAEEncode",
                 "inputs": {
-                    "pixels": ["16", 0] if uses_kontext else ["1", 0],
+                    "pixels": ["1", 0],
                     "vae": ["4", 0],
                 },
             }
@@ -463,18 +803,19 @@ class FluxEditComfyClient:
                 flush=True,
             )
         elif is_kontext:
+            _mode = f"img2img denoise={actual_denoise:.2f} (SIN ReferenceLatent)" if (_img2img_denoise and _use_img_ref) else f"EDIT ref={wf.get('6m', {}).get('inputs', {}).get('reference_latents_method', 'offset(default)') if _use_img_ref else 'no-ref'}"
             print(
-                "[FluxClient] FLUX.1 Kontext dev workflow (standard FLUX img2img): "
-                f"cfg={wf['8']['inputs']['cfg']}, denoise={actual_denoise:.2f}, "
-                f"mask={'inpaint' if mname else 'global'}, "
+                "[FluxClient] FLUX.1 Kontext dev workflow (FluxGuidance + euler): "
+                f"guidance={_kg:.1f}, steps={num_inference_steps}, {_mode}, "
                 f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
                 flush=True,
             )
         elif is_longcat:
+            _workflow_ref = wf.get("11", {}).get("inputs", {}).get("reference_latents_method", "none")
             print(
                 "[FluxClient] LongCat edit workflow: "
                 f"cfg={wf['8']['inputs']['cfg']}, denoise={actual_denoise:.2f}, "
-                f"ref={ref_method}, "
+                f"ref={_workflow_ref}, "
                 f"drop_img_ref={drop_edit_image_ref}, "
                 f"mask={'inpaint' if mname else 'global'}, "
                 f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
@@ -498,6 +839,19 @@ class FluxEditComfyClient:
         if not pid:
             return None, "ComfyUI no devolvió prompt_id"
 
+        def _free_server_vram():
+            # v5.1133c — NO descargar post-run. Evidencia de logs:
+            #   - run 1: unload post-run OK (7078MB libres) → run 2 SAME-model:
+            #     "reutilizando modelo" pero ComfyUI recargó TE+UNet DESDE CERO
+            #     (no había nada residente que reutilizar) → 300s+ de preparación.
+            #   - el modelo residente ES el cache: la reutilización same-model
+            #     samplea a 5.4s/it directo. La protección correcta es el guard
+            #     PRE-RUN de load() (cambio de versión o VRAM libre <1500MB →
+            #     unload sincrono + recarga limpia), que ya cubre ambos casos.
+            _free_now, _tot = _server_vram_free_mb(comfy_url)
+            if _free_now is not None:
+                print(f"[FluxClient] Modelo residente para reutilización (VRAM libre: {_free_now:.0f}MB de {_tot:.0f}MB)", flush=True)
+
         def _on_progress(prog):
             if progress_callback:
                 progress_callback(prog)
@@ -512,6 +866,7 @@ class FluxEditComfyClient:
             progress_callback=_on_progress,
             cancel_check=kwargs.get("cancel_check"),
         )
+        _free_server_vram()
         if img_meta is None:
             return None, wait_msg
 

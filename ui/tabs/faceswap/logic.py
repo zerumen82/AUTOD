@@ -25,7 +25,7 @@ def apply_optimal_faceswap_defaults():
     roop.globals.face_swap_mode = 'selected_faces'
     roop.globals.selected_enhancer = 'GFPGAN'
     roop.globals.use_enhancer = True
-    roop.globals.enhancer_blend_factor = 0.94
+    roop.globals.enhancer_blend_factor = 0.70
     roop.globals.color_match_strength = 0.0
     roop.globals.brightness_strength = 0.0
     roop.globals.autorotate_faces = True
@@ -141,6 +141,12 @@ def process_target_file_async(file_path):
             current_frame = get_image_frame(filename)
             if current_frame is None: return None, None, 0
             list_entry.endframe = total_frames
+        if current_frame is None:
+            return None, None, 0
+        h, w = current_frame.shape[:2]
+        if w > 1280:
+            scale = 1280.0 / w
+            current_frame = cv2.resize(current_frame, (1280, max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
         preview_img = util.convert_to_gradio(current_frame)
         return list_entry, preview_img, total_frames
     except: return None, None, 0
@@ -254,7 +260,7 @@ def get_enhancer_preview(image_path, frame_num, face_idx, enhancer_name, blend_f
         if not roop.globals.INPUT_FACESETS:
             return None, "Carga una cara de origen primero"
             
-        source_face = roop.globals.INPUT_FACESETS[0].faces[0] # Usar la primera por defecto para preview
+        source_face = roop.globals.INPUT_FACESETS[0].faces[0]
         
         # 4. Configurar ProcessMgr para swap rápido
         mgr = ProcessMgr()
@@ -264,27 +270,33 @@ def get_enhancer_preview(image_path, frame_num, face_idx, enhancer_name, blend_f
         roop.globals.enhancer_blend_factor = blend_factor
         
         mgr.initialize(roop.globals.INPUT_FACESETS, [target_face], None)
+        mgr._is_single_photo = not util.is_video(image_path)
+        all_source_faces = [
+            face for faceset in roop.globals.INPUT_FACESETS
+            for face in getattr(faceset, "faces", [])
+        ]
+        is_profile = ProcessMgr._is_profile_face(
+            getattr(target_face, "kps", None), getattr(target_face, "det_score", None),
+        )
+        selected_source = mgr._select_source_face_by_similarity(
+            target_face, all_source_faces, is_profile=is_profile,
+            quality_first=not util.is_video(image_path),
+        )
+        if selected_source is not None:
+            source_face = selected_source
         
-        # 5. Procesar solo la cara
-        # Hacemos un crop generoso alrededor de la cara para el preview
+        # 5. Procesar en coordenadas del frame completo. Los landmarks de
+        # InsightFace están en ese espacio: recortar antes del swap desplazaba
+        # bbox pero dejaba kps intactos y producía un preview desalineado.
         x1, y1, x2, y2 = [int(v) for v in target_face.bbox]
         h, w = frame.shape[:2]
         pad = int(max(x2-x1, y2-y1) * 0.5)
         cx1, cy1 = max(0, x1-pad), max(0, y1-pad)
         cx2, cy2 = min(w, x2+pad), min(h, y2+pad)
-        
         face_crop = frame[cy1:cy2, cx1:cx2].copy()
-        
-        # Ajustar bbox de target_face al crop
-        original_bbox = target_face.bbox
-        target_face.bbox = (x1-cx1, y1-cy1, x2-cx1, y2-cy1)
-        
-        processed_crop = mgr._process_face_swap_v21(source_face, target_face, face_crop.copy(), face_crop)
-        
-        # Restaurar bbox original
-        target_face.bbox = original_bbox
-        
-        if processed_crop is None: return None, "Error procesando preview"
+        processed_frame = mgr._process_face_swap_v21(source_face, target_face, frame.copy(), frame)
+        if processed_frame is None: return None, "Error procesando preview"
+        processed_crop = processed_frame[cy1:cy2, cx1:cx2].copy()
         
         # 6. Crear imagen comparativa (Original | Procesado)
         comparison = np.hstack((face_crop, processed_crop))
@@ -342,7 +354,10 @@ def update_pagination_info(thumbs, gallery_type):
     total_pages = max(1, (total_faces + state.FACES_PER_PAGE - 1) // state.FACES_PER_PAGE)
     start_face = current_page * state.FACES_PER_PAGE + 1
     end_face = min((current_page + 1) * state.FACES_PER_PAGE, total_faces)
-    return f"📄 Página {current_page + 1} de {total_pages} ({start_face}-{end_face} de {total_faces} caras)"
+    label = f"📄 Página {current_page + 1} de {total_pages} ({start_face}-{end_face} de {total_faces} caras)"
+    if gallery_type == "input" and state.source_load_summary:
+        label += f" · {state.source_load_summary}"
+    return label
 
 def update_pagination_buttons(total_faces, gallery_type):
     current_page = state.current_input_page if gallery_type == "input" else state.current_target_page
@@ -387,6 +402,24 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
         gr.Error(error_msg)
         yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin caras origen"))
         return
+
+    from roop.destination_selection import missing_video_references
+    swap_mode = getattr(roop.globals, 'face_swap_mode', None) or 'selected_faces'
+    video_paths = [entry.filename for entry in state.list_files_process
+                   if util.is_video(entry.filename) or entry.filename.lower().endswith('.gif')]
+    missing_targets = missing_video_references(
+        video_paths, getattr(roop.globals, 'selected_face_references', {}),
+    ) if swap_mode in ('selected', 'selected_faces', 'selected_faces_frame') else []
+    if missing_targets:
+        names = ', '.join(os.path.basename(path) for path in missing_targets)
+        error_msg = (f"Falta seleccionar una cara destino en {len(missing_targets)} "
+                     f"vídeo(s): {names}. Abre cada archivo, detecta una cara y haz clic en ella.")
+        print(f"[ERROR] {error_msg}")
+        gr.Warning(error_msg)
+        yield (gr.update(variant="primary", interactive=True),
+               gr.update(variant="stop", interactive=False),
+               get_metrics_html(0, 0, 0, "00:00", "--:--", error_msg))
+        return
     
     # Configurar parámetros (respetar modo ya cargado desde config/UI; no forzar selected_faces)
     if not getattr(roop.globals, 'face_swap_mode', None):
@@ -398,10 +431,11 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
     roop.globals.blend_mode = blend_mode
     roop.globals.keep_frames = keep_frames
 
-    # Verificar caras de destino para fotos (en video el fallback es automático)
-    is_video_present = any(util.is_video(entry.filename) for entry in state.list_files_process)
-    if (not is_video_present
-            and roop.globals.face_swap_mode != 'all'
+    # Una selección de vídeo no cubre por sí sola las fotos del mismo lote.
+    has_photos = any(not (util.is_video(entry.filename) or entry.filename.lower().endswith('.gif'))
+                     for entry in state.list_files_process)
+    if (has_photos
+            and roop.globals.face_swap_mode in ('selected', 'selected_faces', 'selected_faces_frame')
             and (not hasattr(roop.globals, 'TARGET_FACES') or len(roop.globals.TARGET_FACES) <= 0)):
         print("[ERROR] No hay caras de destino seleccionadas. En fotos, debes elegir al menos una cara para cambiar.")
         yield (gr.update(variant="primary", interactive=True), gr.update(variant="stop", interactive=False), get_metrics_html(0, 0, 0, "00:00", "--:--", "Error: Sin selección"))
@@ -470,6 +504,7 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
         get_metrics_html(0, 0, total_files, "00:00", "--:--", "Iniciando..."),
     )
     
+    final_issue = None
     try:
         for progress_percent, progress_message in batch_process_regular(
             state.list_files_process,
@@ -479,19 +514,29 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
             {"layers": []},
             roop.globals.num_swap_steps,
             None,
-            getattr(roop.globals, "source_face_index", 0),
+            0,  # El banco de origen se empareja automaticamente con cada destino.
             temporal_smoothing,
         ):
             elapsed = time.time() - start_t
             elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
             files_done = int(progress_percent / 100.0 * total_files) if total_files > 0 else 0
             time_remaining = "--:--"
-            if progress_percent > 0 and files_done > 0:
+            if progress_percent > 0 and files_done > 0 and elapsed > 0:
                 rate = files_done / elapsed
                 remaining = (total_files - files_done) / rate if rate > 0 else 0
                 time_remaining = time.strftime("%H:%M:%S", time.gmtime(remaining))
             
             print(f"[UI] Progreso global: {progress_percent:.1f}% - {progress_message}")
+            if progress_message.startswith('ERROR:'):
+                gr.Error(progress_message)
+                yield (
+                    gr.update(variant="primary", interactive=True),
+                    gr.update(variant="secondary", interactive=False),
+                    get_metrics_html(0, files_done, total_files, elapsed_str, "--:--", progress_message),
+                )
+                return
+            if 'foto(s) sin swap:' in progress_message:
+                final_issue = progress_message
             
             yield (
                 gr.update(variant="secondary", interactive=False),
@@ -502,13 +547,17 @@ def start_swap(enhancer, keep_frames, wait_after_extraction, skip_audio, face_di
         # Completado
         elapsed = time.time() - start_t
         elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
-        gr.Info(f"✅ Procesamiento completado. Archivos gestionados: {total_files}")
-        print(f"[OK] Procesamiento completado en {elapsed_str}")
+        if final_issue:
+            gr.Warning(final_issue)
+            print(f"[WARNING] {final_issue}")
+        else:
+            gr.Info(f"✅ Procesamiento completado. Archivos gestionados: {total_files}")
+            print(f"[OK] Procesamiento completado en {elapsed_str}")
         
         yield (
             gr.update(variant="primary", interactive=True),
             gr.update(variant="secondary", interactive=False),
-            get_metrics_html(100, total_files, total_files, elapsed_str, "--:--", "Completado"),
+            get_metrics_html(100, total_files, total_files, elapsed_str, "--:--", final_issue or "Completado"),
         )
         
     except Exception as e:

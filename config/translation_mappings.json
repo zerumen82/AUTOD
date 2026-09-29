@@ -1,102 +1,458 @@
 {
-  "mappings": [
-    [" completamente desnuda y descalza", " completely naked and barefoot"],
-    [" completamente desnudo y descalzo", " completely naked and barefoot"],
-    [" completamente desnuda", " completely naked"],
-    [" completamente desnudo", " completely naked"],
-    [" sin ropa", " without clothes, completely naked"],
-    ["mejora la calidad y nitidez", "improve quality, sharpness, detail"],
-    ["mejorar la calidad y nitidez", "improve quality, sharpness, detail"],
-    ["mejora el color y la nitidez", "improve colors, sharpness, detail"],
-    ["mejorar el color y la nitidez", "improve colors, sharpness, detail"],
-    ["cambia el fondo por una playa", "change the background to a beach scene"],
-    ["cambiar el fondo por una playa", "change the background to a beach scene"],
-    ["quitale la ropa", "remove all clothes, completely undress"],
-    ["quitarle la ropa", "remove all clothes, completely undress"],
-    ["ponle un vestido rojo", "put on a red dress"],
-    ["ponerle un vestido rojo", "put on a red dress"],
-    ["que esten bailando", "make them dancing"],
-    ["que esten bailando juntos", "make them dancing together"],
-    ["que este sentada", "make her sitting"],
-    ["que este sentado", "make him sitting"],
-    ["hazla mas bonita", "make her more beautiful, attractive"],
-    ["hazlo mas bonito", "make him more beautiful"],
-    [" descalza", " barefoot"],
-    [" descalzo", " barefoot"],
-    [" desnuda", " naked, without clothes"],
-    [" desnudo", " naked, without clothes"],
-    [" bailando", " dancing"],
-    [" bailen", " dance"],
-    [" sentada", " sitting"],
-    [" sentado", " sitting"],
-    [" de pie", " standing"],
-    [" acostada", " lying down"],
-    [" acostado", " lying down"],
-    [" sonriendo", " smiling"],
-    [" sonrie", " smile"],
-    [" mejora la calidad", " improve quality, sharpness and detail"],
-    [" mejora el color", " improve colors, vibrance"],
-    [" mejorar la calidad", " improve quality, sharpness and detail"],
-    [" mejorar el color", " improve colors, vibrance"],
-    [" mas nitidez", " more sharpness, detail"],
-    [" mas brillo", " more brightness, vibrance"],
-    [" mas bonita", " more beautiful, attractive"],
-    [" mas guapa", " more beautiful, attractive"],
-    ["ponle", " put on"],
-    ["ponerle", " put on"],
-    [" quitale", " remove"],
-    [" quitarle", " remove"],
-    [" fondo", " background"],
-    [" playa", " beach"],
-    [" cyberpunk", " cyberpunk style"],
-    [" rojo", " red"],
-    ["vestido", " dress"],
-    ["cambia el fondo", " change the background completely"],
-    ["cambiar el fondo", " change the background completely"],
-    ["hazla", " make her"],
-    ["hazlo", " make him"],
-    ["hacerla", " make her"],
-    ["hacerlo", " make him"],
-    ["que esten", " make them"],
-    ["que este", " make her"],
-    [" la foto", " the photo"],
-    [" la imagen", " the image"],
-    [" mas", " more"],
-    [" mejor", " better"],
-    [" una", " a"],
-    [" un", " a"],
-    [" y ", " and "],
-    [" moreturbando", " masturbating"],
-    [" masturbando", " masturbating"],
-    [" masturba", " masturbate"],
-    [" masturbacion", " masturbation"],
-    ["follando", "fucking"],
-    ["follame", "fuck me"],
-    ["follar", "fuck"],
-    ["chupando", "sucking"],
-    ["chupame", "suck me"],
-    ["chupar", "suck"],
-    ["sexo", "having sex"],
-    ["teniendo sexo", "having sex"],
-    ["hacer el amor", "make love"],
-    ["penetrando", "penetrating"],
-    ["penetrame", "penetrate me"],
-    ["corriendose", "cumming, orgasm"],
-    ["eyaculando", "ejaculating"],
-    ["oral", "oral sex"],
-    ["mamando", "sucking"],
-    ["culos", "ass, butt"],
-    ["culo", "ass"],
-    ["tetas", "tits, breasts"],
-    ["pechos", "breasts"],
-    ["abierta de piernas", "with legs spread open"],
-    ["a cuatro patas", "on all fours"],
-    ["perrito", "doggy style"],
-    ["misionero", "missionary"],
-    ["desde atras", "from behind"]
+ "mappings": [
+  [
+   " completamente desnuda y descalza",
+   " completely naked and barefoot"
   ],
-  "quality_fixups": [
-    {"find": "improve quality", "replace": "ultra high quality, sharp focus, 8K, highly detailed, crisp"},
-    {"find": "mejorar calidad", "replace": "ultra alta calidad, enfoque nítido, 8K, muy detallado"}
+  [
+   " completamente desnudo y descalzo",
+   " completely naked and barefoot"
+  ],
+  [
+   " completamente desnuda",
+   " completely naked"
+  ],
+  [
+   " completamente desnudo",
+   " completely naked"
+  ],
+  [
+   " sin ropa",
+   " without clothes, completely naked"
+  ],
+  [
+   "mejora la calidad y nitidez",
+   "improve quality, sharpness, detail"
+  ],
+  [
+   "mejorar la calidad y nitidez",
+   "improve quality, sharpness, detail"
+  ],
+  [
+   "mejora el color y la nitidez",
+   "improve colors, sharpness, detail"
+  ],
+  [
+   "mejorar el color y la nitidez",
+   "improve colors, sharpness, detail"
+  ],
+  [
+   "cambia el fondo por una playa",
+   "change the background to a beach scene"
+  ],
+  [
+   "cambiar el fondo por una playa",
+   "change the background to a beach scene"
+  ],
+  [
+   "quitale la ropa",
+   "remove all clothes, completely undress"
+  ],
+  [
+   "quitarle la ropa",
+   "remove all clothes, completely undress"
+  ],
+  [
+   "ponle un vestido rojo",
+   "put on a red dress"
+  ],
+  [
+   "ponerle un vestido rojo",
+   "put on a red dress"
+  ],
+  [
+   "que esten bailando",
+   "make them dancing"
+  ],
+  [
+   "que esten bailando juntos",
+   "make them dancing together"
+  ],
+  [
+   "que este sentada",
+   "make her sitting"
+  ],
+  [
+   "que este sentado",
+   "make him sitting"
+  ],
+  [
+   "hazla mas bonita",
+   "make her more beautiful, attractive"
+  ],
+  [
+   "hazlo mas bonito",
+   "make him more beautiful"
+  ],
+  [
+   " descalza",
+   " barefoot"
+  ],
+  [
+   " descalzo",
+   " barefoot"
+  ],
+  [
+   " desnuda",
+   " naked, without clothes"
+  ],
+  [
+   " desnudo",
+   " naked, without clothes"
+  ],
+  [
+   " bailando",
+   " dancing"
+  ],
+  [
+   " bailen",
+   " dance"
+  ],
+  [
+   " sentada",
+   " sitting"
+  ],
+  [
+   " sentado",
+   " sitting"
+  ],
+  [
+   " de pie",
+   " standing"
+  ],
+  [
+   " acostada",
+   " lying down"
+  ],
+  [
+   " acostado",
+   " lying down"
+  ],
+  [
+   " sonriendo",
+   " smiling"
+  ],
+  [
+   " sonrie",
+   " smile"
+  ],
+  [
+   " mejora la calidad",
+   " improve quality, sharpness and detail"
+  ],
+  [
+   " mejora el color",
+   " improve colors, vibrance"
+  ],
+  [
+   " mejorar la calidad",
+   " improve quality, sharpness and detail"
+  ],
+  [
+   " mejorar el color",
+   " improve colors, vibrance"
+  ],
+  [
+   " mas nitidez",
+   " more sharpness, detail"
+  ],
+  [
+   " mas brillo",
+   " more brightness, vibrance"
+  ],
+  [
+   " mas bonita",
+   " more beautiful, attractive"
+  ],
+  [
+   " mas guapa",
+   " more beautiful, attractive"
+  ],
+  [
+   "ponle",
+   " put on"
+  ],
+  [
+   "ponerle",
+   " put on"
+  ],
+  [
+   " quitale",
+   " remove"
+  ],
+  [
+   " quitarle",
+   " remove"
+  ],
+  [
+   " fondo",
+   " background"
+  ],
+  [
+   " playa",
+   " beach"
+  ],
+  [
+   " cyberpunk",
+   " cyberpunk style"
+  ],
+  [
+   " rojo",
+   " red"
+  ],
+  [
+   "vestido",
+   " dress"
+  ],
+  [
+   "cambia el fondo",
+   " change the background completely"
+  ],
+  [
+   "cambiar el fondo",
+   " change the background completely"
+  ],
+  [
+   "hazla",
+   " make her"
+  ],
+  [
+   "hazlo",
+   " make him"
+  ],
+  [
+   "hacerla",
+   " make her"
+  ],
+  [
+   "hacerlo",
+   " make him"
+  ],
+  [
+   "que esten",
+   " make them"
+  ],
+  [
+   "que este",
+   " make her"
+  ],
+  [
+   " la foto",
+   " the photo"
+  ],
+  [
+   " la imagen",
+   " the image"
+  ],
+  [
+   " mas",
+   " more"
+  ],
+  [
+   " mejor",
+   " better"
+  ],
+  [
+   " una",
+   " a"
+  ],
+  [
+   " un",
+   " a"
+  ],
+  [
+   " y ",
+   " and "
+  ],
+  [
+   " moreturbando",
+   " masturbating"
+  ],
+  [
+   " masturbando",
+   " masturbating"
+  ],
+  [
+   " masturba",
+   " masturbate"
+  ],
+  [
+   " masturbacion",
+   " masturbation"
+  ],
+  [
+   "follando",
+   "fucking"
+  ],
+  [
+   "follame",
+   "fuck me"
+  ],
+  [
+   "follar",
+   "fuck"
+  ],
+  [
+   "chupando",
+   "sucking"
+  ],
+  [
+   "chupame",
+   "suck me"
+  ],
+  [
+   "chupar",
+   "suck"
+  ],
+  [
+   "sexo",
+   "having sex"
+  ],
+  [
+   "teniendo sexo",
+   "having sex"
+  ],
+  [
+   "hacer el amor",
+   "make love"
+  ],
+  [
+   "penetrando",
+   "penetrating"
+  ],
+  [
+   "penetrame",
+   "penetrate me"
+  ],
+  [
+   "corriendose",
+   "cumming, orgasm"
+  ],
+  [
+   "eyaculando",
+   "ejaculating"
+  ],
+  [
+   "oral",
+   "oral sex"
+  ],
+  [
+   "mamando",
+   "sucking"
+  ],
+  [
+   "culos",
+   "ass, butt"
+  ],
+  [
+   "culo",
+   "ass"
+  ],
+  [
+   "tetas",
+   "tits, breasts"
+  ],
+  [
+   "pechos",
+   "breasts"
+  ],
+  [
+   "abierta de piernas",
+   "with legs spread open"
+  ],
+  [
+   "a cuatro patas",
+   "on all fours"
+  ],
+  [
+   "perrito",
+   "doggy style"
+  ],
+  [
+   "misionero",
+   "missionary"
+  ],
+  [
+   "elimina al perro",
+   "remove the dog"
+  ],
+  [
+   "eliminar al perro",
+   "remove the dog"
+  ],
+  [
+   "quita al perro",
+   "remove the dog"
+  ],
+  [
+   "quitar al perro",
+   "remove the dog"
+  ],
+  [
+   "mata al perro",
+   "remove the dog"
+  ],
+  [
+   "matar al perro",
+   "remove the dog"
+  ],
+  [
+   "elimina a la",
+   "remove the"
+  ],
+  [
+   "elimina al",
+   "remove the"
+  ],
+  [
+   "elimina ",
+   "remove "
+  ],
+  [
+   "quita ",
+   "remove "
+  ],
+  [
+   "borra ",
+   "remove "
+  ],
+  [
+   "cambia el plano",
+   "change the framing"
+  ],
+  [
+   "cambiar el plano",
+   "change the framing"
+  ],
+  [
+   "cuerpo entero",
+   "full body"
+  ],
+  [
+   "debe ser",
+   "it must be"
+  ],
+  [
+   "morena",
+   "brunette"
+  ],
+  [
+   "rubia",
+   "blonde"
+  ],
+  [
+   "desde atras",
+   "from behind"
   ]
+ ],
+ "quality_fixups": [
+  {
+   "find": "improve quality",
+   "replace": "ultra high quality, sharp focus, 8K, highly detailed, crisp"
+  },
+  {
+   "find": "mejorar calidad",
+   "replace": "ultra alta calidad, enfoque nítido, 8K, muy detallado"
+  }
+ ]
 }

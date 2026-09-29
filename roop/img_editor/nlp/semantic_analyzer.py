@@ -48,8 +48,8 @@ CONCEPTS: Dict[str, list] = {
         "añadir insertar poner agregar objeto accesorio sombrero gafas bolso en escena",
     ],
     "structural_remove": [
-        "remove delete erase eliminate quitar eliminar borrar people objects from image",
-        "quitar eliminar borrar remover personas objetos de la imagen",
+        "remove delete erase eliminate kill kills killing killed elimination quitar eliminar borrar people objects animals from image",
+        "quitar eliminar borrar remover matar personas objetos animales de la imagen",
     ],
     "structural_background": [
         "change replace background environment scenery landscape location beach sky",
@@ -70,12 +70,42 @@ CONCEPTS: Dict[str, list] = {
     "attribute_body": [
         "nude naked undressed bare skin body exposure remove clothes desnuda sin ropa",
         "quitar ropa exposición corporal piel descubierta desnudo undress strip",
+        "thong tanga g-string underwear lingerie swimwear bikini intimate garment exposure",
+        "tanga hilo dental ropa interior lencería traje baño biquini prenda íntima escote",
+        "barefoot descalzo sin zapatos pies descalzos bare feet no shoes",
+        "cambiar ropa outfit vestimenta desvestir cambiarse quitarse poner tanga",
+    ],
+    # Dirección del cambio corporal (para negatives sin pelear con el pedido).
+    # uncover = quitar/menos ropa; cover = vestir/más ropa (nieve, abrigo...).
+    "attribute_uncover": [
+        "remove take off undress strip naked bare skin less clothing minimal garment exposure",
+        "without clothes no clothes without clothing desnudo sin ropa",
+        "quitar quitarse desvestir desnudar piel descubierta menos ropa prenda mínima tanga",
+        "thong tanga g-string bikini lingerie underwear swimsuit minimal tiny micro only solo",
+        "hilo dental biquini lencería ropa interior bañador mínimo solo únicamente",
+    ],
+    "attribute_cover": [
+        "dress put on wear coat jacket winter snow warm covered bundled sweater clothes on",
+        "vestir poner ponerse abrigo chaqueta nieve invierno ropa abrigada tapado jersey nieve",
     ],
     "attribute_age": [
         "age appear older younger aged elderly juvenile mature wrinkle wrinkle aged skin",
         "appear old aged elderly mature senior wrinkle lines aged skin texture",
         "piel arrugas envejecido mayor edad textura piel arrugas líneas",
         "parecer mayor joven envejecido textura piel arrugas",
+    ],
+    # v5.1127 — APARIENCIA FÍSICA (calvo/pelo/barba...). Sin esto 'the boy is
+    # bald' puntúa ~0 en TODOS los conceptos → mag floor 0.50 → klein EDIT
+    # copy-machine (log 12:11: no ejecutó + derivó identidad). Es un concepto
+    # de ancla (como las prendas en attribute_body), no un trigger de usuario.
+    # Cubre cambios de atributo físico facial/capilar, no edición de piel.
+    "attribute_appearance": [
+        "bald baldness shaved head no hair hairless scalp visible",
+        "calvo calvicie sin pelo cabeza rapada pelada cuero cabelludo",
+        "haircut hairstyle long hair short hair curly straight hair beard mustache shaved",
+        "corte de pelo peinado pelo largo pelo corto rizado liso barba bigote afeitado",
+        "facial features change new look different appearance makeover",
+        "cambiar rasgos faciales nuevo look apariencia diferente cambio de imagen",
     ],
     "attribute_skin": [
         "skin texture rough smooth flawless blemish freckle mole scar tattoo",
@@ -109,6 +139,7 @@ _AXIS_KEYS = {
         "attribute_body",
         "attribute_age",
         "attribute_skin",
+        "attribute_appearance",
     ],
 }
 
@@ -198,6 +229,24 @@ class _ConceptRouterMixin:
             return 0.0
         attr = c.get("attribute", 0.0)
         return min(1.0, body * 0.90 + attr * 0.10)
+
+    def get_body_direction(self, prompt: str) -> str:
+        """Dirección del cambio de ropa: uncover (quitar) / cover (vestir) / change.
+
+        Compara scores entre conceptos de dirección, sin mirar palabras del usuario.
+        Se usa para elegir el negative: solo se niegan prendas que tapen cuando el
+        pedido es quitar; si es vestir (nieve, abrigo...), el negative es neutro.
+        """
+        if not prompt or not prompt.strip():
+            return "change"
+        c = self.score_concepts(prompt)
+        un = c.get("attribute_uncover", 0.0)
+        co = c.get("attribute_cover", 0.0)
+        if un > co * 1.25 and un > 0.03:
+            return "uncover"
+        if co > un * 1.25 and co > 0.03:
+            return "cover"
+        return "change"
 
     def detect_target(self, prompt: str) -> str:
         if not prompt or not prompt.strip():

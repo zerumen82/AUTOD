@@ -36,7 +36,6 @@ skip_audio = None
 wait_after_extraction = None
 many_faces = None
 use_batch = None
-source_face_index = 0
 source_random = False
 target_face_index = 0
 face_position = None
@@ -75,9 +74,8 @@ use_color_matching = True  # REACTIVADO para tono de piel del origen
 # Balance entre parecido al origen y calidad de imagen
 
 # Factor de blending del enhancer (0-1)
-# 0 = sin enhancer, 1 = enhancer completo
-# 0.92 = máximo parecido source (GFPGAN mix ~8%) con nitidez
-enhancer_blend_factor = 0.92
+# Fracción conservada del swap: 0.70 = 70% identidad source + 30% GFPGAN.
+enhancer_blend_factor = 0.70
 
 # Ajuste de brillo (0-1)
 # 0.0 = sin sangrado de brillo del target
@@ -229,4 +227,3 @@ use_gender_filter = False
 
 # Aplicar configuración conservadora automáticamente
 apply_conservative_defaults()
-
