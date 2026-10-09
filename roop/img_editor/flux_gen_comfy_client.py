@@ -28,6 +28,10 @@ FLUX_GEN_REGISTRY: List[Tuple[str, str, str, int]] = [
     ("flux_dev_abliterated", "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf", "FLUX Abliterated (ultra realista)", -20),
     ("schnell", "flux1-schnell-Q4_K_S.gguf", "FLUX Schnell (rápido ~8 pasos)", -15),
     ("flux_dev_q4", "flux1-dev-Q4_K.gguf", "FLUX Dev Q4", -10),
+    # Motores que load() ya soporta vía flux_alias_map: se muestran también en la UI.
+    ("longcat", "LongCat-Image-Edit-Turbo-Q4_K_S.gguf", "LongCat Turbo (edición, rápido)", -6),
+    ("longcat_full", "LongCat-Image-Edit-Q4_K_S.gguf", "LongCat Full (edición, más calidad)", -5),
+    ("flux_q2", "flux1-dev-Q2_K.gguf", "FLUX Dev Q2 (ligero)", -4),
 ]
 
 GENERATION_ALIAS_FILES = {
@@ -182,17 +186,25 @@ def get_installed_generation_engines() -> List[Tuple[str, str]]:
     return [(label, alias) for _order, label, alias in engines]
 
 
-def get_default_generation_engine() -> str:
-    """Default: FLUX Abliterated si está instalado; si no, primer motor disponible."""
+def get_default_generation_engine() -> Optional[str]:
+    """Use the configured default when its model is installed."""
+    from roop.img_editor.gen_prompt_config import get_generate_ui_config
+
     engines = get_installed_generation_engines()
     aliases = [a for _l, a in engines]
-    if "flux_dev_abliterated" in aliases:
-        return "flux_dev_abliterated"
-    if "schnell" in aliases:
-        return "schnell"
-    if "pony_realism" in aliases:
-        return "pony_realism"
-    return aliases[0] if aliases else "flux_dev_abliterated"
+    preferred = get_generate_ui_config().get("default_engine")
+    if preferred in aliases:
+        return preferred
+    config_path = os.path.join(get_project_root(), "config", "model_configs.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as stream:
+            model_configs = json.load(stream)
+    except (OSError, ValueError):
+        model_configs = {}
+    for alias in aliases:
+        if model_configs.get(alias, {}).get("explicit") is False:
+            return alias
+    return None
 
 
 @dataclass
@@ -203,6 +215,11 @@ class GenResult:
     modifier_suffix: str = ""
     lora_applied: str = ""
     time_taken: float = 0.0
+    extra_images: list = None
+
+    def __post_init__(self):
+        if self.extra_images is None:
+            self.extra_images = []
 
 class FluxGenComfyClient:
     """Cliente para generacion pura (txt2img) en ComfyUI usando FLUX/LongCat/SDXL"""
@@ -262,6 +279,7 @@ class FluxGenComfyClient:
         conf: Dict,
         prompt_en: str = "",
         image_type: str = "auto",
+        inject_nsfw: bool = True,
     ) -> Tuple[List[Tuple[str, float]], str, str]:
         """Apila LoRAs automáticamente según escena del prompt (sin UI)."""
         from roop.img_editor.gen_lora_resolver import resolve_scene_loras, format_lora_log
@@ -279,6 +297,7 @@ class FluxGenComfyClient:
 
         picks, boost = resolve_scene_loras(
             prompt_en, self._alias, base_strength=auto_strength, image_type=image_type,
+            include_nsfw=bool(inject_nsfw),
         )
         log = format_lora_log(picks) if picks else ""
         if picks:
@@ -437,6 +456,7 @@ class FluxGenComfyClient:
         prompt: str,
         prompt_modifiers: Dict = None,
         image_type: str = "auto",
+        inject_nsfw: bool = True,
     ) -> Tuple[str, Dict]:
         """Prepara prompt para GENERAR (puro txt2img).
         1) Traduce solo el texto del usuario.
@@ -484,19 +504,34 @@ class FluxGenComfyClient:
             if not modifiers.get("image_type"):
                 modifiers["image_type"] = image_type or "auto"
             from roop.img_editor.gen_prompt_modifiers import resolve_effective_image_type
+            from roop.img_editor.gen_semantic import (
+                prompt_requests_nonphotoreal_style,
+                score_style_gate,
+            )
+            # Gate de estilo: el prompt manda sobre los desplegables.
+            style_requested = prompt_requests_nonphotoreal_style(translated)
+            if style_requested:
+                style_score = score_style_gate(translated)
+                print(f"[GenFlux] Estilo no fotorreal pedido (score={style_score:.2f}) → sin añadidos fotorreales")
             effective_type = resolve_effective_image_type(
                 modifiers.get("image_type", "auto") or "auto",
                 self._alias,
                 self._model_configs,
             )
+            if style_requested:
+                effective_type = "auto"
             final_prompt, suffix, image_type = assemble_generation_prompt(
                 self._alias,
                 translated,
                 modifiers,
                 self._model_configs,
                 is_sdxl=self._is_sdxl,
+                inject_nsfw=bool(inject_nsfw),
+                style_override=style_requested,
             )
             image_type = effective_type
+            if not inject_nsfw:
+                print("[GenFlux] Contenido NSFW OFF: sin prefijo adulto, sin anti-censor ni LoRA adulta")
 
             if self._is_longcat:
                 final_prompt = f"Instruction: {final_prompt}"
@@ -512,14 +547,18 @@ class FluxGenComfyClient:
                 self._alias, neg, modifiers, self._model_configs,
                 prompt_en=translated,
                 is_sdxl=self._is_sdxl,
+                inject_nsfw=bool(inject_nsfw),
+                style_override=style_requested,
             )
             from roop.img_editor.gen_prompt_modifiers import _model_explicit
-            is_explicit = _model_explicit(self._alias, self._model_configs) or bool(conf.get("explicit"))
+            is_explicit = (_model_explicit(self._alias, self._model_configs) or bool(conf.get("explicit"))) and bool(inject_nsfw)
 
             p = {
                 "steps": steps, "cfg": cfg, "neg": neg,
                 "translated": translated, "suffix": suffix, "adult": adult_intent,
                 "effective_image_type": image_type,
+                "style_override": style_requested,
+                "inject_nsfw": bool(inject_nsfw),
             }
 
             print(f"[GenFlux] [Smart] modelo={self._alias} steps={steps} cfg={cfg} sampler={sampler_name} scheduler={scheduler} tipo={image_type} explicit={is_explicit}")
@@ -571,7 +610,11 @@ class FluxGenComfyClient:
         modifier_suffix: str = "",
         image_type: str = "auto",
         prompt_modifiers: Dict = None,
+        init_image: Image.Image = None,
+        img2img_denoise: float = None,
+        enhance_tier: str = None,
         progress_callback=None,
+        inject_nsfw: bool = True,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
@@ -579,11 +622,19 @@ class FluxGenComfyClient:
         if not self.is_available(): return None, "ComfyUI no disponible"
         if not self._loaded: self.load()
 
-        path_type = "PURE T2I (recomendado para GENERAR sin foto)" if not self._is_longcat else "EDIT (LongCat - mejor con foto de referencia)"
+        if init_image is not None:
+            path_type = "IMG2IMG con imagen de referencia"
+        else:
+            path_type = "PURE T2I (recomendado para GENERAR sin foto)" if not self._is_longcat else "EDIT (LongCat - mejor con foto de referencia)"
         print(f"[GenFlux] Usando path: {path_type} para {self._flux_version} (ultra realista SIN CENSURA, ligero para 8GB - usa 'schnell' para velocidad)")
 
         start = time.time()
         w, h = (width // 64) * 64, (height // 64) * 64
+        try:
+            samples = int(kwargs.get("batch_size") or 1)
+        except (TypeError, ValueError):
+            samples = 1
+        samples = max(1, min(samples, 4))
 
         def _report(phase: str, detail: str = "", pct: float = 0):
             if progress_callback:
@@ -598,6 +649,38 @@ class FluxGenComfyClient:
                 })
 
         conf = self._get_model_conf()
+
+        # 0. Imagen de referencia (img2img): se sube a la entrada de ComfyUI
+        # y sustituye al EmptyLatent por VAEEncode de la foto.
+        ref_name = None
+        img_denoise = None
+        if init_image is not None:
+            try:
+                ref_img = init_image.convert("RGB")
+                if ref_img.size != (w, h):
+                    ref_img = ref_img.resize((w, h), Image.LANCZOS)
+                ref_name = f"gen_ref_{int(start)}.png"
+                buf = io.BytesIO()
+                ref_img.save(buf, "PNG")
+                buf.seek(0)
+                _report("Subiendo imagen de referencia", f"{w}×{h}", pct=1)
+                r = requests.post(
+                    f"{comfy_url}/upload/image",
+                    files={"image": (ref_name, buf, "image/png")},
+                    timeout=60,
+                )
+                if r.status_code != 200:
+                    return None, f"Error subiendo imagen de referencia: {r.status_code}"
+                img_denoise = float(img2img_denoise) if img2img_denoise is not None else float(conf.get("img2img_denoise", 0.65))
+                if not 0.0 < img_denoise <= 1.0:
+                    img_denoise = 0.65
+                if samples > 1:
+                    # VAEEncode produce un solo latente: con referencia la
+                    # corrida es siempre de una muestra.
+                    print("[GenFlux] Con imagen de referencia las muestras se fijan en 1")
+                    samples = 1
+            except Exception as e:
+                return None, f"Error preparando imagen de referencia: {e}"
 
         # 1. Resolución de Prompt, Parámetros y Negativo
         _report("Preparando prompt", f"Modelo: {self._alias}")
@@ -614,6 +697,7 @@ class FluxGenComfyClient:
                 prompt,
                 prompt_modifiers=mods,
                 image_type=image_type,
+                inject_nsfw=bool(inject_nsfw),
             )
             actual_steps = ai_params["steps"]
             actual_cfg = ai_params["cfg"]
@@ -632,6 +716,12 @@ class FluxGenComfyClient:
                 current_neg = f"{neg_conf}, {negative_prompt}" if negative_prompt else neg_conf
 
         prompt_for_loras = user_translated or final_prompt or prompt
+        # Overrides explícitos de la UI: mandan sobre lo que salga de config.
+        if steps is not None:
+            actual_steps = max(1, int(steps))
+        if guidance_scale is not None:
+            actual_cfg = float(guidance_scale)
+
         effective_lora_type = "auto"
         if use_ai and not _skip_rewrite:
             effective_lora_type = ai_params.get("effective_image_type", "auto")
@@ -645,6 +735,7 @@ class FluxGenComfyClient:
         lora_stack, lora_boost, lora_log = self._resolve_lora_stack(
             lora_name, lora_strength, conf, prompt_en=prompt_for_loras,
             image_type=effective_lora_type,
+            inject_nsfw=bool(inject_nsfw),
         )
         if lora_boost and lora_boost.strip():
             final_prompt = f"{final_prompt}, {lora_boost}"
@@ -663,7 +754,8 @@ class FluxGenComfyClient:
                     guidance_scale=actual_cfg,
                     seed=seed,
                     width=w,
-                    height=h
+                    height=h,
+                    source_image=init_image,
                 )
                 if res:
                     return res, msg
@@ -673,9 +765,17 @@ class FluxGenComfyClient:
 
         if self._is_sdxl:
             wf = {
-                "1": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
                 "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": self._flux_version}},
             }
+            if ref_name:
+                wf["1"] = {"class_type": "LoadImage", "inputs": {"image": ref_name, "upload": "image"}}
+                wf["11"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["2", 2]}}
+                latent_ref = ["11", 0]
+                ks_denoise = img_denoise
+            else:
+                wf["1"] = {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": samples}}
+                latent_ref = ["1", 0]
+                ks_denoise = 1.0
             
             last_model = ["2", 0]
             last_clip = ["2", 1]
@@ -688,13 +788,15 @@ class FluxGenComfyClient:
                 "class_type": "KSampler",
                 "inputs": {
                     "model": last_model, "positive": ["6", 0], "negative": ["7", 0],
-                    "latent_image": ["1", 0], "seed": seed or int(time.time()) % 1000000,
+                    "latent_image": latent_ref, "seed": seed or int(time.time()) % 1000000,
                     "steps": actual_steps, "cfg": actual_cfg,
-                    "sampler_name": sampler_name, "scheduler": scheduler, "denoise": 1.0
+                    "sampler_name": sampler_name, "scheduler": scheduler, "denoise": ks_denoise
                 }
             }
             wf["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["2", 2]}}
-            wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "GenSDXL"}}
+            # Prefijo único por corrida: con parámetros idénticos ComfyUI
+            # cachea SaveImage y deja history SIN outputs (run sin imagen).
+            wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": f"GenSDXL_{int(start)}"}}
         else:
             # Workflow FLUX / LongCat  -- PURE T2I for Generate tab
             unet_loader_class = "UNETLoader" if self._flux_version.endswith(".safetensors") else "UnetLoaderGGUF"
@@ -703,7 +805,7 @@ class FluxGenComfyClient:
                 unet_inputs["weight_dtype"] = "default"
 
             wf = {
-                "1": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+                "1": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": samples}},
                 "2": {"class_type": unet_loader_class, "inputs": unet_inputs},
                 "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
             }
@@ -721,7 +823,12 @@ class FluxGenComfyClient:
                     last_model, last_clip = self._chain_lora_loaders(wf, last_model, last_clip, lora_stack)
 
                 # Use a neutral gray image instead of pure black for slightly better behavior in pure gen
-                wf["13"] = {"class_type": "EmptyImage", "inputs": {"width": w, "height": h, "batch_size": 1, "color": 128}}
+                if ref_name:
+                    # LongCat es un modelo de edición: la foto real pasa a ser la
+                    # referencia de TextEncodeQwenImageEditPlus (image1).
+                    wf["13"] = {"class_type": "LoadImage", "inputs": {"image": ref_name, "upload": "image"}}
+                else:
+                    wf["13"] = {"class_type": "EmptyImage", "inputs": {"width": w, "height": h, "batch_size": 1, "color": 128}}
                 # Note: for LongCat in Generate we still have to use the edit encoder path because of embedding dimensions.
                 # For maximum instruction following use the recommended standard FLUX model.
                 wf["6"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"clip": last_clip, "prompt": final_prompt, "vae": ["4", 0], "image1": ["13", 0]}}
@@ -754,7 +861,18 @@ class FluxGenComfyClient:
                 ksampler_cfg = actual_cfg
 
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": current_neg, "clip": last_clip}}
-            
+
+            # img2img: con referencia, el latente sale de la foto (VAEEncode).
+            # LongCat conserva EmptyLatent: allí la foto entra como referencia de
+            # edición (image1) y el modelo la reinterpreta a denoise 1.0.
+            latent_ref = ["1", 0]
+            ks_denoise = 1.0
+            if ref_name and not self._is_longcat:
+                wf["1"] = {"class_type": "LoadImage", "inputs": {"image": ref_name, "upload": "image"}}
+                wf["15"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["4", 0]}}
+                latent_ref = ["15", 0]
+                ks_denoise = img_denoise
+
             model_node = last_model
             if self._is_longcat_turbo:
                 wf["17"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": last_model, "shift": 3.1}}
@@ -763,13 +881,15 @@ class FluxGenComfyClient:
                 "class_type": "KSampler",
                 "inputs": {
                     "model": model_node, "positive": positive_input, "negative": ["7", 0],
-                    "latent_image": ["1", 0], "seed": seed or int(time.time()) % 1000000,
+                    "latent_image": latent_ref, "seed": seed or int(time.time()) % 1000000,
                     "steps": actual_steps, "cfg": ksampler_cfg,
-                    "sampler_name": sampler_name, "scheduler": scheduler, "denoise": 1.0
+                    "sampler_name": sampler_name, "scheduler": scheduler, "denoise": ks_denoise
                 }
             }
             wf["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["4", 0]}}
-            wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "GenFlux"}}
+            # Prefijo único por corrida: con parámetros idénticos ComfyUI
+            # cachea SaveImage y deja history SIN outputs (run sin imagen).
+            wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": f"GenFlux_{int(start)}"}}
 
 
         try:
@@ -796,38 +916,60 @@ class FluxGenComfyClient:
             if not img_meta:
                 return None, wait_msg
 
-            res = requests.get(
-                f"{comfy_url}/view?filename={img_meta['filename']}"
-                f"&subfolder={img_meta.get('subfolder', '')}"
-                f"&type={img_meta.get('type', 'output')}",
-                timeout=60,
-            )
-            out_img = Image.open(io.BytesIO(res.content)).convert("RGB")
+            def _download(meta):
+                r = requests.get(
+                    f"{comfy_url}/view?filename={meta['filename']}"
+                    f"&subfolder={meta.get('subfolder', '')}"
+                    f"&type={meta.get('type', 'output')}",
+                    timeout=60,
+                )
+                return Image.open(io.BytesIO(r.content)).convert("RGB")
+
+            metas = [img_meta]
+            if samples > 1:
+                try:
+                    hist = requests.get(f"{comfy_url}/history/{pid}", timeout=15)
+                    if hist.status_code == 200:
+                        for out in (hist.json().get(pid, {}).get("outputs") or {}).values():
+                            for m in out.get("images") or []:
+                                if m not in metas:
+                                    metas.append(m)
+                        metas = metas[:samples]
+                except Exception as e:
+                    print(f"[GenFlux] No se pudieron recuperar las {samples} muestras: {e}")
+
+            tier = (enhance_tier or "hd").lower()
             enhance_quality = bool(kwargs.get("enhance_quality", False))
             fast_finish = not self._is_sdxl and not enhance_quality
-            try:
-                from roop.img_editor.hyperreal_polish import polish_result_image
-                out_img, polish_note, _ = polish_result_image(
-                    out_img, tier="hd", fast=fast_finish,
-                )
-                if polish_note and "omitido" not in polish_note:
-                    print(f"[GenFlux] Post-acabado: {polish_note}")
-            except Exception as e:
-                print(f"[GenFlux] Post-acabado omitido: {e}")
-            if enhance_quality:
+            images = []
+            for idx, meta in enumerate(metas):
+                out_img = _download(meta)
                 try:
-                    from roop.img_editor.image_quality_pipeline import get_quality_finisher
-                    finisher = get_quality_finisher()
-                    _report("ESRGAN x2 full-frame", "textura", pct=96)
-                    out_img, esr_note = finisher.esrgan_x2_fullframe_blend(
-                        out_img, tier="hd", blend=0.26,
+                    from roop.img_editor.hyperreal_polish import polish_result_image
+                    out_img, polish_note, _ = polish_result_image(
+                        out_img, tier=tier, fast=fast_finish,
                     )
-                    if esr_note:
-                        print(f"[GenFlux] {esr_note}")
+                    if polish_note and "omitido" not in polish_note:
+                        print(f"[GenFlux] Post-acabado ({idx + 1}/{len(metas)}): {polish_note}")
                 except Exception as e:
-                    print(f"[GenFlux] ESRGAN post-gen omitido: {e}")
+                    print(f"[GenFlux] Post-acabado omitido: {e}")
+                if enhance_quality:
+                    try:
+                        from roop.img_editor.image_quality_pipeline import get_quality_finisher
+                        finisher = get_quality_finisher()
+                        _report("ESRGAN x2 full-frame", "textura", pct=96)
+                        out_img, esr_note = finisher.esrgan_x2_fullframe_blend(
+                            out_img, tier=tier, blend=0.26,
+                        )
+                        if esr_note:
+                            print(f"[GenFlux] {esr_note}")
+                    except Exception as e:
+                        print(f"[GenFlux] ESRGAN post-gen omitido: {e}")
+                images.append(out_img)
+            out_img = images[0]
             return GenResult(
                 image=out_img,
+                extra_images=images[1:],
                 final_prompt=final_prompt,
                 user_translated=user_translated,
                 modifier_suffix=mod_suffix_used,

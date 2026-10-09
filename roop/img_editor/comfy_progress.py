@@ -9,6 +9,58 @@ import requests
 
 ProgressCallback = Callable[[Dict[str, Any]], None]
 
+_HIST_CACHE: Dict[str, Any] = {"ts": 0.0, "mean": 0.0}
+
+
+def history_mean_seconds(base_url: str, prefix: str = "Gen", ttl: float = 60.0) -> float:
+    """Duración media (mediana) de corridas previas de Generate.
+
+    Este ComfyUI no expone /progress, así que el ETA se deriva de /history:
+    se promedian las duraciones execution_start → execution_success de las
+    corridas cuyas salidas llevan el filename_prefix de Generate.
+    """
+    now = time.time()
+    if now - float(_HIST_CACHE.get("ts") or 0) < ttl:
+        return float(_HIST_CACHE.get("mean") or 0.0)
+    mean = 0.0
+    try:
+        r = requests.get(f"{base_url}/history", timeout=10)
+        if r.status_code == 200:
+            durs = []
+            for entry in r.json().values():
+                outputs = entry.get("outputs") or {}
+                if not any(
+                    str(img.get("filename", "")).startswith(prefix)
+                    for out in outputs.values()
+                    for img in (out.get("images") or [])
+                ):
+                    continue
+                start = end = None
+                for mtype, data in (entry.get("status") or {}).get("messages") or []:
+                    try:
+                        ts = float((data or {}).get("timestamp") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if ts > 1e12:
+                        ts /= 1000.0
+                    if mtype == "execution_start":
+                        start = ts
+                    elif mtype == "execution_success" and ts:
+                        end = ts
+                if start and end and end > start:
+                    durs.append(end - start)
+            if durs:
+                durs.sort()
+                mean = durs[len(durs) // 2]
+    except Exception:
+        mean = 0.0
+    # Solo se cachea un valor válido: con la cola recién iniciada no hay
+    # corridas previas y un 0 cacheado bloquearía el ETA durante el TTL.
+    if mean > 0:
+        _HIST_CACHE["ts"] = now
+        _HIST_CACHE["mean"] = mean
+    return mean
+
 
 def format_duration(seconds: float) -> str:
     if seconds is None or seconds < 0:
@@ -40,6 +92,14 @@ def check_comfy_progress(base_url: str, prompt_id: str, timeout: float = 10) -> 
         h = requests.get(f"{base_url}/history/{prompt_id}", timeout=timeout)
         if h.status_code == 200 and prompt_id in h.json():
             return {"done": True}
+        # Sin /progress, /queue dice si la tarea sigue en cola o corriendo.
+        q = requests.get(f"{base_url}/queue", timeout=timeout)
+        if q.status_code == 200:
+            data = q.json()
+            if any(item[1] == prompt_id for item in data.get("queue_running") or []):
+                return {"running": True, "progress": 0.0, "step": 0, "total": 0, "eta": 0}
+            if any(item[1] == prompt_id for item in data.get("queue_pending") or []):
+                return {"running": True, "progress": 0.0, "step": 0, "total": 0, "eta": 0, "queued": True}
     except Exception:
         pass
     return None
@@ -48,6 +108,8 @@ def check_comfy_progress(base_url: str, prompt_id: str, timeout: float = 10) -> 
 def _infer_phase(prog: Dict[str, Any], elapsed: float, steps_hint: int) -> str:
     if prog.get("done"):
         return "Completado"
+    if prog.get("queued"):
+        return "En cola ComfyUI"
     step = int(prog.get("step") or 0)
     total = int(prog.get("total") or 0) or steps_hint
     pct = float(prog.get("progress") or 0) * 100
@@ -139,6 +201,12 @@ def wait_for_comfy_image(
             prog["progress"] = 1.0
             prog["phase"] = "Completado"
         else:
+            # ETA histórico: /progress no existe en este ComfyUI, se estima
+            # con la duración media de corridas previas de Generate.
+            if not prog.get("queued"):
+                mean = history_mean_seconds(base_url)
+                if mean > 0:
+                    prog["eta"] = max(mean - elapsed, 0.0)
             prog["phase"] = _infer_phase(prog, elapsed, steps_hint)
             prog["elapsed"] = elapsed
 

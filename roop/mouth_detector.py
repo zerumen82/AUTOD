@@ -12,9 +12,8 @@ Mejora precisión de 70% a 95% comparado con 5 keypoints.
 
 import cv2
 import numpy as np
-import mediapipe as mp
 from typing import Tuple, Optional, Dict
-import roop.globals
+import roop.globals  # noqa: F401 -- retain configuration initialization on import
 
 
 class MouthDetector:
@@ -24,12 +23,12 @@ class MouthDetector:
     
     # Indices de landmarks para boca (MediaPipe Face Mesh)
     # Labio superior
-    UPPER_LIP_TOP = 13  # Punto más alto del labio superior
-    UPPER_LIP_BOTTOM = 14  # Punto más bajo del labio superior
+    UPPER_LIP_TOP = 0  # Centro del contorno superior externo
+    UPPER_LIP_BOTTOM = 13  # Centro del contorno superior interno
     
     # Labio inferior
-    LOWER_LIP_TOP = 17  # Punto más alto del labio inferior
-    LOWER_LIP_BOTTOM = 18  # Punto más bajo del labio inferior
+    LOWER_LIP_TOP = 14  # Centro del contorno inferior interno
+    LOWER_LIP_BOTTOM = 17  # Centro del contorno inferior externo
     
     # Comisuras de la boca
     MOUTH_LEFT = 61  # Comisura izquierda
@@ -102,7 +101,13 @@ class MouthDetector:
             height, width = image.shape[:2]
             
             # Extraer puntos de boca (incluyendo puntos intermedios para mejor forma)
-            mouth_indices = [0, 13, 14, 17, 18, 37, 84, 61, 267, 291, 314]
+            mouth_indices = [
+                self.UPPER_LIP_TOP, self.UPPER_LIP_BOTTOM,
+                self.LOWER_LIP_TOP, self.LOWER_LIP_BOTTOM,
+                self.UPPER_LIP_LEFT_CURVE, self.LOWER_LIP_LEFT_CURVE,
+                self.MOUTH_LEFT, self.UPPER_LIP_RIGHT_CURVE,
+                self.MOUTH_RIGHT, self.LOWER_LIP_RIGHT_CURVE,
+            ]
             mouth_points = {}
             for idx in mouth_indices:
                 landmark = face_landmarks.landmark[idx]
@@ -113,14 +118,14 @@ class MouthDetector:
             
             # Calcular apertura de boca
             # Distancia vertical entre labio superior e inferior
-            upper_lip = mouth_points[14]  # Bottom del labio superior
-            lower_lip = mouth_points[17]  # Top del labio inferior
+            upper_lip = mouth_points[self.UPPER_LIP_BOTTOM]
+            lower_lip = mouth_points[self.LOWER_LIP_TOP]
             
             mouth_height = abs(lower_lip[1] - upper_lip[1])
             
             # Ancho de boca para normalizar
-            mouth_left = mouth_points[61]
-            mouth_right = mouth_points[291]
+            mouth_left = mouth_points[self.MOUTH_LEFT]
+            mouth_right = mouth_points[self.MOUTH_RIGHT]
             mouth_width = abs(mouth_right[0] - mouth_left[0])
             
             # v5.1100: Corrección de foreshortening de perfil — con la cabeza girada ~50°+
@@ -165,16 +170,16 @@ class MouthDetector:
             
             # Datos adicionales (con puntos intermedios para máscara más precisa)
             mouth_data = {
-                'upper_lip_top': mouth_points[13],
-                'upper_lip_bottom': mouth_points[14],
-                'lower_lip_top': mouth_points[17],
-                'lower_lip_bottom': mouth_points[18],
-                'mouth_left': mouth_points[61],
-                'mouth_right': mouth_points[291],
-                'upper_lip_left_curve': mouth_points[37],
-                'upper_lip_right_curve': mouth_points[267],
-                'lower_lip_left_curve': mouth_points[84],
-                'lower_lip_right_curve': mouth_points[314],
+                'upper_lip_top': mouth_points[self.UPPER_LIP_TOP],
+                'upper_lip_bottom': mouth_points[self.UPPER_LIP_BOTTOM],
+                'lower_lip_top': mouth_points[self.LOWER_LIP_TOP],
+                'lower_lip_bottom': mouth_points[self.LOWER_LIP_BOTTOM],
+                'mouth_left': mouth_points[self.MOUTH_LEFT],
+                'mouth_right': mouth_points[self.MOUTH_RIGHT],
+                'upper_lip_left_curve': mouth_points[self.UPPER_LIP_LEFT_CURVE],
+                'upper_lip_right_curve': mouth_points[self.UPPER_LIP_RIGHT_CURVE],
+                'lower_lip_left_curve': mouth_points[self.LOWER_LIP_LEFT_CURVE],
+                'lower_lip_right_curve': mouth_points[self.LOWER_LIP_RIGHT_CURVE],
                 'mouth_height': mouth_height,
                 'mouth_width': mouth_width,
                 'open_ratio': open_ratio,

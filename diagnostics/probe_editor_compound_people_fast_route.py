@@ -15,7 +15,7 @@ result, message, mask = get_img_editor_manager().generate_intelligent(
     enhance_faces=True, auto_upscale=False,
 )
 assert result is not None, message
-assert "un pase rápido" in message, message
+assert "cada cambio por separado" in message, message
 path = root / "diagnostics/editor_compound_people_fast_route.png"
 result.save(path)
 print(f"output={path} size={result.size} mask={mask is not None} message={message}")

@@ -84,37 +84,51 @@ class CLIPSegMasker:
             print(f"[CLIPSeg] Error inicializando: {e}")
             return False, str(e)
 
-    def generate_mask(self, image: Image.Image, prompt: str, threshold: float = 0.4) -> Optional[Image.Image]:
-        """
-        Genera una máscara binaria para el prompt dado.
-        """
+    @staticmethod
+    def _as_image(image) -> Image.Image:
+        """The segmenter resizes a PIL image. Callers also pass a float array."""
+        if isinstance(image, Image.Image):
+            return image
+        array = np.asarray(image)
+        if array.dtype != np.uint8:
+            array = np.clip(array, 0, 255).astype(np.uint8)
+        if array.ndim == 2:
+            return Image.fromarray(array, mode="L")
+        return Image.fromarray(array[..., :3], mode="RGB")
+
+    def probability(self, image: Image.Image, prompt: str) -> Optional[np.ndarray]:
+        """Mapa 0–1 del segmentador, del tamaño de la foto. Sin umbral binario."""
+        image = self._as_image(image)
         if not self._initialized:
-            ok, msg = self.initialize()
+            ok, _msg = self.initialize()
             if not ok:
                 return None
-
         try:
             from torchvision import transforms
 
-            # Preprocesar imagen
             transform = transforms.Compose([
                 transforms.Resize((352, 352)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
-
             img_tensor = transform(image).unsqueeze(0).to(self.device)
-
-            # Generar predicción
             with torch.no_grad():
                 preds = self.model(img_tensor, prompt)[0]
+            heat = torch.sigmoid(preds[0, 0]).cpu().numpy()
+            return cv2.resize(heat, (image.width, image.height))
+        except Exception as exc:
+            print(f"[CLIPSeg] Error midiendo '{prompt}': {exc}")
+            return None
 
-            # Post-procesar
-            mask = torch.sigmoid(preds[0, 0])
-            mask = mask.cpu().numpy()
-
-            # Reescalar a tamaño original
-            mask_img = cv2.resize(mask, (image.width, image.height))
+    def generate_mask(self, image: Image.Image, prompt: str, threshold: float = 0.4) -> Optional[Image.Image]:
+        """
+        Genera una máscara binaria para el prompt dado.
+        """
+        image = self._as_image(image)
+        try:
+            mask_img = self.probability(image, prompt)
+            if mask_img is None:
+                return None
 
             # Aplicar umbral
             binary_mask = (mask_img > threshold).astype(np.uint8) * 255
@@ -129,7 +143,7 @@ class CLIPSegMasker:
             if cov > 0.97:
                 print(f"[CLIPSeg] Máscara SATURADA para '{prompt}' (cobertura={cov:.2%}) — devuelvo None (inpaint inútil)")
                 return None
-            print(f"[CLIPSeg] Máscara OK para '{prompt}': cobertura={cov:.1%}")
+            print(f"[CLIPSeg] Máscara OK para '{prompt}': cobertura={cov:.1%}", flush=True)
 
             # Suavizar máscara (opcional pero recomendado para inpaint)
             binary_mask = cv2.GaussianBlur(binary_mask, (5, 5), 0)

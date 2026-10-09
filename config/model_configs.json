@@ -11,7 +11,10 @@
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, score_6, score_5, score_4, cartoon, anime, manga, comic, illustration, digital art, concept art, cel shaded, stylized, 3d render, cgi, painting, drawing, 2d, toon, plastic skin, doll, figurine, low quality, worst quality, deformed, disfigured, monochrome, exaggerated proportions, cartoon proportions, stylized anatomy, curvy exaggeration, thick body, barbie, waxy skin, airbrushed, over smooth, painterly, artistic render",
     "prefix": "score_9, score_8_up, score_7_up, source_photo, rating_explicit, ",
     "prefix_compact": "score_9, score_8_up, score_7_up, source_photo, rating_explicit, ",
-    "photoreal_tail": "photorealistic, raw photo, realistic, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy, natural proportions, gritty, candid, urban decay, sweaty skin, dslr, 8k, depth of field, real life photography, realistic proportions, no stylized, natural body"
+    "prefix_sfw": "score_9, score_8_up, score_7_up, source_photo, ",
+    "prefix_compact_sfw": "score_9, score_8_up, score_7_up, source_photo, ",
+    "photoreal_tail": "photorealistic, raw photo, realistic, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy, natural proportions, gritty, candid, urban decay, sweaty skin, dslr, 8k, depth of field, real life photography, realistic proportions, no stylized, natural body",
+    "img2img_denoise": 0.65
   },
   "juggernaut_xl": {
     "name": "Juggernaut XL Ragnarok",
@@ -25,12 +28,13 @@
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, comic, illustration, 3d render, cgi, low quality, deformed, disfigured",
     "prefix": "photorealistic, RAW photo, realistic, sharp focus, ",
     "prefix_compact": "photorealistic, RAW photo, realistic, sharp focus, ",
-    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy",
+    "img2img_denoise": 0.65
   },
   "cyberrealistic_pony": {
     "name": "CyberRealistic Pony v1.8",
     "explicit": true,
-    "nsfw_tags": "score_9, score_8_up, score_7_up, rating_explicit",
+    "nsfw_tags": "rating_explicit",
     "multi_subject": true,
     "steps": 28,
     "cfg": 5.5,
@@ -39,7 +43,10 @@
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, score_6, score_5, score_4, cartoon, anime, manga, comic, illustration, 3d render, cgi, low quality, deformed, disfigured",
     "prefix": "score_9, score_8_up, score_7_up, rating_explicit, ",
     "prefix_compact": "score_9, score_8_up, score_7_up, rating_explicit, ",
-    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy"
+    "prefix_sfw": "score_9, score_8_up, score_7_up, ",
+    "prefix_compact_sfw": "score_9, score_8_up, score_7_up, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy",
+    "img2img_denoise": 0.65
   },
   "realism_engine": {
     "name": "Realism Engine Reprise V4",
@@ -52,7 +59,8 @@
     "scheduler": "karras",
     "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, 3d render, low quality, deformed, disfigured",
     "prefix": "realistic, sharp focus, ",
-    "prefix_compact": ""
+    "prefix_compact": "",
+    "img2img_denoise": 0.65
   },
   "flux_dev_abliterated": {
     "name": "FLUX.1 Dev Abliterated",
@@ -63,9 +71,10 @@
     "cfg": 3.5,
     "sampler": "euler_ancestral",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed, censored, sfw, clothed, plastic skin, doll, airbrushed",
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed, plastic skin, doll, airbrushed",
     "prefix_compact": "photorealistic RAW photograph, ",
-    "photoreal_tail": "film grain, natural skin pores, realistic skin texture, sharp focus, natural lighting, realistic human anatomy, dslr, depth of field"
+    "photoreal_tail": "film grain, natural skin pores, realistic skin texture, sharp focus, natural lighting, realistic human anatomy, dslr, depth of field",
+    "img2img_denoise": 0.65
   },
   "schnell": {
     "name": "Flux Schnell Q4",
@@ -74,7 +83,8 @@
     "cfg": 1.0,
     "sampler": "euler",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed"
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
+    "img2img_denoise": 0.65
   },
   "flux_dev_q4": {
     "name": "Flux Dev Q4",
@@ -83,7 +93,8 @@
     "cfg": 3.5,
     "sampler": "euler_ancestral",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed"
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
+    "img2img_denoise": 0.65
   },
   "flux_q2": {
     "name": "FLUX.1 Dev Q2",
@@ -92,7 +103,8 @@
     "cfg": 3.5,
     "sampler": "euler_ancestral",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed"
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
+    "img2img_denoise": 0.65
   },
   "klein_base": {
     "name": "FLUX.2 Klein 4B Q4",
@@ -101,7 +113,8 @@
     "cfg": 4.0,
     "sampler": "heun",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed"
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
+    "img2img_denoise": 0.65
   },
   "longcat": {
     "name": "LongCat Turbo",
@@ -110,7 +123,30 @@
     "cfg": 1.0,
     "sampler": "euler_ancestral",
     "scheduler": "simple",
-    "negative_prompt": "blurry, low quality, deformed"
+    "negative_prompt": "blurry, low quality, deformed",
+    "img2img_denoise": 0.65,
+    "appearance_edit": {
+      "denoise": 1.0,
+      "spatial_reference": true
+    },
+    "region_edit": {
+      "denoise": 1.0,
+      "spatial_reference": true
+    },
+    "region_proposal": {
+      "enabled": true,
+      "max_coverage": 0.90,
+      "model_path": "models/llm/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "context_size": 8192,
+      "gpu_layers": 0,
+      "ambiguous_translation": {
+        "enabled": true,
+        "max_tokens": 256,
+        "temperature": 0.0,
+        "repeat_penalty": 1.05,
+        "system_prompt": "Translate the image editing instruction into English. Preserve the exact requested action, all affected objects, and all location relationships. Preserve negation, exclusions and obligation: mandatory requirements must remain mandatory, not suggestions. In particular, Spanish debe or deben means must, not should. If it is already in English, repeat it unchanged. Return only the complete translated instruction. Do not interpret, simplify, or add anything."
+      }
+    }
   },
   "longcat_full": {
     "name": "LongCat Full",
@@ -119,7 +155,8 @@
     "cfg": 2.5,
     "sampler": "euler_ancestral",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed"
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
+    "img2img_denoise": 0.65
   },
   "default": {
     "explicit": false,
@@ -127,6 +164,18 @@
     "cfg": 3.5,
     "sampler": "euler_ancestral",
     "scheduler": "simple",
-    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated"
+    "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated",
+    "img2img_denoise": 0.65
+  },
+  "faceswap": {
+    "align_constrain_scale_dev": 0.35,
+    "align_constrain_crop_to_bbox_ratio": 1.5,
+    "align_constrain_translate_bbox_fraction": 0.75,
+    "source_verification_detector_sizes": [640],
+    "source_identity_similarity_threshold": 0.5,
+    "mouth_occlusion_ring_outer_kernel": 25,
+    "mouth_occlusion_ring_inner_kernel": 7,
+    "shaped_fallback": true,
+    "shaped_fallback_floor": 0.55
   }
 }

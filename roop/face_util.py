@@ -4,20 +4,19 @@
 
 # AGREGAR CARPETA DLL AL PATH AL INICIO - CRITICO PARA CUDA
 import os
-dll_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "dll"))
-os.environ["PATH"] = dll_path + ";" + os.environ.get("PATH", "")
-
 import logging
-import signal
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from typing import Any, List, Optional, Tuple
+from typing import List, Tuple
 import warnings
 
-import cv2
-import numpy as np
+dll_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "dll"))
+os.environ["PATH"] = dll_path + ";" + os.environ.get("PATH", "")
+
+import cv2  # noqa: E402 -- native DLL setup above
+import numpy as np  # noqa: E402 -- native DLL setup above
 
 # Suprimir warnings de asyncio
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="asyncio")
@@ -33,8 +32,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Importaciones basicas
-from roop.capturer import get_image_frame, get_video_frame
-from roop.utilities import convert_to_gradio
+from roop.capturer import get_image_frame, get_video_frame  # noqa: E402 -- native DLL setup above
+from roop.faceswap_config import get_faceswap_config  # noqa: E402 -- native DLL setup above
 
 # Variable global simple (sin inicializacion automatica)
 FACE_ANALYSER = None
@@ -114,9 +113,9 @@ def preprocess_image_for_detection(img: np.ndarray) -> np.ndarray:
     """Preprocesa una imagen de forma suave para mejorar la deteccion sin generar ruido"""
     try:
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
+        lightness, a, b = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)) 
-        l_enhanced = clahe.apply(l)
+        l_enhanced = clahe.apply(lightness)
         lab_enhanced = cv2.merge([l_enhanced, a, b])
         img_enhanced = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
         # Sharpening sutil
@@ -164,7 +163,6 @@ def _initialize_face_analyser_sync():
     try:
         print("[INFO] Inicializando FaceAnalysis...")
 
-        import roop.globals
         from insightface.app import FaceAnalysis
 
         models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
@@ -172,7 +170,7 @@ def _initialize_face_analyser_sync():
         try:
             import onnxruntime as ort
             use_cuda = 'CUDAExecutionProvider' in ort.get_available_providers()
-        except:
+        except BaseException:
             use_cuda = False
         ctx_id = 0 if use_cuda else -1
         
@@ -181,12 +179,20 @@ def _initialize_face_analyser_sync():
         analyser_instance = None
         try:
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if use_cuda else ['CPUExecutionProvider']
-            
+            # EXHAUSTIVE benchmarks every cuDNN kernel again each time the
+            # editor releases this session to free the 8 GB card. HEURISTIC
+            # picks a kernel without that search. The weights stay the same.
+            provider_options = (
+                [{"cudnn_conv_algo_search": "HEURISTIC"}, {}]
+                if use_cuda else None
+            )
+
             analyser_instance = FaceAnalysis(
                 name="buffalo_l",
                 root=models_dir,
                 download=True,
-                providers=providers
+                providers=providers,
+                provider_options=provider_options,
             )
             
             # Prepare con tamaño 1024x1024 para máxima calidad y detección de perfiles
@@ -196,7 +202,7 @@ def _initialize_face_analyser_sync():
                 det_thresh=0.1 # Muy permisivo para no perder ninguna cara
             )
             
-            print(f"[SUCCESS] FaceAnalysis listo (1024x1024, thresh=0.1)")
+            print("[SUCCESS] FaceAnalysis listo (1024x1024, thresh=0.1)")
             return analyser_instance
 
         except Exception as e:
@@ -477,6 +483,27 @@ def _is_face_complete(face, img_w, img_h):
         return True  # ante duda no bloquear (la geometría ya filtra)
 
 
+def _get_faces_at_detector_size(image_bgr, analyser, size):
+    """Run a configured detector scale without changing shared analyser state."""
+    from insightface.app.common import Face as InsightFace
+
+    size = int(size)
+    if size <= 0:
+        raise ValueError("Source verification detector size must be positive")
+    boxes, keypoints = analyser.det_model.detect(image_bgr, input_size=(size, size))
+    faces = []
+    for index, box in enumerate(boxes):
+        face = InsightFace(
+            bbox=box[:4], det_score=box[4],
+            kps=None if keypoints is None else keypoints[index],
+        )
+        for task, model in analyser.models.items():
+            if task != "detection":
+                model.get(image_bgr, face)
+        faces.append(face)
+    return faces
+
+
 def extract_face_images(
     image_path,
     options: tuple = (False, 0),
@@ -492,7 +519,7 @@ def extract_face_images(
     global FACE_ANALYSER, FACE_ANALYSER_CPU, CACHE_RESULTS, CACHE_DETECTIONS, USE_CPU_FALLBACK
     
     is_video, frame_index = options
-    image_id = f"{image_path}_{frame_index}" if is_video else str(image_path)
+    _image_id = f"{image_path}_{frame_index}" if is_video else str(image_path)
     
     # 1. Verificar cache de RESULTADOS COMPLETOS
     cache_key = get_cache_key(
@@ -508,8 +535,8 @@ def extract_face_images(
     if FACE_ANALYSER is None:
         FACE_ANALYSER = get_face_analyser()
         if FACE_ANALYSER is None:
-            print(f"[FACES] ❌ FaceAnalysis (CUDA) no disponible.")
-            print(f"[FACES]    Verifica que models/buffalo_l/ exista o que la descarga automatica funcione.")
+            print("[FACES] ❌ FaceAnalysis (CUDA) no disponible.")
+            print("[FACES]    Verifica que models/buffalo_l/ exista o que la descarga automatica funcione.")
             return []
     
     try:
@@ -537,6 +564,10 @@ def extract_face_images(
         # ============ SOURCE FACES: USAR TODA LA IMAGEN ============
         if is_source_face:
             h, w = img_rgb.shape[:2]
+            source_settings = get_faceswap_config()
+            source_identity_threshold = float(source_settings["source_identity_similarity_threshold"])
+            if not np.isfinite(source_identity_threshold) or not 0 < source_identity_threshold <= 1:
+                raise ValueError("Source identity similarity threshold must be in (0, 1]")
             print(f"[SOURCE_DETECT] Cargando cara de origen: {os.path.basename(str(image_path))} ({w}x{h})")
 
             def _run_detect(img_try, analyser, thresh):
@@ -574,7 +605,7 @@ def extract_face_images(
 
             # Padding controlado
             if not faces and w > 100 and h > 100:
-                print(f"[SOURCE_DETECT] No se detectó cara directamente. Intentando con padding...")
+                print("[SOURCE_DETECT] No se detectó cara directamente. Intentando con padding...")
                 pad_h, pad_w = h // 3, w // 3
                 img_padded = cv2.copyMakeBorder(
                     img_rgb, pad_h, pad_h, pad_w, pad_w, cv2.BORDER_CONSTANT, value=[127, 127, 127]
@@ -651,6 +682,25 @@ def extract_face_images(
                         print(f"[SOURCE_DETECT] Recuperadas {len(faces)} cara(s) con detector de primer plano")
                 except Exception as e:
                     print(f"[SOURCE_DETECT] Detector de primer plano omitido: {e}")
+
+            # Rotation deduplication can retain an incomplete or distorted
+            # candidate. Keep a direct, complete candidate at another scale
+            # before filtering; it still must pass the crop identity check.
+            if faces and not any(
+                _has_face_geometry(candidate, max_tilt=45.0)
+                and _is_face_complete(candidate, w, h)
+                for candidate in faces
+            ):
+                try:
+                    for detector_size in source_settings["source_verification_detector_sizes"]:
+                        direct_faces = _get_faces_at_detector_size(img, FACE_ANALYSER, detector_size)
+                        faces.extend(
+                            candidate for candidate in direct_faces
+                            if _has_face_geometry(candidate, max_tilt=45.0)
+                            and _is_face_complete(candidate, w, h)
+                        )
+                except Exception as scale_error:
+                    print(f"[SOURCE_DETECT] Escala directa omitida: {scale_error}")
 
             # Cuando una cara ocupa claramente el primer plano, las caras
             # minúsculas de fondo no pertenecen al retrato de origen.
@@ -784,11 +834,40 @@ def extract_face_images(
                                         if _nv > 0:
                                             _sim_v = float(np.dot(_emb_o, _ev / _nv))
                                             _best_sim_v = max(_best_sim_v, _sim_v)
-                                            if _sim_v >= 0.50:
+                                            if _sim_v >= source_identity_threshold:
                                                 _ok_v = True
                                                 break
                                     if _ok_v:
                                         break
+                        if not _ok_v and _emb_orig is not None:
+                            # The 1024 anchors can miss even a padded crop.
+                            # Confirm the same identity on that crop at the
+                            # configured scales, without rotated deduplication.
+                            try:
+                                for detector_size in source_settings["source_verification_detector_sizes"]:
+                                    for crop_image in (_crop_v, cv2.cvtColor(_crop_v, cv2.COLOR_BGR2RGB)):
+                                        _faces_v = _get_faces_at_detector_size(crop_image, FACE_ANALYSER, detector_size)
+                                        for verified_face in _faces_v:
+                                            if not _has_face_geometry(verified_face, max_tilt=45.0):
+                                                continue
+                                            verified_embedding = getattr(verified_face, 'embedding', None)
+                                            if verified_embedding is None:
+                                                continue
+                                            verified_embedding = np.asarray(verified_embedding, dtype=np.float32).reshape(-1)
+                                            verified_norm = np.linalg.norm(verified_embedding)
+                                            if verified_norm > 0 and verified_embedding.size == _emb_o.size:
+                                                verified_similarity = float(np.dot(_emb_o, verified_embedding / verified_norm))
+                                                _best_sim_v = max(_best_sim_v, verified_similarity)
+                                                if verified_similarity >= source_identity_threshold:
+                                                    _ok_v = True
+                                                    print(f"[SOURCE_DETECT] Crop confirma identidad a {detector_size}px (sim={verified_similarity:.3f})")
+                                                    break
+                                        if _ok_v:
+                                            break
+                                    if _ok_v:
+                                        break
+                            except Exception as scale_error:
+                                print(f"[SOURCE_DETECT] Verificación de escala omitida: {scale_error}")
                         if not _ok_v and _emb_orig is not None and not _faces_from_smart_fallback:
                             # A face can disappear when cropped even with
                             # padding (closeups and unusual expressions).
@@ -817,7 +896,7 @@ def extract_face_images(
                                     if _ea.size == _eo.size and _ea_norm > 0:
                                         _alt_sim = float(np.dot(_eo / _eo_norm, _ea / _ea_norm))
                                         _best_sim_v = max(_best_sim_v, _alt_sim)
-                                        if _alt_sim >= 0.50:
+                                        if _alt_sim >= source_identity_threshold:
                                             _ok_v = True
                                             print(
                                                 f"[SOURCE_DETECT] Segunda escala confirma cara "
@@ -825,20 +904,6 @@ def extract_face_images(
                                                 flush=True,
                                             )
                                             break
-                        # Una cara de primer plano inclinada puede dejar de
-                        # detectarse al recortarla y reducirla. Si ya pasó
-                        # geometría/completitud y tiene confianza y tamaño
-                        # altos, el crop fallido no invalida esa detección.
-                        _area_ratio_v = (_fw_v * _fh_v) / float(max(1, w * h))
-                        if (not _ok_v and _faces_from_smart_fallback
-                                and _area_ratio_v >= 0.10
-                                and float(getattr(_f, 'det_score', 0.0) or 0.0) >= 0.75):
-                            _ok_v = True
-                            print(
-                                f"[SOURCE_DETECT] Primer plano confirmado por geometría, "
-                                f"tamaño {_area_ratio_v:.1%} y det={det:.2f}",
-                                flush=True,
-                            )
                         if _ok_v:
                             _verified.append(_f)
                         else:
@@ -878,7 +943,7 @@ def extract_face_images(
                     face_embedding = getattr(face_data_full, 'embedding', None)
                     
                     if face_embedding is None:
-                        print(f"[SOURCE_DETECT] ⚠️ Cara detectada pero SIN EMBEDDING. Intentando recuperación agresiva...")
+                        print("[SOURCE_DETECT] ⚠️ Cara detectada pero SIN EMBEDDING. Intentando recuperación agresiva...")
                         # Extraer el crop de la cara
                         x1, y1, x2, y2 = np.asarray(face_data_full.bbox, dtype=np.int32)
                         # Clamping
@@ -925,11 +990,12 @@ def extract_face_images(
                                             )
                                         except Exception:
                                             face_data_full = _rp
-                                        print(f"[SOURCE_DETECT] ✅ Embedding recuperado con padding")
+                                        print("[SOURCE_DETECT] ✅ Embedding recuperado con padding")
                                         face_embedding = face_data_full.embedding
                                     else:
-                                        print(f"[SOURCE_DETECT] ❌ Recuperado con padding sin geometría — se descarta")
-                            except: pass
+                                        print("[SOURCE_DETECT] ❌ Recuperado con padding sin geometría — se descarta")
+                            except BaseException:
+                                pass
 
                         # Intento 2: Sharpening + Brightness
                         if face_embedding is None and face_crop.size > 0:
@@ -962,21 +1028,23 @@ def extract_face_images(
                                             )
                                         except Exception:
                                             face_data_full = _re
-                                        print(f"[SOURCE_DETECT] ✅ Embedding recuperado con preprocesamiento")
+                                        print("[SOURCE_DETECT] ✅ Embedding recuperado con preprocesamiento")
                                         face_embedding = face_data_full.embedding
                                     else:
-                                        print(f"[SOURCE_DETECT] ❌ Recuperado con preproceso sin geometría — se descarta")
-                            except: pass
+                                        print("[SOURCE_DETECT] ❌ Recuperado con preproceso sin geometría — se descarta")
+                            except BaseException:
+                                pass
 
                     if face_embedding is None:
                         # Si no hay embedding tras todo esto, omitimos esta cara
-                        print(f"[SOURCE_DETECT] ❌ Falló extracción de embedding para una cara. Omitiendo.")
+                        print("[SOURCE_DETECT] ❌ Falló extracción de embedding para una cara. Omitiendo.")
                         continue
 
                     normed_emb = None
                     emb = np.array(face_embedding)
                     n = np.linalg.norm(emb)
-                    if n > 0: normed_emb = emb / n
+                    if n > 0:
+                        normed_emb = emb / n
 
                     face_obj = Face(
                         bbox=np.asarray(face_data_full.bbox, dtype=np.int32).tolist(),
@@ -1175,7 +1243,7 @@ def extract_face_images(
                 
                 results.append([face_obj, face_img])
                 
-            except Exception as e:
+            except Exception:
                 continue
         
         if len(results) > 0:
@@ -1184,6 +1252,6 @@ def extract_face_images(
         return results
     
 
-    except Exception as e:
+    except Exception:
         _cache_put(CACHE_RESULTS, cache_key, [])
         return []

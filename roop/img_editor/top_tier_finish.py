@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 
-def _edge_mask_from_image(img: Image.Image, edge_thresh: float = 28.0, dilate_px: int = 3) -> Optional[np.ndarray]:
+def _edge_mask_from_image(img: Image.Image, edge_thresh: float = 28.0, dilate_px: int = 2) -> Optional[np.ndarray]:
     """v5.1134 — mapa de BORDES del sujeto (gradiente Sobel sobre luminancia).
     Devuelve máscara float 0..1 (1 = borde fuerte, con dilatación) o None si cv2 no está."""
     try:
@@ -336,7 +336,14 @@ def _classical_finish_strengths(
     gentle = sharp and at_size
 
     if gentle:
-        dep, color, light, sharpen = 0.12, 0.14, 0.12, 1.06
+        if after_edit:
+            dep, color, light, sharpen = 0.12, 0.14, 0.12, 1.06
+        else:
+            # At full resolution the previous strengths often rounded back
+            # to the input pixels, so Quality appeared to do nothing. Give a
+            # clean photo a visible but restrained tonal/detail finish without
+            # increasing bilateral smoothing or inventing texture.
+            dep, color, light, sharpen = 0.12, 0.28, 0.17, 1.09
     elif sharp:
         dep, color, light, sharpen = 0.14, 0.16, 0.16, 1.08
     else:

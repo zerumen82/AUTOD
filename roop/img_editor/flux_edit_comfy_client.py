@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, json, time, requests, io
+import os
+import json
+import time
+import requests
+import io
 import numpy as np
 from typing import Optional, Tuple
 from PIL import Image
@@ -14,6 +18,80 @@ def get_project_root():
 
 def get_models_base():
     return os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
+
+
+# A measured hole at strength 1 is empty noise. On the hair mask that noise
+# became a second head (FastEdit_00841_). Refining an inpaint of the hole at
+# this strength left the previous surface as a shadow (edit_1790869075.png).
+# Region edits that insert a new face can still use it.
+SURFACE_CONTINUATION_DENOISE = 0.60
+
+
+def _appearance_sampling_config(recipe_key="appearance_edit"):
+    path = os.path.join(get_project_root(), "config", "model_configs.json")
+    with open(path, encoding="utf-8") as stream:
+        model = json.load(stream)["longcat"]
+    appearance = model[recipe_key]
+    steps = int(model["steps"])
+    denoise = float(appearance["denoise"])
+    spatial_reference = appearance["spatial_reference"]
+    if steps < 1 or not 0.0 < denoise <= 1.0 or not isinstance(spatial_reference, bool):
+        raise ValueError("Invalid LongCat appearance sampling configuration")
+    return steps, denoise, spatial_reference
+
+
+APPEARANCE_SAMPLE_STEPS, APPEARANCE_SAMPLE_DENOISE, APPEARANCE_SPATIAL_REFERENCE = _appearance_sampling_config()
+REGION_SAMPLE_STEPS, REGION_SAMPLE_DENOISE, REGION_SPATIAL_REFERENCE = _appearance_sampling_config("region_edit")
+
+
+def measured_appearance_sample(has_mask: bool) -> dict:
+    """One LongCat pass for a measured appearance or surface region.
+
+    A measured region uses the configured native schedule and the original
+    spatial reference. Full-strength noise without that reference added a
+    head or hand in real edits. The measured mask still limits the change.
+    """
+    if has_mask:
+        return {
+            "num_inference_steps": APPEARANCE_SAMPLE_STEPS,
+            "denoise": APPEARANCE_SAMPLE_DENOISE,
+            "step_cap": APPEARANCE_SAMPLE_STEPS,
+            "no_kontext": not APPEARANCE_SPATIAL_REFERENCE,
+        }
+    return {"num_inference_steps": 12, "denoise": 1.0, "no_kontext": True}
+
+
+def measured_region_sample(has_mask: bool) -> dict:
+    """Use the configured native recipe only for an actually measured region."""
+    if has_mask:
+        return {
+            "num_inference_steps": REGION_SAMPLE_STEPS,
+            "denoise": REGION_SAMPLE_DENOISE,
+            "step_cap": REGION_SAMPLE_STEPS,
+            "no_kontext": not REGION_SPATIAL_REFERENCE,
+        }
+    return measured_appearance_sample(False)
+
+
+def longcat_turbo_denoise(preserve_frame, has_mask, keep_source_pixels, requested=1.0, prompt_authority=False):
+    """Strength for LongCat Turbo.
+
+    A measured region that keeps the photo pixels uses the requested strength.
+    Region edits request 1.0. A measured appearance edit requests
+    APPEARANCE_SAMPLE_DENOISE. A continuation of the surrounding surface
+    passes SURFACE_CONTINUATION_DENOISE: strength 1 painted a new person into
+    the hole, and 0.85 left the previous pixels (edit_1790790024.png). Body
+    edits with prompt authority run without a mask, or with the measured
+    subject mask keeping the photo pixels, at the requested strength; other
+    unmasked preservation uses 0.55.
+    """
+    if prompt_authority and not has_mask:
+        return requested
+    if preserve_frame and not has_mask:
+        return 0.55
+    if preserve_frame and has_mask and not keep_source_pixels:
+        return 0.85
+    return requested
 
 
 def _server_vram_free_mb(comfy_url):
@@ -75,7 +153,7 @@ class FluxEditComfyClient:
         try:
             r = requests.get(f"{get_comfyui_url()}/system_stats", timeout=5)
             return r.status_code == 200
-        except:
+        except Exception:
             return False
 
     def _model_exists(self, subdir: str, name: str) -> bool:
@@ -316,6 +394,7 @@ class FluxEditComfyClient:
         grow_mask_by: int = 4,
         no_kontext: bool = False,
         drop_edit_image_ref: bool = False,
+        prompt_authority: bool = False,
         **kwargs
     ) -> Tuple[Optional[GenResult], str]:
 
@@ -325,6 +404,13 @@ class FluxEditComfyClient:
         # También aceptado vía kwargs por llamadas genéricas del manager
         drop_edit_image_ref = bool(drop_edit_image_ref or kwargs.get("drop_edit_image_ref", False))
         no_kontext = bool(no_kontext or kwargs.get("no_kontext", False))
+        prompt_authority = bool(prompt_authority or kwargs.get("prompt_authority", False))
+        preserve_frame = bool(kwargs.get("preserve_frame", False))
+        # The inpaint encoder paints the hole flat gray. On a measured head
+        # that gray is what comes back (edit_1790789518.png). Keeping the
+        # photo pixels and noising only the mask leaves the face for the
+        # sampler to edit.
+        keep_source_pixels = bool(kwargs.get("keep_source_pixels", False))
         # v5.1104 — img2img PURO para uncover (solo lo pasa el manager en
         # kontext+uncover): KSampler sobre el latente de la foto con denoise
         # alto, SIN ReferenceLatent. None = modo EDIT (ReferenceLatent).
@@ -401,7 +487,9 @@ class FluxEditComfyClient:
                 image = image.resize((new_w, new_h), Image.LANCZOS)
 
         iname = f"fast_{int(t0)}.png"
-        buf = io.BytesIO(); image.save(buf, "PNG"); buf.seek(0)
+        buf = io.BytesIO()
+        image.save(buf, "PNG")
+        buf.seek(0)
         comfy_url = get_comfyui_url()
         try:
             r = requests.post(
@@ -432,8 +520,37 @@ class FluxEditComfyClient:
             mask_image = None
         if mask_image:
             mname = f"mask_{int(t0)}.png"
-            mbuf = io.BytesIO(); mask_image.convert("L").resize((new_w, new_h)).save(mbuf, "PNG"); mbuf.seek(0)
+            mbuf = io.BytesIO()
+            mask_image.convert("L").resize((new_w, new_h)).save(mbuf, "PNG")
+            mbuf.seek(0)
             requests.post(f"{comfy_url}/upload/image", files={"image": (mname, mbuf, "image/png")})
+
+        # Appearance only. Qwen copies a large measured surface from image1
+        # (edit_1790892396). The extra view covers that surface. Node 5
+        # keeps encoding the photo.
+        surface_reference = kwargs.get("reference_image")
+        use_surface_reference = (
+            is_longcat
+            and no_kontext
+            and surface_reference is not None
+            and prompt_authority
+            and not drop_edit_image_ref
+            and mask_image is not None
+            and keep_source_pixels
+        )
+        reference_name = None
+        if use_surface_reference:
+            reference_name = f"ref_{int(t0)}.png"
+            rbuf = io.BytesIO()
+            surface_reference.convert("RGB").resize((new_w, new_h), Image.LANCZOS).save(rbuf, "PNG")
+            rbuf.seek(0)
+            uploaded = requests.post(
+                f"{comfy_url}/upload/image",
+                files={"image": (reference_name, rbuf, "image/png")},
+                timeout=60,
+            )
+            if uploaded.status_code != 200:
+                reference_name = None
 
         wf = {
             "1": {"class_type": "LoadImage", "inputs": {"image": iname, "upload": "image"}},
@@ -441,6 +558,11 @@ class FluxEditComfyClient:
             "3": {"class_type": "DualCLIPLoaderGGUF" if self._dual_clip else ("CLIPLoaderGGUF" if self._is_gguf_clip else "CLIPLoader"), "inputs": {"clip_name1": self._clip_name, "clip_name2": self._clip_name2, "type": self._clip_type} if self._dual_clip else {"clip_name": self._clip_name, "type": self._clip_type, "device": "default"}},
             "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
         }
+        if reference_name:
+            wf["1r"] = {
+                "class_type": "LoadImage",
+                "inputs": {"image": reference_name, "upload": "image"},
+            }
 
         # Manejo de LoRAs
         last_model = ["2", 0]
@@ -485,8 +607,24 @@ class FluxEditComfyClient:
             num_inference_steps = min(num_inference_steps, 4)
         elif is_longcat and self._is_longcat_turbo:
             actual_cfg = 1.0
-            actual_denoise = 1.0
-            num_inference_steps = min(num_inference_steps, 12)
+            try:
+                requested_denoise = float(denoise)
+            except (TypeError, ValueError):
+                requested_denoise = 1.0
+            if not 0.0 < requested_denoise <= 1.0:
+                requested_denoise = 1.0
+            actual_denoise = longcat_turbo_denoise(
+                preserve_frame, mask_image is not None, keep_source_pixels, requested_denoise,
+                prompt_authority=prompt_authority,
+            )
+            # 12 steps makes denoise 0.85 almost a full redraw and 0.65 leave
+            # the previous surface. A longer schedule lets a mid strength
+            # change that surface while the photo around the mask stays.
+            try:
+                step_cap = int(kwargs.get("step_cap", 12) or 12)
+            except (TypeError, ValueError):
+                step_cap = 12
+            num_inference_steps = min(num_inference_steps, max(4, min(step_cap, 28)))
         elif is_longcat and no_kontext:
             # Edición fuerte de LongCat. La foto sigue siendo el latente inicial
             # y la referencia visual: un latente vacío convierte el edit en
@@ -573,7 +711,94 @@ class FluxEditComfyClient:
                 # Edición fuerte guiada por referencia. La foto sigue entrando en
                 # el conditioning y en el sampler: sin ello LongCat genera una
                 # escena nueva de baja fidelidad en lugar de editar la existente.
-                if drop_edit_image_ref:
+                # prompt_authority es la excepción: Qwen-VL sigue viendo la foto,
+                # pero el latente de referencia (método index) copiaba la pose y
+                # el cuerpo y la instrucción no se aplicaba.
+                if prompt_authority and not drop_edit_image_ref and mask_image is not None:
+                    # The measured subject is repainted. The sampler must use
+                    # the photo latent with that mask, not an empty frame.
+                    qwen_image = ["1", 0]
+                    if reference_name:
+                        qwen_image = ["1r", 0]
+                        print(
+                            "[FluxClient] Qwen y el latente ven la superficie pedida cubierta "
+                            "con el color de alrededor; fuera de la zona sigue la foto",
+                            flush=True,
+                        )
+                    print(
+                        "[FluxClient] LongCat edición fuerte: sujeto medido, el resto de la foto se conserva",
+                        flush=True,
+                    )
+                    wf["6"] = {
+                        "class_type": "TextEncodeQwenImageEditPlus",
+                        "inputs": {
+                            "clip": last_clip,
+                            "prompt": prompt,
+                            "image1": qwen_image,
+                        },
+                    }
+                    if self._is_longcat_turbo:
+                        positive_input = ["6", 0]
+                        negative_input = positive_input
+                    else:
+                        wf["7"] = {
+                            "class_type": "CLIPTextEncode",
+                            "inputs": {"text": negative_prompt, "clip": last_clip},
+                        }
+                        positive_input = ["6", 0]
+                        negative_input = ["7", 0]
+                    klein_empty_latent = None
+                elif prompt_authority and preserve_frame and not drop_edit_image_ref:
+                    print(
+                        "[FluxClient] LongCat edición fuerte: foto conservada, sujeto no medido",
+                        flush=True,
+                    )
+                    wf["6"] = {
+                        "class_type": "TextEncodeQwenImageEditPlus",
+                        "inputs": {
+                            "clip": last_clip,
+                            "prompt": prompt,
+                            "image1": ["1", 0],
+                        },
+                    }
+                    if self._is_longcat_turbo:
+                        positive_input = ["6", 0]
+                        negative_input = positive_input
+                    else:
+                        wf["7"] = {
+                            "class_type": "CLIPTextEncode",
+                            "inputs": {"text": negative_prompt, "clip": last_clip},
+                        }
+                        positive_input = ["6", 0]
+                        negative_input = ["7", 0]
+                    klein_empty_latent = None
+                elif prompt_authority and not drop_edit_image_ref:
+                    print("[FluxClient] LongCat edición fuerte: Qwen ve la foto, sin ancla de latente", flush=True)
+                    wf["5d"] = {"class_type": "GetImageSize", "inputs": {"image": ["1", 0]}}
+                    wf["5e"] = {
+                        "class_type": "EmptySD3LatentImage",
+                        "inputs": {"width": ["5d", 0], "height": ["5d", 1], "batch_size": 1},
+                    }
+                    wf["6"] = {
+                        "class_type": "TextEncodeQwenImageEditPlus",
+                        "inputs": {
+                            "clip": last_clip,
+                            "prompt": prompt,
+                            "image1": ["1", 0],
+                        },
+                    }
+                    if self._is_longcat_turbo:
+                        positive_input = ["6", 0]
+                        negative_input = positive_input
+                    else:
+                        wf["7"] = {
+                            "class_type": "CLIPTextEncode",
+                            "inputs": {"text": negative_prompt, "clip": last_clip},
+                        }
+                        positive_input = ["6", 0]
+                        negative_input = ["7", 0]
+                    klein_empty_latent = ["5e", 0]
+                elif drop_edit_image_ref:
                     print("[FluxClient] LongCat edición fuerte sin imagen de referencia")
                     wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": last_clip}}
                     wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
@@ -760,19 +985,43 @@ class FluxEditComfyClient:
         }
         wf["10"] = {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "FastEdit"}}
 
-        uses_kontext = False  # LongCat no debe usar FluxKontextImageScale (recorta al centro)
+        mask_mode = "global"
         if mname:
             wf["14"] = {"class_type": "LoadImage", "inputs": {"image": mname, "upload": "image"}}
             wf["15"] = {"class_type": "ImageToMask", "inputs": {"image": ["14", 0], "channel": "red"}}
-            wf["5"] = {
-                "class_type": "VAEEncodeForInpaint",
-                "inputs": {
-                    "pixels": ["1", 0],
-                    "vae": ["4", 0],
-                    "mask": ["15", 0],
-                    "grow_mask_by": max(0, int(grow_mask_by)),
-                },
-            }
+            if keep_source_pixels and klein_empty_latent is None:
+                # The covered view is the latent only inside the measured
+                # zone: outside that mask the cover is the original photo.
+                # Starting from the photo kept a large hair mass
+                # (edit_1790893724, luminance 42 to 48).
+                source_pixels = ["1r", 0] if reference_name else ["1", 0]
+                wf["5"] = {
+                    "class_type": "VAEEncode",
+                    "inputs": {
+                        "pixels": source_pixels,
+                        "vae": ["4", 0],
+                    },
+                }
+                wf["16"] = {
+                    "class_type": "SetLatentNoiseMask",
+                    "inputs": {
+                        "samples": ["5", 0],
+                        "mask": ["15", 0],
+                    },
+                }
+                wf["8"]["inputs"]["latent_image"] = ["16", 0]
+                mask_mode = "foto"
+            else:
+                wf["5"] = {
+                    "class_type": "VAEEncodeForInpaint",
+                    "inputs": {
+                        "pixels": ["1", 0],
+                        "vae": ["4", 0],
+                        "mask": ["15", 0],
+                        "grow_mask_by": max(0, int(grow_mask_by)),
+                    },
+                }
+                mask_mode = "inpaint"
         else:
             wf["5"] = {
                 "class_type": "VAEEncode",
@@ -817,7 +1066,7 @@ class FluxEditComfyClient:
                 f"cfg={wf['8']['inputs']['cfg']}, denoise={actual_denoise:.2f}, "
                 f"ref={_workflow_ref}, "
                 f"drop_img_ref={drop_edit_image_ref}, "
-                f"mask={'inpaint' if mname else 'global'}, "
+                f"mask={mask_mode}, "
                 f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
                 flush=True,
             )
@@ -825,7 +1074,7 @@ class FluxEditComfyClient:
             print(
                 "[FluxClient] Qwen-Image-Edit workflow: "
                 f"cfg={wf['8']['inputs']['cfg']}, steps={num_inference_steps}, "
-                f"mask={'inpaint' if mname else 'global'}, "
+                f"mask={mask_mode}, "
                 f"nodes={sorted(wf.keys(), key=_wf_sort_key)}",
                 flush=True,
             )

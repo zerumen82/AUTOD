@@ -7,7 +7,7 @@ del proceso de intercambio de caras.
 
 import cv2
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 
 
 def match_color_histogram(
@@ -79,7 +79,12 @@ def match_color_histogram(
         return source
 
 
-def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray) -> np.ndarray:
+def detect_foreground_occlusion(
+    face_img: np.ndarray,
+    target_region: np.ndarray,
+    feature_points=None,
+    interior_mask=None,
+) -> np.ndarray:
     """
     Detecta pelo, flequillo, manos u objetos sobre la cara para protegerlos durante el swap.
 
@@ -161,11 +166,42 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
         _, detail_mask = cv2.threshold(tgt_lap_abs.astype(np.uint8), lap_thresh, 255, cv2.THRESH_BINARY)
 
         protect_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.circle(protect_mask, (int(w * 0.35), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
-        cv2.circle(protect_mask, (int(w * 0.65), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
-
         mouth_area = np.zeros((h, w), dtype=np.uint8)
-        cv2.ellipse(mouth_area, (w // 2, int(h * 0.70)), (int(w * 0.24), int(h * 0.15)), 0, 0, 360, 255, -1)
+        # En perfil los 5 puntos no caen en el centro del crop alineado
+        # (~26 px de error). Ojos y boca siguen esos puntos; sin ellos se
+        # mantiene la elipse centrada de siempre.
+        _feat = None
+        if feature_points is not None:
+            try:
+                _cand = np.asarray(feature_points, dtype=np.float32).reshape(-1, 2)
+                if _cand.shape[0] >= 5 and np.isfinite(_cand[:5]).all():
+                    _feat = _cand[:5]
+            except Exception:
+                _feat = None
+        if _feat is not None:
+            eye_span = float(np.linalg.norm(_feat[0] - _feat[1]))
+            radius = int(np.clip(max(4.0, eye_span * 0.45), 4.0, min(w, h) * 0.10))
+            for eye in (_feat[0], _feat[1]):
+                cv2.circle(
+                    protect_mask,
+                    (int(round(float(eye[0]))), int(round(float(eye[1])))),
+                    max(1, radius), 255, -1,
+                )
+            mouth_mid = (_feat[3] + _feat[4]) * 0.5
+            lip_span = float(np.linalg.norm(_feat[3] - _feat[4]))
+            axis_src = max(lip_span, eye_span * 0.8, 8.0)
+            axis_w = int(np.clip(axis_src * 1.8, 4.0, w * 0.35))
+            axis_h = int(np.clip(axis_src * 0.9, 4.0, h * 0.28))
+            cv2.ellipse(
+                mouth_area,
+                (int(round(float(mouth_mid[0]))), int(round(float(mouth_mid[1])))),
+                (max(1, axis_w), max(1, axis_h)),
+                0, 0, 360, 255, -1,
+            )
+        else:
+            cv2.circle(protect_mask, (int(w * 0.35), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
+            cv2.circle(protect_mask, (int(w * 0.65), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
+            cv2.ellipse(mouth_area, (w // 2, int(h * 0.70)), (int(w * 0.24), int(h * 0.15)), 0, 0, 360, 255, -1)
 
         has_mouth_object = False
         mouth_obj_score = float(np.mean(cv2.bitwise_and(object_mask, mouth_area)))
@@ -200,7 +236,20 @@ def detect_foreground_occlusion(face_img: np.ndarray, target_region: np.ndarray)
         occlusion = cv2.dilate(occlusion, kernel_dilate, iterations=1)
         occlusion = cv2.GaussianBlur(occlusion, (11, 11), 0)
 
-        return occlusion.astype(np.float32) / 255.0
+        result = occlusion.astype(np.float32) / 255.0
+        if interior_mask is not None:
+            interior = np.asarray(interior_mask, dtype=np.float32)
+            if interior.ndim == 3:
+                interior = interior[:, :, 0]
+            if interior.shape[:2] != result.shape[:2]:
+                interior = cv2.resize(
+                    interior, (result.shape[1], result.shape[0]), interpolation=cv2.INTER_LINEAR,
+                )
+            peak = float(np.max(interior)) if interior.size else 0.0
+            if peak > 1.0:
+                interior = interior / peak
+            result = np.clip(result * interior, 0.0, 1.0)
+        return result
     except Exception as e:
         print(f"[OCCLUSION] Error: {e}")
         try:
@@ -216,24 +265,24 @@ def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, in
     h, w = frame_shape[:2]
     x1, y1, x2, y2 = map(int, bbox)
     x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
-    
+
     bw, bh = x2 - x1, y2 - y1
     if bw <= 0 or bh <= 0:
         return np.zeros((h, w), dtype=np.float32)
 
     mask = np.zeros((h, w), dtype=np.float32)
-    
+
     # Centro y ejes para elipse (v5.4.10: reducido para evitar borde sharp/círculo gris)
     center = ((x1 + x2) // 2, (y1 + y2) // 2)
     axes = (int(bw * 0.40), int(bh * 0.44))  # v5.42: Reducido para máscara más ajustada
     cv2.ellipse(mask, center, axes, 0, 0, 360, 1.0, -1)
-    
+
     # v5.8: Atenuación superior progresiva (Top-Down Fade) más suave
     gradient = np.ones((bh, bw), dtype=np.float32)
     fade_height = int(bh * 0.30)
     for i in range(fade_height):
         gradient[i, :] = (i / fade_height) ** 0.6
-    
+
     full_gradient = np.ones_like(mask)
     full_gradient[y1:y2, x1:x2] = gradient
     mask = mask * full_gradient
@@ -245,13 +294,13 @@ def create_soft_mask(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, in
         occ_resized = cv2.GaussianBlur(occ_resized, (5, 5), 0)
         full_occ_mask[y1:y2, x1:x2] = occ_resized
         mask = np.clip(mask - (full_occ_mask * 0.85), 0, 1)
-    
+
     # Blur dinámico más amplio para feathering suave (v5.10: doble blur para eliminar halo)
     blur_size = int(max(feather, min(bw, bh) // 8)) | 1  # v5.42: Blur reducido para no exceder cara
     mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
     # Segundo blur con kernel más pequeño para suavizado fino
     mask = cv2.GaussianBlur(mask, (9, 9), 0)
-    
+
     return np.clip(mask, 0, 1.0)
 
 
@@ -265,11 +314,11 @@ def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray,
         if mask.dtype != np.uint8:
             mask = (mask * 255).astype(np.uint8)
         original_mask = mask.copy()
-        
+
         # v5.15: Sin re-blur — la máscara ya llega suave desde ProcessMgr (blur_sz + tail truncation).
         # Re-difuminar aquí re-extiende la zona de transición y anula el tail truncation,
         # creando halo visible. Para NORMAL_CLONE, máscara ajustada = mejor integración.
-        
+
         # Recortar la zona activa
         x, y, bw, bh = cv2.boundingRect(mask)
         if bw <= 1 or bh <= 1:
@@ -295,7 +344,7 @@ def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray,
         mask_crop[:, -1] = 0
 
         crop_center = (x1 + source_crop.shape[1] // 2, y1 + source_crop.shape[0] // 2)
-        
+
         result = cv2.seamlessClone(
             source_crop.astype(np.uint8),
             target.astype(np.uint8),
@@ -314,8 +363,10 @@ def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray,
         if bw > 1 and bh > 1:
             pad = 18
             sh, sw = source.shape[:2]
-            x1 = max(0, x - pad); y1 = max(0, y - pad)
-            x2 = min(sw, x + bw + pad); y2 = min(sh, y + bh + pad)
+            x1 = max(0, x - pad)
+            y1 = max(0, y - pad)
+            x2 = min(sw, x + bw + pad)
+            y2 = min(sh, y + bh + pad)
             target_crop = target[y1:y2, x1:x2]
             mask_crop = use_mask[y1:y2, x1:x2]
             if target_crop.shape[:2] == source.shape[:2]:
@@ -328,50 +379,50 @@ def blend_with_poisson(source: np.ndarray, target: np.ndarray, mask: np.ndarray,
 def adjust_face_brightness(face: np.ndarray, target_region: np.ndarray, strength: float = 0.2) -> np.ndarray:
     """
     Ajusta el brillo de la cara para que coincida con la región objetivo.
-    
+
     NOTA: strength reducido a 0.2 por defecto para preservar mejor la identidad de origen.
-    
+
     Args:
         face: Imagen de la cara a ajustar
         target_region: Región objetivo para matching
         strength: Fuerza del ajuste (0.0 - 1.0)
-    
+
     Returns:
         Cara con brillo ajustado
     """
     try:
         if face is None or target_region is None or face.size == 0 or target_region.size == 0:
             return face
-        
+
         # Asegurar mismo tamaño
         if face.shape != target_region.shape:
             target_region = cv2.resize(target_region, (face.shape[1], face.shape[0]), interpolation=cv2.INTER_LINEAR)
-        
+
         # Calcular brillo promedio
         face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
         target_gray = cv2.cvtColor(target_region, cv2.COLOR_BGR2GRAY)
-        
+
         face_brightness = np.mean(face_gray)
         target_brightness = np.mean(target_gray)
-        
+
         # Calcular factor de ajuste con límites para evitar excesos
         if face_brightness > 10:  # Evitar división por valores muy pequeños
             brightness_ratio = target_brightness / face_brightness
             # Limitar ratio para evitar cambios extremos
             brightness_ratio = np.clip(brightness_ratio, 0.7, 1.3)
-            
+
             # Aplicar con strength
             adjustment = 1.0 + (brightness_ratio - 1.0) * strength
-            
+
             # Ajustar en espacio LAB (solo canal L)
             face_lab = cv2.cvtColor(face, cv2.COLOR_BGR2LAB).astype(np.float32)
             face_lab[:, :, 0] = np.clip(face_lab[:, :, 0] * adjustment, 0, 255)
-            
+
             result = cv2.cvtColor(face_lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
             return result
-        
+
         return face
-        
+
     except Exception as e:
         print(f"[BRIGHTNESS] Error: {e}")
         return face
@@ -389,24 +440,24 @@ def apply_quality_enhancements(
     """
     if options is None:
         options = {}
-    
+
     # 1. Ajustar colores para mejor integración
     color_match_strength = options.get('color_match_strength', 0.3)
     if color_match_strength > 0:
         swapped_face = match_color_histogram(swapped_face, target_region)
-    
+
     # 2. Ajustar brillo
     brightness_match_strength = options.get('brightness_match_strength', 0.2)
     if brightness_match_strength > 0:
         swapped_face = adjust_face_brightness(swapped_face, target_region, brightness_match_strength)
-    
+
     # 3. Detectar oclusiones (pelo, flequillo, objetos)
     occlusion_mask = detect_foreground_occlusion(swapped_face, target_region)
-    
+
     # 4. Crear máscara suave para blending con feathering generoso (v5.10: 50px)
     feather_amount = options.get('feather_amount', 50)
     soft_mask = create_soft_mask(bbox, frame.shape, feather=feather_amount, occlusion_mask=occlusion_mask)
-    
+
     return swapped_face, soft_mask
 
 
@@ -419,36 +470,36 @@ def advanced_blend(
 ) -> np.ndarray:
     """
     Realiza blending avanzado de la cara en el frame.
-    
+
     Args:
         swapped_face: Cara intercambiada
         frame: Frame destino
         bbox: Bounding box
         soft_mask: Máscara suave (opcional)
         blend_mode: Modo de blending ("poisson", "weighted", "direct")
-    
+
     Returns:
         Frame con la cara integrada
     """
     x1, y1, x2, y2 = map(int, bbox)
     w, h = x2 - x1, y2 - y1
-    
+
     # Asegurar que la cara tenga el tamaño correcto
     if swapped_face.shape[:2] != (h, w):
         swapped_face = cv2.resize(swapped_face, (w, h), interpolation=cv2.INTER_LANCZOS4)
-    
+
     result = frame.copy()
-    
+
     if blend_mode == "poisson":
         # Crear máscara para Poisson
         if soft_mask is not None:
             mask = (soft_mask[y1:y2, x1:x2] * 255).astype(np.uint8)
         else:
             mask = np.ones((h, w), dtype=np.uint8) * 255
-        
+
         center = (x1 + w // 2, y1 + h // 2)
         result = blend_with_poisson(swapped_face, result, mask, center)
-        
+
     elif blend_mode == "weighted":
         # Blending ponderado con máscara suave
         if soft_mask is not None:
@@ -456,13 +507,13 @@ def advanced_blend(
             mask_3ch = np.stack([mask_3ch] * 3, axis=-1)
         else:
             mask_3ch = np.ones((h, w, 3), dtype=np.float32)
-        
+
         target_region = result[y1:y2, x1:x2].astype(np.float32)
-        blended = (swapped_face.astype(np.float32) * mask_3ch + 
+        blended = (swapped_face.astype(np.float32) * mask_3ch +
                   target_region * (1 - mask_3ch))
         result[y1:y2, x1:x2] = np.clip(blended, 0, 255).astype(np.uint8)
-        
+
     else:  # direct
         result[y1:y2, x1:x2] = swapped_face
-    
+
     return result

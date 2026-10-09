@@ -36,5 +36,30 @@ def get_lora_catalog() -> List[Dict[str, Any]]:
     return list(get_generation_prompt_config().get("lora_catalog") or [])
 
 
+def get_route_editor_config() -> Dict[str, Any]:
+    raw = get_generation_prompt_config().get("route_editor") or {}
+    return {
+        "default_engine": str(raw.get("default_engine") or "longcat"),
+        "engines": dict(raw.get("engines") or {}),
+    }
+
+
+def get_generate_ui_config() -> Dict[str, Any]:
+    return dict(get_generation_prompt_config().get("generate_ui") or {})
+
+
 def get_rewriter_config() -> Dict[str, Any]:
     return dict(get_generation_prompt_config().get("rewriter") or {})
+
+
+def get_style_gate_config() -> Dict[str, Any]:
+    """Gate de estilo: decide si el prompt pide un estilo NO fotorreal.
+
+    Concepts (descripciones EN/ES) + threshold viven en
+    config/generation_prompt.json — sin palabras de usuario hardcodeadas.
+    """
+    raw = get_generation_prompt_config().get("style_gate") or {}
+    return {
+        "concepts": list(raw.get("concepts") or []),
+        "threshold": float(raw.get("threshold", 0.25)),
+    }

@@ -74,6 +74,8 @@ CONCEPTS: Dict[str, list] = {
         "tanga hilo dental ropa interior lencería traje baño biquini prenda íntima escote",
         "barefoot descalzo sin zapatos pies descalzos bare feet no shoes",
         "cambiar ropa outfit vestimenta desvestir cambiarse quitarse poner tanga",
+        "genital anatomy penis phallus body proportion size larger bigger smaller",
+        "anatomía genital pene falo proporción corporal tamaño",
     ],
     # Dirección del cambio corporal (para negatives sin pelear con el pedido).
     # uncover = quitar/menos ropa; cover = vestir/más ropa (nieve, abrigo...).
@@ -83,6 +85,14 @@ CONCEPTS: Dict[str, list] = {
         "quitar quitarse desvestir desnudar piel descubierta menos ropa prenda mínima tanga",
         "thong tanga g-string bikini lingerie underwear swimsuit minimal tiny micro only solo",
         "hilo dental biquini lencería ropa interior bañador mínimo solo únicamente",
+    ],
+    "body_exposure_full": [
+        "fully nude completely naked no clothes at all entire body bare",
+        "totalmente desnudo completamente desnuda sin ropa en todo el cuerpo",
+    ],
+    "body_exposure_local": [
+        "barefoot bare feet no shoes remove footwear feet only",
+        "descalzo descalza pies desnudos sin zapatos quitar calzado solo pies",
     ],
     "attribute_cover": [
         "dress put on wear coat jacket winter snow warm covered bundled sweater clothes on",
@@ -431,6 +441,28 @@ class LightLocalIntentAnalyzer(_ConceptRouterMixin):
         }
 
     @staticmethod
+    def _token_match(left: str, right: str) -> str:
+        """How two tokens overlap. A conjugation or a doubled letter is exact.
+
+        "elimina"/"eliminar" and "removes"/"remove" differ by a short ending.
+        "tatoo"/"tattoo" is the same token with one letter typed twice.
+        A short stem such as "gray" inside "grayscale" stays a partial:
+        the extra letters are a different word, not an ending.
+        """
+        if left == right:
+            return "exact"
+        shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+        if len(shorter) >= 4 and len(longer) >= 4 and shorter in longer:
+            if len(shorter) >= 5 and len(longer) - len(shorter) <= 3:
+                return "exact"
+            return "partial"
+        if len(left) >= 5 and len(right) >= 5:
+            fold = lambda token: re.sub(r"(.)\1+", r"\1", token)
+            if fold(left) == fold(right):
+                return "exact"
+        return "none"
+
+    @staticmethod
     def _tokenize(text: str) -> set:
         raw = re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ0-9]+", (text or "").lower())
         stop = LightLocalIntentAnalyzer._STOPWORDS
@@ -452,13 +484,18 @@ class LightLocalIntentAnalyzer(_ConceptRouterMixin):
             exact = 0
             partial = 0
             for pw in p_words:
+                kind = "none"
                 if pw in t_words:
+                    kind = "exact"
+                else:
+                    for tw in t_words:
+                        kind = self._token_match(pw, tw)
+                        if kind != "none":
+                            break
+                if kind == "exact":
                     exact += 1
-                    continue
-                for tw in t_words:
-                    if len(pw) >= 4 and len(tw) >= 4 and (pw in tw or tw in pw):
-                        partial += 1
-                        break
+                elif kind == "partial":
+                    partial += 1
             # Cobertura del prompt en el concepto (no del concepto en el prompt)
             coverage = (exact + 0.55 * partial) / max(len(p_words), 1)
             # Bonus ligero si hay solape denso con el concepto

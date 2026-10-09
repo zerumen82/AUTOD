@@ -3,8 +3,7 @@ import os
 import cv2
 import numpy as np
 import onnxruntime
-
-import roop.globals
+from typing import Optional
 from roop.types import Frame
 from roop.utilities import resolve_relative_path
 
@@ -35,18 +34,12 @@ class Mask_XSeg:
         except Exception as e:
             print(f"[ERROR] Error cargando modelo XSeg: {e}")
 
-    def Run(self, img: Frame, masking_text: str = "") -> np.ndarray:
+    def Run(self, img: Frame, masking_text: str = "") -> Optional[np.ndarray]:
         """
         Genera una máscara de segmentación facial de 256x256.
         """
         if self.model_xseg is None or img is None:
-            # Si no hay modelo, devolver máscara blanca parcial (elipse genérica)
-            if img is not None:
-                h, w = img.shape[:2]
-                mask = np.zeros((h, w), dtype=np.float32)
-                cv2.ellipse(mask, (w // 2, h // 2), (int(w * 0.45), int(h * 0.50)), 0, 0, 360, 1.0, -1)
-                return mask
-            return np.zeros((256, 256), dtype=np.float32)
+            return None
 
         validated_img = None
         try:
@@ -54,15 +47,14 @@ class Mask_XSeg:
             if isinstance(img, np.ndarray):
                 validated_img = img.copy()
             else:
-                return np.zeros((256, 256), dtype=np.float32)
+                return None
 
             # Redimensionar con validación
             temp_frame = cv2.resize(validated_img, (256, 256), cv2.INTER_CUBIC)
 
             if temp_frame is None or temp_frame.size == 0:
                 print("[ERROR] Mask_XSeg: resize devolvió imagen vacía")
-                height, width = validated_img.shape[:2]
-                return np.zeros((height, width), dtype=np.float32)
+                return None
 
             # Normalizar: [0, 255] -> [-1, 1]
             blob = temp_frame.astype(np.float32) / 127.5 - 1.0
@@ -105,12 +97,7 @@ class Mask_XSeg:
 
         except Exception as e:
             print(f"[ERROR] Mask_XSeg: error en procesamiento: {str(e)}")
-            # En caso de error, devolver máscara negra del tamaño correcto
-            if validated_img is not None:
-                height, width = validated_img.shape[:2]
-            else:
-                height, width = 256, 256
-            return np.zeros((height, width), dtype=np.float32)
+            return None
 
     def Release(self):
         if self.model_xseg:

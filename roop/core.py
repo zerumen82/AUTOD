@@ -405,137 +405,139 @@ def batch_process_regular(
     
     # Inicializar ProcessMgr
     process_mgr = ProcessMgr()
-    
-    # Configurar opciones de procesamiento
-    processor_options = {'face_swapper': {}}
-    if mask_engine and mask_engine != "None":
-        processor_options["masking"] = {"subtype": mask_engine}
-    
-    # ProcessOptions(processordefines, face_distance, blend_ratio, swap_mode, selected_index, masking_text, imagemask, num_steps, show_face_area, ...)
-    options = ProcessOptions(
-        processor_options,                                    # processordefines
-        getattr(roop.globals, 'distance_threshold', 0.6),    # face_distance
-        getattr(roop.globals, 'blend_ratio', 0.95),          # blend_ratio
-        roop.globals.face_swap_mode if hasattr(roop.globals, 'face_swap_mode') else 'all',  # swap_mode
-        0,  # selected_index: source automatica, solo se elige destino
-        clip_text if clip_text else "",                       # masking_text
-        mask_data,                                            # imagemask
-        num_swap_steps if num_swap_steps else 1,              # num_steps
-        False,                                                # show_face_area
-        False,                                                # show_mask
-        getattr(roop.globals, 'use_enhancer', True),          # use_enhancer
-        getattr(roop.globals, 'blend_mode', 'seamless')       # blend_mode
-    )
-    
-    # Inicializar ProcessMgr con las caras de origen
-    if hasattr(roop.globals, 'INPUT_FACESETS') and roop.globals.INPUT_FACESETS:
-        target_faces = getattr(roop.globals, 'TARGET_FACES', [])
-        process_mgr.initialize(
-            roop.globals.INPUT_FACESETS,
-            target_faces,
-            options
-        )
-    else:
-        yield (100, "ERROR: No hay caras de origen configuradas")
-        return
-    
+
     processed_files = 0
     photos_without_swap = []
+
+    try:
+        # Configurar opciones de procesamiento
+        processor_options = {'face_swapper': {}}
+        if mask_engine and mask_engine != "None":
+            processor_options["masking"] = {"subtype": mask_engine}
     
-    for entry in list_files_process:
-        if not roop.globals.processing:
-            yield (100, "Procesamiento cancelado")
+        # ProcessOptions(processordefines, face_distance, blend_ratio, swap_mode, selected_index, masking_text, imagemask, num_steps, show_face_area, ...)
+        options = ProcessOptions(
+            processor_options,                                    # processordefines
+            getattr(roop.globals, 'distance_threshold', 0.6),    # face_distance
+            getattr(roop.globals, 'blend_ratio', 0.95),          # blend_ratio
+            roop.globals.face_swap_mode if hasattr(roop.globals, 'face_swap_mode') else 'all',  # swap_mode
+            0,  # selected_index: source automatica, solo se elige destino
+            clip_text if clip_text else "",                       # masking_text
+            mask_data,                                            # imagemask
+            num_swap_steps if num_swap_steps else 1,              # num_steps
+            False,                                                # show_face_area
+            False,                                                # show_mask
+            getattr(roop.globals, 'use_enhancer', True),          # use_enhancer
+            getattr(roop.globals, 'blend_mode', 'seamless')       # blend_mode
+        )
+    
+        # Inicializar ProcessMgr con las caras de origen
+        if hasattr(roop.globals, 'INPUT_FACESETS') and roop.globals.INPUT_FACESETS:
+            target_faces = getattr(roop.globals, 'TARGET_FACES', [])
+            process_mgr.initialize(
+                roop.globals.INPUT_FACESETS,
+                target_faces,
+                options
+            )
+        else:
+            yield (100, "ERROR: No hay caras de origen configuradas")
             return
-        
-        filename = entry.filename
-        start_frame = entry.startframe if hasattr(entry, 'startframe') else 0
-        end_frame = entry.endframe if hasattr(entry, 'endframe') else 0
-        fps = entry.fps if hasattr(entry, 'fps') else 30.0
-        
-        # Determinar si es video o imagen
-        is_video = util.is_video(filename) or filename.lower().endswith('.gif')
-        
-        # Construir ruta de salida
-        output_filename = os.path.basename(filename)
-        # v5.1042: OpenCV no tiene writer para .jfif/.jpe/.jpeg → imwrite falla silenciosamente
-        # (log: "could not find a writer for the specified extension" en 505735164.jfif).
-        # Normalizar a .jpg, que cv2.imwrite soporta siempre.
-        output_ext = os.path.splitext(output_filename)[1].lower()
-        if output_ext in ('.jfif', '.jpe', '.jpeg'):
-            output_filename = os.path.splitext(output_filename)[0] + '.jpg'
-        output_path = os.path.join(roop.globals.output_path, output_filename)
-        
-        # Asegurar que el directorio de salida existe
-        os.makedirs(roop.globals.output_path, exist_ok=True)
-        
-        progress_percent = (processed_files / total_files) * 100
-        yield (progress_percent, f"Procesando: {output_filename}")
-        
-        try:
-            if is_video:
-                # Procesar video usando run_batch_inmem
-                for video_progress, video_msg in process_mgr.run_batch_inmem(
-                    filename,
-                    output_path,
-                    start_frame=start_frame,
-                    end_frame=end_frame if end_frame > 0 else None,
-                    fps=fps,
-                    skip_audio=getattr(roop.globals, 'skip_audio', False)
-                ):
-                    # El porcentaje principal es global del lote; el mensaje conserva
-                    # el avance local del video para evitar lecturas ambiguas en la UI.
-                    combined_progress = progress_percent + (video_progress / total_files)
-                    progress_scope = f"Archivo {processed_files + 1}/{total_files}"
-                    if total_files > 1:
-                        progress_scope += f" | video {video_progress:.1f}%"
-                    yield (combined_progress, f"{progress_scope} | {video_msg}")
-            else:
-                # Procesar imagen - usar imdecode para soportar WebP
-                from roop.capturer import get_image_frame
-                frame = get_image_frame(filename)
-                if frame is not None:
-                    processed_frame = process_mgr.process_frame(frame, file_path=filename)
-                    if processed_frame is not None:
-                        if np.array_equal(processed_frame, frame):
-                            photos_without_swap.append(output_filename)
-                            print(f"[FOTO] SIN_SWAP {os.path.basename(filename)}: salida idéntica al original; revisar los mensajes [FOTO] y [SWAP_SKIP] anteriores", flush=True)
-                        if not cv2.imwrite(output_path, processed_frame):
-                            print(f"[FOTO] ERROR al guardar {output_path}", flush=True)
-                    else:
-                        # Si no se procesó, copiar original
-                        photos_without_swap.append(output_filename)
-                        print(f"[FOTO] SIN_SWAP {os.path.basename(filename)}: procesador devolvió None", flush=True)
-                        if not cv2.imwrite(output_path, frame):
-                            print(f"[FOTO] ERROR al guardar {output_path}", flush=True)
-                else:
-                    print(f"[WARNING] No se pudo leer: {filename}")
-                    photos_without_swap.append(output_filename)
-                    
-        except Exception as e:
-            print(f"[ERROR] Procesando {filename}: {e}")
-            if not is_video:
-                photos_without_swap.append(output_filename)
-            import traceback
-            traceback.print_exc()
-        
-        processed_files += 1
     
-    # Finalizar
-    try:
-        process_mgr.Release()
-    except Exception:
-        pass
-    # Restore stdout and close batch log
-    try:
-        sys.stdout = _orig_stdout
-    except Exception:
-        pass
-    if _batch_log_file:
+        for entry in list_files_process:
+            if not roop.globals.processing:
+                yield (100, "Procesamiento cancelado")
+                return
+        
+            filename = entry.filename
+            start_frame = entry.startframe if hasattr(entry, 'startframe') else 0
+            end_frame = entry.endframe if hasattr(entry, 'endframe') else 0
+            fps = entry.fps if hasattr(entry, 'fps') else 30.0
+        
+            # Determinar si es video o imagen
+            is_video = util.is_video(filename) or filename.lower().endswith('.gif')
+        
+            # Construir ruta de salida
+            output_filename = os.path.basename(filename)
+            # v5.1042: OpenCV no tiene writer para .jfif/.jpe/.jpeg → imwrite falla silenciosamente
+            # (log: "could not find a writer for the specified extension" en 505735164.jfif).
+            # Normalizar a .jpg, que cv2.imwrite soporta siempre.
+            output_ext = os.path.splitext(output_filename)[1].lower()
+            if output_ext in ('.jfif', '.jpe', '.jpeg'):
+                output_filename = os.path.splitext(output_filename)[0] + '.jpg'
+            output_path = os.path.join(roop.globals.output_path, output_filename)
+        
+            # Asegurar que el directorio de salida existe
+            os.makedirs(roop.globals.output_path, exist_ok=True)
+        
+            progress_percent = (processed_files / total_files) * 100
+            yield (progress_percent, f"Procesando: {output_filename}")
+        
+            try:
+                if is_video:
+                    # Procesar video usando run_batch_inmem
+                    for video_progress, video_msg in process_mgr.run_batch_inmem(
+                        filename,
+                        output_path,
+                        start_frame=start_frame,
+                        end_frame=end_frame if end_frame > 0 else None,
+                        fps=fps,
+                        skip_audio=getattr(roop.globals, 'skip_audio', False)
+                    ):
+                        # El porcentaje principal es global del lote; el mensaje conserva
+                        # el avance local del video para evitar lecturas ambiguas en la UI.
+                        combined_progress = progress_percent + (video_progress / total_files)
+                        progress_scope = f"Archivo {processed_files + 1}/{total_files}"
+                        if total_files > 1:
+                            progress_scope += f" | video {video_progress:.1f}%"
+                        yield (combined_progress, f"{progress_scope} | {video_msg}")
+                else:
+                    # Procesar imagen - usar imdecode para soportar WebP
+                    from roop.capturer import get_image_frame
+                    frame = get_image_frame(filename)
+                    if frame is not None:
+                        processed_frame = process_mgr.process_frame(frame, file_path=filename)
+                        if processed_frame is not None:
+                            if np.array_equal(processed_frame, frame):
+                                photos_without_swap.append(output_filename)
+                                print(f"[FOTO] SIN_SWAP {os.path.basename(filename)}: salida idéntica al original; revisar los mensajes [FOTO] y [SWAP_SKIP] anteriores", flush=True)
+                            if not cv2.imwrite(output_path, processed_frame):
+                                print(f"[FOTO] ERROR al guardar {output_path}", flush=True)
+                        else:
+                            # Si no se procesó, copiar original
+                            photos_without_swap.append(output_filename)
+                            print(f"[FOTO] SIN_SWAP {os.path.basename(filename)}: procesador devolvió None", flush=True)
+                            if not cv2.imwrite(output_path, frame):
+                                print(f"[FOTO] ERROR al guardar {output_path}", flush=True)
+                    else:
+                        print(f"[WARNING] No se pudo leer: {filename}")
+                        photos_without_swap.append(output_filename)
+                    
+            except Exception as e:
+                print(f"[ERROR] Procesando {filename}: {e}")
+                if not is_video:
+                    photos_without_swap.append(output_filename)
+                import traceback
+                traceback.print_exc()
+        
+            processed_files += 1
+    
+    finally:
+        # Finalizar
         try:
-            _batch_log_file.write(f"\n=== END: {processed_files} files ===\n")
-            _batch_log_file.close()
+            process_mgr.Release()
         except Exception:
             pass
+        # Restore stdout and close batch log
+        try:
+            sys.stdout = _orig_stdout
+        except Exception:
+            pass
+        if _batch_log_file:
+            try:
+                _batch_log_file.write(f"\n=== END: {processed_files} files ===\n")
+                _batch_log_file.close()
+            except Exception:
+                pass
     if photos_without_swap:
         yield (100, f"Procesados {processed_files} archivos; {len(photos_without_swap)} foto(s) sin swap: {', '.join(photos_without_swap[:5])}")
     else:

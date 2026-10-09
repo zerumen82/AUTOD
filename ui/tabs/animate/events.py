@@ -20,18 +20,21 @@ def _status(message):
 
 
 def on_cancel_animate():
+    # is_animating no se limpia aquí: el worker es dueño de la bandera y
+    # liberarla con el hilo vivo dejaría la animación corriendo en silencio.
     request_cancel(SCOPE_ANIMATE, interrupt_comfy=True)
-    state.is_animating = False
     return _status("Cancelando animación…"), *btn_idle()
 
 
 def wire_animate_events(ui):
     def on_animate_click(img_data, p, engine, l_name, l_strength, stabilize_face, ar_chunks, add_audio):
-        clear_cancel(SCOPE_ANIMATE)
-
+        # El guard va ANTES de clear_cancel: mientras un worker cancelado
+        # todavía frena, limpiar primero reviviría su bandera de cancelación.
         if state.is_animating:
             yield None, _status("Ya hay una animación en proceso"), *btn_idle()
             return
+
+        clear_cancel(SCOPE_ANIMATE)
 
         p = (p or "").strip()
         if img_data is None:
@@ -71,33 +74,34 @@ def wire_animate_events(ui):
             except Exception as e:
                 result["msg"] = f"Excepción: {str(e)}"
             finally:
+                # El worker es dueño de las banderas del ámbito animate.
+                clear_cancel(SCOPE_ANIMATE)
                 state.is_animating = False
                 updates.put(None)
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
 
-        try:
-            yield None, _status("Generando animación autoregresiva con audio..."), *btn_running()
-            while True:
-                if is_cancelled(SCOPE_ANIMATE):
-                    break
-                try:
-                    message = updates.get(timeout=0.35)
-                except queue.Empty:
-                    yield gr.skip(), gr.skip(), gr.skip(), gr.skip()
-                    continue
-                if message is None:
-                    break
-                yield None, _status(message), gr.skip(), gr.skip()
-
+        # La cancelación la limpia el worker en su propio finally: hacerlo
+        # aquí con el hilo vivo reviviría el trabajo cancelado.
+        yield None, _status("Generando animación autoregresiva con audio..."), *btn_running()
+        while True:
             if is_cancelled(SCOPE_ANIMATE):
-                yield None, cancel_status_html(), *btn_idle()
-                return
+                break
+            try:
+                message = updates.get(timeout=0.35)
+            except queue.Empty:
+                yield gr.skip(), gr.skip(), gr.skip(), gr.skip()
+                continue
+            if message is None:
+                break
+            yield None, _status(message), gr.skip(), gr.skip()
 
-            yield result["video"], _status(result["msg"]), *btn_idle()
-        finally:
-            clear_cancel(SCOPE_ANIMATE)
+        if is_cancelled(SCOPE_ANIMATE):
+            yield None, cancel_status_html(), *btn_idle()
+            return
+
+        yield result["video"], _status(result["msg"]), *btn_idle()
 
     animate_event = ui["btn_animate"].click(
         fn=on_animate_click,

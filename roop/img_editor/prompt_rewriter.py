@@ -206,6 +206,58 @@ class PromptRewriter:
         }
 
     @staticmethod
+    def _translate_edit_instruction(prompt: str, llm, config: dict) -> Optional[str]:
+        """Translate a complete instruction; incomplete replies cannot edit."""
+        if not prompt or llm is None:
+            return None
+        max_tokens = int(config["max_tokens"])
+        temperature = float(config["temperature"])
+        repeat_penalty = float(config["repeat_penalty"])
+        system_msg = config["system_prompt"].strip()
+        if max_tokens <= 0 or temperature < 0 or repeat_penalty <= 0 or not system_msg:
+            raise ValueError("Configuración no válida de traducción local")
+        response = llm.create_completion(
+            f"<|im_start|>system\n{system_msg}<|im_end|>\n"
+            f"<|im_start|>user\n{prompt.strip()}<|im_end|>\n"
+            "<|im_start|>assistant\n",
+            max_tokens=max_tokens, temperature=temperature, echo=False,
+            stop=["<|im_end|>"], repeat_penalty=repeat_penalty,
+        )
+        choice = response["choices"][0]
+        if choice.get("finish_reason") != "stop":
+            return None
+        translated = choice["text"].strip()
+        return translated or None
+
+    @staticmethod
+    def _classify_edit_support(prompt: str, llm) -> List[str]:
+        """Propose one existing editing support, leaving location context out."""
+        if not prompt or llm is None:
+            return []
+        try:
+            system_msg = (
+                "An image editor needs a short segmentation query for the requested change. "
+                "Return only the words naming the existing object or surface to modify. "
+                "Names used only to locate another object must be left out. "
+                "For a new object, name its supporting surface. "
+                "Copy the region name from the request, using the same language. "
+                "Do not return JSON, explanations, or extra words."
+            )
+            response = llm.create_completion(
+                f"<|im_start|>system\n{system_msg}<|im_end|>\n"
+                f"<|im_start|>user\n{prompt.strip()}<|im_end|>\n"
+                "<|im_start|>assistant\n",
+                max_tokens=80, temperature=0.0, echo=False,
+                stop=["<|im_end|>", "\n"], repeat_penalty=1.05,
+            )
+            query = response["choices"][0]["text"].strip().strip("\"'")
+            print(f"[PromptRewriter] Propuesta de soporte: {query!r}", flush=True)
+            return [query] if query else []
+        except Exception as exc:
+            print(f"[PromptRewriter] Propuesta de soporte omitida: {exc}", flush=True)
+            return []
+
+    @staticmethod
     def _classify_affected_regions(prompt: str, llm) -> List[str]:
         """Ask a narrow, independent scope question when the main plan omits it.
 

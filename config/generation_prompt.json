@@ -4,7 +4,31 @@
     "anatomy_attribute": 0.10,
     "multi_person_structural": 0.08,
     "lora_scene_min_score": 0.12,
-    "flux_max_tail_parts": 5
+    "flux_max_tail_parts": 5,
+    "route_structural": 0.30,
+    "route_pose": 0.15,
+    "route_attribute": 0.25
+  },
+  "route_editor": {
+    "default_engine": "longcat",
+    "engines": {
+      "longcat": "longcat",
+      "longcat_full": "longcat_full",
+      "klein_base": "klein"
+    }
+  },
+  "generate_ui": {
+    "default_engine": "flux_dev_q4",
+    "nsfw_content_default": false
+  },
+  "style_gate": {
+    "concepts": [
+      "a drawing, pencil sketch, illustration, painting, cartoon, anime, manga, comic art, watercolor, digital artwork, stylized artwork, not a photograph",
+      "dibujo, dibujo a lapiz, dibujo a lápiz, ilustracion, ilustración, pintura, acuarela, comic, cómic, anime, manga, arte digital, no es una fotografia, no es una fotografía",
+      "drawing style, illustration style, anime style, cartoon style, painting style, sketch style, 3d render style, art style",
+      "estilo dibujo, estilo ilustración, estilo ilustracion, estilo anime, estilo cartoon, estilo pintura, estilo sketch, estilo arte"
+    ],
+    "threshold": 0.25
   },
   "prompt_extras": {
     "explicit_sdxl_prefix_fallback": "photorealistic, RAW photo, realistic, film grain, detailed skin texture, sharp focus, natural lighting, realistic anatomy, ",
@@ -23,6 +47,7 @@
       "anchors": ["nsfw explicit adult uncensored nude scene"],
       "strength": 0.50,
       "always": true,
+      "nsfw": true,
       "boost": "",
       "label": "NSFW base"
     },
@@ -30,6 +55,7 @@
       "file": "Nsfw Deepthroat.safetensors",
       "anchors": ["oral sex blowjob deepthroat kneeling sucking fellatio"],
       "strength": 0.72,
+      "nsfw": true,
       "boost": "",
       "label": "Oral / deepthroat"
     },
@@ -37,6 +63,7 @@
       "file": "Cuckold_Threesome_SDXL.safetensors",
       "anchors": ["threesome two men another man second man mmf cuckold waiting third person"],
       "strength": 0.62,
+      "nsfw": true,
       "sdxl_only": true,
       "boost": "",
       "label": "Threesome 2M+1F"
@@ -45,6 +72,7 @@
       "file": "Cuckold_Sex_-_Pony.safetensors",
       "anchors": ["threesome two men another man cuckold mmf waiting"],
       "strength": 0.62,
+      "nsfw": true,
       "pony_only": true,
       "boost": "",
       "label": "Threesome Pony"
@@ -53,6 +81,7 @@
       "file": "NsfwPovAllInOneLoraSdxl-000009.safetensors",
       "anchors": ["point of view pov first person camera perspective"],
       "strength": 0.55,
+      "nsfw": true,
       "skip_when_multi_person": true,
       "boost": "",
       "label": "POV NSFW"

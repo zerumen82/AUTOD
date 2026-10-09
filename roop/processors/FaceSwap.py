@@ -1,21 +1,121 @@
 import os
 import numpy as np
-import insightface
 import cv2
-import inspect
 import roop.globals
 from roop.path_helper import get_root_path
-from typing import Any, Tuple, Optional, Dict
+from roop.faceswap_config import get_faceswap_config
+from typing import Any, Optional
 from roop.types import Face, Frame
 
 
 class FaceWarpEngine:
     """Landmark-based face warp using Delaunay triangulation for strong identity transfer"""
+
+    @staticmethod
+    def arcface_template(image_size_out):
+        """Use the local InsightFace convention, including the 128px x shift."""
+        from insightface.utils import face_align
+
+        size = int(image_size_out)
+        if size <= 0 or size != image_size_out:
+            raise ValueError('Alignment output size must be a positive integer')
+        if size % 112 == 0:
+            ratio, shift = size / 112.0, 0.0
+        elif size % 128 == 0:
+            ratio = size / 128.0
+            shift = (128 - 112) / 2 * ratio
+        else:
+            raise ValueError('Alignment output size must follow InsightFace 112/128 convention')
+        template = face_align.arcface_dst.copy() * ratio
+        template[:, 0] += shift
+        return template
+
+    @staticmethod
+    def estimate_constrained_norm(
+        image_size,
+        kps,
+        image_size_out=128,
+        bbox=None,
+        max_translate_px=None,
+        max_scale_dev=None,
+        crop_to_bbox_ratio=None,
+        translate_bbox_fraction=None,
+    ):
+        """Keep InsightFace M unless its inverse crop scale/center escapes bbox.
+
+        The inverse square crop side is compared with sqrt(bbox area), so
+        both bbox dimensions contribute without treating profile eye spacing
+        as face size. Outside the configured band, preserve roll, constrain
+        scale and anchor the template centroid to the measured bbox center.
+        Invalid geometry/configuration raises ValueError; no image is allocated.
+        This does not bypass ProcessMgr's earlier landmark validity gate.
+        """
+        from insightface.utils import face_align
+
+        dimensions = np.asarray(image_size, dtype=np.float64)
+        points = np.asarray(kps, dtype=np.float32)
+        bounds = np.asarray(bbox, dtype=np.float64)
+        if dimensions.shape != (2,) or not np.isfinite(dimensions).all() or np.any(dimensions <= 0):
+            raise ValueError('Alignment requires positive finite image dimensions')
+        if points.shape != (5, 2) or not np.isfinite(points).all():
+            raise ValueError('Alignment requires five finite landmarks')
+        if bounds.shape != (4,) or not np.isfinite(bounds).all():
+            raise ValueError('Alignment requires a finite bbox')
+        bbox_size = bounds[2:] - bounds[:2]
+        if np.any(bbox_size <= 0):
+            raise ValueError('Alignment requires a bbox with positive width and height')
+        template = FaceWarpEngine.arcface_template(image_size_out).astype(np.float64)
+        config = get_faceswap_config()
+        scale_dev = float(config['align_constrain_scale_dev'] if max_scale_dev is None else max_scale_dev)
+        crop_ratio = float(config['align_constrain_crop_to_bbox_ratio'] if crop_to_bbox_ratio is None else crop_to_bbox_ratio)
+        translate_fraction = float(config['align_constrain_translate_bbox_fraction'] if translate_bbox_fraction is None else translate_bbox_fraction)
+        if not np.isfinite([scale_dev, crop_ratio, translate_fraction]).all():
+            raise ValueError('Alignment constraints must be finite')
+        if not 0 <= scale_dev < 1 or crop_ratio <= 0 or translate_fraction < 0:
+            raise ValueError('Alignment constraint ranges are invalid')
+        if max_translate_px is None:
+            translate_limit = bbox_size * translate_fraction
+        else:
+            translate_px = float(max_translate_px)
+            if not np.isfinite(translate_px) or translate_px < 0:
+                raise ValueError('Alignment translation limit must be finite and nonnegative')
+            translate_limit = np.full(2, translate_px)
+
+        # estimate_norm returns the same matrix as norm_crop2 without allocating
+        # a dummy full-resolution frame and a crop for every processed face.
+        m_kps = face_align.estimate_norm(points, int(image_size_out))
+        if not np.isfinite(m_kps).all():
+            raise ValueError('Landmarks do not yield a finite alignment')
+        determinant = float(np.linalg.det(m_kps[:, :2]))
+        if determinant <= np.finfo(np.float64).eps:
+            raise ValueError('Landmarks do not yield an invertible alignment')
+        inverse = cv2.invertAffineTransform(m_kps)
+        inverse_scale = 1 / np.sqrt(determinant)
+        expected_side = np.sqrt(bbox_size[0] * bbox_size[1]) * crop_ratio
+        minimum_side = expected_side * (1 - scale_dev)
+        maximum_side = expected_side * (1 + scale_dev)
+        crop_side = int(image_size_out) * inverse_scale
+        center = (bounds[:2] + bounds[2:]) / 2
+        template_center = template.mean(axis=0)
+        projected_center = inverse[:, :2] @ template_center + inverse[:, 2]
+        if minimum_side <= crop_side <= maximum_side and np.all(np.abs(projected_center - center) <= translate_limit):
+            return m_kps, 'kps_ok'
+
+        constrained_side = np.clip(crop_side, minimum_side, maximum_side)
+        corrected_inverse = inverse.copy()
+        corrected_inverse[:, :2] *= constrained_side / crop_side
+        corrected_inverse[:, 2] = center - corrected_inverse[:, :2] @ template_center
+        constrained = cv2.invertAffineTransform(corrected_inverse)
+        if not np.isfinite(constrained).all() or np.linalg.det(constrained[:, :2]) <= 0:
+            raise ValueError('BBox constraint did not yield a valid alignment')
+        return constrained, 'bbox_anchored'
+
     
     @staticmethod
     def warp_face(source_img, target_img, src_kps, tgt_kps, src_landmarks_106=None, tgt_landmarks_106=None, out_size=256):
         from insightface.utils import face_align
-        import numpy as np, cv2
+        import numpy as np
+        import cv2
         
         aimg_src, M_src = face_align.norm_crop2(source_img, np.array(src_kps, dtype=np.float32), out_size)
         aimg_tgt, M_tgt = face_align.norm_crop2(target_img, np.array(tgt_kps, dtype=np.float32), out_size)
@@ -86,7 +186,8 @@ class FaceWarpEngine:
             
             warp_mat = cv2.getAffineTransform(src_offset, tgt_offset)
             src_roi = aimg_src[src_y1:src_y1+rh_s, src_x1:src_x1+rw_s]
-            if src_roi.size == 0: continue
+            if src_roi.size == 0:
+                continue
             
             warped_roi = cv2.warpAffine(src_roi, warp_mat, (rw, rh), None, cv2.INTER_LINEAR, cv2.BORDER_REFLECT_101)
             mask = np.zeros((rh, rw), dtype=np.uint8)
@@ -152,8 +253,8 @@ class FaceSwap:
         
         try:
             from insightface.model_zoo.inswapper import INSwapper
-            self.model = INSwapper(model_file=model_path, session=None)
-            self.model.session = ort.InferenceSession(model_path, providers=providers)
+            session = temp_sess if providers == ['CPUExecutionProvider'] else ort.InferenceSession(model_path, providers=providers)
+            self.model = INSwapper(model_file=model_path, session=session)
             print(f"[FaceSwap] Modelo {os.path.basename(model_path)} inicializado correctamente.")
         except Exception as e:
             print(f"[FaceSwap] Error crítico inicializando modelo: {e}")
@@ -175,7 +276,7 @@ class FaceSwap:
             if self.model is not None:
                 if self.source_is_image:
                     if getattr(roop.globals, 'log_level', 'error') == 'debug':
-                        print(f"[FaceSwap] Usando pipeline 256px (IMAGE)")
+                        print("[FaceSwap] Usando pipeline 256px (IMAGE)")
                     try:
                         from insightface.utils import face_align
                         src_img = getattr(source_face, 'face_img', getattr(source_face, 'face_img_ref', None))
@@ -185,8 +286,22 @@ class FaceSwap:
                             tgt_kps = np.array(target_face.kps, dtype=np.float32)
                             
                             # 1. Alinear (norm_crop2 devuelve BGR 0-255)
+                            # H-FS-004: M constreñida por bbox — norm_crop2 solo usa
+                            # 5 kps y con kps degenerados genera warp 1,6x
+                            # desplazado. Si M se dispara, se re-estima anclada.
+                            _tbbox = getattr(target_face, 'bbox', None)
+                            try:
+                                M_tgt, _m_how = FaceWarpEngine.estimate_constrained_norm(
+                                    temp_frame.shape[:2], tgt_kps, 256, bbox=_tbbox,
+                                )
+                            except (ValueError, TypeError, OSError, KeyError) as alignment_error:
+                                print(f"[FaceSwap] Invalid target alignment/config: {alignment_error}", flush=True)
+                                return None
                             aimg_src, _ = face_align.norm_crop2(src_img, src_kps, 256)
-                            aimg_tgt, M_tgt = face_align.norm_crop2(temp_frame, tgt_kps, 256)
+                            aimg_tgt = cv2.warpAffine(
+                                temp_frame, M_tgt, (256, 256),
+                                borderMode=cv2.BORDER_REPLICATE,
+                            )
                             
                             # 2. Preparar blobs [1, 3, 256, 256] BGR 0-255 (Sin normalización manual)
                             blob_src = aimg_src.astype(np.float32)
@@ -222,7 +337,7 @@ class FaceSwap:
                 else:
                     # v5.40: Pipeline manual para modelos 128px (embedding-based) BGR 0-255
                     if getattr(roop.globals, 'log_level', 'error') == 'debug':
-                        print(f"[FaceSwap] Usando pipeline 128px (EMBEDDING)")
+                        print("[FaceSwap] Usando pipeline 128px (EMBEDDING)")
                     try:
                         from insightface.utils import face_align
                         src_emb = getattr(source_face, 'embedding', None)
@@ -230,8 +345,20 @@ class FaceSwap:
                             src_emb = np.array(src_emb, dtype=np.float32).flatten()
                             src_emb = src_emb / np.linalg.norm(src_emb)
                             tgt_kps = np.array(target_face.kps, dtype=np.float32)
-                            
-                            aimg_tgt, M_tgt = face_align.norm_crop2(temp_frame, tgt_kps, 128)
+
+                            # H-FS-004: misma M constreñida en producción 128.
+                            _tbbox128 = getattr(target_face, 'bbox', None)
+                            try:
+                                M_tgt, _m_how128 = FaceWarpEngine.estimate_constrained_norm(
+                                    temp_frame.shape[:2], tgt_kps, 128, bbox=_tbbox128,
+                                )
+                            except (ValueError, TypeError, OSError, KeyError) as alignment_error:
+                                print(f"[FaceSwap] Invalid target alignment/config: {alignment_error}", flush=True)
+                                return None
+                            aimg_tgt = cv2.warpAffine(
+                                temp_frame, M_tgt, (128, 128),
+                                borderMode=cv2.BORDER_REPLICATE,
+                            )
                             
                             # v5.41: Ambos modelos inswapper_128 esperan input [0,1] float32.
                             # El wrapper INSwapper de insightface normaliza a [0,1] internamente,
@@ -270,10 +397,11 @@ class FaceSwap:
 
             if res_data is None:
                 if getattr(roop.globals, 'log_level', 'error') == 'debug':
-                    print(f"[FaceSwap] ⚠️ Fallback a WARP GEOMÉTRICO (modelo falló o no disponible)")
+                    print("[FaceSwap] ⚠️ Fallback a WARP GEOMÉTRICO (modelo falló o no disponible)")
                 res_data = self._run_warp(temp_frame, target_face, source_face, paste_back=False)
             
-            if res_data is None: return None
+            if res_data is None:
+                return None
             
             if isinstance(res_data, tuple):
                 swapped_face, M = res_data
@@ -283,7 +411,8 @@ class FaceSwap:
                     M = M * scale
                 res_data = (swapped_face, M)
 
-            if not paste_back: return res_data
+            if not paste_back:
+                return res_data
             if isinstance(res_data, tuple):
                 return self.paste_back_robust(temp_frame, res_data[0], res_data[1])
             return res_data
@@ -295,15 +424,18 @@ class FaceSwap:
     def _run_warp(self, temp_frame, target_face, source_face, paste_back=True):
         try:
             src_img = getattr(source_face, 'face_img_ref', getattr(source_face, 'face_img', None))
-            if src_img is None: return None
+            if src_img is None:
+                return None
             src_img_bgr = cv2.cvtColor(src_img, cv2.COLOR_RGB2BGR) if src_img.shape[2] >= 3 else src_img
             
             warped_face, M = FaceWarpEngine.warp_face(
                 src_img_bgr, temp_frame, np.array(source_face.kps), np.array(target_face.kps)
             )
-            if not paste_back: return warped_face, M
+            if not paste_back:
+                return warped_face, M
             return self.paste_back_robust(temp_frame, warped_face, M)
-        except Exception: return None
+        except Exception:
+            return None
 
     def paste_back_robust(self, target_img, source_face_img, M):
         try:
@@ -319,7 +451,8 @@ class FaceSwap:
             
             center = (int(np.mean(np.where(warped_mask > 0.5)[1])), int(np.mean(np.where(warped_mask > 0.5)[0])))
             return blend_with_poisson(warped_face, target_img, warped_mask, center)
-        except Exception: return target_img
+        except Exception:
+            return target_img
 
     def Release(self):
         self.model = None

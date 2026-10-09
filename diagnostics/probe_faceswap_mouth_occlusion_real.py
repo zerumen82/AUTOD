@@ -41,8 +41,8 @@ def main():
     roop.globals.use_enhancer = True
     original_occlusion = process_module.detect_foreground_occlusion
 
-    def record_occlusion(swapped, reference):
-        mask = original_occlusion(swapped, reference)
+    def record_occlusion(swapped, reference, **kwargs):
+        mask = original_occlusion(swapped, reference, **kwargs)
         cv2.imwrite(str(OUT / 'faceswap_mouth_occ_target.jpg'), reference)
         cv2.imwrite(str(OUT / 'faceswap_mouth_occ_mask.png'), np.uint8(np.clip(mask, 0, 1) * 255))
         print(f'[PROBE] occlusion fraction={np.mean(mask > .1):.3f}, mean={np.mean(mask):.3f}', flush=True)

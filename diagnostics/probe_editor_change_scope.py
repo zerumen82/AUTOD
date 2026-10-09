@@ -50,6 +50,27 @@ def main():
     assert ImgEditorManager._visual_subject_description(
         "the white man who is on his knees is bald"
     ) == "the white man who is on his knees"
+    assert ImgEditorManager._visual_subject_description(
+        "la mujer tiene el pelo negro"
+    ) == "la mujer"
+    assert ImgEditorManager._visual_subject_description(
+        "the woman has the black hair"
+    ) == "the woman"
+    assert ImgEditorManager._requested_change_scope(
+        "la mujer tiene el pelo negro"
+    ) == "el pelo negro"
+    assert ImgEditorManager._requested_change_scope(
+        "the woman has the black hair"
+    ) == "the black hair"
+    assert ImgEditorManager._requested_change_scope(
+        "la mujer tiene que ir sin medias"
+    ) == "ir sin medias"
+    assert ImgEditorManager._visual_subject_description(
+        "the woman has to leave"
+    ) == "the woman"
+    assert ImgEditorManager._requested_change_scope(
+        "the woman has to leave"
+    ) == "leave"
 
 
 if __name__ == "__main__":

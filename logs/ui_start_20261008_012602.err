@@ -1,0 +1,12 @@
+D:\PROJECTS\AUTOAUTO\ui\main.py:391: UserWarning: The parameters have been moved from the Blocks constructor to the launch() method in Gradio 6.0: css. Please pass these parameters to launch() instead.
+  with gr.Blocks(title="AutoAuto - AI Editor", css=css) as demo:
+[2026-10-08 01:27:02,151] INFO - HTTP Request: GET http://localhost:7861/gradio_api/startup-events "HTTP/1.1 200 OK"
+[pywebview] CUSTOM ICON LOADED: D:\PROJECTS\AUTOAUTO\assets\icon.ico (32x32)
+[2026-10-08 01:27:02,266] WARNING - CUSTOM ICON LOADED: D:\PROJECTS\AUTOAUTO\assets\icon.ico (32x32)
+[2026-10-08 01:27:04,463] INFO - HTTP Request: HEAD http://localhost:7861/ "HTTP/1.1 200 OK"
+[2026-10-08 01:27:05,294] INFO - HTTP Request: GET https://api.gradio.app/v3/tunnel-request "HTTP/1.1 200 OK"
+[2026-10-08 01:27:06,543] INFO - HTTP Request: HEAD https://huggingface.co/api/telemetry/https%3A/api.gradio.app/gradio-launched-telemetry "HTTP/1.1 200 OK"
+D:\PROJECTS\AUTOAUTO\venv\lib\site-packages\transformers\models\marian\tokenization_marian.py:176: UserWarning: Recommended: pip install sacremoses.
+  warnings.warn("Recommended: pip install sacremoses.")
+Loading weights:   0%|          | 0/258 [00:00<?, ?it/s]Loading weights: 100%|██████████| 258/258 [00:00<00:00, 19634.05it/s]
+Both `max_new_tokens` (=54) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)

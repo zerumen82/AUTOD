@@ -234,20 +234,46 @@ def get_effective_prefix(
     model_configs: Dict,
     has_style_modifier: bool = False,
     is_sdxl: bool = True,
+    inject_nsfw: bool = True,
+    style_override: bool = False,
 ) -> str:
     """Prefijo del modelo desde config.
     Para modelos explicit, inyecta nsfw_tags del config al inicio (cada modelo especifica los suyos).
-    Todo definido en model_configs.json — sin hardcodes por alias en código."""
+    Todo definido en model_configs.json — sin hardcodes por alias en código.
+
+    inject_nsfw=False (checkbox «Contenido NSFW» de la UI): usa el prefijo
+    SFW configurado o elimina de él los tags NSFW configurados.
+    style_override=True (el prompt pide un estilo no fotorreal): se omite el
+    boilerplate fotorreal (prefix_compact/prefix/fallback).
+    """
     conf = model_configs.get(model_alias, model_configs.get("default", {}))
     is_explicit = bool(conf.get("explicit", False))
-    nsfw_tags = (conf.get("nsfw_tags") or "").strip()
+    nsfw_tags = (conf.get("nsfw_tags") or "").strip() if inject_nsfw else ""
+
+    def configured_prefix(key: str) -> str:
+        value = conf.get(f"{key}_sfw") if not inject_nsfw else None
+        if value is None:
+            value = conf.get(key, "")
+        value = str(value or "")
+        if inject_nsfw or not value:
+            return value
+        blocked = {
+            tag.strip().casefold()
+            for tag in str(conf.get("nsfw_tags") or "").split(",")
+            if tag.strip()
+        }
+        if not blocked:
+            return value
+        kept = [
+            item.strip() for item in value.split(",")
+            if item.strip() and item.strip().casefold() not in blocked
+        ]
+        return ", ".join(kept) + (", " if kept and value.rstrip().endswith(",") else "")
 
     if not is_sdxl:
-        compact = (conf.get("prefix_compact") or "").strip()
+        compact = "" if style_override else configured_prefix("prefix_compact").strip()
         if compact:
             prefix = compact if compact.endswith(", ") else f"{compact}, "
-        elif is_explicit and nsfw_tags:
-            prefix = nsfw_tags + ", "
         else:
             prefix = ""
         if is_explicit and nsfw_tags and nsfw_tags.lower() not in prefix.lower():
@@ -255,17 +281,21 @@ def get_effective_prefix(
         return prefix
 
     # --- SDXL ---
-    if has_style_modifier and image_type in PHOTOREAL_IMAGE_TYPES:
-        compact = conf.get("prefix_compact")
+    if style_override:
+        prefix = ""
+    elif has_style_modifier and image_type in PHOTOREAL_IMAGE_TYPES:
+        compact = configured_prefix("prefix_compact") if "prefix_compact" in conf else None
         if compact is not None:
             prefix = compact
         else:
-            prefix = conf.get("prefix", "")
+            prefix = configured_prefix("prefix")
     else:
-        prefix = conf.get("prefix", "")
+        prefix = configured_prefix("prefix")
 
     if not prefix.strip():
         if is_explicit:
+            if style_override:
+                return (nsfw_tags + ", ") if nsfw_tags else ""
             from roop.img_editor.gen_prompt_config import get_prompt_extras
             base = (get_prompt_extras().get("explicit_sdxl_prefix_fallback") or "").strip()
             if base and not base.endswith(", "):
@@ -287,6 +317,7 @@ def get_effective_prefix(
 
 def _split_style_and_extras(
     modifiers: Dict[str, str],
+    exclude_categories: Tuple[str, ...] = (),
 ) -> Tuple[str, str, List[str], str]:
     """Separa estilo (image_type) de extras; aplica bloqueos en tiempo de generación."""
     image_type = modifiers.get("image_type", "auto") or "auto"
@@ -294,11 +325,12 @@ def _split_style_and_extras(
     style_frag = ""
     extra_frags: List[str] = []
     for cat, frag in parts:
+        if cat in exclude_categories:
+            continue
         if cat == "image_type":
             style_frag = frag
         else:
             extra_frags.append(frag)
-    suffix_display = ", ".join(frag for _, frag in parts)
     return style_frag, ", ".join(extra_frags), extra_frags, image_type
 
 
@@ -308,17 +340,30 @@ def assemble_generation_prompt(
     modifiers: Dict[str, str],
     model_configs: Dict,
     is_sdxl: bool = True,
+    inject_nsfw: bool = True,
+    style_override: bool = False,
 ) -> Tuple[str, str, str]:
     """Monta prompt: prefijo mínimo → escena usuario (primero) → estilo → extras.
-    Recorta por presupuesto CLIP (~77 tokens) sin tocar el texto del usuario."""
-    style_frag, extras_joined, extra_list, image_type = _split_style_and_extras(modifiers)
+    Recorta por presupuesto CLIP (~77 tokens) sin tocar el texto del usuario.
+
+    style_override=True → el prompt pide un estilo no fotorreal: se caen el
+    tipo de imagen fotorreal, el suffix de estilo/piel de la UI y la cola
+    photoreal_tail (el prompt manda sobre los desplegables).
+    """
+    exclude = ("image_type", "skin_finish") if style_override else ()
+    style_frag, extras_joined, extra_list, image_type = _split_style_and_extras(
+        modifiers, exclude_categories=exclude,
+    )
     image_type = resolve_effective_image_type(image_type, model_alias, model_configs)
+    if style_override:
+        image_type = "auto"
     has_style = image_type != "auto"
     suffix_display = ", ".join(x for x in [style_frag, extras_joined] if x)
 
     prefix = get_effective_prefix(
         model_alias, image_type, model_configs,
         has_style_modifier=has_style, is_sdxl=is_sdxl,
+        inject_nsfw=inject_nsfw, style_override=style_override,
     )
     scene = (translated or "").strip().rstrip(",").strip()
     scene_words = len(scene.split()) if scene else 0
@@ -340,6 +385,7 @@ def assemble_generation_prompt(
     tail_parts: List[str] = []
     if (
         is_sdxl
+        and inject_nsfw
         and _model_explicit(model_alias, model_configs)
         and scene_needs_anatomy_integrity(scene)
         and extras_cfg.get("anatomy_integrity_positive")
@@ -508,9 +554,15 @@ def get_effective_negative(
     model_configs: Dict = None,
     prompt_en: str = "",
     is_sdxl: bool = True,
+    inject_nsfw: bool = True,
+    style_override: bool = False,
 ) -> str:
     """Refuerza negativo según config del modelo + reglas generales (anti-censor, anti-stylize para photoreal).
-    Los términos específicos de cada modelo (scores, anti-illustrated fuertes, etc.) van en su negative_prompt del JSON."""
+    Los términos específicos de cada modelo (scores, anti-illustrated fuertes, etc.) van en su negative_prompt del JSON.
+
+    inject_nsfw=False → sin bloques adultos (anti-censor / multi-subject / anti-dismembered).
+    style_override=True → sin anti_stylize (no se pelea con el estilo pedido).
+    """
 
     neg = _dedupe_comma_list((base_negative or "").strip())
     mods = modifiers or {}
@@ -519,8 +571,10 @@ def get_effective_negative(
         model_alias,
         model_configs or {},
     )
+    if style_override:
+        image_type = "auto"
     conf = (model_configs or {}).get(model_alias, {})
-    is_explicit = bool(conf.get("explicit", False))
+    is_explicit = bool(conf.get("explicit", False)) and inject_nsfw
 
     from roop.img_editor.gen_semantic import scene_needs_anatomy_integrity, is_multi_person_scene
     from roop.img_editor.gen_prompt_config import get_prompt_extras

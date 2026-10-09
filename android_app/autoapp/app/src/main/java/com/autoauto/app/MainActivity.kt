@@ -129,8 +129,9 @@ class MainActivity : AppCompatActivity() {
         "Kontext (edición fuerte)",
         "Qwen-Image-Edit Q5 (20B)"
     )
-    private val genEngines = arrayOf("flux_dev_abliterated", "schnell", "klein_base")
+    private val genEngines = arrayOf("flux_dev_q4", "flux_dev_abliterated", "schnell", "klein_base")
     private val genEngineLabels = arrayOf(
+        "FLUX Dev Q4",
         "FLUX Abliterated (ultra realista)",
         "FLUX Schnell (rápido)",
         "FLUX.2 Klein 4B (rápido + realista)"
@@ -159,6 +160,7 @@ class MainActivity : AppCompatActivity() {
             putString("lastResultPath", lastResultPath)
             putBoolean("isGenerateMode", isGenerateMode)
             putInt("genEngine", selectedGenEngine)
+            putString("genEngineAlias", genEngines[selectedGenEngine])
             putBoolean("genOrientationH", genOrientationH)
             putBoolean("genEnhance", genEnhanceCheck.isChecked)
             putBoolean("genRewriter", genRewriterCheck.isChecked)
@@ -186,8 +188,20 @@ class MainActivity : AppCompatActivity() {
         when (tier) { "4k" -> tierGroup.check(R.id.tier4k); "8k" -> tierGroup.check(R.id.tier8k); else -> tierGroup.check(R.id.tierHd) }
         promptInput.setText(p.getString("prompt", "") ?: "")
         // Generate mode
-        selectedGenEngine = p.getInt("genEngine", 0)
-        if (selectedGenEngine >= genEngines.size) selectedGenEngine = 0
+        val defaultGenAlias = getString(R.string.default_generation_engine)
+        val savedGenAlias = p.getString("genEngineAlias", null)
+        // La versión anterior guardaba el índice: 0=Abliterated, 1=Schnell,
+        // 2=Klein. El índice 0 era también su default, de modo que se migra
+        // al nuevo default seguro; las otras selecciones conservan su motor.
+        val legacyGenEngines = arrayOf("flux_dev_abliterated", "schnell", "klein_base")
+        val legacyAlias = legacyGenEngines.getOrNull(p.getInt("genEngine", 0))
+        val selectedAlias = savedGenAlias ?: when (legacyAlias) {
+            "schnell", "klein_base" -> legacyAlias
+            else -> defaultGenAlias
+        }
+        selectedGenEngine = genEngines.indexOf(selectedAlias).takeIf { it >= 0 }
+            ?: genEngines.indexOf(defaultGenAlias).takeIf { it >= 0 }
+            ?: 0
         genEngineSpinner.setSelection(selectedGenEngine)
         genEnhanceCheck.isChecked = p.getBoolean("genEnhance", false)
         genRewriterCheck.isChecked = p.getBoolean("genRewriter", false)

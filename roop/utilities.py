@@ -106,7 +106,7 @@ def convert_to_gradio(image, is_rgb=False):
             arr = np.array(image)
             if isinstance(arr, np.ndarray) and len(arr.shape) >= 2:
                 return arr.copy()
-        except:
+        except BaseException:
             pass
 
     except Exception as e:
@@ -123,13 +123,13 @@ def create_error_image(message):
     error_img = np.zeros((height, width, 3), dtype=np.uint8)
     error_img[:, :, 0] = 50  # Fondo azul oscuro
     error_img[:, :, 2] = 50  # Fondo azul oscuro
-    
+
     # Añadir texto del error
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 0.4
     color = (255, 255, 255)  # Texto blanco
     thickness = 1
-    
+
     # Dividir el mensaje en líneas
     words = message.split()
     lines = []
@@ -144,7 +144,7 @@ def create_error_image(message):
             current_line = [word]
     if current_line:
         lines.append(' '.join(current_line))
-    
+
     # Dibujar cada línea
     y = 30
     for i, line in enumerate(lines):
@@ -154,7 +154,7 @@ def create_error_image(message):
         x = (width - text_size[0]) // 2
         cv2.putText(error_img, line, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
         y += 20
-    
+
     return error_img
 
 
@@ -358,7 +358,7 @@ def str_to_class(module_name, class_name) -> Any:
         print(f"[DEBUG] Attempting to import module: {module_name}")
         module_ = import_module(module_name)
         print(f"[DEBUG] Module imported successfully: {module_}")
-        
+
         # Intentar obtener la clase directamente primero
         if hasattr(module_, class_name):
             print(f"[DEBUG] Found class {class_name} in module")
@@ -378,10 +378,10 @@ def str_to_class(module_name, class_name) -> Any:
                     except Exception as e:
                         print(f"[DEBUG] Error trying to instantiate {attr_name}: {e}")
                         continue
-            
+
             if class_ is None:
                 print(f"Class {class_name} does not exist in module {module_name}")
-        
+
     except ImportError as e:
         print(f"Module {module_name} does not exist: {e}")
         # Fallback: intentar importar solo el módulo base
@@ -394,11 +394,11 @@ def str_to_class(module_name, class_name) -> Any:
             print(f"[DEBUG] Available FaceSwap processors: {available}")
         except Exception as base_error:
             print(f"[DEBUG] Base module import failed: {base_error}")
-    
+
     return class_
 
 def is_installed(name:str) -> bool:
-    return shutil.which(name);
+    return shutil.which(name)
 
 # Taken from https://stackoverflow.com/a/68842705
 def get_platform() -> str:
@@ -407,17 +407,17 @@ def get_platform() -> str:
             proc_version = open("/proc/version").read()
             if "Microsoft" in proc_version:
                 return "wsl"
-        except:
+        except BaseException:
             pass
     return sys.platform
 
 def open_with_default_app(filename:str):
-    if filename == None:
+    if filename is None:
         return
     platform = get_platform()
     if platform == "darwin":
         subprocess.call(("open", filename))
-    elif platform in ["win64", "win32"]:        
+    elif platform in ["win64", "win32"]:
         os.startfile(filename.replace("/", "\\"))
     elif platform == "wsl":
         subprocess.call("cmd.exe /C start".split() + [filename])
@@ -463,10 +463,10 @@ def open_folder(path: str):
         elif platform in ["win64", "win32"]:
             open_with_default_app(path)
         elif platform == "wsl":
-            subprocess.call("cmd.exe /C start".split() + [filename])
+            subprocess.call("cmd.exe /C start".split() + [path])
         else:  # linux variants
             subprocess.Popen(["xdg-open", path])
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
         pass
         # import webbrowser
@@ -474,7 +474,7 @@ def open_folder(path: str):
 
 
 def create_version_html() -> str:
-    versions_html = f"""
+    versions_html = """
 <span>Version 1.0</span>
 """
     return versions_html

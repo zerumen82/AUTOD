@@ -84,8 +84,13 @@ def resolve_scene_loras(
     model_alias: str,
     base_strength: float = 0.55,
     image_type: str = "auto",
+    include_nsfw: bool = True,
 ) -> Tuple[List[LoraPick], str]:
-    """LoRAs desde catálogo JSON + scores semánticos (sin ifs por palabra del usuario)."""
+    """LoRAs desde catálogo JSON + scores semánticos (sin ifs por palabra del usuario).
+
+    include_nsfw=False (checkbox «Contenido NSFW» de la UI): se omiten las
+    entradas marcadas con "nsfw": true en config/generation_prompt.json.
+    """
     pony = _is_pony_model(model_alias)
     picks: List[LoraPick] = []
     used_files = set()
@@ -93,6 +98,8 @@ def resolve_scene_loras(
     multi_person = is_multi_person_scene(prompt_en)
 
     for entry in get_lora_catalog():
+        if not include_nsfw and entry.get("nsfw"):
+            continue
         if not entry.get("always"):
             continue
         if entry.get("pony_only") and not pony:
@@ -111,6 +118,8 @@ def resolve_scene_loras(
 
     scored = []
     for entry in get_lora_catalog():
+        if not include_nsfw and entry.get("nsfw"):
+            continue
         if entry.get("always"):
             continue
         if entry.get("pony_only") and not pony:

@@ -60,6 +60,14 @@ def main():
     _seed(mgr)
     setattr(mgr, '_closeup_active_a.mp4', True)
     mgr._reset_tracking_on_scene_cut(r'D:\clips\a.mp4', 30, reason='probe closeup')
+    assert 'video_a.mp4_p0' not in mgr._mouth_blend_ema_by_person
+    assert 'video_a.mp4' not in mgr._occ_frame_ema
+    _assert_other_video(mgr)
+
+    _seed(mgr)
+    mgr._reset_tracking_on_scene_cut(
+        r'D:\clips\a.mp4', 40, reason='probe explicit soft closeup', soft=True,
+    )
     assert mgr._mouth_blend_ema_by_person['video_a.mp4_p0'] == 0.65
     assert 'video_a.mp4' in mgr._occ_frame_ema
 

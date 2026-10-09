@@ -253,34 +253,12 @@ def create_ui():
         
         # Tabs
         with gr.Tabs() as tabs:
-            # Tab 1: Face Swap
-            with gr.Tab("Face Swap"):
-                try:
-                    from ui.tabs.faceswap_tab import faceswap_tab
-                    faceswap_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
-            
-            # Tab 2: Animate Image
-            with gr.Tab("Animate Image"):
-                try:
-                    from ui.tabs.animate_photo_tab import animate_photo_tab
-                    animate_photo_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
-            
-            # Tab 3: Image Editor
-            with gr.Tab("🎨 Image Editor"):
-                try:
-                    create_img_editor_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
-            
-            # Tab 4: Generation
+            # Tab 1: Generation
+            gen_components = None
             with gr.Tab("🚀 Generate"):
                 try:
                     from ui.tabs.gen.gen_tab import create_gen_tab
-                    create_gen_tab()
+                    gen_components = create_gen_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
                 
@@ -300,6 +278,32 @@ def create_ui():
                         sd_btn_open = gr.Button("🌐 Abrir WebUI Completa", variant="secondary", scale=1)
                     
                     sd_msg = gr.Textbox(label="Mensaje", interactive=False, visible=False)
+            
+            # Tab 2: Image Editor
+            with gr.Tab("🎨 Image Editor"):
+                try:
+                    editor_components = create_img_editor_tab()
+                    if gen_components:
+                        from ui.tabs.gen.events import wire_editor_bridge
+                        wire_editor_bridge(gen_components, editor_components)
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+            
+            # Tab 3: Face Swap
+            with gr.Tab("Face Swap"):
+                try:
+                    from ui.tabs.faceswap_tab import faceswap_tab
+                    faceswap_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+            
+            # Tab 4: Animate Image
+            with gr.Tab("Animate Image"):
+                try:
+                    from ui.tabs.animate_photo_tab import animate_photo_tab
+                    animate_photo_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
             
             # Tab 5: Settings
             with gr.Tab("Settings"):
@@ -410,34 +414,12 @@ def create_ui():
         
         # Tabs
         with gr.Tabs() as tabs:
-            # Tab 1: Face Swap
-            with gr.Tab("Face Swap"):
-                try:
-                    from ui.tabs.faceswap_tab import faceswap_tab
-                    faceswap_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
-            
-            # Tab 2: Animate Image
-            with gr.Tab("Animate Image"):
-                try:
-                    from ui.tabs.animate_photo_tab import animate_photo_tab
-                    animate_photo_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
-            
-            # Tab 3: Image Editor
-            with gr.Tab("🎨 Image Editor"):
-                try:
-                    create_img_editor_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
-            
-            # Tab 4: Generation
+            # Tab 1: Generation
+            gen_components = None
             with gr.Tab("🚀 Generate"):
                 try:
                     from ui.tabs.gen.gen_tab import create_gen_tab
-                    create_gen_tab()
+                    gen_components = create_gen_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
                 
@@ -457,6 +439,32 @@ def create_ui():
                         sd_btn_open = gr.Button("🌐 Abrir WebUI Completa", variant="secondary", scale=1)
                     
                     sd_msg = gr.Textbox(label="Mensaje", interactive=False, visible=False)
+            
+            # Tab 2: Image Editor
+            with gr.Tab("🎨 Image Editor"):
+                try:
+                    editor_components = create_img_editor_tab()
+                    if gen_components:
+                        from ui.tabs.gen.events import wire_editor_bridge
+                        wire_editor_bridge(gen_components, editor_components)
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+            
+            # Tab 3: Face Swap
+            with gr.Tab("Face Swap"):
+                try:
+                    from ui.tabs.faceswap_tab import faceswap_tab
+                    faceswap_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+            
+            # Tab 4: Animate Image
+            with gr.Tab("Animate Image"):
+                try:
+                    from ui.tabs.animate_photo_tab import animate_photo_tab
+                    animate_photo_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
             
             # Tab 5: Settings
             with gr.Tab("Settings"):

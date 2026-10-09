@@ -77,7 +77,7 @@ print("PROBE v5.1140 — Generate: workflows reales por motor + APK + VRAM")
 print("=" * 70)
 
 # ---------------------------------------------------------------- FLUX abliterated
-print("\n[1] flux_dev_abliterated (default): grafo ComfyUI")
+print("\n[1] flux_dev_abliterated (selección explícita): grafo ComfyUI")
 ok, msg = client.load("flux_dev_abliterated")
 check("load OK", ok)
 check("dual clip (clip_l + T5 GGUF)", client._is_dual_clip and client._clip_type == "flux")
@@ -103,7 +103,12 @@ check("FluxGuidance con cfg 3.5", wf.get("14", {}).get("inputs", {}).get("guidan
 check("KSampler a cfg 1.0 (receta FLUX.1)", ks.get("cfg") == 1.0)
 check("denoise 1.0 (puro txt2img)", ks.get("denoise") == 1.0)
 check("VAEDecode + SaveImage", wf.get("9", {}).get("class_type") == "VAEDecode" and wf.get("10", {}).get("class_type") == "SaveImage")
-check("negative con censored/sfw (abliterated)", "censored" in (wf.get("7", {}).get("inputs", {}).get("text") or ""))
+# v5.1203: 'censored/sfw/clothed' salió del negative del modelo y vive ahora en
+# prompt_extras.anti_censor_negative, que se inyecta SOLO con el checkbox
+# «Contenido NSFW» activo (ruta AI). Ver probe_gen_prompt_adherence.py [1].
+neg_text = (wf.get("7", {}).get("inputs", {}).get("text") or "")
+check("negative del workflow = config del modelo", neg_text == conf["negative_prompt"])
+check("anti-censor fuera de la config base (gateado por inject_nsfw)", "panties" not in neg_text)
 
 # ---------------------------------------------------------------- Schnell (receta distilled)
 print("\n[2] schnell: receta distilled 4 pasos / cfg 1.0")
