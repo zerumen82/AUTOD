@@ -517,19 +517,11 @@ class ImgEditorManager:
                 angle_change=angle_change, pose_change=pose_change,
             )
 
-        # --- 2. POV/postura/acción física: regeneración fuerte sin ancla ---
-        # Una postura o interacción no existe en la fuente. Turbo (12 pasos) es
-        # útil para retoques, pero con reference_latents conserva la anatomía
-        # original e ignora el verbo. En 8GB Full Q4 usa offload y es lento, pero
-        # deja al prompt reconstruir la relación espacial. El bypass se activa
-        # más abajo con pose_change.
+        # --- 2. POV/postura/accion fisica: regimen fuerte SIN cambiar de pesos.
+        # Turbo es el motor elegido; el bypass sin ancla se activa mas abajo
+        # con pose_change (gen_params no_kontext). No se cambia a Full.
         if (angle_change or pose_change) and not body_transform:
-            if preferred_engine == "longcat_full":
-                return None, None, ""
-            return (
-                "longcat_full", _LONGCAT_FULL_VERSION,
-                f"pov={angle_change} pose={pose_change}: {preferred_engine} -> longcat_full (acción/postura, sin ancla)"
-            )
+            return None, None, ""
         if preferred_engine in _WEAK_FOR_STRONG:
             # Mag alta (>0.65) o structural add: necesita engine fuerte
             needs_strong = (
@@ -561,82 +553,40 @@ class ImgEditorManager:
                         f"pov={angle_change}): {preferred_engine} -> kontext (8GB)"
                     )
 
-        # --- 3. LongCat Turbo para edits fuertes: upgrade a Full ---
-        if preferred_engine in ("longcat", "imagine") and mag >= 0.75:
-            if vram_gb >= _LONGCAT_MIN_VRAM:
-                return (
-                    "longcat_full", _LONGCAT_FULL_VERSION,
-                    f"mag={mag:.2f} >= 0.75: longcat turbo -> longcat_full (calidad)"
-                )
+        # --- 3. LongCat Turbo es el motor elegido (spec/00-PRINCIPIOS). No hay
+        # upgrade automatico a Full: el usuario pidio volver a Turbo.
+        # mag>=0.75 se queda en Turbo con regimen fuerte (bypass sin ancla),
+        # sin cambiar de pesos.
 
-        # --- 3b. Klein 4B para edits fuertes: el distilled + ReferenceLatent
-        # conserva demasiado (misma evidencia que motivó el bypass uncover:
-        # regenera lo mismo aunque el prompt pida cambio). Klein es débil en
-        # instruction-following (v5.1097) → mismo umbral needs_strong que los
-        # demás débiles (0.65, log real: rewriter mag=0.70 se colaba entre
-        # 0.65 y 0.75 y klein corría nativo sin seguir el prompt).
-        # Solo magnitud + tabla de capacidades, cero vocabulario.
-        if preferred_engine in ("klein", "klein_base") and mag >= 0.65:
-            if vram_gb >= _LONGCAT_MIN_VRAM:
-                return (
-                    "longcat_full", _LONGCAT_FULL_VERSION,
-                    f"mag={mag:.2f} >= 0.65: klein -> longcat_full (edit fuerte)"
-                )
-            # v5.1118 — 8GB: mag>=0.75 → LongCat (bypass sin ancla).
-            # Log real 07:22: no-body mag=0.80 → kontext+offset = copy machine
-            # (std=52, no obedeció). Kontext queda para el rango moderado.
-            # v5.1120 — FULL en vez de Turbo.
-            elif mag >= 0.75:
-                return (
-                    "longcat_full", _LONGCAT_FULL_VERSION,
-                    f"mag={mag:.2f} >= 0.75: klein -> longcat_full (bypass sin ancla, 8GB)"
-                )
-            else:
-                return (
-                    "kontext", _KONTEXT_VERSION,
-                    f"mag={mag:.2f} >= 0.65: klein -> kontext (edit fuerte, 8GB)"
-                )
+        # --- 3b. Klein pedido a mano: vuelve a Turbo (motor elegido).
+        # Klein ignora la mascara por diseno (ReferenceLatent) y no
+        # conserva cuerpos; Turbo con inpaint si la respeta.
+        # Solo magnitud, cero vocabulario.
+        if preferred_engine in ("klein", "klein_base", "klein_9b"):
+            return (
+                "longcat", _LONGCAT_TURBO_VERSION,
+                f"klein -> longcat turbo (mascara + cuerpos)"
+            )
 
         # --- 4. Quality improvements: classical pipeline, sin override ---
         if quality_only:
             return None, None, ""
 
-        # --- 5. Background: cualquier engine funciona, LongCat/Kontext mejores ---
-        if background_focus and preferred_engine in _WEAK_FOR_STRONG:
-            if vram_gb >= _LONGCAT_MIN_VRAM:
-                return (
-                    "longcat_full", _LONGCAT_FULL_VERSION,
-                    f"background edit: {preferred_engine} -> longcat_full"
-                )
-            else:
-                return (
-                    "kontext", _KONTEXT_VERSION,
-                    f"background edit: {preferred_engine} -> kontext (8GB)"
-                )
+        # --- 5. Background: Turbo con mascara (motor elegido). No hay
+        # override a Full/Kontext: la mascara focal ya manda a LongCat
+        # con inpaint mas abajo.
 
         # --- 6. Default: mantener engine preferido ---
         return None, None, ""
 
     @staticmethod
     def _select_longcat_version(client, magnitude: float, body_transform: bool) -> str:
-        """Elige LongCat sin alternar Full↔Turbo entre ediciones consecutivas.
+        """Turbo es el motor elegido (spec/00-PRINCIPIOS): siempre Turbo.
 
-        En 8GB ambas variantes comparten el encoder Qwen-VL enorme. Degradar de
-        Full a Turbo por una pequeña variación de magnitud descargaba el modelo
-        residente y provocaba otra carga/offload de varios minutos. Se conserva
-        Full una vez cargado; Turbo solo asciende a Full ante un cambio fuerte.
+        Sin alternancia Full<->Turbo: el cambio de pesos descargaba el
+        modelo residente y provocaba recargas de varios minutos.
         """
-        full = "LongCat-Image-Edit-Q4_K_S.gguf"
-        turbo = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
-        desired = full if body_transform or float(magnitude) >= 0.70 else turbo
-        active = getattr(client, "_flux_version", None) if getattr(client, "_loaded", False) else None
-        if active == full and desired == turbo:
-            print(
-                "[ImgEditor] LongCat residente Full conservado (evita recarga Full→Turbo)",
-                flush=True,
-            )
-            return full
-        return desired
+        return "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
 
     def _apply_prompt_rewriter(
         self,
@@ -2286,6 +2236,14 @@ class ImgEditorManager:
             # borrosa frente al resto nítido. Compensación medida: igualar la
             # nitidez del parche al recorte original con unsharp, solo con
             # interpolación >1,5x y solo si hay déficit real.
+            # 2026-10-10: una sola pasada de sigma 1,5 con tope 0,90 subía
+            # 7->16 frente a 402 del recorte (4% de la fuente): el parche
+            # seguía tan blando como la ventana translucida que se ve al
+            # rededor de la cabeza. El escalado ×3,5 reparte el déficit por
+            # bandas (fina, media y gruesa), así que se compensa por bandas
+            # con tope por pasada, hasta 70% de la nitidez fuente o 2 rondas.
+            # Validado en diagnostics/test_sharpness_fix.py sobre foto real:
+            # 8->268 de 424 (63%) con desvío en zonas planas p99=21,6.
             if scale_up > 1.5:
                 try:
                     import cv2 as _cv2
@@ -2298,22 +2256,38 @@ class ImgEditorManager:
                     ed_sharp = float(_cv2.Laplacian(ed_arr, _cv2.CV_64F).var())
                     if src_sharp > 1.0 and ed_sharp < src_sharp * 0.80:
                         arr = np.asarray(edited, dtype=np.float32)
-                        blur = _cv2.GaussianBlur(arr, (0, 0), 1.5)
-                        # Fuerza adaptativa al déficit medido (x3,7 en la sesión
-                        # real); tope 0,90 para no crear halos.
-                        strength = float(min(0.90, 0.50 * (src_sharp / max(1.0, ed_sharp) - 1.0)))
-                        if strength >= 0.05:
-                            arr = _cv2.addWeighted(arr, 1.0 + strength, blur, -strength, 0)
-                            edited = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-                        new_sharp = float(
-                            _cv2.Laplacian(
-                                np.asarray(edited.convert("L"), dtype=np.uint8),
-                                _cv2.CV_64F,
-                            ).var()
+                        ed_initial = ed_sharp
+                        target = src_sharp * 0.70
+                        passes_used = 0
+                        for _round in range(2):
+                            if ed_sharp >= target:
+                                break
+                            for sigma, cap in ((1.0, 0.6), (2.0, 0.6), (4.0, 0.5)):
+                                if ed_sharp >= target:
+                                    break
+                                deficit = src_sharp / max(1.0, ed_sharp) - 1.0
+                                strength = float(min(cap, 0.50 * deficit))
+                                if strength < 0.05:
+                                    continue
+                                blur = _cv2.GaussianBlur(arr, (0, 0), sigma)
+                                arr = _cv2.addWeighted(
+                                    arr, 1.0 + strength, blur, -strength, 0,
+                                )
+                                passes_used += 1
+                                ed_sharp = float(
+                                    _cv2.Laplacian(
+                                        np.clip(arr, 0, 255).astype(np.uint8),
+                                        _cv2.CV_64F,
+                                    ).var()
+                                )
+                        edited = Image.fromarray(
+                            np.clip(arr, 0, 255).astype(np.uint8)
                         )
                         print(
                             f"[ImgEditor] Paste x{scale_up:.2f}: nitidez parche "
-                            f"{ed_sharp:.0f} -> {new_sharp:.0f} (original {src_sharp:.0f}, fuerza {strength:.2f})",
+                            f"{ed_initial:.0f} -> {ed_sharp:.0f} (original "
+                            f"{src_sharp:.0f}, {ed_sharp / max(1.0, src_sharp):.0%} "
+                            f"de fuente, {passes_used} pasadas multi)",
                             flush=True,
                         )
                 except Exception as sharp_err:
@@ -2366,7 +2340,17 @@ class ImgEditorManager:
             enhanced_mask = self._apply_object_exclusion(local_mask, measured_zone)
             if enhanced_mask is not None:
                 local_mask = enhanced_mask
-        soft = self._feather_mask(local_mask, amount=6)
+        # 2026-10-10: 6px de feather sobre un recorte de 3428px deja el borde
+        # del parche durisimo (nitidez 15 pegada contra foto 402) y se ve el
+        # rectangulo translucido alrededor de la cabeza. El feather escala con
+        # el recorte para que la transicion sea suave en fotos grandes.
+        feather_px = max(6, int(min(crop_w, crop_h) * 0.02))
+        soft = self._feather_mask(local_mask, amount=feather_px)
+        print(
+            f"[ImgEditor] Feather paste: {feather_px}px sobre recorte "
+            f"{crop_w}x{crop_h}",
+            flush=True,
+        )
         # The feather is applied around the measured change, so it bleeds a few
         # pixels past it. Those pixels still have to stay inside the subject
         # already located on the photo: an edit that did not ask for a new
@@ -3412,6 +3396,40 @@ class ImgEditorManager:
             )
         return groups
 
+    def _compound_clause_zone(
+        self, image: Image.Image, clause: str, source: str, facts: dict, faces,
+    ) -> Optional[Image.Image]:
+        """Paste zone of one compound clause, measured without generating.
+
+        The compound route is ONE generation of the full instruction. The
+        prompt is still split, but only to measure where each clause lands
+        on this photo: a measured surface is its own zone, and a body, pose
+        or appearance clause edits a person, so that person is the zone.
+        The generation is full-frame, so a 2% request patch would miss a
+        limb the model placed a few pixels away. A clause that measures
+        nothing returns None and is reported, never guessed.
+        """
+        raw = (source or clause).strip()
+        translated = clause
+        if ((facts.get("local_region") or facts.get("region_ambiguous"))
+                and not facts.get("local_appearance")):
+            passes = self._measured_region_passes(
+                image, raw, translated,
+                surface_recolor=bool(facts.get("surface_recolor")),
+                faces=faces,
+            )
+        else:
+            passes = self._measured_subject_passes(image, raw, translated, faces)
+            if not passes and facts.get("local_appearance"):
+                recovered = self._appearance_head_pass(image, raw, translated, faces)
+                if recovered is not None:
+                    passes = [recovered]
+        for item in passes:
+            mask = item.get("mask")
+            if mask is not None:
+                return mask
+        return None
+
     def _narrow_appearance_passes(
         self, image, passes, score_raw, prompt_raw, prompt, faces,
     ) -> list:
@@ -3945,6 +3963,35 @@ class ImgEditorManager:
         )
         return person_mask
 
+    def _head_zone_for_subject(
+        self, image: Image.Image, subject_mask: Image.Image, faces,
+    ) -> Optional[Image.Image]:
+        """Head of the measured person, for appearance edits without a part.
+
+        "bald" or "beard" are often not in the photo yet, so the segmenter
+        cannot draw them and the clause falls back to the whole person. A
+        full-photo pass has no spatial anchor and the model paints the
+        scalp glossy (2026-10-12, edit_1791760178.png). The head of the
+        measured person is where those changes live; intersecting the head
+        candidates with the measured person keeps the zone on that person.
+        """
+        if subject_mask is None or not faces:
+            return None
+        head_union = self._head_mask_from_faces(image, faces)
+        if head_union is None:
+            return None
+        person = np.asarray(subject_mask.convert("L")) >= 128
+        head = np.asarray(head_union.convert("L")) >= 128
+        zone = Image.fromarray(((head & person).astype(np.uint8)) * 255, "L")
+        if int((np.asarray(zone) >= 128).sum()) < 48:
+            return None
+        print(
+            "[ImgEditor] Cabeza del sujeto medida para la edición de apariencia; "
+            "pase local con ancla espacial",
+            flush=True,
+        )
+        return zone
+
     def _covered_surface_view(
         self, image: Image.Image, mask: Image.Image,
         person: Optional[Image.Image] = None,
@@ -4023,7 +4070,16 @@ class ImgEditorManager:
 
         no_kontext without that cover removes the photo the sampler was
         anchored to. Body and region edits never reach this.
+
+        When the recipe already anchors the photo spatially
+        (no_kontext=False), the cover is NOT sent: the flat fill hides
+        the very surface the model must edit, and the bald head came out
+        pale and plasticky (2026-10-12, edit_1791758193.png). The
+        original photo plus the spatial anchor is the versatile recipe
+        for any appearance change.
         """
+        if sample.get("no_kontext") is False:
+            return sample, None
         reference = self._reference_for_work(image, mask, person, local_box)
         if reference is None:
             return sample, None
@@ -5202,124 +5258,169 @@ class ImgEditorManager:
                 and not (quality_hybrid and quality_use_generative is True)
                 and engine in ("longcat", "imagine")
                 and 0 < get_vram_gb() <= 10):
-            # The prompt is split into clauses and ordered by what each one
-            # needs. A pose or a whole-body change redraws the frame, so it
-            # goes first and several of those share one pass. A measured
-            # surface goes next. A tight appearance change goes last, so a
-            # broader zone cannot paint over it. A single clause never
-            # enters here.
+            # A compound prompt is ONE generation: the full instruction goes
+            # to Turbo once, and only the zones each clause measured are
+            # pasted back. Per-clause passes were slow (~1 min each), left
+            # grey ghosts between overlapping passes, and dropped the clause
+            # that ran last. The prompt is still split, to measure each
+            # clause's zone on this photo; never to generate once per clause.
             if (_compound_depth == 0 and not quality_hybrid
                     and self._split_compound_instruction(prompt)):
                 clauses = self._split_compound_instruction(prompt)
-                # Score each clause in the language the user wrote as well as
-                # in the translation. "grises" is a measured recolor; the
-                # English "grey" alone is not, and that clause was redrawing
-                # the whole photo before the other change.
                 sources = self._split_compound_instruction(prompt_raw)
                 if len(sources) != len(clauses):
                     sources = [""] * len(clauses)
-
-                def _clause_facts(clause: str, source: str = "") -> dict:
-                    return self._prompt_authority_facts(source or clause, clause)
-
-                paired = list(zip(clauses, sources))
-                scored = [(pair, _clause_facts(pair[0], pair[1])) for pair in paired]
-                frame_pairs = [
-                    pair for pair, facts in scored
-                    if not facts.get("local_appearance") and not facts.get("local_region")
-                    and not facts.get("region_ambiguous")
-                ]
-                region_pairs = [
-                    pair for pair, facts in scored
-                    if (facts.get("local_region") or facts.get("region_ambiguous"))
-                    and not facts.get("local_appearance")
-                ]
-                appearance_pairs = [
-                    pair for pair, facts in scored if facts.get("local_appearance")
-                ]
-                jobs = []
-                if len(frame_pairs) == 1:
-                    jobs.append((*frame_pairs[0], "encuadre"))
-                elif len(frame_pairs) > 1:
-                    jobs.append((
-                        ", ".join(text for text, _source in frame_pairs),
-                        ", ".join(source for _text, source in frame_pairs if source),
-                        "encuadre",
-                    ))
-                jobs.extend((*pair, "zona medida") for pair in region_pairs)
-                jobs.extend((*pair, "apariencia") for pair in appearance_pairs)
-                print(
-                    "[ImgEditor] El prompt se parte y se ordena según cada cambio: "
-                    + ", ".join(kind for _clause, _source, kind in jobs),
-                    flush=True,
-                )
-                current = img
-                applied = 0
-                notes = []
-                # The conjunction split leaves the second half without the
-                # person ("Man must be bald and go naked" → "go naked"), and
-                # an unnamed global pass edits whoever the model picks. The
-                # subject comes from the full instruction the user wrote.
-                shared_subject = ""
-                for _full_text in (prompt, prompt_raw):
-                    shared_subject = self._visual_subject_description(_full_text)
-                    if shared_subject:
-                        break
-                for index, (clause, source, kind) in enumerate(jobs, start=1):
+                zones = []
+                unmeasured = []
+                # The full-prompt score dilutes one clause ("bald and naked"
+                # reads as weak body). The wrapper flags come from the
+                # strongest clause, the same way the single-clause path
+                # composes its own instruction.
+                compound_pose = False
+                compound_body = False
+                compound_local = False
+                compound_direction = "change"
+                compound_intensity = 0.0
+                for clause, source in zip(clauses, sources):
                     if cancel_check and cancel_check():
                         return None, "Cancelado", None
-                    clause_facts = _clause_facts(clause, source)
-                    clause_is_local = bool(
-                        clause_facts.get("local_appearance") or clause_facts.get("local_region")
-                        or clause_facts.get("region_ambiguous")
+                    clause_facts = self._prompt_authority_facts(
+                        source or clause, clause,
                     )
-                    # A measured surface carries its own region, and a weak
-                    # clause with no person-level signal keeps its own text;
-                    # only a body/pose/appearance predicate is rebinding.
-                    person_level = bool(
-                        clause_facts.get("body") or clause_facts.get("pose")
-                        or clause_facts.get("local_appearance")
+                    if clause_facts.get("pose"):
+                        compound_pose = True
+                    if clause_facts.get("body") and (
+                            float(clause_facts.get("body_intensity", 0.0))
+                            > compound_intensity):
+                        compound_body = True
+                        compound_direction = str(clause_facts.get("body_direction", "change"))
+                        compound_intensity = float(clause_facts.get("body_intensity", 0.0))
+                    if (clause_facts.get("local_appearance")
+                            or clause_facts.get("local_region")
+                            or clause_facts.get("region_ambiguous")):
+                        compound_local = True
+                    zone = self._compound_clause_zone(
+                        img, clause, source, clause_facts, source_faces,
                     )
-                    if (kind != "zona medida" and person_level and shared_subject
-                            and not self._visual_subject_description(clause)):
-                        clause = self._attach_subject(clause, shared_subject)
+                    if zone is not None:
+                        zones.append(zone)
+                    else:
+                        unmeasured.append(clause)
+                print(
+                    "[ImgEditor] Compuesto: un solo pase Turbo con los "
+                    f"{len(clauses)} cambios; zonas medidas={len(zones)}"
+                    + (f", sin zona={len(unmeasured)}" if unmeasured else ""),
+                    flush=True,
+                )
+                self._release_local_gpu_before_comfy()
+                from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
+                fast_client = get_flux_edit_comfy_client()
+                loaded, load_msg = fast_client.load("LongCat-Image-Edit-Turbo-Q4_K_S.gguf")
+                fast_result = None
+                fast_msg = load_msg
+                # The union of the measured zones is both the sampler hole
+                # and the paste. Measured before generating, it drives the
+                # local window the same way the single-instruction path
+                # does. A full-photo pass without an anchor regenerated the
+                # scene from noise and painted a white blob
+                # (edit_1791840439; edit_1791843357).
+                union = None
+                if zones:
+                    union = zones[0]
+                    for extra in zones[1:]:
+                        left = np.asarray(union.convert("L"), dtype=np.uint8)
+                        right = np.asarray(extra.convert("L"), dtype=np.uint8)
+                        if left.shape != right.shape:
+                            right = cv2.resize(
+                                right, (left.shape[1], left.shape[0]),
+                                interpolation=cv2.INTER_LINEAR,
+                            )
+                        union = Image.fromarray(np.maximum(left, right), "L")
+                generation_image = img
+                generation_mask = None
+                local_box = None
+                if union is not None:
+                    generation_image, generation_mask, local_box = (
+                        self._appearance_work_region(img, union)
+                    )
+                    if local_box is None:
+                        local_box = (0, 0, img.size[0], img.size[1])
+                if loaded:
+                    # Same client flags as the single-instruction path: the
+                    # measured zone is the sampler hole and the paste, and
+                    # the photo stays anchored so the room survives. A pose
+                    # still redraws the frame.
+                    compound_authority = bool(
+                        compound_pose or compound_body or compound_local
+                    )
+                    compound_preserve = bool(
+                        (compound_body and not compound_pose) or compound_local
+                    )
+                    # The full sentence dilutes a clause's exposure score
+                    # ("bald and naked" reads as weak body, 0.23 < 0.50,
+                    # and the nude suffix was dropped). The change list
+                    # keeps every clause, but each one is scored alone,
+                    # the same as the single-clause path.
+                    fast_prompt = self._compose_generation_prompt(
+                        self._compound_change_list(prompt),
+                        engine="longcat", magnitude=0.85,
+                        pose_change=compound_pose,
+                        body_transform=compound_body,
+                        body_direction=compound_direction,
+                        body_intensity=compound_intensity,
+                    )
+                    if negative_prompt:
+                        fast_prompt += f" Avoid: {negative_prompt}."
                     print(
-                        f"[ImgEditor] Cláusula {index}/{len(jobs)} por separado ({kind}): {clause}",
+                        "[ImgEditor] Un pase, 12 pasos, fuerza 1.00, "
+                        f"{len(clauses)} cambios juntos",
                         flush=True,
                     )
-                    edited, clause_msg, _clause_mask = self.generate_intelligent(
-                        image=current, prompt=clause,
+                    fast_result, fast_msg = fast_client.generate(
+                        image=generation_image, prompt=fast_prompt,
                         negative_prompt=negative_prompt,
-                        num_inference_steps=num_inference_steps,
-                        guidance_scale=guidance_scale, seed=seed,
-                        use_rewriter=False, use_semantic=use_semantic,
-                        ref_metadata=ref_metadata, engine=engine,
-                        enhance_faces=False, lora_name=lora_name,
-                        lora_strength=lora_strength, denoise=denoise,
-                        progress_callback=progress_callback, auto_upscale=False,
-                        quality_mode=False, enhance_tier=enhance_tier,
-                        face_preserve=face_preserve, cancel_check=cancel_check,
-                        _compound_depth=_compound_depth + 1,
-                        _source_clause=source,
+                        guidance_scale=1.0, seed=seed,
+                        prompt_authority=compound_authority,
+                        preserve_frame=compound_preserve,
+                        mask_image=generation_mask,
+                        keep_source_pixels=generation_mask is not None,
+                        lora_name=lora_name, lora_strength=lora_strength,
+                        progress_callback=progress_callback,
+                        cancel_check=cancel_check,
+                        num_inference_steps=12, denoise=1.0, no_kontext=False,
                     )
-                    if edited is None:
-                        notes.append(clause_msg or "cláusula no aplicada")
-                        continue
-                    if clause_msg and "no se sustituye" in clause_msg and clause_is_local:
-                        notes.append(f"{clause}: zona no medida")
-                        continue
-                    current = edited
-                    applied += 1
-                    notes.append(clause_msg or clause)
-                if applied:
-                    note = (
-                        f"cada cambio por separado ({applied}/{len(jobs)}) | "
-                        "cumplimiento visual no verificado"
-                    )
+                if fast_result is not None:
+                    generated = fast_result.image.convert("RGB")
+                    if union is not None:
+                        output = self._integrate_local_generation(
+                            img, generated, union, local_box,
+                            keep_measured_mask=True,
+                        )
+                        note = (
+                            f"un solo pase Turbo ({len(clauses)} cambios); "
+                            f"{len(zones)} zonas medidas pegadas, "
+                            "el resto de la foto se conserva"
+                        )
+                    else:
+                        output = generated
+                        note = (
+                            f"un solo pase Turbo ({len(clauses)} cambios); "
+                            "sin zona medida, la foto entera sale del modelo"
+                        )
+                    if output.size != img.size:
+                        output = output.resize(img.size, Image.Resampling.LANCZOS)
+                    if unmeasured:
+                        note += " | sin zona medida: " + ", ".join(unmeasured)
+                    note += " | cumplimiento visual no verificado"
                     print(f"[ImgEditor] {note}", flush=True)
-                    return current, " | ".join(notes + [note]), None
+                    return output, f"{fast_msg}; {note}", None
                 if cancel_check and cancel_check():
                     return None, "Cancelado", None
+                print(
+                    f"[ImgEditor] Pase único de {len(clauses)} cambios no generó "
+                    f"({fast_msg}); se intenta la instrucción completa",
+                    flush=True,
+                )
             try:
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                 authority_facts = self._prompt_authority_facts(score_raw, prompt)
@@ -5381,6 +5482,25 @@ class ImgEditorManager:
                         subject_passes = self._narrow_appearance_passes(
                             img, subject_passes, score_raw, prompt_raw, prompt, source_faces,
                         )
+                        # An appearance predicate the segmenter cannot draw
+                        # ("bald", "beard") falls back to the whole person, and
+                        # the full-photo pass regenerates everything with no
+                        # spatial anchor (glossy scalp, edit_1791760178). The
+                        # head of the measured person is where those changes
+                        # live; the local pass keeps the photo anchored.
+                        if (len(subject_passes) == 1
+                                and subject_passes[0].get("deliver_region")
+                                and subject_passes[0].get("person") is not None):
+                            head_zone = self._head_zone_for_subject(
+                                img, subject_passes[0]["person"], source_faces,
+                            )
+                            if head_zone is not None:
+                                subject_passes = [{
+                                    **subject_passes[0],
+                                    "mask": head_zone,
+                                    "deliver_region": False,
+                                    "measured_request": True,
+                                }]
                     if appearance_edit and not subject_passes and not tried_head:
                         recovered = self._appearance_head_pass(
                             img, score_raw, prompt, source_faces,
@@ -5519,13 +5639,20 @@ class ImgEditorManager:
                             body_request_region = self._continue_body_part(
                                 img, body_request_region, subject_mask, source_faces,
                             )
+                    # A body change with no distinct part ("nude") used to
+                    # regenerate the whole photo without an anchor, and the
+                    # model painted a white blob over the scene
+                    # (edit_1791840439). The measured person is the zone; the
+                    # local pass keeps the photo anchored, the same recipe
+                    # that fixed the appearance fallback.
+                    body_local = bool(
+                        multi_output is None and body_edit
+                        and body_request_region is None and subject_mask is not None
+                    )
                     instruction_on_photo = bool(
                         multi_output is None
                         and subject_mask is not None
-                        and (
-                            (body_edit and body_request_region is None)
-                            or (appearance_edit and deliver_region)
-                        )
+                        and appearance_edit and deliver_region
                     )
                     generation_mask = (
                         subject_mask
@@ -5563,12 +5690,41 @@ class ImgEditorManager:
                         if local_box is None:
                             local_box = (0, 0, img.size[0], img.size[1])
                             generation_mask = body_request_region
-                    elif instruction_on_photo:
-                        generation_image = img
-                        generation_mask = None
+                    elif body_local:
+                        generation_image, generation_mask, local_box = (
+                            self._appearance_work_region(
+                                img, subject_mask,
+                                subject_passes[0].get("person")
+                                if len(subject_passes) == 1 else None,
+                            )
+                        )
+                        if local_box is None:
+                            local_box = (0, 0, img.size[0], img.size[1])
                         print(
-                            "[ImgEditor] Sin parte distinta: la instrucción ve "
-                            "la foto entera y se pega solo la persona medida",
+                            "[ImgEditor] Cuerpo sin parte distinta: la persona "
+                            "medida es la zona y la foto queda anclada",
+                            flush=True,
+                        )
+                    elif instruction_on_photo:
+                        # Anclar el pase en la persona medida. Un pase de la
+                        # foto entera con no_kontext y sin máscara a denoise
+                        # 1.0 arranca de ruido (el latente de la foto se
+                        # reemplaza del todo) y pinta un blob; la persona ya
+                        # medida es la zona y la ventana local mantiene la
+                        # foto anclada, la misma receta del fallback de
+                        # apariencia y del cuerpo sin parte.
+                        generation_image, generation_mask, local_box = (
+                            self._appearance_work_region(
+                                img, subject_mask,
+                                subject_passes[0].get("person")
+                                if len(subject_passes) == 1 else None,
+                            )
+                        )
+                        if local_box is None:
+                            local_box = (0, 0, img.size[0], img.size[1])
+                        print(
+                            "[ImgEditor] Sin cabeza medida: la persona es la "
+                            "zona y la foto queda anclada",
                             flush=True,
                         )
                     if multi_output is None:
@@ -5636,7 +5792,12 @@ class ImgEditorManager:
                             measured_appearance_sample(generation_mask is not None)
                             if appearance_edit or recolor_edit
                             else measured_region_sample(generation_mask is not None) if region_edit
-                            else {"num_inference_steps": 12, "denoise": 1.0, "no_kontext": True}
+                            else {
+                                "num_inference_steps": 12, "denoise": 1.0,
+                                # The local body pass keeps the photo anchored;
+                                # the full-photo body pass does not.
+                                "no_kontext": not body_local,
+                            }
                         )
                         if appearance_edit and generation_mask is not None and not deliver_region:
                             appearance_sample, vision_reference = (
@@ -7301,7 +7462,7 @@ class ImgEditorManager:
                     # inpaint.
                     if engine not in ("longcat", "imagine", "longcat_full"):
                         engine = "longcat"
-                        version = "LongCat-Image-Edit-Q4_K_S.gguf"
+                        version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
                         from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                         if self.flux_klein_client is None:
                             self.flux_klein_client = get_flux_edit_comfy_client()
@@ -7521,35 +7682,11 @@ class ImgEditorManager:
                         load_params = {"qwen_version": version} if "qwen" in engine else {"flux_version": version}
                         success, msg = client.load(**load_params)
                         if not success:
-                            # Fallback VRAM 8GB: si el motor pedido no carga (falta/OOM),
-                            # reintentar con Klein 4B (~5GB total) antes de fallar.
-                            # Nota: LongCat usa qwen_2.5_vl_7b_fp8 (8.74GB solo CLIP) -> en 8GB
-                            # va con offload CPU, lento y propenso a gris/OOM/colgado.
-                            # v5.1090: fallback a Klein TAMBIEN para body_transform.
-                            # Un edit parcial con Klein (que termina) es mejor que un
-                            # colgado de 300s+ con LongCat en 8GB.
-                            if engine != "klein":
-                                try:
-                                    from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client as _klein_cli
-                                    fb = _klein_cli()
-                                    ok2, msg2 = fb.load(flux_version="flux-2-klein-base-4b-Q4_K_S.gguf")
-                                    if ok2:
-                                        print(f"[ImgEditor] Fallback VRAM: {engine} no cargo ({msg}) -> Klein 4B" + (" (body: calidad menor pero sin colgado)" if body_transform else ""))
-                                        client = fb
-                                        engine = "klein"
-                                        version = "flux-2-klein-base-4b-Q4_K_S.gguf"
-                                        params = {"denoise": 1.0, "num_inference_steps": 4, "guidance_scale": 1.0, "mode": "img2img"}
-                                        success, msg = True, msg2
-                                        if not success:
-                                            return None, msg
-                                    else:
-                                            return None, msg, final_mask
-                                except Exception:
-                                    return None, msg, final_mask
-                            else:
-                                return None, msg, final_mask
+                            # Turbo es el motor elegido (spec/00): si no carga
+                            # se informa, no se cambia a Klein (ignora mascara).
+                            return None, msg, final_mask
 
-                        # Una región focal detectada no se manda como un inpaint
+# Una región focal detectada no se manda como un inpaint
                         # LongCat (su VAE puede rellenarla de gris), ni se deja
                         # regenerar sobre el fotograma entero. Se genera un crop
                         # con contexto y después se repone exactamente en ese

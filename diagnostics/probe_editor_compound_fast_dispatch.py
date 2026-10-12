@@ -193,34 +193,24 @@ def main():
             if manager._split_compound_instruction(translated):
                 clauses = manager._split_compound_instruction(translated)
                 generations = [args for name, args in client.calls if name == "generate"]
-                assert generations, (prompt, client.calls)
-                assert len(generations) <= len(clauses) * 2, (len(generations), clauses)
+                assert len(generations) == 1, (len(generations), clauses)
                 prompts = [item["prompt"] for item in generations]
                 original_clauses = manager._split_compound_instruction(prompt)
                 if len(original_clauses) != len(clauses):
                     original_clauses = [""] * len(clauses)
+                # One instruction carries every clause: each one must appear
+                # in the single composed prompt.
                 for clause, original in zip(clauses, original_clauses):
-                    clause_facts = manager._prompt_authority_facts(original or clause, clause)
-                    local = bool(
-                        clause_facts.get("local_appearance") or clause_facts.get("local_region")
-                        or clause_facts.get("region_ambiguous")
-                    )
                     present = any(clause.lower() in item.lower() for item in prompts)
-                    if local and not present:
-                        assert (
-                            "no se sustituye" in message
-                            or "zona no medida" in message
-                            or "región no medida" in message
-                        ), (clause, message)
-                        continue
                     assert present, (clause, prompts)
-                assert "cada cambio por separado" in message, (prompt, message)
+                assert "un solo pase Turbo" in message, (prompt, message)
+                assert "cada cambio por separado" not in message, (prompt, message)
+                assert generations[0]["mask_image"] is None, (prompt, message)
+                assert generations[0]["keep_source_pixels"] is False
                 if "naked" not in translated.lower() and "nude" not in translated.lower():
                     assert all("fully nude" not in item.lower() for item in prompts), prompts
                 else:
                     assert any("fully nude" in item.lower() for item in prompts), prompts
-                    if any("bald" in item.lower() for item in prompts):
-                        assert any("fully nude" not in item.lower() for item in prompts), prompts
                 # A subject-less body clause must reach the model with the
                 # person named, or the global pass edits whoever it picks.
                 stripped_body = [
@@ -233,8 +223,13 @@ def main():
                     assert subject, (stripped_body, translated)
                     assert any(subject in item for item in prompts), (subject, prompts)
                     print(f"OK: {prompt} -> sujeto propagado a {stripped_body}")
-                assert all(item["no_kontext"] is True for item in generations)
-                print(f"OK: {prompt} -> cada cláusula por separado")
+                # The compound pass keeps the photo anchored the same way the
+                # single-instruction path does: no_kontext=False adds the
+                # index_timestep_zero reference so the room survives. A
+                # no_kontext=True pass regenerated the scene from noise and
+                # left a white blob (edit_1791843357).
+                assert all(item["no_kontext"] is False for item in generations)
+                print(f"OK: {prompt} -> un solo pase Turbo anclado con las cláusulas juntas")
                 continue
             if facts.get("local_appearance") or facts.get("local_region") or facts.get("region_ambiguous"):
                 assert output is not None and list(output.getdata()) == list(source.getdata())
@@ -392,26 +387,27 @@ def main():
         )
     assert restored_output is not None and restored_output.size == photo.size
     restored_generations = [args for name, args in restored_client.calls if name == "generate"]
-    assert len(restored_generations) >= 2
-    barefoot_call = next(
-        call for call in restored_generations if "barefoot" in call["prompt"].lower()
-    )
-    bald_call_separated = next(
-        call for call in restored_generations if "bald" in call["prompt"].lower()
-    )
-    assert "fully nude" not in barefoot_call["prompt"].lower()
-    assert barefoot_call["mask_image"] is None
-    assert barefoot_call["denoise"] == 1.0
-    assert barefoot_call["num_inference_steps"] == 12
-    assert barefoot_call["no_kontext"] is True
-    # "bald" lights nothing on this masker. The man is the paste, not the hole.
-    assert bald_call_separated["mask_image"] is None
-    assert bald_call_separated["keep_source_pixels"] is not True
-    assert bald_call_separated["denoise"] == 1.0
-    assert bald_call_separated["num_inference_steps"] == 12
-    assert bald_call_separated["no_kontext"] is True
-    assert "cada cambio por separado" in restored_message
-    print("OK: dos cambios separados por coma, cada uno en su pase")
+    assert len(restored_generations) == 1, restored_client.calls
+    sole_restored = restored_generations[0]
+    sole_restored_prompt = sole_restored["prompt"].lower()
+    assert "barefoot" in sole_restored_prompt and "bald" in sole_restored_prompt, sole_restored_prompt
+    # The measured zone is the sampler hole and the paste, and the photo
+    # stays anchored (no_kontext=False -> index_timestep_zero reference).
+    assert sole_restored["mask_image"] is not None
+    assert sole_restored["keep_source_pixels"] is True
+    assert sole_restored["denoise"] == 1.0
+    assert sole_restored["num_inference_steps"] == 12
+    assert sole_restored["no_kontext"] is False
+    assert "un solo pase Turbo" in restored_message, restored_message
+    assert "cada cambio por separado" not in restored_message, restored_message
+    # "bald" lights nothing on this masker; the man measured is the only
+    # paste. The woman is never measured, so her zone keeps the source.
+    restored_src = np.asarray(photo.convert("RGB"))
+    restored_out = np.asarray(restored_output.convert("RGB"))
+    assert (restored_out[5, 5] == restored_src[5, 5]).all(), restored_out[5, 5]
+    restored_face = restored_out[61, 163]
+    assert int(restored_face[0]) > 180, restored_face
+    print("OK: descalza y calvo comparten un pase; solo la persona medida se pega")
 
     # 2026-10-08 night: sending the measured person as the sampler hole
     # flattened skin and left the request undone. With no distinct part,
@@ -434,12 +430,14 @@ def main():
     body_generations = [args for name, args in body_client.calls if name == "generate"]
     assert len(body_generations) == 1, body_client.calls
     body_call = body_generations[0]
-    assert body_call["mask_image"] is None, body_message
-    assert body_call["keep_source_pixels"] is not True, body_message
+    # No distinct body part is measurable, so the measured person is the
+    # zone: a local anchored pass, not the whole photo regen.
+    assert body_call["mask_image"] is not None, body_message
+    assert body_call["keep_source_pixels"] is True, body_message
     assert body_call["prompt_authority"] is True and body_call["preserve_frame"] is True
     assert body_call["denoise"] == 1.0, body_call["denoise"]
     assert body_call["num_inference_steps"] == 12
-    assert body_call["no_kontext"] is True
+    assert body_call["no_kontext"] is False
     assert "cuerpo medido" in body_message, body_message
     assert "edición corporal global" not in body_message, body_message
     assert "fully nude" not in body_call["prompt"].lower(), body_call["prompt"]
@@ -450,8 +448,8 @@ def main():
     assert int(face[0]) > 200 and int(face[1]) < 40 and int(face[2]) < 40, face
     torso = out_arr[90, 80]
     assert int(torso[0]) > 200 and int(torso[1]) < 40 and int(torso[2]) < 40, torso
-    print("OK: sin parte distinta la instrucción ve la foto; se pega la persona medida")
-    print("OK: sin zona de predicado se pega la región ya medida")
+    print("OK: sin parte distinta la persona medida es la zona; la foto queda anclada")
+    print("OK: sin zona de predicado se pega la persona medida en pase local")
 
     # 2026-10-08 log: "The woman must go without stockings" alone lost body
     # when the rescore kept only the English sentence. The Spanish clause
@@ -492,17 +490,19 @@ def main():
     woman_generations = [args for name, args in woman_client.calls if name == "generate"]
     assert len(woman_generations) == 1, woman_client.calls
     woman_call = woman_generations[0]
-    assert woman_call["mask_image"] is None, woman_message
-    assert woman_call["keep_source_pixels"] is not True, woman_message
+    # No distinct part is measurable, so the measured woman is the zone:
+    # a local anchored pass, not the whole photo regen.
+    assert woman_call["mask_image"] is not None, woman_message
+    assert woman_call["keep_source_pixels"] is True, woman_message
     assert woman_call["num_inference_steps"] == 12
-    assert woman_call["no_kontext"] is True
+    assert woman_call["no_kontext"] is False
     assert "cuerpo medido" in woman_message, woman_message
     assert "edición corporal global" not in woman_message, woman_message
     woman_out = np.asarray(woman_output.convert("RGB"))
     woman_src = np.asarray(photo.convert("RGB"))
     assert (woman_out[5, 200] == woman_src[5, 200]).all()
     assert int(woman_out[40, 40][0]) > 200
-    print("OK: sin medias en inglés ve la foto y pega a la mujer medida")
+    print("OK: sin medias en inglés pega a la mujer medida en pase local anclado")
 
     # 2026-10-08 saved photo: the body clause measured a part (10.3%) but
     # Turbo was given the whole person at denoise 1. The sampler redrew the
@@ -613,15 +613,18 @@ def main():
     assert skin_output is not None and skin_output.size == skin_photo.size, skin_message
     skin_calls = [args for name, args in skin_client.calls if name == "generate"]
     assert skin_calls, skin_message
-    assert skin_calls[0]["mask_image"] is None, skin_message
+    # The skin speck is not the part and the shoes are not measurable, so
+    # the measured woman is the zone: a local anchored pass.
+    assert skin_calls[0]["mask_image"] is not None, skin_message
+    assert skin_calls[0]["keep_source_pixels"] is True, skin_message
     assert skin_calls[0]["num_inference_steps"] == 12
-    assert skin_calls[0]["no_kontext"] is True
+    assert skin_calls[0]["no_kontext"] is False
     skin_src = np.asarray(skin_photo.convert("RGB"))
     skin_out = np.asarray(skin_output.convert("RGB"))
     assert (skin_out[5, 5] == skin_src[5, 5]).all()
     assert not (skin_out[40, 60] == skin_src[40, 60]).all()
     assert not (skin_out[130, 60] == skin_src[130, 60]).all()
-    print("OK: una mancha de piel no es la parte; se pega la persona medida")
+    print("OK: una mancha de piel no es la parte; se pega la persona medida en pase local")
 
     # The shoe sits mostly outside the body silhouette and only touches the
     # leg. Clipping to the silhouette kept the skin. The object that touches
@@ -745,32 +748,36 @@ def main():
         )
     assert chain_output is not None, chain_message
     assert "no se sustituye" not in chain_message, chain_message
-    assert "cada cambio por separado (2/2)" in chain_message, chain_message
+    assert "un solo pase Turbo" in chain_message, chain_message
+    assert "cada cambio por separado" not in chain_message, chain_message
     chain_generations = [args for name, args in chain_client.calls if name == "generate"]
-    # A barely visible stub can schedule the existing retry. Stockings have
-    # no measured part, so that clause sees the photo. Hair stays its part.
-    assert len(chain_generations) >= 2, chain_generations
-    stockings_call = next(call for call in chain_generations if "stockings" in call["prompt"].lower())
-    hair_call = next(call for call in chain_generations if "hair" in call["prompt"].lower() or "pelo" in call["prompt"].lower())
-    assert stockings_call["mask_image"] is None, chain_message
-    assert stockings_call["num_inference_steps"] == 12
-    assert hair_call["mask_image"] is not None, chain_message
-    assert hair_call["keep_source_pixels"] is True
-    hair_cover = float((np.asarray(hair_call["mask_image"].convert("L")) >= 96).mean())
-    woman_cover = float((np.asarray(
+    # Stockings and hair used to be two chained edits; both clauses now
+    # share one Turbo pass of the full instruction, and the woman measured
+    # for either clause is the only zone pasted.
+    assert len(chain_generations) == 1, chain_generations
+    sole_chain = chain_generations[0]
+    sole_chain_prompt = sole_chain["prompt"].lower()
+    assert "stocking" in sole_chain_prompt, sole_chain_prompt
+    assert "hair" in sole_chain_prompt or "pelo" in sole_chain_prompt, sole_chain_prompt
+    assert sole_chain["mask_image"] is not None, chain_message
+    assert sole_chain["keep_source_pixels"] is True, chain_message
+    assert sole_chain["num_inference_steps"] == 12
+    assert sole_chain["no_kontext"] is False
+    chain_src = np.asarray(photo.convert("RGB"))
+    chain_out = np.asarray(chain_output.convert("RGB"))
+    woman_zone = np.asarray(
         _WomanMasker().generate_mask(photo, "la mujer").convert("L")
-    ) >= 96).mean())
-    assert 0 < hair_cover < woman_cover, (hair_cover, woman_cover)
-    part_queries = [
-        query for query in chain_masker.queries
-        if re.search(r"\b(?:hair|pelo|cabello)\b", (query or "").lower())
-        and not re.search(r"\b(?:woman|mujer)\b", (query or "").lower())
-    ]
-    assert part_queries, chain_masker.queries
+    ) >= 96
+    assert (chain_out[5, 200] == chain_src[5, 200]).all(), chain_out[5, 200]
+    assert woman_zone[70, 50], "la mujer mide su cuerpo entero"
+    chain_inside = chain_out[70, 50]
+    assert int(chain_inside[0]) > 180, chain_inside
+    # Zone measurement never asks the segmenter the full predicate
+    # sentence; a recolor may still ask for the requested part alone.
     assert not any(
         query.casefold() == "the woman has the black hair" for query in chain_masker.queries
     ), chain_masker.queries
-    print("OK: medias y pelo negro son dos pases; el pelo no se consulta como frase entera")
+    print("OK: medias y pelo negro comparten un pase; la mujer medida es la única zona pegada")
     compound_client = FakeClient()
     woman_mask = Image.new("L", photo.size, 0)
     woman_mask.paste(255, (8, 8, 115, 135))
@@ -888,16 +895,19 @@ def main():
     portrait_sent = next(
         c[1] for c in portrait_client.calls if c[0] == "generate"
     )
-    assert portrait_sent["mask_image"] is None
-    assert portrait_sent["keep_source_pixels"] is not True
+    # "bald" lights nothing on this masker, so the head of the measured
+    # man is the zone: a local pass with the spatial anchor, not a
+    # full-photo regen (which painted the scalp glossy).
+    assert portrait_sent["mask_image"] is not None
+    assert portrait_sent["keep_source_pixels"] is True
     assert portrait_sent["denoise"] == 1.0
-    assert portrait_sent["num_inference_steps"] == 12
-    assert portrait_sent["no_kontext"] is True
+    assert portrait_sent["num_inference_steps"] == APPEARANCE_SAMPLE_STEPS
+    assert portrait_sent["no_kontext"] is False
     assert portrait_sent.get("reference_image") is None
     assert portrait_output.getpixel((40, 120)) == portrait.getpixel((40, 120))
-    assert portrait_output.getpixel((300, 450)) != portrait.getpixel((300, 450))
+    assert portrait_output.getpixel((300, 450)) == portrait.getpixel((300, 450))
     assert portrait_output.getpixel((270, 110)) != portrait.getpixel((270, 110))
-    print("OK: predicado vacío en retrato pega al hombre medido; la otra persona queda")
+    print("OK: calva sin zona medida pega la cabeza; el cuerpo y el fondo quedan")
 
     head_client = FakeClient()
     with (patch("ui.tabs.comfy_launcher.is_comfyui_running", return_value=True),
@@ -919,16 +929,18 @@ def main():
     assert sent["prompt_authority"] is True
     assert "mask_denoise" not in sent
     assert "fully nude" not in sent["prompt"].lower()
-    assert sent["mask_image"] is None
-    assert sent["keep_source_pixels"] is not True
+    # "bald" lights nothing here either; the head of the measured man is
+    # the zone (local anchored pass), not the whole person on the photo.
+    assert sent["mask_image"] is not None
+    assert sent["keep_source_pixels"] is True
     assert sent["denoise"] == 1.0
-    assert sent["num_inference_steps"] == 12
-    assert sent["no_kontext"] is True
+    assert sent["num_inference_steps"] == APPEARANCE_SAMPLE_STEPS
+    assert sent["no_kontext"] is False
     assert sent.get("reference_image") is None
     assert output.getpixel((100, 120)) == photo.getpixel((100, 120))
-    assert output.getpixel((90, 80)) != photo.getpixel((90, 80))
+    assert output.getpixel((90, 80)) == photo.getpixel((90, 80))
     assert output.getpixel((163, 54)) != photo.getpixel((163, 54))
-    print("OK: predicado vacío pega la persona medida, cara y cuerpo; fuera de ella la foto queda")
+    print("OK: calva sin zona medida pega la cabeza medida; el cuerpo queda")
 
     class _RequestMasker:
         """The segmenter answers the predicate, whatever it is, inside the subject."""
@@ -1042,11 +1054,15 @@ def main():
     assert "solo la zona medida" in message, message
     assert "zona no medida" not in message
     weak_sent = weak_client.calls[-1][1]
-    assert weak_sent["mask_image"] is None
-    assert weak_sent["keep_source_pixels"] is not True
+    # CLIPSeg cannot measure the man, so the face with the most response
+    # is recovered and its head is the zone: a local anchored pass, not a
+    # full-photo regen.
+    assert weak_sent["mask_image"] is not None
+    assert weak_sent["keep_source_pixels"] is True
     assert weak_sent["denoise"] == 1.0
-    assert weak_sent["num_inference_steps"] == 12
-    assert weak_sent["no_kontext"] is True
+    assert weak_sent["num_inference_steps"] == APPEARANCE_SAMPLE_STEPS
+    assert weak_sent["no_kontext"] is False
+    assert weak_sent.get("reference_image") is None
     assert output.getpixel((20, 20)) == wide.getpixel((20, 20))
     assert output.getpixel((166, 64)) == wide.getpixel((166, 64))
     assert output.getpixel((486, 257)) != wide.getpixel((486, 257))
@@ -1144,22 +1160,30 @@ def main():
             engine="longcat",
         )
     assert ordered is not None and ordered.size == photo.size
-    assert "cada cambio por separado" in order_message, order_message
+    assert "un solo pase Turbo" in order_message, order_message
+    assert "cada cambio por separado" not in order_message, order_message
     order_calls = [call for name, call in order_client.calls if name == "generate"]
-    assert len(order_calls) >= 2, order_calls
-    assert all(call["preserve_frame"] is True for call in order_calls), order_calls
-    assert all(call["mask_image"] is not None for call in order_calls), order_message
-    first_prompt = order_calls[0]["prompt"].lower()
-    second_prompt = order_calls[1]["prompt"].lower()
-    assert "grey" in first_prompt or "wall" in first_prompt, first_prompt
-    assert "bald" in second_prompt, second_prompt
-    assert order_calls[0]["keep_source_pixels"] is True
-    assert order_calls[0].get("reference_image") is None
-    assert order_calls[0]["denoise"] == 1.0
-    assert order_calls[0]["num_inference_steps"] == APPEARANCE_SAMPLE_STEPS
-    assert order_calls[0]["no_kontext"] == measured_appearance_sample(True)["no_kontext"]
-    assert order_calls[1]["denoise"] == APPEARANCE_SAMPLE_DENOISE
-    print("OK: calvo y paredes se ordenan; la pared no reescribe la foto")
+    assert len(order_calls) == 1, order_calls
+    order_call = order_calls[0]
+    order_prompt = order_call["prompt"].lower()
+    assert ("grey" in order_prompt or "wall" in order_prompt) and "bald" in order_prompt, order_prompt
+    assert order_call["mask_image"] is not None
+    assert order_call["keep_source_pixels"] is True
+    assert order_call["preserve_frame"] is True, order_call
+    assert order_call.get("reference_image") is None
+    assert order_call["denoise"] == 1.0
+    assert order_call["num_inference_steps"] == 12
+    assert order_call["no_kontext"] is False
+    # Both clauses measured a zone (man and wall); the union is the only
+    # paste, so a pixel far from either stays byte-identical, while a
+    # pixel inside the wall zone takes the generated color.
+    order_src = np.asarray(photo.convert("RGB"))
+    order_out = np.asarray(ordered.convert("RGB"))
+    assert (order_out[2, 116] == order_src[2, 116]).all(), order_out[2, 116]
+    assert (order_out[78, 116] == order_src[78, 116]).all(), order_out[78, 116]
+    order_wall = order_out[40, 10]
+    assert int(order_wall[0]) > 180, order_wall
+    print("OK: calvo y paredes comparten un pase; el fondo lejano queda byte a byte")
 
     class _SplitPeople:
         def probability(self, image, query):
@@ -1580,24 +1604,15 @@ def main():
     assert cover_ok, cover_msg
     cover_sent = [call for name, call in cover_client.calls if name == "generate"]
     assert len(cover_sent) == 1, cover_sent
-    cover_src = np.asarray(cover_sent[0]["image"])
-    cover_hair = np.all(cover_src == np.array([30, 20, 15]), axis=2)
-    cover_skin = np.all(cover_src == np.array([190, 150, 120]), axis=2)
-    assert cover_hair.any() and cover_skin.any()
-    cover_ref = cover_sent[0].get("reference_image")
-    assert cover_ref is not None and cover_ref.size == cover_sent[0]["image"].size
-    assert cover_sent[0]["no_kontext"] is True
-    cover_ref_px = np.asarray(cover_ref.convert("RGB"))
-    assert np.linalg.norm(
-        cover_ref_px[cover_hair].astype(np.float32) - np.array([190, 150, 120]),
-        axis=1,
-    ).max() < 30
-    cover_mask = np.asarray(cover_sent[0]["mask_image"].convert("L")) >= 160
-    assert np.array_equal(cover_ref_px[~cover_mask], cover_src[~cover_mask])
+    # The appearance recipe anchors the photo spatially; a flat cover
+    # would hide the very surface the model must edit (the bald head came
+    # out pale and plasticky). The original photo goes, no cover.
+    assert cover_sent[0].get("reference_image") is None
+    assert cover_sent[0]["no_kontext"] is False
     assert cover_sent[0]["denoise"] == APPEARANCE_SAMPLE_DENOISE
     assert cover_sent[0]["num_inference_steps"] == APPEARANCE_SAMPLE_STEPS
     assert APPEARANCE_SAMPLE_DENOISE == 1.0
-    print("OK: la pasada de apariencia cubre la superficie y manda la foto a fuerza plena")
+    print("OK: la pasada de apariencia manda la foto con ancla espacial, sin relleno plano")
 
     class UnchangedThenEdited(FakeClient):
         def generate(self, **kwargs):
@@ -1619,9 +1634,9 @@ def main():
     assert not manager._edit_is_nearly_unchanged(couch_image, retry_out)
     for field in ("seed", "num_inference_steps", "denoise", "step_cap", "no_kontext"):
         assert retry_calls[0][field] == retry_calls[1][field], field
-    assert retry_calls[0]["no_kontext"] is True
-    assert retry_calls[0].get("reference_image") is not None
-    assert retry_calls[1].get("reference_image") is not None
+    assert retry_calls[0]["no_kontext"] is False
+    assert retry_calls[0].get("reference_image") is None
+    assert retry_calls[1].get("reference_image") is None
     assert retry_calls[0]["num_inference_steps"] == APPEARANCE_SAMPLE_STEPS
     print("OK: segunda pasada de apariencia se ejecuta con la misma receta")
 
@@ -1691,18 +1706,21 @@ def main():
     empty_generations = [call for name, call in empty_client.calls if name == "generate"]
     assert empty_generations, empty_client.calls
     empty_sent = empty_generations[0]
+    # The head of the measured person is the zone for the bald fallback:
+    # a local anchored pass, not the whole person on the full photo.
     assert empty_sent.get("reference_image") is None
-    assert empty_sent["mask_image"] is None
-    assert empty_sent["no_kontext"] is True
+    assert empty_sent["mask_image"] is not None
+    assert empty_sent["keep_source_pixels"] is True
+    assert empty_sent["no_kontext"] is False
     assert empty_sent["denoise"] == 1.0
-    assert empty_sent["num_inference_steps"] == 12
+    assert empty_sent["num_inference_steps"] == APPEARANCE_SAMPLE_STEPS
     empty_src = np.asarray(empty_image)
     empty_out = np.asarray(empty_output.convert("RGB"))
     assert not np.array_equal(empty_out[30, 80], empty_src[30, 80])
     assert not np.array_equal(empty_out[70, 80], empty_src[70, 80])
-    assert not np.array_equal(empty_out[160, 80], empty_src[160, 80])
+    assert np.array_equal(empty_out[160, 80], empty_src[160, 80])
     assert np.array_equal(empty_out[4, 80], empty_src[4, 80])
-    print("OK: predicado vacío pega la persona medida; fuera de ella la foto queda")
+    print("OK: calva sin zona medida pega la cabeza; el cuerpo y el fondo quedan")
 
     # "elimina tatoo" was a full-frame LongCat pass: the conjugated verb was
     # only a partial and the English "removes" tied the body score. It has to
@@ -1751,14 +1769,18 @@ def main():
         )
     assert tattoo_output is not None and tattoo_output.size == tattoo_image.size, tattoo_message
     tattoo_generations = [call for name, call in tattoo_client.calls if name == "generate"]
-    assert len(tattoo_generations) >= 2, (len(tattoo_generations), tattoo_message)
-    assert all(call.get("mask_image") is not None for call in tattoo_generations), tattoo_message
-    assert all(call.get("preserve_frame") is True for call in tattoo_generations), tattoo_message
+    assert len(tattoo_generations) == 1, (len(tattoo_generations), tattoo_message)
+    tattoo_call = tattoo_generations[0]
+    assert tattoo_call.get("mask_image") is not None, tattoo_message
+    assert tattoo_call.get("preserve_frame") is True, tattoo_message
+    assert tattoo_call.get("keep_source_pixels") is True, tattoo_message
+    assert tattoo_call.get("no_kontext") is False, tattoo_message
+    assert "un solo pase Turbo" in tattoo_message, tattoo_message
     tattoo_out = np.asarray(tattoo_output.convert("RGB"))
     assert np.array_equal(tattoo_out[10, 10], tattoo_photo[10, 10]), tattoo_out[10, 10]
     assert not np.array_equal(tattoo_out[55, 45], tattoo_photo[55, 45]), tattoo_out[55, 45]
     assert not np.array_equal(tattoo_out[20, 180], tattoo_photo[20, 180]), tattoo_out[20, 180]
-    print("OK: tatuaje y paredes son zonas medidas; el resto del cuadro queda")
+    print("OK: tatuaje y paredes comparten un pase; la unión medida es lo único pegado")
 
     # A few skin pixels where the wall meets a cheek are cut off. Covering
     # most of that face drops the continuation and keeps the measured peak.
