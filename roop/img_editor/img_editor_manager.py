@@ -3238,6 +3238,22 @@ class ImgEditorManager:
                 background_score = float(
                     scores.get("structural_background", 0.0),
                 )
+                # v5.1216: el hecho de postura salía SOLO de la lista de
+                # palabras del analizador, pero el concepto medido ya
+                # existía (CONCEPTS["pose"] describe «dance/bailando»):
+                # «el gato está bailando» medía pose 0,289 (0,79 con el
+                # alcance «bailando») y seguía en la ruta anclada de cuerpo
+                # ("exact same framing") — el gato se vestía pero no
+                # bailaba. Misma competición que el resto de hechos
+                # (≥0,20 y ×1,25); las keywords siguen mandando sin
+                # condición (pose_hit previo intacto, nada regresa).
+                pose_score = float(scores.get("pose", 0.0))
+                if pose_score >= 0.20 and pose_score >= max(
+                    body_score, appearance_score, recolor_score,
+                    structural_score, background_score,
+                ) * 1.25:
+                    pose_hit = True
+                    facts["pose"] = True
                 scenario_leads = bool(
                     not pose_hit and not body_leads
                     and background_score >= 0.20

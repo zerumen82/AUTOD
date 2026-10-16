@@ -28,6 +28,12 @@ CONCEPTS: Dict[str, list] = {
         "cambiar pose postura posición del cuerpo brazos piernas",
         "de pie sentado rodillas acostado bailando corriendo girar mirar cámara",
         "mover izquierda derecha arriba abajo en el encuadre",
+        # El matcher de tokens no cruza dance↔dancing («dance» no es
+        # subcadena de «dancing»): medido 2026-10-16, "the cat dances"
+        # valía 0,41 y "the cat is dancing" 0,000. Texto de concepto, no
+        # palabra de usuario (mismo precedente que «paint over/repaint»
+        # en attribute_recolor).
+        "dance dancing groove sway twirl spin rhythm",
     ],
     "structural": [
         "add insert put new people objects props elements into scene",

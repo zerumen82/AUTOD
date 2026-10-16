@@ -93,6 +93,13 @@ def main():
             "the woman goes barefoot and without stockings, "
             "the white man who is on his knees is bald",
         ),
+        # Postura medida sin keyword (2026-10-16): sin el concepto medido en
+        # facts esta cláusula caía a la ruta anclada de cuerpo y el gato no
+        # bailaba; con postura el pase compuesto es sin ancla y "postura nueva".
+        (
+            "el gato esta bailando, vestido de lo que sea",
+            "the cat is dancing, dressed in whatever",
+        ),
         (
             "la mujer debe ir sin medias, descalza, vestida solo con un tanga",
             "the woman must go without stockings, barefoot, dressed only in a thong",
@@ -157,6 +164,27 @@ def main():
     print("OK: error de carga o subida Turbo se devuelve sin iniciar Full")
 
     _check_subject_growth(manager)
+
+    # Postura sin keyword: el hecho de postura sale del concepto MEDIDO
+    # (CONCEPTS["pose"] describe "dance/bailando"), no solo de la lista de
+    # palabras del analizador. Medido 2026-10-16: "el gato esta bailando"
+    # ya medía pose 0,289 (0,79 con el alcance "bailando") pero facts
+    # seguía en falso → la ruta anclada "exact same framing" sujetaba al
+    # gato en el sitio y solo se le aplicaba la ropa.
+    dance_facts = manager._prompt_authority_facts(
+        "el gato esta bailando", "the cat is dancing",
+    )
+    assert dance_facts["pose"] is True, dance_facts
+    en_dance = manager._prompt_authority_facts(
+        "the cat is dancing", "the cat is dancing",
+    )
+    assert en_dance["pose"] is True, en_dance
+    dressed_only = manager._prompt_authority_facts(
+        "vestido de lo que sea", "dressed in whatever",
+    )
+    assert dressed_only["pose"] is False, dressed_only
+    print("OK: postura medida enciende el hecho sin keyword de lista")
+
     assert manager._edit_is_nearly_unchanged(source, source.copy())
     changed_small = source.copy()
     changed_small.paste("blue", (8, 8, 22, 22))
