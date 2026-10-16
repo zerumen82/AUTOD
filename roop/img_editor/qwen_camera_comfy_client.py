@@ -27,6 +27,22 @@ VAE = "qwen_image_vae.safetensors"
 # 129.8 s. 1152 px only finished after the weights were already resident.
 CAMERA_SIDE = 768
 
+# Presupuestos de la ruta de cámara, medidos en esta máquina (2026-10-16,
+# con MUSICIA/ACE-Step compartiendo el equipo): la carga fría + prep tardó
+# 202 s en llegar al KSampler (job interrumpido con los 14 nodos previos ya
+# ejecutados) y una recarga limpia documenta 164 s hasta el primer paso.
+# El stall viejo de 150 s mataba el job justo antes de muestrear y la foto
+# salía sin cambiar el POV.
+# - stall: tiempo máximo desde el encolado hasta el PRIMER paso de muestreo.
+CAMERA_FIRST_STEP_STALL_S = 300
+# - timeout: carga + 4 pasos Lightning + decode/save (recorrido frío
+#   histórico completo: 129,8 s en 2026-10-01; con el equipo cargado, ~350 s).
+CAMERA_RUN_TIMEOUT_S = 420
+# - tope de la ruta entera (ambos intentos); solo se reintenta si queda
+#   presupuesto para un ciclo razonable.
+CAMERA_ROUTE_BUDGET_S = 720
+CAMERA_RETRY_MIN_S = 300
+
 
 def _fold(value):
     return "".join(c for c in unicodedata.normalize("NFD", value.lower())
@@ -171,25 +187,39 @@ class QwenCameraComfyClient:
         for attempt in (1, 2):
             if cancel_check and cancel_check():
                 return None, "Cancelado"
+            remaining = CAMERA_ROUTE_BUDGET_S - (time.time() - started)
+            if attempt == 2 and remaining < CAMERA_RETRY_MIN_S:
+                # El reintento solo vale si cabe un ciclo razonable; sin
+                # presupuesto la cola se libera sola y no se descarga nada.
+                print(
+                    f"[QwenCamera] Sin presupuesto para el reintento "
+                    f"(quedan {remaining:.0f}s de {CAMERA_ROUTE_BUDGET_S}s)",
+                    flush=True,
+                )
+                return None, last_message
             free_mb, _ = _server_vram_free_mb(url)
             if attempt == 2:
                 if not _queue_is_idle(url):
                     return None, last_message
+                print("[QwenCamera] Carga sin paso 1; se descarga y se reintenta una vez", flush=True)
                 _sync_unload(url, "reintento Qwen Camera tras carga sin muestreo")
             elif free_mb is not None and free_mb < 5600 and _queue_is_idle(url):
                 _sync_unload(url, f"cambio a Qwen Camera ({free_mb:.0f}MB libres)")
+            timeout = min(CAMERA_RUN_TIMEOUT_S, remaining)
+            stall = min(CAMERA_FIRST_STEP_STALL_S, timeout - 60)
             result, message = self._generate_once(
-                url, image, pose, seed, progress_callback, cancel_check, started)
+                url, image, pose, seed, progress_callback, cancel_check, started,
+                stall_timeout=stall, timeout=timeout)
             if result is not None:
                 return result, message
             last_message = message
             if attempt == 1 and str(message).startswith("Sin muestreo"):
-                print("[QwenCamera] Carga sin paso 1; se descarga y se reintenta una vez", flush=True)
                 continue
             return None, message
         return None, last_message
 
-    def _generate_once(self, url, image, pose, seed, progress_callback, cancel_check, started):
+    def _generate_once(self, url, image, pose, seed, progress_callback, cancel_check, started,
+                       stall_timeout=CAMERA_FIRST_STEP_STALL_S, timeout=CAMERA_RUN_TIMEOUT_S):
         try:
             buffer = io.BytesIO()
             camera_input = image.convert("RGB")
@@ -215,9 +245,9 @@ class QwenCameraComfyClient:
                 return None, f"ComfyUI rechazó el workflow: {payload}"
             print(f"[QwenCamera] {pose} {width}x{height}", flush=True)
             meta, message = wait_for_comfy_image(
-                url, payload["prompt_id"], timeout=240, steps_hint=4,
+                url, payload["prompt_id"], timeout=timeout, steps_hint=4,
                 progress_callback=progress_callback, cancel_check=cancel_check,
-                stall_timeout=150)
+                stall_timeout=stall_timeout)
             if meta is None:
                 return None, message
             response = requests.get(f"{url}/view", params={

@@ -68,7 +68,7 @@ def main():
 
     class FailedCamera:
         def generate(self, image, pose, **kwargs):
-            return None, "Sin muestreo (150s)"
+            return None, "Sin muestreo (300s)"
 
     failed = FailedCamera()
     with (
@@ -92,6 +92,61 @@ def main():
     assert list(output.getdata()) == list(source.getdata()), "a failed camera pass must keep the input pixels"
     assert client.calls == [], client.calls
     assert message.startswith("POV no aplicado"), message
+
+    # Presupuesto real de la ruta de cámara: 2026-10-16 la carga fría + prep
+    # tardó 202 s en llegar al KSampler (job interrumpido con los 14 nodos
+    # previos ejecutados) y el stall de 150 s lo mataba justo antes de
+    # muestrear, así que "cambia el pov" salía sin cambios.
+    from roop.img_editor.qwen_camera_comfy_client import QwenCameraComfyClient
+
+    captured = []
+
+    def _capturing_wait(base_url, prompt_id, **kwargs):
+        captured.append(kwargs)
+        return None, f"Sin muestreo ({kwargs.get('stall_timeout', 0):.0f}s)"
+
+    def _post(url, **kwargs):
+        body = ({"name": "cam.png"} if url.endswith("/upload/image")
+                else {"prompt_id": "probe-budget"})
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)
+
+    with (
+        patch("roop.img_editor.qwen_camera_comfy_client.get_comfyui_url",
+              return_value="http://comfy.test"),
+        patch("roop.img_editor.qwen_camera_comfy_client._server_vram_free_mb",
+              return_value=(8000, 8192)),
+        patch("roop.img_editor.qwen_camera_comfy_client._queue_is_idle",
+              return_value=True),
+        patch("roop.img_editor.qwen_camera_comfy_client._sync_unload",
+              return_value=True),
+        patch("roop.img_editor.qwen_camera_comfy_client.wait_for_comfy_image",
+              side_effect=_capturing_wait),
+        patch("roop.img_editor.qwen_camera_comfy_client.requests.post",
+              side_effect=_post),
+        patch.object(QwenCameraComfyClient, "available",
+                     new=lambda self: (True, "OK")),
+    ):
+        budget_client = QwenCameraComfyClient()
+        budget_result, budget_message = budget_client.generate(
+            Image.new("RGB", (48, 32), "white"),
+            "<sks> front-right quarter view elevated shot medium shot",
+        )
+    assert budget_result is None, budget_message
+    assert captured, "wait_for_comfy_image must be reached"
+    first = captured[0]
+    assert first.get("stall_timeout", 0) >= 240, (
+        f"stall_timeout={first.get('stall_timeout')} kills the measured 202 s "
+        "cold load before its first sampling step"
+    )
+    assert first["timeout"] > first["stall_timeout"], first
+    assert 1 <= len(captured) <= 2, captured
+    for call in captured:
+        assert 240 <= call["stall_timeout"] < call["timeout"] <= 720, call
+    print(
+        "OK: camera budget covers the measured 202 s cold load "
+        f"(stall={first['stall_timeout']:.0f}s, timeout={first['timeout']:.0f}s, "
+        f"attempts={len(captured)})"
+    )
     print("OK: camera first, remaining edit second, explicit pose and uncertainty reported")
 
 
