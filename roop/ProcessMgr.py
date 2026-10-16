@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 import roop.globals
-from roop.faceswap_config import get_faceswap_config
+from roop.faceswap_config import get_faceswap_config, landmarks_fit_bbox
 from roop.quality_enhancements import (
     match_color_histogram,
     detect_foreground_occlusion
@@ -206,6 +206,11 @@ class ProcessMgr:
         self._mouth_blend_smooth.clear()
         if isinstance(getattr(self, '_occ_frame_ema', None), dict):
             self._occ_frame_ema.clear()
+        if isinstance(getattr(self, '_prev_final_mask', None), dict):
+            self._prev_final_mask.clear()
+        for attr in list(vars(self)):
+            if attr.startswith('_mask_boost_ema_'):
+                delattr(self, attr)
         for attr in (
             '_mouth_blend_ema_by_person',
             '_mouth_force_paste_by_person',
@@ -1295,10 +1300,7 @@ class ProcessMgr:
                 return None
             if not (0 <= (x1+x2)/2 < width and 0 <= (y1+y2)/2 < height):
                 return None
-            if np.count_nonzero(
-                (kps[:5, 0] >= x1-(x2-x1)*0.5) & (kps[:5, 0] <= x2+(x2-x1)*0.5)
-                & (kps[:5, 1] >= y1-(y2-y1)*0.5) & (kps[:5, 1] <= y2+(y2-y1)*0.5)
-            ) < 4:
+            if not landmarks_fit_bbox(kps, box):
                 return None
             return face
         except (TypeError, ValueError):
@@ -1607,6 +1609,12 @@ class ProcessMgr:
             setattr(self, f'_hard_scene_cut_frame_{video_basename}', frame_count)
 
         if not soft:
+            previous_masks = getattr(self, '_prev_final_mask', None)
+            if isinstance(previous_masks, dict):
+                previous_masks.pop(video_key, None)
+            boost_key = f'_mask_boost_ema_{video_basename}'
+            if hasattr(self, boost_key):
+                delattr(self, boost_key)
             if hasattr(self, '_prev_frame_result') and isinstance(self._prev_frame_result, dict):
                 self._prev_frame_result.pop(video_key, None)
             if hasattr(self, '_last_swap_bbox') and isinstance(self._last_swap_bbox, dict):
@@ -4036,6 +4044,174 @@ class ProcessMgr:
             return candidate_faces[0] if candidate_faces else None
 
     @staticmethod
+    def _compensate_face_sharpness(patch, original_frame, M):
+        """v5.1203 — H-FS-004: compensa el déficit de nitidez del parche de cara
+        en FOTOS midiendo contra el original alineado por M.
+
+        El unsharp fijo (1.10-1.15, sigma 0.4-0.5) dejaba la cara intercambiada
+        en 34-41% de la nitidez del original (medido en el lote real:
+        f2 484->200, f3 268->91) → "cara fundida". Receta idéntica a la ya
+        validada en el Editor (img_editor_manager._integrate_local_generation,
+        MEMORY 2026-10-10, test_sharpness_fix: 8->268 de 424):
+          gate: parche < 0.80 × original; objetivo = 0.70 × original;
+          2 rondas × bandas sigma 1.0/2.0/4.0 con tope 0.6/0.6/0.5;
+          strength = min(tope, 0.50 × déficit), salto si < 0.05.
+          Tras cada pasada que supere el objetivo se interpola hacia atrás
+          para aterrizar cerca del 70% DESDE ABAJO: con déficit grande el
+          tope 0.6 sobrepasaba a 93-105% y el grano de la piel ajena quedaba
+          áspero sobre la del objetivo (parche visible).
+
+        Mide sobre el crop alineado (warpAffine del original con la MISMA M
+        que usa el pegado), así que solo se modifica el contenido que va
+        dentro de la ventana ya auditada — fuera de la máscara no se pinta
+        nada. Devuelve (parche_out, nota); sin déficit devuelve el parche
+        intacto. Cualquier error debe manejarlo el llamador (fallback al
+        unsharp fijo).
+        """
+        ref = cv2.warpAffine(
+            original_frame, M,
+            (patch.shape[1], patch.shape[0]),
+            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+        )
+
+        def _lap(img):
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+            return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        src_sharp = _lap(ref)
+        patch_sharp = _lap(patch)
+        if src_sharp <= 1.0:
+            return patch, f"original sin textura (src={src_sharp:.1f}); parche intacto"
+        if patch_sharp >= src_sharp * 0.80:
+            return patch, (
+                f"sin déficit (parche {patch_sharp:.0f} vs original {src_sharp:.0f}, "
+                f"{patch_sharp / src_sharp:.0%}); parche intacto"
+            )
+        initial = patch_sharp
+        target = src_sharp * 0.70
+        arr = patch.astype(np.float32)
+        passes = 0
+        for _ in range(2):
+            if patch_sharp >= target:
+                break
+            for sigma, cap in ((1.0, 0.6), (2.0, 0.6), (4.0, 0.5)):
+                if patch_sharp >= target:
+                    break
+                deficit = src_sharp / max(1.0, patch_sharp) - 1.0
+                strength = float(min(cap, 0.50 * deficit))
+                if strength < 0.05:
+                    continue
+                pre = arr.copy()
+                pre_sharp = patch_sharp
+                blur = cv2.GaussianBlur(arr, (0, 0), sigma)
+                arr = cv2.addWeighted(arr, 1.0 + strength, blur, -strength, 0)
+                passes += 1
+                # Medir en gris (igual que _lap): Laplacian sobre 3 canales
+                # sobreestima la nitidez y el bucle se detenía antes de tiempo
+                # (medido: nota 62 vs 31 real en gris → objetivo no alcanzado).
+                patch_sharp = _lap(np.clip(arr, 0, 255).astype(np.uint8))
+                if patch_sharp > target and patch_sharp > pre_sharp:
+                    # Retroceso: con déficit grande (medido 58 vs 1074) una
+                    # pasada de tope 0.6 sobrepasa el objetivo de golpe
+                    # (93-105% frente al 70% pretendido) y el grano de la piel
+                    # ajena queda áspero sobre la del objetivo (parche
+                    # visible). La receta del Editor aterriza en ~63% porque
+                    # sus déficits son menores; aquí se mezcla hacia atrás
+                    # para aterrizar cerca del objetivo DESDE ABAJO — más
+                    # suave que pasararse, nunca más nítido que el original.
+                    _t = (target - pre_sharp) / max(1e-6, patch_sharp - pre_sharp)
+                    _t = float(min(1.0, max(0.0, _t)))
+                    arr = pre + (arr - pre) * _t
+                    patch_sharp = _lap(np.clip(arr, 0, 255).astype(np.uint8))
+        out = np.clip(arr, 0, 255).astype(np.uint8)
+        note = (
+            f"parche {initial:.0f} -> {patch_sharp:.0f} (original {src_sharp:.0f}, "
+            f"{patch_sharp / max(1.0, src_sharp):.0%} de fuente, {passes} pasadas)"
+        )
+        return out, note
+
+    @staticmethod
+    def _compensate_pasted_sharpness(result_frame, original_frame, mask):
+        """v5.1204 — H-FS-004: compensa la nitidez de la cara ya PEGADA, en
+        marco, para fotos.
+
+        Medido en la evidencia real (03429): la compensación alineada deja
+        el parche en 44% de la textura del original dentro de la máscara,
+        pero el warp inverso 512->628 del pegado pierde más y el resultado
+        final cae a 18% (parche 10 vs original 55 medido en el núcleo de la
+        máscara) — la medición alineada no ve ese round-trip de resample y
+        su objetivo full-canvas se detiene antes de tiempo.
+
+        Aplica aquí la misma receta ya validada del Editor
+        (img_editor_manager._integrate_local_generation) sobre el resultado
+        compuesto, midiendo contra el original EN MARCO (misma escala, sin
+        asimetría de resample): gate <0.80×, objetivo 0.70×, bandas sigma
+        1.0/2.0/4.0 con topes 0.6/0.6/0.5, 2 rondas, retroceso hacia el
+        objetivo desde abajo. La corrección entra multiplicada por la
+        máscara de pegado, así que fuera de la región pastada no se escribe
+        ni un píxel (los bordes de la ventana quedan intactos). Solo fotos:
+        el vídeo no variará nitidez frame a frame sin validación de vídeo
+        completo. Devuelve (resultado, nota); sin déficit devuelve intacto.
+        """
+        region = np.asarray(mask) >= 0.90
+        if not region.any():
+            return result_frame, "sin región pastada; resultado intacto"
+
+        def _gray(img):
+            return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+
+        def _lvar(img):
+            return float(cv2.Laplacian(_gray(img), cv2.CV_64F)[region].var())
+
+        src_sharp = _lvar(original_frame)
+        cur_sharp = _lvar(result_frame)
+        if src_sharp <= 1.0:
+            return result_frame, (
+                f"original sin textura (src={src_sharp:.1f}); resultado intacto"
+            )
+        if cur_sharp >= src_sharp * 0.80:
+            return result_frame, (
+                f"sin déficit (pegada {cur_sharp:.0f} vs original {src_sharp:.0f}, "
+                f"{cur_sharp / src_sharp:.0%}); resultado intacto"
+            )
+        initial = cur_sharp
+        target = src_sharp * 0.70
+        w3 = np.asarray(mask, dtype=np.float32)
+        if w3.ndim == 2:
+            w3 = w3[:, :, None]
+        arr = result_frame.astype(np.float32)
+        passes = 0
+        for _ in range(2):
+            if cur_sharp >= target:
+                break
+            for sigma, cap in ((1.0, 0.6), (2.0, 0.6), (4.0, 0.5)):
+                if cur_sharp >= target:
+                    break
+                deficit = src_sharp / max(1.0, cur_sharp) - 1.0
+                strength = float(min(cap, 0.50 * deficit))
+                if strength < 0.05:
+                    continue
+                pre = arr.copy()
+                pre_sharp = cur_sharp
+                blur = cv2.GaussianBlur(arr, (0, 0), sigma)
+                sharp = arr * (1.0 + strength) - blur * strength
+                cand = np.clip(pre * (1.0 - w3) + sharp * w3, 0, 255)
+                passes += 1
+                cur_sharp = _lvar(np.clip(cand, 0, 255).astype(np.uint8))
+                if cur_sharp > target and cur_sharp > pre_sharp:
+                    _t = (target - pre_sharp) / max(1e-6, cur_sharp - pre_sharp)
+                    _t = float(min(1.0, max(0.0, _t)))
+                    cand = pre + (cand - pre) * _t
+                    cur_sharp = _lvar(np.clip(cand, 0, 255).astype(np.uint8))
+                arr = cand
+        out = np.clip(arr, 0, 255).astype(np.uint8)
+        note = (
+            f"pegada {initial:.0f} -> {cur_sharp:.0f} (original {src_sharp:.0f}, "
+            f"{cur_sharp / max(1.0, src_sharp):.0%} de fuente, {passes} pasadas)"
+        )
+        return out, note
+
+    @staticmethod
     def _is_profile_face(kps, det_score=None):
         """Detect if face is a profile/side view based on 5-point kps landmarks
         v5.1074c: Reducido falsos perfiles — antes 40% del video era "perfil" (4089/10K).
@@ -4777,6 +4953,16 @@ class ProcessMgr:
             # vídeo; ante duda no bloquea.
             try:
                 _kps_chk = getattr(target_face, 'kps', None)
+                if not landmarks_fit_bbox(_kps_chk, target_face.bbox):
+                    print(
+                        f"[ALIGN_REJECT] Frame {call_num}: landmarks fuera del bbox "
+                        "o geometría no válida; se busca una referencia coherente",
+                        flush=True,
+                    )
+                    return self._swap_from_saved_reference(
+                        source_face, target_face, result_frame,
+                        original_frame, call_num, photo_path=photo_path,
+                    )
                 if _kps_chk is not None:
                     _kps_arr = np.asarray(_kps_chk, dtype=np.float32)
                     _bb_chk = np.asarray(target_face.bbox, dtype=np.float32)
@@ -4797,7 +4983,8 @@ class ProcessMgr:
                                 original_frame, call_num, photo_path=photo_path,
                             )
             except Exception as _e_align:
-                print(f"[ALIGN_REJECT] check falló ({_e_align}); continúa flujo normal", flush=True)
+                print(f"[ALIGN_REJECT] check falló ({_e_align}); se conserva el fotograma", flush=True)
+                return result_frame
 
             # ============================================
             # SUAVIZADO TEMPORAL AVANZADO (v3.5)
@@ -5397,20 +5584,46 @@ class ProcessMgr:
                             # v5.1073: Unsharp reducido — el swap a 128/256px ya tiene artefactos de interpolación,
                             # el sharpening los amplifica visiblemente en caras grandes.
                             face_h_us = max(1, y2 - y1)
-                            if _large_face:
-                                # Caras grandes: unsharp suave — la resolución real viene de GFPGAN 512px
-                                unsharp_amt = 1.12
-                                unsharp_sigma = 0.4
-                            elif is_closeup:
-                                unsharp_amt = 1.15
-                                unsharp_sigma = 0.5
-                            else:
-                                unsharp_amt = 1.10
-                                unsharp_sigma = 0.4
-                            blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), unsharp_sigma)
-                            swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, unsharp_amt, blurred, -(unsharp_amt - 1.0), 0)
+                            # v5.1203 — H-FS-004: en FOTOS el unsharp fijo no llega: el lote
+                            # real quedó en 34-41% de la nitidez del original dentro de la
+                            # cara (f2 484->200, f3 268->91 → "cara fundida/mal de calidad").
+                            # La ruta de foto usa ahora la compensación medida por bandas
+                            # ya validada en el Editor (img_editor_manager: gate <0.80 del
+                            # original, objetivo 70%, 2 rondas, topes 0.6/0.6/0.5). Mide el
+                            # propio crop alineado contra el original warpAffine(M), así que
+                            # no pinta nada fuera de la ventana de pegado ya auditada. El
+                            # vídeo conserva el unsharp fijo (no cambiar nitidez frame a
+                            # frame sin validación de vídeo completo).
+                            _photo_compensated = False
+                            if getattr(self, '_is_single_photo', False) and M is not None:
+                                try:
+                                    _comp_patch, _sharp_note = self._compensate_face_sharpness(
+                                        swapped_face_aligned, original_frame, M,
+                                    )
+                                    swapped_face_aligned = _comp_patch
+                                    _photo_compensated = True
+                                    # Siempre en fotos: una línea por foto es el
+                                    # registro directo del déficit en el próximo lote.
+                                    print(f"[QUALITY] nitidez foto: {_sharp_note}", flush=True)
+                                except Exception as sharp_err:
+                                    _photo_compensated = False
+                                    print(f"[QUALITY] Compensación de nitidez omitida: {sharp_err}", flush=True)
+                            if not _photo_compensated:
+                                if _large_face:
+                                    # Caras grandes: unsharp suave — la resolución real viene de GFPGAN 512px
+                                    unsharp_amt = 1.12
+                                    unsharp_sigma = 0.4
+                                elif is_closeup:
+                                    unsharp_amt = 1.15
+                                    unsharp_sigma = 0.5
+                                else:
+                                    unsharp_amt = 1.10
+                                    unsharp_sigma = 0.4
+                                blurred = cv2.GaussianBlur(swapped_face_aligned, (0, 0), unsharp_sigma)
+                                swapped_face_aligned = cv2.addWeighted(swapped_face_aligned, unsharp_amt, blurred, -(unsharp_amt - 1.0), 0)
                             if call_num % 50 == 1:
-                                print(f"[QUALITY] {active_enhancer} mix={gfpgan_mix:.2f} color={color_match_strength:.2f} unsharp={unsharp_amt:.1f} large={_large_face}")
+                                _unsharp_note = "multi-band" if _photo_compensated else f"{unsharp_amt:.1f}"
+                                print(f"[QUALITY] {active_enhancer} mix={gfpgan_mix:.2f} color={color_match_strength:.2f} unsharp={_unsharp_note} large={_large_face}")
                     except Exception as e:
                         print(f"[AUTO_PILOT_ERR] {e}")
 
@@ -5589,7 +5802,7 @@ class ProcessMgr:
                 # ruido a esa escala; en caras grandes el gate 0.01-0.40 sigue protegiendo.
                 occ_low_quality = is_very_small_face or float(getattr(target_face, 'det_score', 1.0) or 1.0) < 0.30
                 _occ_pts, _occ_interior = (None, None)
-                if is_profile and raw_swapped_aligned is not None:
+                if raw_swapped_aligned is not None:
                     _ref_for_occ = reference_region if reference_region is not None else raw_swapped_aligned
                     _occ_pts, _occ_interior = self._profile_occlusion_guides(
                         M, getattr(target_face, 'kps', None), (x1, y1, x2, y2),
@@ -5701,7 +5914,10 @@ class ProcessMgr:
                 # v5.83/94/993/1071/1072b: Content-feather para caras 60-120px, perfiles Y closeup profiles.
                 # v5.1152: Closeup profiles ahora también lo necesitan — antes se saltaban y tenían borde más duro.
                 # Solo se salta en is_very_small_face (<60px) donde el ruido domina.
-                if not is_very_small_face:
+                # v5.1216: En fotos individuales se omite — final_mask con GaussianBlur ya realiza el blend
+                # continuo; emborronar warped_face a 13-25px en la transición destruía la textura (440->355)
+                # y producía el halo/blur elíptico percibido alrededor del rostro.
+                if not is_very_small_face and not getattr(self, '_is_single_photo', False):
                     content_blur_sz = int(max(13, min(25, blur_sz + 3))) | 1
                     tent = np.clip(1.0 - np.abs(final_mask - 0.5) * 2.0, 0, 1.0)
                     warp_gate = (np.max(warped_face.astype(np.float32), axis=2) > 8).astype(np.float32)
@@ -6232,6 +6448,23 @@ class ProcessMgr:
                     result_frame, original_frame, blend_mask, face_w, face_h,
                 )
 
+            # v5.1204 — H-FS-004: en FOTOS, medido en marco, la cara pegada
+            # queda en 18-44% de la nitidez del original dentro de la máscara
+            # (el warp inverso 512->628 no lo ve la compensación alineada).
+            # Compensación medida sobre el resultado FINAL ya compuesto, con
+            # la misma receta (gate 0.80, objetivo 0.70, retroceso desde
+            # abajo) y aplicada solo dentro de la máscara de pegado. El vídeo
+            # conserva su ruta actual: nada de nitidez variable frame a frame
+            # sin validación de vídeo completo.
+            if getattr(self, '_is_single_photo', False) and blend_mask is not None:
+                try:
+                    result_frame, _paste_sharp_note = self._compensate_pasted_sharpness(
+                        result_frame, original_frame, blend_mask,
+                    )
+                    print(f"[QUALITY] nitidez pegada: {_paste_sharp_note}", flush=True)
+                except Exception as paste_sharp_err:
+                    print(f"[QUALITY] Compensación de nitidez pegada omitida: {paste_sharp_err}", flush=True)
+
             if call_num <= 3:
                 cv2.imwrite(os.path.join(debug_dir, f'04_final_result_f{call_num}.png'), result_frame)
 
@@ -6367,6 +6600,7 @@ class ProcessMgr:
         self._session_log_file = open(session_log_path, 'w', encoding='utf-8')
         self._session_log_file.write("=== AUTO-AUTO v5.1202 — FaceSwap source quality and current-frame alignment ===\n")
         self._session_log_file.write(f"Start: {datetime.now()}\n")
+        self._session_log_file.write(f"PID: {_os.getpid()}\n")
         self._session_log_file.write(f"Video: {video_path}\n")
         self._session_log_file.write(f"Output: {output_path}\n\n")
         self._session_log_file.flush()
@@ -6660,7 +6894,10 @@ class ProcessMgr:
                 sys.stdout = self._old_stdout
             if hasattr(self, '_session_log_file') and self._session_log_file:
                 try:
-                    self._session_log_file.write("\n=== END ===\n")
+                    # Sin esta marca el finally no corrió: el proceso murió
+                    # por fuera (incidente 2026-10-13). El PID correlaciona
+                    # con ui_start_*.log y los eventos de Windows.
+                    self._session_log_file.write(f"\n=== END (PID {_os.getpid()}) ===\n")
                     self._session_log_file.close()
                 except BaseException:
                     pass

@@ -19,7 +19,8 @@
   },
   "generate_ui": {
     "default_engine": "flux_dev_q4",
-    "nsfw_content_default": false
+    "nsfw_content_default": false,
+    "default_route": "img2img"
   },
   "style_gate": {
     "concepts": [
@@ -29,6 +30,15 @@
       "estilo dibujo, estilo ilustración, estilo ilustracion, estilo anime, estilo cartoon, estilo pintura, estilo sketch, estilo arte"
     ],
     "threshold": 0.25
+  },
+  "adult_gate": {
+    "concepts": [
+      "nude naked nudity fully naked topless bare body bare skin undressed without clothes",
+      "desnudo desnuda desnudez sin ropa cuerpo desnudo en pelota",
+      "sex sexual intercourse fucking erotic intimate xxx pornographic porn nsfw uncensored adult content",
+      "sexo relación sexual follar erótico erótica xxx pornográfico porno contenido adulto sin censura"
+    ],
+    "threshold": 0.13
   },
   "prompt_extras": {
     "explicit_sdxl_prefix_fallback": "photorealistic, RAW photo, realistic, film grain, detailed skin texture, sharp focus, natural lighting, realistic anatomy, ",

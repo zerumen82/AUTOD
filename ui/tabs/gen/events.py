@@ -138,14 +138,18 @@ def on_generate_image(
     prompt, width, height, engine_val, image_style, shot_framing, lighting,
     skin_finish, enhance_quality, use_rewriter,
     color_grade="auto", seed=0, steps=0, cfg_scale=0.0, negative_prompt="",
-    ref_image=None, route="auto", enhance_tier="hd", samples=1,
-    nsfw_content=None,
+    # Ruta por defecto img2img (config generate_ui.default_route): Generate y
+    # el Editor son paralelos e independientes; "editor" es elección manual.
+    ref_image=None, route="img2img", enhance_tier="hd", samples=1,
+    nsfw_content=None, lora_choice=None,
 ):
     # Los primeros 10 parámetros son el contrato legacy de la APK
     # (api_name="generate_image"); el resto (modificadores, avanzados,
-    # imagen de referencia) llegan solo por generate_image_ui.
+    # imagen de referencia, NSFW, LoRA) llega solo por generate_image_ui.
     if nsfw_content is None:
         nsfw_content = bool(get_generate_ui_config().get("nsfw_content_default", False))
+    if lora_choice is None:
+        lora_choice = "Auto"
     with state._generation_lock:
         if state.is_generating:
             yield None, "<div style='text-align:center;color:#ef4444;padding:10px;'>⚠️ Ya hay una generación en curso</div>", *gr.skip(), *gr.skip()
@@ -259,6 +263,7 @@ def on_generate_image(
                     enhance_tier=enhance_tier or "hd",
                     batch_size=int(samples or 1),
                     inject_nsfw=bool(nsfw_content),
+                    lora_name=(lora_choice or "Auto"),
                 )
 
                 if is_cancelled(SCOPE_GENERATION):
@@ -396,6 +401,7 @@ def wire_events(ui_comp):
             ui_comp["ref_image"], ui_comp["route"],
             ui_comp["enhance_tier"], ui_comp["samples"],
             ui_comp["nsfw_content"],
+            ui_comp["lora_choice"],
         ],
         outputs=_outputs,
         api_name="generate_image_ui",

@@ -11,7 +11,7 @@ from PIL import Image
 from dataclasses import dataclass
 
 from roop.comfy_workflows import get_comfyui_url
-from roop.img_editor.comfy_progress import wait_for_comfy_image
+from roop.img_editor.comfy_progress import new_client_id, wait_for_comfy_image
 
 # Solo modelos SDXL NSFW instalados en este proyecto (checkpoints + diffusion_models)
 GENERATION_MODEL_REGISTRY: List[Tuple[str, Tuple[str, ...], str, int, bool]] = [
@@ -280,24 +280,46 @@ class FluxGenComfyClient:
         prompt_en: str = "",
         image_type: str = "auto",
         inject_nsfw: bool = True,
+        adult_intent: Optional[bool] = None,
     ) -> Tuple[List[Tuple[str, float]], str, str]:
-        """Apila LoRAs automáticamente según escena del prompt (sin UI)."""
+        """Apila LoRAs automáticamente según escena del prompt (sin UI).
+
+        La elección explícita del usuario (dropdown LoRA) se aplica tal cual,
+        sin gates: su elección es intención explícita (v5.1210) y usa la
+        fuerza del catálogo. El modo Auto solo añade LoRAs adultas si el
+        prompt mide intención adulta — el checkbox es permiso, el prompt
+        manda.
+        """
         from roop.img_editor.gen_lora_resolver import resolve_scene_loras, format_lora_log
 
         requested = (lora_name or "Auto").strip()
         auto_strength = float(conf.get("auto_lora_strength", 0.55))
 
         if requested not in ("", "None", "Auto"):
-            strength = float(lora_strength) if lora_strength is not None else auto_strength
+            if lora_strength is not None:
+                strength = float(lora_strength)
+            else:
+                from roop.img_editor.gen_prompt_config import get_lora_catalog
+                catalog = next(
+                    (entry for entry in get_lora_catalog()
+                     if str(entry.get("file", "")).lower() == requested.lower()),
+                    None,
+                )
+                strength = (
+                    float(catalog.get("strength", auto_strength)) if catalog else auto_strength
+                )
             log = f"{requested}@{strength:.2f}"
             return [(requested, strength)], "", log
 
         if requested == "None" or not (self._is_sdxl and conf.get("explicit", False)):
             return [], "", ""
 
+        if adult_intent is None:
+            from roop.img_editor.gen_semantic import prompt_requests_adult_content
+            adult_intent = prompt_requests_adult_content(prompt_en)
         picks, boost = resolve_scene_loras(
             prompt_en, self._alias, base_strength=auto_strength, image_type=image_type,
-            include_nsfw=bool(inject_nsfw),
+            include_nsfw=bool(inject_nsfw) and bool(adult_intent),
         )
         log = format_lora_log(picks) if picks else ""
         if picks:
@@ -505,6 +527,7 @@ class FluxGenComfyClient:
                 modifiers["image_type"] = image_type or "auto"
             from roop.img_editor.gen_prompt_modifiers import resolve_effective_image_type
             from roop.img_editor.gen_semantic import (
+                prompt_requests_adult_content,
                 prompt_requests_nonphotoreal_style,
                 score_style_gate,
             )
@@ -513,6 +536,10 @@ class FluxGenComfyClient:
             if style_requested:
                 style_score = score_style_gate(translated)
                 print(f"[GenFlux] Estilo no fotorreal pedido (score={style_score:.2f}) → sin añadidos fotorreales")
+            # v5.1210: el checkbox NSFW es solo permiso; la intención adulta
+            # la decide el PROMPT medido (rewriter o solape de conceptos).
+            # Prefijo/anti-censor solo con ambas señales — el prompt manda.
+            adult_intent = bool(adult_intent) or prompt_requests_adult_content(translated)
             effective_type = resolve_effective_image_type(
                 modifiers.get("image_type", "auto") or "auto",
                 self._alias,
@@ -528,10 +555,16 @@ class FluxGenComfyClient:
                 is_sdxl=self._is_sdxl,
                 inject_nsfw=bool(inject_nsfw),
                 style_override=style_requested,
+                adult_intent=adult_intent,
             )
             image_type = effective_type
             if not inject_nsfw:
                 print("[GenFlux] Contenido NSFW OFF: sin prefijo adulto, sin anti-censor ni LoRA adulta")
+            elif not adult_intent:
+                print("[GenFlux] NSFW ON pero el prompt no pide contenido adulto "
+                      "→ sin prefijo/anti-censor ni LoRAs adultas (el prompt manda)")
+            else:
+                print("[GenFlux] NSFW ON + intención adulta medida → prefijo adulto activo")
 
             if self._is_longcat:
                 final_prompt = f"Instruction: {final_prompt}"
@@ -549,6 +582,7 @@ class FluxGenComfyClient:
                 is_sdxl=self._is_sdxl,
                 inject_nsfw=bool(inject_nsfw),
                 style_override=style_requested,
+                adult_intent=adult_intent,
             )
             from roop.img_editor.gen_prompt_modifiers import _model_explicit
             is_explicit = (_model_explicit(self._alias, self._model_configs) or bool(conf.get("explicit"))) and bool(inject_nsfw)
@@ -716,6 +750,10 @@ class FluxGenComfyClient:
                 current_neg = f"{neg_conf}, {negative_prompt}" if negative_prompt else neg_conf
 
         prompt_for_loras = user_translated or final_prompt or prompt
+        # v5.1210: gate adulto de LoRAs del modo Auto — el checkbox es
+        # permiso; la intención la decide el prompt medido (o el rewriter).
+        from roop.img_editor.gen_semantic import prompt_requests_adult_content
+        adult_intent = bool(adult_intent) or prompt_requests_adult_content(prompt_for_loras)
         # Overrides explícitos de la UI: mandan sobre lo que salga de config.
         if steps is not None:
             actual_steps = max(1, int(steps))
@@ -736,6 +774,7 @@ class FluxGenComfyClient:
             lora_name, lora_strength, conf, prompt_en=prompt_for_loras,
             image_type=effective_lora_type,
             inject_nsfw=bool(inject_nsfw),
+            adult_intent=adult_intent,
         )
         if lora_boost and lora_boost.strip():
             final_prompt = f"{final_prompt}, {lora_boost}"
@@ -894,7 +933,10 @@ class FluxGenComfyClient:
 
         try:
             _report("Enviando a ComfyUI", f"{w}×{h} · {actual_steps} pasos", pct=2)
-            r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf})
+            # v5.1206 — client_id en el POST: sin él ComfyUI no emite
+            # "executing" y el /ws no recibe fases por nodo (ver comfy_progress).
+            client_id = new_client_id()
+            r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf, "client_id": client_id})
             pid = r.json().get("prompt_id")
             if not pid:
                 return None, f"ComfyUI sin prompt_id: {r.text[:200]}"
@@ -906,12 +948,19 @@ class FluxGenComfyClient:
                     prog.setdefault("detail", lora_log or "")
                     progress_callback(prog)
 
+            try:
+                # v5.1205 — fases reales por nodo vía WebSocket (ver comfy_progress).
+                node_names = {str(k): (v or {}).get("class_type", "") for k, v in wf.items()}
+            except Exception:
+                node_names = {}
             img_meta, wait_msg = wait_for_comfy_image(
                 comfy_url,
                 pid,
                 steps_hint=actual_steps,
                 progress_callback=_comfy_cb,
                 cancel_check=kwargs.get("cancel_check"),
+                node_names=node_names,
+                client_id=client_id,
             )
             if not img_meta:
                 return None, wait_msg

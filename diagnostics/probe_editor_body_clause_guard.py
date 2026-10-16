@@ -34,6 +34,20 @@ MAN_CLOTH = (40, 160, 60)
 DARK_CLOTH = (90, 60, 40)
 SWIM = (220, 40, 40)
 
+# Production now sends local windows. Keep fixture frames and segmenter
+# coordinates in the same window, rather than squeezing a whole photo into it.
+_IMAGE_BOXES = {}
+
+
+def _image_box(image):
+    entry = _IMAGE_BOXES.get(id(image))
+    if entry is not None:
+        registered, box = entry
+        assert registered is image
+        return box
+    assert image.size == (WIDTH, HEIGHT), ("unregistered fixture crop", image.size)
+    return (0, 0, WIDTH, HEIGHT)
+
 HEELS_BOX = (40, 132, 70, 150)
 DRESS_BOX = (30, 60, 80, 115)
 MAN_TORSO_BOX = (115, 60, 180, 140)
@@ -109,7 +123,11 @@ class _Masker:
         text = (prompt or "").strip(" .,!?\"'").lower()
         if "barefoot" in text or "descalz" in text:
             x1, y1, x2, y2 = HEELS_BOX
-            arr[y1:y2, x1:x2] = 255
+            left, top, right, bottom = _image_box(image)
+            local_x1, local_y1 = max(0, x1-left), max(0, y1-top)
+            local_x2, local_y2 = min(right-left, x2-left), min(bottom-top, y2-top)
+            if local_x2 > local_x1 and local_y2 > local_y1:
+                arr[local_y1:local_y2, local_x1:local_x2] = 255
         elif "naked" in text or "desnud" in text:
             rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
             skin = (
@@ -146,7 +164,11 @@ class _ScriptedClient:
         self.attempts[key] = step + 1
         frames = self.behavior[key]
         frame = frames[min(step, len(frames) - 1)]
-        return SimpleNamespace(image=frame.copy()), f"OK {key} intento {step}"
+        box = _image_box(kwargs["image"])
+        generated = frame.crop(box)
+        assert generated.size == kwargs["image"].size
+        _IMAGE_BOXES[id(generated)] = (generated, box)
+        return SimpleNamespace(image=generated), f"OK {key} intento {step}"
 
 
 def _facts(_raw, _translated):
@@ -181,7 +203,17 @@ def _passes(photo):
 
 
 def _run(manager, photo, passes, faces, client):
-    with patch.object(manager, "_get_clipseg_masker", return_value=_Masker()):
+    _IMAGE_BOXES.clear()
+    original_window = manager._appearance_work_region
+
+    def fixture_window(*args, **kwargs):
+        window, mask, box = original_window(*args, **kwargs)
+        if box is not None:
+            _IMAGE_BOXES[id(window)] = (window, box)
+        return window, mask, box
+
+    with (patch.object(manager, "_get_clipseg_masker", return_value=_Masker()),
+          patch.object(manager, "_appearance_work_region", side_effect=fixture_window)):
         return manager._apply_subject_passes(
             client, photo, passes,
             seed=1, negative_prompt="", lora_name="", lora_strength=0,

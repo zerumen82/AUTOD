@@ -121,41 +121,91 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                 autoregressive, auto_iterations, quality_mode, enhance_tier,
                 quality_preserve_faces=True,
                 quality_deposter=True, quality_upscale=True,
-                quality_color=True, quality_realism=True):
+                quality_color=True, quality_realism=True,
+                progress=gr.Progress()):
     with state._generation_lock:
         if state.is_generating:
-            return None, "Ya hay una transformacion en proceso", None
+            _txt = "Ya hay una transformacion en proceso"
+            if state.generation_started_at:
+                _txt += f" (lleva {int(time.time() - state.generation_started_at)} s)"
+            print(f"[ImgEditor] Clic rechazado: {_txt}", flush=True)
+            return None, _txt, None
         state.is_generating = True
+        state.generation_started_at = time.time()
 
-    p_text = (p_text or "").strip()
-    if not p_text and not quality_mode:
+    def _end_generation():
         state.is_generating = False
-        return None, "Escribe un prompt", None
-    if img_data is None:
-        state.is_generating = False
-        return None, "Sube una imagen", None
+        state.generation_started_at = None
 
-    if isinstance(img_data, dict):
-        img = img_data.get("background")
-    elif isinstance(img_data, str):
-        img = Image.open(img_data).convert("RGB")
-    else:
-        img = img_data
+    # Las validaciones tempranas también viven dentro de try: una excepción
+    # aquí (p.ej. Image.open de una ruta temporal borrada) dejaba
+    # is_generating clavado en True y cada edicion posterior moria en
+    # silencio con "ya hay una transformacion".
+    try:
+        p_text = (p_text or "").strip()
+        # Primer print del handler: si la consola no muestra esta línea, el
+        # clic no llegó a Python (cola/conexión de Gradio) y el problema es
+        # de despacho, no del pipeline.
+        print(
+            f"[ImgEditor] Solicitud recibida prompt={p_text[:60]!r} "
+            f"engine={engine_val} calidad={bool(quality_mode)}",
+            flush=True,
+        )
+        progress(0, desc="Preparando")
+        if not p_text and not quality_mode:
+            _end_generation()
+            return None, "Escribe un prompt", None
+        if img_data is None:
+            _end_generation()
+            return None, "Sube una imagen", None
 
-    if img is None:
-        state.is_generating = False
-        return None, "Imagen invalida", None
-    if not isinstance(img, Image.Image):
-        state.is_generating = False
-        return None, "Formato de imagen no soportado", None
+        if isinstance(img_data, dict):
+            img = img_data.get("background")
+        elif isinstance(img_data, str):
+            img = Image.open(img_data).convert("RGB")
+        else:
+            img = img_data
 
-    manual_mask = _extract_painted_mask(img_data, img)
-    # ImageEditor entrega un fondo RGBA. El gestor y FaceAnalysis reciben RGB;
-    # conservar alpha aquí haría que el detector omitiera las caras antes del
-    # preflight, aunque la selección manual fuese válida.
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    cancel_check = lambda: not state.is_generating
+        if img is None:
+            _end_generation()
+            return None, "Imagen invalida", None
+        if not isinstance(img, Image.Image):
+            _end_generation()
+            return None, "Formato de imagen no soportado", None
+
+        manual_mask = _extract_painted_mask(img_data, img)
+        # ImageEditor entrega un fondo RGBA. El gestor y FaceAnalysis reciben RGB;
+        # conservar alpha aquí haría que el detector omitiera las caras antes del
+        # preflight, aunque la selección manual fuese válida.
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+    except Exception as e:
+        traceback.print_exc()
+        _end_generation()
+        return None, f"Error: {str(e)}", None
+
+    def cancel_check():
+        return not state.is_generating
+
+    # Barra de progreso en la propia UI: sin esto, la fase local y la espera
+    # de ComfyUI no pintan NADA hasta el final y "arrancó pero trabaja en
+    # silencio" es indistinguible de "no arrancó". Acepta los dicts del
+    # manager (phase/progress/detail) y los de ComfyUI (phase/step/total).
+    # Un fallo aquí jamás debe romper la edición.
+    def _ui_progress(prog):
+        try:
+            frac = max(0.0, min(1.0, float(prog.get("progress") or 0.0)))
+            desc = str(prog.get("phase") or "")
+            detail = prog.get("detail")
+            if detail and str(detail) not in desc:
+                desc = f"{desc}: {detail}" if desc else str(detail)
+            step = int(prog.get("step") or 0)
+            total = int(prog.get("total") or 0)
+            if step and total:
+                desc = f"{desc} (paso {step}/{total})".strip()
+            progress(frac, desc=desc or "Trabajando")
+        except Exception:
+            pass
 
     try:
         manager = get_img_editor_manager()
@@ -201,6 +251,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                     denoise=denoise_val if denoise_val and denoise_val > 0 else None,
                     auto_upscale=False,
                     cancel_check=cancel_check,
+                    progress_callback=_ui_progress,
                 )
                 compliance = getattr(manager, "_last_instruction_compliance", None) or {}
                 hair_unmet = (res_img is not None
@@ -211,10 +262,18 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                     if best_hair_candidate is None or score < best_hair_candidate[4]:
                         best_hair_candidate = (res_img, msg, mask_img, compliance, score)
                     if attempt + 1 < RETRY_ATTEMPTS:
+                        # La receta anclada conserva el pelo que el modelo
+                        # todavía ve, así que remuestrear la misma foto solo
+                        # afeita otro parche. La siguiente muestra parte del
+                        # resultado medido: con menos pelo visible la
+                        # eliminación se acumula, y el pegado sigue midiendo
+                        # el cambio sobre esa nueva fuente.
                         print(
-                            "[ImgEditor] Pelo residual medido; se intenta otra muestra focal",
+                            "[ImgEditor] Pelo residual medido; la siguiente "
+                            "muestra completa la eliminación sobre el resultado",
                             flush=True,
                         )
+                        current_img = best_hair_candidate[0]
                         continue
                 if (res_img is not None and compliance.get("compliant") is False
                         and not hair_unmet):
@@ -295,7 +354,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         traceback.print_exc()
         return None, f"Error: {str(e)}", None
     finally:
-        state.is_generating = False
+        _end_generation()
 
 
 def _show_quality_options(enabled):

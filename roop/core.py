@@ -393,6 +393,7 @@ def batch_process_regular(
             _batch_log_file = open(_log_path, 'w', encoding='utf-8')
             _batch_log_file.write(f"=== AUTO-AUTO v5.1190 — BATCH FOTOS ===\n")
             _batch_log_file.write(f"Start: {datetime.now()}\n")
+            _batch_log_file.write(f"PID: {os.getpid()}\n")
             _batch_log_file.write(f"Files: {total_files}\n\n")
             _batch_log_file.flush()
         except Exception:
@@ -534,7 +535,10 @@ def batch_process_regular(
             pass
         if _batch_log_file:
             try:
-                _batch_log_file.write(f"\n=== END: {processed_files} files ===\n")
+                # Sin esta marca el finally no corrió: el proceso murió por
+                # fuera. El PID permite correlacionar con ui_start_*.log y
+                # con los eventos de Windows del incidente 2026-10-13.
+                _batch_log_file.write(f"\n=== END: {processed_files} files (PID {os.getpid()}) ===\n")
                 _batch_log_file.close()
             except Exception:
                 pass

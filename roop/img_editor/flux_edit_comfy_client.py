@@ -11,7 +11,7 @@ from PIL import Image
 from dataclasses import dataclass
 
 from roop.comfy_workflows import get_comfyui_url
-from roop.img_editor.comfy_progress import wait_for_comfy_image
+from roop.img_editor.comfy_progress import new_client_id, wait_for_comfy_image
 
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -135,6 +135,36 @@ def _queue_is_idle(comfy_url) -> bool:
     except Exception:
         return False
 
+
+def _reuse_floor_mb_for(flux_version: str, vram_total, *, reuse: bool = True) -> int:
+    """Piso de VRAM por debajo del cual NO se reutiliza el modelo cargado.
+
+    v5.1207 — contrato con datos de producción (edición "el hombre debe ser
+    calvo", 2026-10-13, RTX 3060 Ti 8 GB):
+    - Turbo reutilizando (misma versión ya residente): 4000 MB. La pasada 2
+      corrió con 5198 MB libres a 3,1 s/paso SIN thrash y la preparación
+      costó ~50 s (recarga del encoder VL); una recarga limpia cuesta ~164 s
+      hasta el primer paso (82 s de carga + 82 s de prep/encode). Turbo con
+      CFG=1 omite el encode negativo, así que no se reproduce el ping-pong
+      TE↔UNet medido antes (450 s+ de preparación). Ahorro: ~130 s entre
+      ediciones consecutivas.
+    - Full reutilizando: 5600 MB — su thrash con encode negativo sigue sin
+      desmentir.
+    - Primera carga con VRAM ajena (reuse=False): 5600 para LongCat. No se
+      sabe qué modelo dejó residente la sesión anterior; convivencia de dos
+      UNets de ~3,5 GB con el encoder VL de 9,4 GB no cabe en 8 GB.
+    - No-LongCat o GPU de más de 10 GB: 2200 (piso histórico, sin cambio).
+    """
+    if not (
+        flux_version.startswith("LongCat-")
+        and vram_total is not None
+        and vram_total <= 10000
+    ):
+        return 2200
+    if not reuse:
+        return 5600
+    return 4000 if flux_version.startswith("LongCat-Image-Edit-Turbo-") else 5600
+
 @dataclass
 class GenResult:
     image: Image.Image
@@ -194,14 +224,20 @@ class FluxEditComfyClient:
         # con el MISMO LongCat Full). Mejor pagar ~45-60s de recarga que 8min de
         # ping-pong VAE↔TE↔UNet.
         _pre_vram_free, _pre_vram_total = _server_vram_free_mb(comfy_url)
-        # LongCat mantiene el UNet en VRAM tras la primera edición. En una
-        # RTX 3060 Ti, el encoder de 7.9 GB de la siguiente petición compite
-        # con ese UNet: 5198 MB libres parecían suficientes, pero el segundo
-        # muestreo pasó de 7 s/paso a decenas de segundos/paso. Una recarga
-        # limpia cuesta menos que ese intercambio continuo de pesos.
-        _reuse_floor_mb = (
-            5600 if flux_version.startswith("LongCat-") and _pre_vram_total is not None
-            and _pre_vram_total <= 10000 else 2200
+        # v5.1207 — LongCat mantiene el UNet en VRAM tras la primera edición.
+        # El piso depende del caso (contrato en _reuse_floor_mb_for, fijado con
+        # datos reales de producción del 2026-10-13):
+        #  - reutilizar MISMA versión (2ª pasada/edición consecutiva): Turbo
+        #    4000 MB (5198 libres corrieron a 3,1 s/paso sin thrash; la
+        #    recarga limpia cuesta ~164 s hasta el primer paso), Full 5600.
+        #  - primera carga con VRAM ajena de otra sesión: 5600 conservador
+        #    (convivir con un UNet ajeno + encoder VL de 9,4 GB no cabe en
+        #    8 GB y hacía thrash de 450 s+ de preparación).
+        _reusing_same = bool(
+            self._loaded and getattr(self, '_flux_version', None) == flux_version
+        )
+        _reuse_floor_mb = _reuse_floor_mb_for(
+            flux_version, _pre_vram_total, reuse=_reusing_same
         )
         _low_vram = (
             _pre_vram_free is not None
@@ -1079,7 +1115,11 @@ class FluxEditComfyClient:
                 flush=True,
             )
 
-        r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf})
+        # v5.1206 — client_id en el POST: sin él ComfyUI NO emite "executing"
+        # (fases por nodo) y el /ws solo recibía "progress" en broadcast; por
+        # eso la edición real mostró "Sampler 1/8" pero nunca "Fases:".
+        client_id = new_client_id()
+        r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf, "client_id": client_id})
         if r.status_code != 200:
             err = r.json().get("error", {}).get("message", r.text[:200])
             return None, f"ComfyUI rechazó el prompt: {err}"
@@ -1107,6 +1147,13 @@ class FluxEditComfyClient:
             elif int(prog.get("elapsed") or 0) % 15 == 0 and prog.get("phase"):
                 print(f"[FluxClient] {prog.get('phase')} ({int(prog.get('elapsed') or 0)}s)", flush=True)
 
+        # v5.1205 — mapa nodo→clase para que el WebSocket reporte fases reales
+        # (TextEncode vs KSampler vs VAE) en lugar del "Preparando generación"
+        # ciego que duró 19 min en edit_1791916588.
+        try:
+            node_names = {str(k): (v or {}).get("class_type", "") for k, v in wf.items()}
+        except Exception:
+            node_names = {}
         img_meta, wait_msg = wait_for_comfy_image(
             comfy_url,
             pid,
@@ -1114,6 +1161,8 @@ class FluxEditComfyClient:
             steps_hint=num_inference_steps,
             progress_callback=_on_progress,
             cancel_check=kwargs.get("cancel_check"),
+            node_names=node_names,
+            client_id=client_id,
         )
         _free_server_vram()
         if img_meta is None:

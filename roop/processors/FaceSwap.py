@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 import roop.globals
 from roop.path_helper import get_root_path
-from roop.faceswap_config import get_faceswap_config
+from roop.faceswap_config import get_faceswap_config, landmarks_fit_bbox
 from typing import Any, Optional
 from roop.types import Face, Frame
 
@@ -48,7 +48,8 @@ class FaceWarpEngine:
         as face size. Outside the configured band, preserve roll, constrain
         scale and anchor the template centroid to the measured bbox center.
         Invalid geometry/configuration raises ValueError; no image is allocated.
-        This does not bypass ProcessMgr's earlier landmark validity gate.
+        Points outside their bbox are rejected even if a caller bypasses
+        ProcessMgr's earlier landmark validity gate.
         """
         from insightface.utils import face_align
 
@@ -64,6 +65,8 @@ class FaceWarpEngine:
         bbox_size = bounds[2:] - bounds[:2]
         if np.any(bbox_size <= 0):
             raise ValueError('Alignment requires a bbox with positive width and height')
+        if not landmarks_fit_bbox(points, bounds):
+            raise ValueError('Alignment landmarks lie outside their face bbox')
         template = FaceWarpEngine.arcface_template(image_size_out).astype(np.float64)
         config = get_faceswap_config()
         scale_dev = float(config['align_constrain_scale_dev'] if max_scale_dev is None else max_scale_dev)

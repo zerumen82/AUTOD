@@ -53,7 +53,7 @@ def build_animate_ui():
                     lora_list = ["None"] + animator.get_available_loras()
                     engine = gr.Dropdown(
                         label="Motor de animación",
-                        choices=["framepack", "wan_video", "svd_turbo", "ltx_video"],
+                        choices=["framepack", "wan_video"],
                         value="framepack",
                         info="FramePack: único con modelo instalado (~5GB). wan_video requiere descargar Wan2.2 (scripts/download_animate_models).",
                     )

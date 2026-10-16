@@ -13,6 +13,14 @@ Arranca ComfyUI si no está vivo (log en logs/comfyui_manual.log, proceso
 desacoplado de este script) y guarda en diagnostics/out/gen_castillo_style/.
 
 Uso:  python diagnostics/probe_gen_castillo_real.py [--only-off|--only-on]
+                       [--engine <motor>]
+
+El motor por defecto es el de la UI (generate_ui.default_engine en
+config/generation_prompt.json; hoy flux_dev_q4). El par histórico
+castillo_nsfw_off/on.png de este directorio usa flux_dev_abliterated: era el
+motor por defecto cuando se escribió el probe (2026-10-04); se mantiene
+nombrado aparte para no pisar esa evidencia. Las salidas nuevas llevan el
+motor en el nombre (castillo_<motor>_nsfw_off/on.png).
 """
 import os
 import subprocess
@@ -25,6 +33,7 @@ sys.path.insert(0, ".")
 OUT_DIR = os.path.join("diagnostics", "out", "gen_castillo_style")
 PROMPT = "CASTILLO CON UNICORNIOS, ESTILO DIBUJO"
 SEED = 123456
+ENGINE = "flux_dev_abliterated"  # lo resuelve main() (--engine o config)
 MODS = {
     "image_type": "photoreal",
     "lighting": "natural",
@@ -93,8 +102,8 @@ def start_comfy() -> bool:
 def run_one(tag: str, inject_nsfw: bool) -> str:
     from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client
     client = get_flux_gen_client()
-    ok, msg = client.load("flux_dev_abliterated")
-    print(f"[{tag}] load: {ok} {msg}")
+    ok, msg = client.load(ENGINE)
+    print(f"[{tag}] motor={ENGINE} load: {ok} {msg}")
     res, gmsg = client.generate_ai(
         prompt=PROMPT,
         width=1152,
@@ -115,21 +124,34 @@ def run_one(tag: str, inject_nsfw: bool) -> str:
     return path
 
 
+def _resolve_engine() -> str:
+    args = sys.argv[1:]
+    if "--engine" in args:
+        index = args.index("--engine")
+        if index + 1 < len(args):
+            return args[index + 1]
+    from roop.img_editor.flux_gen_comfy_client import get_default_generation_engine
+    engine = get_default_generation_engine() or "flux_dev_abliterated"
+    return engine
+
+
 def main() -> int:
+    global ENGINE
+    ENGINE = _resolve_engine()
     only_off = "--only-off" in sys.argv
     only_on = "--only-on" in sys.argv
     print("=" * 70)
-    print("PROBE REAL — Generate: prompt del castillo (A/B con semilla fija)")
+    print(f"PROBE REAL — Generate: prompt del castillo (A/B, motor={ENGINE})")
     print("=" * 70)
     if not start_comfy():
         return 1
 
     failed = False
     if not only_on:
-        if not run_one("castillo_nsfw_off", inject_nsfw=False):
+        if not run_one(f"castillo_{ENGINE}_nsfw_off", inject_nsfw=False):
             failed = True
     if not only_off:
-        if not run_one("castillo_nsfw_on", inject_nsfw=True):
+        if not run_one(f"castillo_{ENGINE}_nsfw_on", inject_nsfw=True):
             failed = True
 
     print("\n" + "=" * 70)

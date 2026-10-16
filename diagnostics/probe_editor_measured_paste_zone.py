@@ -75,22 +75,42 @@ def hair_case():
     scalp[int(ys[0] + 0.60 * (ys[-1] - ys[0])) + 1:, :] = False
     before = float((src_hair[scalp] < 90).mean())
     after = float((out_hair[scalp] < 90).mean())
-    # Outside the measured subject the photo must be byte-identical: the model
-    # rewrote those pixels, and a correct measured paste never writes them.
+    # Outside the silhouette two measurable outcomes are told apart
+    # (v5.1212, Fix G aprobado por el usuario): the material that hung past
+    # it (its original tone equals the removed material) is cleaned, because
+    # that leftover dark arc is the reported defect; what must never reach
+    # the photo is the background the model rewrote, on pixels whose
+    # original tone is not that material.
     outside = np.asarray(subject_img, dtype=np.uint8) < 96
-    leak = float((np.abs(
-        np.asarray(result, dtype=np.int16) - np.asarray(source, dtype=np.int16)
-    ).max(axis=2)[outside] >= 8).mean()) if outside.any() else 0.0
+    original = np.asarray(source, dtype=np.int16)
+    changed = np.abs(
+        np.asarray(result, dtype=np.int16) - original
+    ).max(axis=2) >= 8
+    # This scene paints the hair mass with one exact tone; anything else
+    # outside is untouched background (or the rewrite the model did on it).
+    is_material = (original == np.array([40, 35, 30], dtype=np.int16)).all(axis=2)
+    leak = (
+        float((changed & outside & ~is_material).sum())
+        / max(int(outside.sum()), 1)
+    )
+    rim = outside & is_material
+    ghost = float((out_hair[rim] < 90).mean()) if rim.any() else 0.0
     print(f"  pelo en cuero {before:.1%} -> {after:.1%}")
-    print(f"  fuga fuera del sujeto medido: {leak:.2%} del resto de la foto")
+    print(f"  fuga del fondo reescrito: {leak:.2%} del resto de la foto")
+    print(f"  pelo colgado fuera de la silueta: {int(rim.sum())} px, "
+          f"fantasma {ghost:.1%}")
     print(f"  cambios en el marco: {band:.1%}")
     ok_hair = after < 0.10 * max(before, 0.01)
     # The rewritten background must not reach the photo at all.
     ok_bg = leak < 0.001
+    # The material that hung past the silhouette must not stay as a ghost.
+    ok_rim = int(rim.sum()) == 0 or ghost < 0.10
     # A measured paste is a hard local write: no partial-alpha frame-wide band.
     ok_band = band < 0.45
-    print(f"  [{'OK' if ok_hair and ok_bg and ok_band else 'FALLO'}] pelo borrado={ok_hair}, fondo intacto={ok_bg}, sin banda translucida={ok_band}")
-    return ok_hair and ok_bg and ok_band
+    print(f"  [{'OK' if ok_hair and ok_bg and ok_rim and ok_band else 'FALLO'}] "
+          f"pelo borrado={ok_hair}, fondo intacto={ok_bg}, "
+          f"sin fantasma fuera={ok_rim}, sin banda translucida={ok_band}")
+    return ok_hair and ok_bg and ok_rim and ok_band
 
 
 def no_change_case():

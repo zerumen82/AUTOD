@@ -494,7 +494,6 @@ class ImgEditorManager:
         mag = float(analysis.get("magnitude", 0.5))
         high_structural = bool(analysis.get("high_structural", False))
         structural_bias = str(analysis.get("structural_bias", "neutral"))
-        background_focus = bool(analysis.get("background_focus", False))
         quality_only = bool(analysis.get("quality_only", False))
         angle_change = bool(analysis.get("angle_change", False))
         pose_change = bool(analysis.get("pose_change", False))
@@ -565,7 +564,7 @@ class ImgEditorManager:
         if preferred_engine in ("klein", "klein_base", "klein_9b"):
             return (
                 "longcat", _LONGCAT_TURBO_VERSION,
-                f"klein -> longcat turbo (mascara + cuerpos)"
+                "klein -> longcat turbo (mascara + cuerpos)"
             )
 
         # --- 4. Quality improvements: classical pipeline, sin override ---
@@ -1227,6 +1226,85 @@ class ImgEditorManager:
                 queries.append(cleaned)
         return queries
 
+    @staticmethod
+    def _singular_surface_query(query: str) -> str:
+        """Singular de una frase de superficie con artículo (solo morfología).
+
+        CLIPSeg responde muy distinto al plural y al singular sobre la MISMA
+        foto: 'the walls' midió 2,0 % y 'the wall' 13,1 % (pared del 15/10).
+        Solo se transforma la última palabra detrás de un artículo; frases
+        sin artículo ('de color gris', 'grey') quedan intactas.
+        """
+        match = re.match(
+            r"^((?:the|a|an|el|la|los|las|un|una|unos|unas)\s+)(.+)$",
+            query.strip(),
+            re.I,
+        )
+        if not match:
+            return query
+        article, rest = match.group(1), match.group(2)
+        words = rest.split()
+        if not words:
+            return query
+        last = words[-1]
+        if article.strip().casefold() in ("the", "a", "an"):
+            if (len(last) > 3 and last.endswith("s")
+                    and not last.endswith(("ss", "us", "is"))):
+                words[-1] = last[:-1]
+        else:
+            lowered = article.strip().casefold()
+            if lowered in ("los", "las"):
+                article = "el " if lowered == "los" else "la "
+            if len(last) > 4 and last.endswith("es"):
+                words[-1] = last[:-2]
+            elif len(last) > 3 and last.endswith("s"):
+                words[-1] = last[:-1]
+        singular = article + " ".join(words)
+        return query if singular.casefold() == query.strip().casefold() else singular
+
+    @staticmethod
+    def _determiner_phrases(text: str) -> list:
+        """Determiner-led noun phrases of a clause (grammar, no vocabulary).
+
+        An imperative carries its subject after the verb ("pinta LAS PAREDES
+        de gris") and has no copula for the subject extractor to split, so
+        only the full sentence reached CLIPSeg (1,33 % vs 13,1 % de "the
+        wall" sobre la misma foto del 15/10).
+        """
+        return list(dict.fromkeys(
+            f"{match.group(1)}{match.group(2)}"
+            for match in re.finditer(
+                r"\b((?:the|a|an|el|la|los|las|un|una)\s+)(\w+)",
+                text or "",
+                flags=re.I,
+            )
+        ))
+
+    @staticmethod
+    def _imperative_change(text: str) -> str:
+        """Trailing complement after a mid-clause noun phrase (grammar only).
+
+        "pinta las paredes de gris" has no copula for the scope splitter, so
+        the full sentence reached the request measurement (1,33 % on the
+        15/10 wall photo) and the repaint got a sliver of the wall. The words
+        after the determiner-led phrase are the requested change; function
+        words are dropped and the user's own content words stay.
+        """
+        clause = (text or "").strip()
+        phrase = None
+        for match in re.finditer(
+            r"\b((?:the|a|an|el|la|los|las|un|una)\s+)(\w+)", clause, flags=re.I,
+        ):
+            phrase = match
+        if phrase is None or phrase.start() == 0:
+            return ""
+        tail = clause[phrase.end():].strip(" ,.;:!?")
+        tail = re.sub(
+            r"^(?:de|del|en|in|into|to|with|a|an|of|on|por|para)\b\s*",
+            "", tail, flags=re.I,
+        )
+        return tail.strip(" ,.;:!?")
+
     def _request_region_on_subject(
         self, image: Image.Image, subject_mask: Image.Image, texts,
     ) -> Optional[Image.Image]:
@@ -1540,8 +1618,8 @@ class ImgEditorManager:
         image: Image.Image, seed_mask: Image.Image,
         subject_mask: Image.Image, faces,
         masker=None,
-        negative_query="chair",
-        positive_query="plant",
+        negative_query=None,
+        positive_query=None,
         complete_hair: bool = True,
     ) -> Optional[Image.Image]:
         """Extend a thin measured peak through pixels of the same color.
@@ -1685,8 +1763,9 @@ class ImgEditorManager:
                     f"(-{dropped} px); solo el color del pico",
                     flush=True,
                 )
+        same = ImgEditorManager._drop_other_person_contact(photo, same, subject, faces)
         same = ImgEditorManager._drop_measured_object(
-            photo, same, subject, faces, masker, negative_query="chair", positive_query="plant"
+            photo, same, subject, faces, masker, negative_query, positive_query,
         )
         touch = surface & same
         if int(touch.sum()) < 48:
@@ -1697,8 +1776,9 @@ class ImgEditorManager:
             keep |= labels == label
         if int(keep.sum()) < int(surface.sum()) * 1.08:
             return finish(seed.copy())
+        keep = ImgEditorManager._drop_other_person_contact(photo, keep, subject, faces)
         keep = ImgEditorManager._drop_measured_object(
-            photo, keep, subject, faces, masker, negative_query="chair", positive_query="plant"
+            photo, keep, subject, faces, masker, negative_query, positive_query,
         )
         # The continuation may not paint a face the measured peak never
         # touched. On a 1248x832 frame the hair peak grew into the other
@@ -1812,9 +1892,9 @@ class ImgEditorManager:
         MediaPipe face detection. This allows excluding specific objects while preserving
         the requested object in the surface.
         """
-        if keep is None or masker is None or int(keep.sum()) < 48:
+        if (keep is None or masker is None or int(keep.sum()) < 48
+                or not (negative_query or positive_query)):
             return keep
-        height, width = keep.shape
         subject_mask = subject if isinstance(subject, np.ndarray) else np.asarray(subject)
         
         # The color field is a float array. The segmenter expects an image;
@@ -1840,7 +1920,10 @@ class ImgEditorManager:
 
         # Extract negative mask (e.g. chair)
         try:
-            negative_mask = masker.generate_mask(photo_image, negative_query)
+            negative_mask = (
+                masker.generate_mask(photo_image, negative_query)
+                if negative_query else None
+            )
         except Exception:
             negative_mask = None
         
@@ -2197,7 +2280,77 @@ class ImgEditorManager:
             closed = cv2.morphologyEx(
                 selected.astype(np.uint8), cv2.MORPH_CLOSE, kernel,
             ) > 0
-            zone = np.where(closed & grown & (subject >= 96), 255, 0).astype(np.uint8)
+            # v5.1212 (Fix G): una eliminación se sale de la silueta. El pelo
+            # que cuelga contra el fondo es de la persona pero el segmentador
+            # lo deja fuera; la generación lo quita (calva) y un pegado
+            # recortado al sujeto dejaba los mechones viejos dibujados sobre
+            # el fondo (edit_1792096645 y edit_1792096853: arco de pelo sobre
+            # la cortina). Esos píxeles entran en la zona cuando coinciden
+            # tres hechos medidos: el mismo cambio Otsu, contacto con el
+            # cambio ya retenido en el sujeto y un color ORIGINAL igual al
+            # del material que la edición retiró (mediana del original bajo
+            # el cambio retenido). Una pared reescrita conserva su propio
+            # color original y queda fuera.
+            subject_on = subject >= 96
+            outside_change = (delta >= threshold) & ~subject_on
+            base_zone = closed & grown & subject_on
+            extension = np.zeros(changed.shape, dtype=bool)
+            if outside_change.any() and int(base_zone.sum()) >= 48:
+                removed = np.median(orig_arr[base_zone].reshape(-1, 3), axis=0)
+                color_d = np.linalg.norm(
+                    orig_arr.astype(np.float32) - removed.astype(np.float32),
+                    axis=2,
+                )
+                # El alcance es la propia extensión del cambio medido (su
+                # bbox), no una forma inventada: lo que cuelga de la cabeza
+                # vive junto a ella.
+                ys_b, xs_b = np.where(base_zone)
+                span_b = max(
+                    int(ys_b.max() - ys_b.min() + 1),
+                    int(xs_b.max() - xs_b.min() + 1),
+                )
+                reach = cv2.distanceTransform(
+                    (~base_zone).astype(np.uint8), cv2.DIST_L2, 3,
+                )
+                near = reach <= span_b
+                # Dos hechos medidos, cada uno cobrando su caso (2026-10-15):
+                # 1) el anillo exterior tiene que medir un «otro» grupo: si
+                #    todo lo que rodea al cambio es del mismo tono que el
+                #    material (escenas sin persona dibujada, blanco sobre
+                #    blanco), no hay material colgado medible y no se extiende
+                #    nada;
+                # 2) para entrar se exige el tono EXACTO del material (misma
+                #    separación plana de 18 que aplica «solo el color del pico»
+                #    en _complete_request_surface): el limite a mitad de camino
+                #    admite un fondo del mismo rango que el material cuando la
+                #    zona medida ya contiene pixeles de fondo (24094 px de
+                #    fondo entraban en el escenario del zapato). El pelo que
+                #    cuelga de una cabeza comparte su tono píxel a píxel.
+                ring = near & ~base_zone
+                same_limit = _same_color_limit(color_d, base_zone, ring)
+                if same_limit is not None:
+                    close = color_d <= 18.0
+                    count_e, labels_e = cv2.connectedComponents(
+                        (base_zone | (outside_change & close & near)).astype(np.uint8),
+                        connectivity=8,
+                    )
+                    inside_labels = labels_e[base_zone]
+                    inside_labels = inside_labels[inside_labels > 0]
+                    if count_e > 1 and inside_labels.size:
+                        touching = np.isin(labels_e, np.unique(inside_labels))
+                        extension = (
+                            outside_change & close & touching & near
+                        )
+                        if int(extension.sum()) < 48:
+                            extension = np.zeros(changed.shape, dtype=bool)
+                        else:
+                            print(
+                                "[ImgEditor] Cambio medido fuera de la silueta: "
+                                f"{int(extension.sum())} px del material retirado "
+                                "entran en la zona; el fondo de otro color queda fuera",
+                                flush=True,
+                            )
+            zone = np.where(base_zone | extension, 255, 0).astype(np.uint8)
             coverage = float((zone >= 160).mean())
             print(
                 f"[ImgEditor] Zona pegada medida sobre el sujeto: "
@@ -2331,15 +2484,6 @@ class ImgEditorManager:
             if measured_zone is not None:
                 local_mask = measured_zone
                 
-        # Enhanced object exclusion: integrate successful logic from probes
-        # This combines CLIPSeg positives for maceta + CLIPSeg negatives for silla
-        # similar to context_box_excl_2_grabcut probe (0.646 IoU achievement)
-        if measured_zone is not None:
-            # Apply enhanced object exclusion to remove unwanted elements while
-            # preserving the measured changes for object replacement
-            enhanced_mask = self._apply_object_exclusion(local_mask, measured_zone)
-            if enhanced_mask is not None:
-                local_mask = enhanced_mask
         # 2026-10-10: 6px de feather sobre un recorte de 3428px deja el borde
         # del parche durisimo (nitidez 15 pegada contra foto 402) y se ve el
         # rectangulo translucido alrededor de la cabeza. El feather escala con
@@ -2356,47 +2500,27 @@ class ImgEditorManager:
         # already located on the photo: an edit that did not ask for a new
         # pose may not write outside the region it was measured on.
         soft_arr = np.asarray(soft)
-        # Integrate successful object exclusion logic from context_box_excl_2_grabcut probe
-        # This probe achieved 0.646 IoU (maximum of series) by combining:
-        # - CLIPSeg positives for maceta
-        # - CLIPSeg negatives for silla
-        # - SAM2+GrabCut with exclusion
         keep = subject_arr if limit is None else np.minimum(subject_arr, np.asarray(limit))
-        exclusion_mask_base = keep
+        # v5.1212 (Fix G): la zona medida ya incluye el material retirado que
+        # se sale de la silueta (delta + contacto + color original medido).
+        # Este clip existia para que el feather no escribiera fuera del sujeto;
+        # si recorta la zona medida, vuelve a dejar el pelo viejo dibujado
+        # sobre el fondo. Lo que la medicion admitio no lo recorta el clip.
+        if measured_zone is not None:
+            measured_arr = np.asarray(measured_zone, dtype=np.uint8)
+            if measured_arr.shape == keep.shape:
+                keep = np.maximum(keep, measured_arr)
         if keep.shape[:2] == soft_arr.shape[:2]:
-            # Apply object exclusion logic: keep only pixels that pass both
-            # subject mask and exclusion criteria (similar to context_box_excl_2_grabcut approach)
-            # Use OTSU thresholding for subject mask and exclusion mask
-            try:
-                import cv2
-            except ImportError:
-                # Fallback to hardcoded thresholds if cv2 is not available
-                subject_thresh = 96
-                exclusion_thresh = 128
-            else:
-                # Compute OTSU threshold for keep
-                if keep.size > 0 and not np.all(keep == keep[0,0]):
-                    # cv2.threshold devuelve (nivel, imagen). El primer
-                    # retorno es el nivel: guardarse la imagen hacía que
-                    # keep >= thresh siempre fuese True en el fondo (0).
-                    subject_thresh, _ = cv2.threshold(keep, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                else:
-                    subject_thresh = 96  # fallback
-                # Compute OTSU threshold for exclusion_mask_base
-                if exclusion_mask_base.size > 0 and not np.all(exclusion_mask_base == exclusion_mask_base[0,0]):
-                    exclusion_thresh, _ = cv2.threshold(exclusion_mask_base, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                else:
-                    exclusion_thresh = 128  # fallback
-            # El grupo débil de una máscara mide exactamente 0; con nivel
-            # 0 el fondo seguiría pasando el guard.
-            subject_thresh = max(float(subject_thresh), 1.0)
-            exclusion_thresh = max(float(exclusion_thresh), 1.0)
-            subject_mask = (keep >= subject_thresh)
-            exclusion_mask = (exclusion_mask_base >= exclusion_thresh)
-            # Combined mask: must pass both subject and exclusion criteria
-            combined_mask = subject_mask & exclusion_mask
+            # This is a paste boundary, not another object segmentation.
+            # Otsu separates measured support from its weak rim; zero always
+            # remains outside, including when the measured threshold is zero.
+            subject_thresh = 0.0
+            if keep.size and not np.all(keep == keep[0, 0]):
+                subject_thresh, _ = cv2.threshold(
+                    keep, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+                )
             soft = Image.fromarray(
-                np.where(combined_mask, soft_arr, 0).astype(np.uint8), "L",
+                np.where(keep > subject_thresh, soft_arr, 0).astype(np.uint8), "L",
             )
         blended = Image.composite(
             edited, source.convert("RGB").crop((x1, y1, x2, y2)), soft,
@@ -2404,6 +2528,73 @@ class ImgEditorManager:
         full = source.convert("RGB").copy()
         full.paste(blended, (x1, y1))
         return full
+
+    def _degenerate_faces_mask(
+        self, source: Image.Image, generated: Image.Image, faces,
+    ) -> Optional[Image.Image]:
+        """Faces the generation collapsed into a black (or blown) blob.
+
+        A pass that regenerates a person sometimes delivers a solid black
+        mask over the face (edit_1792086220, 15/10: the woman's face pasted
+        at median luma 6 against the source's 193 in the same pixels). The
+        zone paste cannot tell a face from any other measured pixel, so a
+        collapsed face is detected by its own pixels and excluded from the
+        paste; the original face stays. The collapse is measured RELATIVE to
+        the source face (the generated median falls below a quarter of the
+        source's own luma), so any skin tone is protected by the same rule;
+        a face that merely shifted, aged or was restyled keeps its own luma
+        and is not touched.
+        """
+        if source is None or generated is None or not faces:
+            return None
+        try:
+            comparison = generated.convert("RGB")
+            if comparison.size != source.size:
+                comparison = comparison.resize(source.size, Image.Resampling.LANCZOS)
+            src = np.asarray(source.convert("RGB"), dtype=np.int16)
+            gen = np.asarray(comparison, dtype=np.int16)
+        except Exception:
+            return None
+        bad = np.zeros((source.height, source.width), dtype=np.uint8)
+        found = False
+        soft_sigma = 3.0
+        for face in faces:
+            try:
+                x1, y1, x2, y2 = [float(v) for v in face.bbox]
+            except (TypeError, ValueError, AttributeError):
+                continue
+            w, h = x2 - x1, y2 - y1
+            if w < 8 or h < 8:
+                continue
+            cx1 = max(0, int(x1 + w * 0.25))
+            cy1 = max(0, int(y1 + h * 0.25))
+            cx2 = min(source.width, int(x2 - w * 0.25))
+            cy2 = min(source.height, int(y2 - h * 0.25))
+            if cx2 - cx1 < 4 or cy2 - cy1 < 4:
+                continue
+            src_luma = float(np.median(src[cy1:cy2, cx1:cx2]))
+            gen_luma = float(np.median(gen[cy1:cy2, cx1:cx2]))
+            if src_luma < 24 or gen_luma > 0.25 * src_luma:
+                continue
+            radius = max(6, int(round(0.20 * max(w, h))))
+            bx1 = max(0, int(x1) - radius)
+            by1 = max(0, int(y1) - radius)
+            bx2 = min(source.width, int(x2) + radius)
+            by2 = min(source.height, int(y2) + radius)
+            bad[by1:by2, bx1:bx2] = 255
+            found = True
+            soft_sigma = max(soft_sigma, radius / 3.0)
+            print(
+                f"[ImgEditor] Cara degenerada en el generado "
+                f"(luma {gen_luma:.0f} vs fuente {src_luma:.0f}); "
+                "esa cara se conserva de la foto original",
+                flush=True,
+            )
+        if not found:
+            return None
+        soft = cv2.GaussianBlur(bad, (0, 0), soft_sigma)
+        soft = np.clip(soft.astype(np.int32) * 2, 0, 255).astype(np.uint8)
+        return Image.fromarray(soft, "L")
 
     def _second_focused_pass(
         self, fast_client, edited: Image.Image, original: Image.Image,
@@ -2623,6 +2814,140 @@ class ImgEditorManager:
         )
         return Image.fromarray(kept, "L")
 
+    def _close_recolor_halo(
+        self, image: Image.Image, mask: Image.Image, faces,
+    ) -> Optional[Image.Image]:
+        """The wall gap that hugs a person is wall too.
+
+        CLIPSeg leaves an unmeasured band between the person and the wall it
+        lights, and the same-color continuation refuses it because the warm
+        bounce light differs from the flat wall. That band survives the paste
+        as the ORIGINAL warm wall inside a newly gray room, which reads as a
+        glowing halo around the person (edit_1792086138 / edit_1792086220,
+        15/10: the untouched pixels measured identical to the pre-edit photo
+        while the rest of the wall moved from peach 223,157 to gray 137,138).
+        The gap is an INTERIOR hole of the measured region enclosed by that
+        same region, so it is filled — but only inside the neighbourhood of a
+        measured person, and the people themselves stay out; a hole away from
+        any person (a sconce, a picture frame) is an object and is not
+        repainted.
+        """
+        if mask is None or not faces:
+            return mask
+        arr = np.asarray(mask.convert("L"))
+        if arr.shape[:2] != (image.height, image.width):
+            arr = cv2.resize(arr, image.size, interpolation=cv2.INTER_LINEAR)
+        region = arr >= 96
+        if float(region.mean()) < 0.12:
+            return mask
+        try:
+            masker = self._get_clipseg_masker()
+        except Exception:
+            return mask
+        if masker is None:
+            return mask
+        background = self._background_mask_from_people(image, masker, faces)
+        if background is None:
+            return mask
+        people = np.asarray(
+            background.convert("L").resize(image.size, Image.Resampling.BILINEAR)
+        ) < 128
+        if not people.any() or not region.any():
+            return mask
+        # Interior holes: non-region pixels whose connected component touches
+        # no border. (Seeded floodFill lies when the top-left pixel IS region:
+        # nothing propagates and the whole outside counts as a hole, sweeping
+        # distant zones into the paste — probe compound, fondo lejano.)
+        holes_src = (~region).astype(np.uint8)
+        _, labels = cv2.connectedComponents(holes_src, connectivity=4)
+        border = np.concatenate([
+            labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1],
+        ])
+        exterior = np.unique(border)
+        exterior = exterior[exterior != 0]
+        holes = holes_src.astype(bool) & ~np.isin(labels, exterior)
+        # Only the band within reach of a person: the bounce-light halo.
+        ring_px = max(16, int(round(0.03 * max(image.height, image.width))))
+        ring = cv2.dilate(
+            people.astype(np.uint8),
+            cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (ring_px * 2 + 1, ring_px * 2 + 1),
+            ),
+        ) > 0
+        filled = holes & ring & ~people
+        added = int(filled.sum())
+        if added < 48:
+            return mask
+        merged = region | filled
+        coverage = float(merged.mean())
+        # Same surface floor as the rest of the recolor: a speck is no zone.
+        if coverage < 0.08 or coverage > 0.90:
+            return mask
+        print(
+            f"[ImgEditor] El hueco junto a las personas es de la misma "
+            f"superficie: +{added} px en la zona ({coverage:.1%}); "
+            "las personas quedan fuera",
+            flush=True,
+        )
+        return Image.fromarray(merged.astype(np.uint8) * 255, "L")
+
+    def _closed_structural_zone(
+        self, image: Image.Image, mask: Image.Image, faces,
+    ) -> Optional[Image.Image]:
+        """A removal edits everything inside its zone's own box.
+
+        "Remove the pictures" measures the wall BETWEEN the pictures, so the
+        frames arrive as holes and exterior gaps. FastEdit never touches
+        anything outside the mask (0 % measured on 2026-10-15), so without
+        this nothing could be removed. The box of the measured zone is the
+        margin the paste already accepts, so inside it the elimination takes
+        the whole box. The people are taken out on top of the same people
+        rules as any measured surface; when the box is mostly people the
+        removal is not of objects and the measured zone stays as measured.
+        """
+        if mask is None:
+            return None
+        arr = np.asarray(mask.convert("L"))
+        if arr.shape[:2] != (image.height, image.width):
+            arr = cv2.resize(arr, image.size, interpolation=cv2.INTER_LINEAR)
+        region = arr > 96
+        if not region.any():
+            return None
+        ys, xs = np.nonzero(region)
+        box = np.zeros_like(region, dtype=np.uint8)
+        box[ys.min():ys.max() + 1, xs.min():xs.max() + 1] = 1
+        if faces:
+            try:
+                masker = self._get_clipseg_masker()
+                background = (
+                    self._background_mask_from_people(image, masker, faces)
+                    if masker is not None else None
+                )
+            except Exception:
+                background = None
+            if background is None:
+                return mask
+            people = np.asarray(
+                background.convert("L").resize(image.size, Image.Resampling.BILINEAR)
+            ) < 128
+            overlap = float((box.astype(bool) & people).sum()) / max(1, int(box.sum()))
+            if overlap >= 0.55:
+                # The box is more people than surface: this elimination is
+                # not of objects; the measured zone stays as measured.
+                return mask
+            box[people] = 0
+        finished = Image.fromarray(box * 255, "L")
+        coverage = float((np.asarray(finished) >= 96).mean())
+        # Same surface floor as a recolor: a speck is not an object zone.
+        if coverage < 0.08:
+            return mask
+        print(
+            f"[ImgEditor] La eliminación toma la caja de la zona medida "
+            f"({coverage:.1%}) sin las personas",
+            flush=True,
+        )
+        return finished
+
     def _compose_scene_preserving_heads(
         self, source: Image.Image, generated: Image.Image,
         source_background_mask: Image.Image, faces: list, masker,
@@ -2827,6 +3152,14 @@ class ImgEditorManager:
             "body_intensity": 0.0,
             "local_appearance": False,
             "local_region": False,
+            # v5.1215: el usuario prima que la escena quede BIEN aunque la
+            # cara original cambie («mientras me repintes la escenario al 95 %
+            # me vale»). Un pedido de escenario NO es una región local: manda
+            # la regeneración completa, sin ancla, como la postura.
+            "scenario": False,
+            # v5.1209: la eliminación estructural que el caller usa para
+            # cerrar la zona dentro de su propia caja (sin listas de tipos).
+            "structural_remove": False,
         }
         texts = [text for text in (raw_prompt, translated_prompt) if text and text.strip()]
         if not texts:
@@ -2879,6 +3212,7 @@ class ImgEditorManager:
                     float(scores.get("structural_remove", 0.0)),
                     float(scores.get("structural_add", 0.0)),
                 )
+                remove_score = float(scores.get("structural_remove", 0.0))
                 appearance_score = max(
                     float(scores.get("attribute_appearance", 0.0)),
                     float(scores.get("target_hair", 0.0)),
@@ -2895,29 +3229,57 @@ class ImgEditorManager:
                         body_score, structural_score, recolor_score,
                     ) * 1.25
                 )
+                # v5.1215: un cambio de escenario pide regenerar la escena
+                # completa («que esté en una playa»). La competición es el
+                # resto de hechos de LA MISMA cláusula, igual que en cuerpo/
+                # región: sin lista de palabras nueva, el score medido
+                # structural_background ya existe. Gana sobre región local:
+                # pintar una zona no es cambiar de escenario.
+                background_score = float(
+                    scores.get("structural_background", 0.0),
+                )
+                scenario_leads = bool(
+                    not pose_hit and not body_leads
+                    and background_score >= 0.20
+                    and background_score >= max(
+                        body_score, appearance_score, recolor_score,
+                        structural_operation,
+                    ) * 1.25
+                )
                 local_candidate = max(structural_score, recolor_score)
                 local_competition = max(body_score, appearance_score)
                 region_leads = bool(
                     not pose_hit and not body_leads and not appearance_leads
+                    and not scenario_leads
                     and local_candidate >= 0.20
                     and local_candidate >= local_competition * 1.25
                 )
                 judged.append({
                     "pose": pose_hit,
                     "body": body_leads,
+                    # v5.1215: quién manda la cláusula — escenario vs región.
+                    "scenario": scenario_leads,
                     "intensity": intensity,
                     "direction": direction,
                     "appearance": appearance_leads,
                     "region": region_leads,
                     "recolor": bool(
                         region_leads and recolor_score >= 0.20
-                        and recolor_score >= structural_score
+                        # v5.1209: mismo factor 1,25 del resto de
+                        # competiciones. El ancla de "pintar" acerca
+                        # "quita la pintura" al recolor (0,285 vs 0,289); sin
+                        # margen, un empate por ruido voltearía una
+                        # eliminación a pintado.
+                        and recolor_score >= structural_score * 1.25
                     ),
                     "ambiguous": bool(
                         structural_operation >= 0.20
                         and not pose_hit and not body_leads
                         and not appearance_leads and not region_leads
                     ),
+                    # v5.1209: solo ELIMINAR cierra la zona (añadir o
+                    # colorear no debe tragarse los objetos medidos).
+                    "structural_remove": bool(remove_score >= 0.20),
                 })
         body_hits = [item for item in judged if item["body"]]
         if body_hits:
@@ -2926,15 +3288,24 @@ class ImgEditorManager:
             facts["body_direction"] = leading["direction"]
             facts["body_intensity"] = leading["intensity"]
         facts["authority"] = bool(facts["pose"] or facts["body"])
+        # v5.1215: el escenario medido manda sobre la región local. Un
+        # cambio de escenario no es «pintar una zona»: pide escena nueva y
+        # el usuario acepta que las caras cambien con ella (prioridad:
+        # que quede bien). Si alguna cláusula pide escenario, el pass se
+        # desancla entero.
+        facts["scenario"] = bool(
+            not facts["pose"] and not facts["body"]
+            and any(item.get("scenario") for item in judged)
+        )
         # Same score relation as the body decision above. No edit-type list.
         # A wording that already measured a region is not cancelled by a
         # translation whose shared verb only ties with body.
         facts["local_appearance"] = bool(
-            not facts["pose"] and not facts["body"]
+            not facts["pose"] and not facts["body"] and not facts["scenario"]
             and any(item["appearance"] for item in judged)
         )
         facts["local_region"] = bool(
-            not facts["pose"] and not facts["body"]
+            not facts["pose"] and not facts["body"] and not facts["scenario"]
             and not facts["local_appearance"]
             and any(item["region"] for item in judged)
         )
@@ -2943,9 +3314,15 @@ class ImgEditorManager:
             and any(item["recolor"] for item in judged if item["region"])
         )
         facts["region_ambiguous"] = bool(
-            not facts["pose"] and not facts["body"]
+            not facts["pose"] and not facts["body"] and not facts["scenario"]
             and not facts["local_appearance"] and not facts["local_region"]
             and any(item["ambiguous"] for item in judged)
+        )
+        # v5.1209: si alguna cláusula midió una eliminación estructural, la
+        # ruta de región cierra la máscara dentro de su caja; el resto (pose
+        # / cuerpo / apariencia) ni llega a esa compuerta.
+        facts["structural_remove"] = bool(
+            any(item["structural_remove"] for item in judged)
         )
         return facts
 
@@ -3015,6 +3392,38 @@ class ImgEditorManager:
         if scale < 1.0:
             soft = cv2.resize(soft, (width, height), interpolation=cv2.INTER_LINEAR)
         return soft
+
+    @staticmethod
+    def _region_contains_a_face(region: np.ndarray, faces, width: int, height: int) -> bool:
+        """Whether the measured region IS a person: a whole face sits inside it.
+
+        A recolor whose requested part is not measurable must not repaint a
+        whole person, so the abstention fires when the measured region is a
+        detected face's person. _grow_measured_subject only asks whether the
+        region touches a face (15% of its bbox), which a surface mask that
+        bleeds over a face edge also satisfies — and then a measured wall
+        behind a full-body person was thrown away as «a person without its
+        part» and was never painted (2026-10-16: wall measured 13.9% of the
+        photo, grazed ~33% of a tiny face bbox, discarded). A person contains
+        its face; a surface merely grazes it. Containment is definitional —
+        every pixel of the face bbox lies inside the region — so there is no
+        tuned share to hardcode.
+        """
+        binary = np.asarray(region) > 96
+        if binary.shape[:2] != (height, width):
+            binary = cv2.resize(
+                binary.astype(np.uint8), (width, height),
+                interpolation=cv2.INTER_NEAREST,
+            ) > 0
+        for face in faces:
+            x1, y1, x2, y2 = [int(v) for v in face.bbox]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(width, x2), min(height, y2)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            if bool(binary[y1:y2, x1:x2].all()):
+                return True
+        return False
 
     @staticmethod
     def _masks_are_same_subject(first: np.ndarray, second: np.ndarray) -> bool:
@@ -3267,6 +3676,24 @@ class ImgEditorManager:
                 queries = [text]
         if not queries:
             return []
+        if surface_recolor:
+            # v5.1209: el recolor pregunta también el singular de cada frase
+            # con artículo ('the walls' 2,0 % → 'the wall' 13,1 % en la misma
+            # foto) y los sintagmas con artículo de la cláusula (el imperativo
+            # no tiene predicado que dividir y solo llegaba la frase completa,
+            # 1,33 %). Gana la cobertura con los mismos suelos y guards.
+            variants = []
+            for item in queries:
+                singular = self._singular_surface_query(item)
+                variants.append(item)
+                if singular != item and singular not in variants:
+                    variants.append(singular)
+            for text in (raw_prompt, translated_prompt):
+                for phrase in self._determiner_phrases(text):
+                    for candidate in (phrase, self._singular_surface_query(phrase)):
+                        if candidate and candidate not in variants:
+                            variants.append(candidate)
+            queries = variants
         try:
             masker = self._get_clipseg_masker()
         except Exception:
@@ -3300,11 +3727,24 @@ class ImgEditorManager:
             flush=True,
         )
         subject = Image.fromarray(best).convert("L")
-        requested = (
-            self._request_region_on_subject(
-                image, subject, [raw_prompt, translated_prompt],
-            ) if surface_recolor else None
-        )
+        requested = None
+        if surface_recolor:
+            # v5.1209: el imperativo no tiene scope de cambio; sin el
+            # complemento "de gris"/"in grey" la medición del request era la
+            # frase completa (1,33 %) y su área le ganaba a "grey", dejando el
+            # pintado en una esquirla de la pared. Con complemento solo se
+            # mide ese (la copula ya medía 'de color gris'/'grey'); sin él,
+            # el flujo de partes de persona queda intacto.
+            changes = [
+                change for change in (
+                    self._imperative_change(raw_prompt),
+                    self._imperative_change(translated_prompt),
+                ) if change
+            ]
+            requested = self._request_region_on_subject(
+                image, subject,
+                changes if changes else [raw_prompt, translated_prompt],
+            )
         if requested is not None:
             # A recolor can name a part of a subject. The subject locator
             # supplies context; it is not the region to repaint.
@@ -3317,16 +3757,27 @@ class ImgEditorManager:
                 "requested_part": True,
             }]
         if (surface_recolor and faces
-                and self._grow_measured_subject(best, faces, width, height) is not None):
+                and self._region_contains_a_face(best, faces, width, height)):
+            # v5.1215: la coincidencia de cara era «cualquier solape» (15 %
+            # del bbox en _grow_measured_subject), y la máscara de una
+            # superficie que sangra sobre una cara diminta (pared detrás de
+            # alguien de cuerpo entero) cumplía ese suelo: la pared medida
+            # (13,9 %) se descartaba como «persona sin parte» y no se
+            # pintaba. Una persona contiene su cara; una superficie solo la
+            # roza — la contención de la cara dentro de la región separa las
+            # dos medidas sin preguntar por palabras y sin umbral.
             print(
                 "[ImgEditor] Parte pedida no medida en la persona; no se sustituye la foto",
                 flush=True,
             )
             return []
         mask = self._continue_measured_region(Image.fromarray(best).convert("L"), best)
+        zone = mask if mask is not None else Image.fromarray(best).convert("L")
+        if surface_recolor:
+            zone = self._close_recolor_halo(image, zone, faces) or zone
         return [{
             "text": (translated_prompt or raw_prompt or "").strip(),
-            "mask": mask if mask is not None else Image.fromarray(best).convert("L"),
+            "mask": zone,
             "coverage": best_coverage,
         }]
 
@@ -3424,11 +3875,16 @@ class ImgEditorManager:
                 recovered = self._appearance_head_pass(image, raw, translated, faces)
                 if recovered is not None:
                     passes = [recovered]
+        zone = None
         for item in passes:
             mask = item.get("mask")
             if mask is not None:
-                return mask
-        return None
+                measured = np.asarray(
+                    mask.convert("L").resize(image.size, Image.Resampling.NEAREST),
+                    dtype=np.uint8,
+                )
+                zone = measured if zone is None else np.maximum(zone, measured)
+        return Image.fromarray(zone, "L") if zone is not None else None
 
     def _narrow_appearance_passes(
         self, image, passes, score_raw, prompt_raw, prompt, faces,
@@ -3451,8 +3907,6 @@ class ImgEditorManager:
                 completed = self._complete_request_surface(
                     image, requested, person_mask, faces,
                     masker=self._get_clipseg_masker(),
-                    negative_query="chair",
-                    positive_query="plant",
                 )
                 local_mask = completed if completed is not None else requested
                 measured_request = True
@@ -3475,50 +3929,62 @@ class ImgEditorManager:
             })
         return narrowed
 
-    def _apply_object_exclusion(
-        self, mask: Image.Image, measured_zone: Image.Image,
+    def _body_paste_zone(
+        self, source, generated, subject_mask, request_region, texts, box,
     ) -> Optional[Image.Image]:
-        """Apply object exclusion logic similar to context_box_excl_2_grabcut probe.
-        
-        This integrates the successful object exclusion approach from probes:
-        - CLIPSeg positives for maceta
-        - CLIPSeg negatives for silla
-        - SAM2+GrabCut with exclusion
-        
-        This achieves the 0.646 IoU result from the probe.
+        """Measure a body's requested change in source and generated coordinates.
+
+        A requested new state may not exist in the source. Measure it in the
+        generated photo too, then accept only changed pixels on that person.
+        A collateral change elsewhere does not count as an applied request.
         """
-        try:
-            # Convert to numpy arrays
-            mask_arr = np.asarray(mask.convert("L"))
-            zone_arr = np.asarray(measured_zone.convert("L"))
-            
-            # Create exclusion mask: pixels that should be excluded
-            # Based on the successful probe approach
-            # Use Otsu thresholding to separate foreground/background
-            gray = mask_arr
-            _, threshold = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # Apply exclusion similar to context_box_excl_2_grabcut logic
-            # Keep pixels that are part of the measured zone but exclude
-            # unwanted elements using the measured zone as guidance
-            exclusion = cv2.bitwise_and(threshold, threshold, mask=~zone_arr.astype(np.uint8))
-            
-            # Apply the exclusion to the mask
-            result_arr = mask_arr & (~exclusion)
-            
-            # Convert back to Image
-            result = Image.fromarray(result_arr.astype(np.uint8), "L")
-            
-            print(
-                f"[ImgEditor] Object exclusion applied: combined CLIPSeg positives + negatives + SAM2+GrabCut exclusion",
-                flush=True,
+        box = tuple(int(value) for value in box)
+        original_crop = source.convert("RGB").crop(box)
+        updated_crop = generated.convert("RGB").resize(
+            original_crop.size, Image.Resampling.LANCZOS,
+        )
+        updated_photo = source.convert("RGB").copy()
+        updated_photo.paste(updated_crop, box[:2])
+        state_region = self._request_region_on_subject(
+            updated_photo, subject_mask, texts,
+        )
+        # v5.1204: sin parte distinta, la persona medida ES la zona (el
+        # llamador ya decidió arriba: «Cuerpo sin parte distinta: la
+        # persona medida es la zona»). La medida sobre el estado generado
+        # solo puede AÑADIR a esa base: en la foto ya pegada, el falso
+        # «parte» de piel deja de ser piel (el modelo la cambió) y pasaba
+        # el guard de piel, degradando la zona de la persona entera a ese
+        # speck (probe_editor_compound_fast_dispatch: 480 px y el píxel
+        # (40,60) intacto; con la base correcta la zona vuelve a ser la
+        # persona cambiada). Los píxeles sin cambios siguen fuera: la zona
+        # final es cambio ∩ permitido.
+        allowed = None
+        if request_region is None:
+            allowed = np.asarray(
+                subject_mask.convert("L").resize(source.size, Image.Resampling.NEAREST),
+                dtype=np.uint8,
             )
-            
-            return result
-            
-        except Exception as exc:
-            print(f"[ImgEditor] Object exclusion failed: {exc}", flush=True)
+        for region in (request_region, state_region):
+            if region is not None:
+                measured = np.asarray(
+                    region.convert("L").resize(source.size, Image.Resampling.NEAREST),
+                    dtype=np.uint8,
+                )
+                allowed = measured if allowed is None else np.maximum(allowed, measured)
+        if allowed is None:
+            allowed = np.asarray(
+                subject_mask.convert("L").resize(source.size, Image.Resampling.NEAREST),
+                dtype=np.uint8,
+            )
+        local_allowed = Image.fromarray(allowed, "L").crop(box)
+        changed = self._changed_zone_on_subject(
+            updated_crop, original_crop, local_allowed,
+        )
+        if changed is None:
             return None
+        zone = Image.new("L", source.size, 0)
+        zone.paste(changed, box[:2])
+        return zone
 
     def _apply_subject_passes(
         self, client, image, passes, seed, negative_prompt,
@@ -3574,8 +4040,6 @@ class ImgEditorManager:
                     completed = self._complete_request_surface(
                         current, requested, pass_mask, faces,
                         masker=self._get_clipseg_masker(),
-                        negative_query="chair",
-                        positive_query="plant",
                     )
                     focused = completed if completed is not None else requested
                     measured_request = True
@@ -3589,13 +4053,12 @@ class ImgEditorManager:
                 pass_mask = focused
                 pass_localize = True
             work_image, work_mask, local_box = current, pass_mask, None
-            body_part = bool(body_pass and request_region is not None)
-            if body_part:
-                # Same contract as the single body pass: the measured part
-                # is the sample. The whole person is not the instruction.
-                pass_mask = request_region
+            if body_pass:
+                # The requested state can be absent in the original photo.
+                # Sample the measured person and verify the requested region
+                # in both frames before pasting any change.
                 work_image, work_mask, local_box = self._appearance_work_region(
-                    current, pass_mask,
+                    current, pass_mask, item.get("person"),
                 )
                 if local_box is None:
                     local_box = (0, 0, current.size[0], current.size[1])
@@ -3612,7 +4075,10 @@ class ImgEditorManager:
                 measured_appearance_sample(work_mask is not None)
                 if facts["local_appearance"] or facts.get("surface_recolor")
                 else measured_region_sample(True) if pass_localize and work_mask is not None
-                else {"num_inference_steps": 12, "denoise": 1.0, "no_kontext": True}
+                else {
+                    "num_inference_steps": 12, "denoise": 1.0,
+                    "no_kontext": work_mask is None,
+                }
             )
             vision_reference = None
             if facts["local_appearance"] and work_mask is not None and not deliver_region:
@@ -3650,7 +4116,8 @@ class ImgEditorManager:
             # Appearance already sampled the measured surface. The surrounding
             # fill does not apply the instruction and leaves the previous
             # surface. Region edits can still use it when they insert a face.
-            if pass_localize and work_mask is not None and not facts["local_appearance"]:
+            if (pass_localize and work_mask is not None
+                    and not facts["local_appearance"] and not body_pass):
                 updated, repair_msg = self._repair_inserted_surface(
                     client, work_image, work_mask, updated, faces, local_box,
                     job_prompt, seed, negative_prompt, lora_name, lora_strength,
@@ -3659,28 +4126,22 @@ class ImgEditorManager:
                 if repair_msg:
                     messages.append(repair_msg)
             body_zone = None
-            if body_part:
+            if body_pass and pass_mask is not None:
                 zone_box = (
                     local_box
                     if local_box is not None
                     else (0, 0, before.size[0], before.size[1])
                 )
-                updated = self._integrate_local_generation(
-                    before, updated, request_region, zone_box,
-                    keep_measured_mask=True,
+                body_zone = self._body_paste_zone(
+                    before, updated, pass_mask, request_region,
+                    [item.get("text", "")], zone_box,
                 )
-                body_zone = request_region
-            elif body_pass and pass_mask is not None:
-                zone_box = (
-                    local_box
-                    if local_box is not None
-                    else (0, 0, before.size[0], before.size[1])
+                updated = (
+                    self._integrate_local_generation(
+                        before, updated, body_zone, zone_box,
+                        keep_measured_mask=True,
+                    ) if body_zone is not None else before
                 )
-                updated = self._integrate_local_generation(
-                    before, updated, pass_mask, zone_box,
-                    keep_measured_mask=True,
-                )
-                body_zone = pass_mask
             elif local_box is not None:
                 updated = self._integrate_local_generation(
                     current, updated, pass_mask, local_box,
@@ -3719,28 +4180,22 @@ class ImgEditorManager:
                     retry, retry_msg = None, str(error)
                 if retry is not None:
                     updated = retry.image.convert("RGB")
-                    if body_part:
+                    if body_pass and pass_mask is not None:
                         zone_box = (
                             local_box
                             if local_box is not None
                             else (0, 0, before.size[0], before.size[1])
                         )
-                        updated = self._integrate_local_generation(
-                            before, updated, request_region, zone_box,
-                            keep_measured_mask=True,
+                        body_zone = self._body_paste_zone(
+                            before, updated, pass_mask, request_region,
+                            [item.get("text", "")], zone_box,
                         )
-                        body_zone = request_region
-                    elif body_pass and pass_mask is not None:
-                        zone_box = (
-                            local_box
-                            if local_box is not None
-                            else (0, 0, before.size[0], before.size[1])
+                        updated = (
+                            self._integrate_local_generation(
+                                before, updated, body_zone, zone_box,
+                                keep_measured_mask=True,
+                            ) if body_zone is not None else before
                         )
-                        updated = self._integrate_local_generation(
-                            before, updated, pass_mask, zone_box,
-                            keep_measured_mask=True,
-                        )
-                        body_zone = pass_mask
                     elif local_box is not None:
                         updated = self._integrate_local_generation(
                             before, updated, pass_mask, local_box,
@@ -3965,6 +4420,7 @@ class ImgEditorManager:
 
     def _head_zone_for_subject(
         self, image: Image.Image, subject_mask: Image.Image, faces,
+        announce: bool = True,
     ) -> Optional[Image.Image]:
         """Head of the measured person, for appearance edits without a part.
 
@@ -3985,11 +4441,12 @@ class ImgEditorManager:
         zone = Image.fromarray(((head & person).astype(np.uint8)) * 255, "L")
         if int((np.asarray(zone) >= 128).sum()) < 48:
             return None
-        print(
-            "[ImgEditor] Cabeza del sujeto medida para la edición de apariencia; "
-            "pase local con ancla espacial",
-            flush=True,
-        )
+        if announce:
+            print(
+                "[ImgEditor] Cabeza del sujeto medida para la edición de apariencia; "
+                "pase local con ancla espacial",
+                flush=True,
+            )
         return zone
 
     def _covered_surface_view(
@@ -4108,8 +4565,6 @@ class ImgEditorManager:
         extended = self._complete_request_surface(
             image, part, subject, faces,
             masker=masker,
-            negative_query="chair",
-            positive_query="plant",
             complete_hair=False,
         )
         if extended is None:
@@ -4314,6 +4769,34 @@ class ImgEditorManager:
         if repaired_image.size != work_image.size:
             repaired_image = repaired_image.resize(work_image.size, Image.Resampling.LANCZOS)
         return repaired_image, f"superficie continuada: {message}"
+
+    @staticmethod
+    def _credible_faces(faces):
+        """Keep the detections that can anchor an edit (medido 2026-10-16).
+
+        On fast_1792015141.png («Man must be bald») the detector returned the
+        man (det 0.69, 100×137 px) plus a 27×22 px false face on his foot (det
+        0.30); the subject heat lit the foot skin (0.225) over the real face
+        (0.097) and the whole edit anchored to the toes
+        (probe_editor_bald_backhair_20261016). Real second people measured on
+        the fixture photos stay at 0.57× or more of the strongest face
+        (office 0.84, fast_1791410285 0.82, fast_1791415803 0.83,
+        fast_1791420497 0.57) while the speck sits at 0.43×; a detection
+        below half of the best score is skin noise, not a person. Faces
+        without det_score (probe fixtures) and photos whose only detection is
+        itself noise keep every face, since a relative floor has nothing
+        stronger to compare against.
+        """
+        if not faces:
+            return list(faces)
+        best = max(float(getattr(face, "det_score", 0.0) or 0.0) for face in faces)
+        if best <= 0.0:
+            return list(faces)
+        kept = [
+            face for face in faces
+            if float(getattr(face, "det_score", 0.0) or 0.0) >= 0.5 * best
+        ]
+        return kept if kept else list(faces)
 
     def _appearance_head_pass(self, image: Image.Image, raw_prompt: str, translated_prompt: str, faces):
         """Head of the face the subject query lights, when the binary mask is empty."""
@@ -5062,7 +5545,7 @@ class ImgEditorManager:
                 if analyser is not None:
                     faces = detect_faces_robust(img_bgr, analyser, 0.20)
                     if faces:
-                        source_faces = list(faces)
+                        source_faces = self._credible_faces(faces)
                         ages = [getattr(f, 'age', None) for f in faces if getattr(f, 'age', None) is not None]
                         if ages:
                             detected_age = int(sum(ages) / len(ages))
@@ -5264,7 +5747,15 @@ class ImgEditorManager:
             # grey ghosts between overlapping passes, and dropped the clause
             # that ran last. The prompt is still split, to measure each
             # clause's zone on this photo; never to generate once per clause.
-            if (_compound_depth == 0 and not quality_hybrid
+            # v5.1211: la ruta compuesta medida TAMBIÉN en modo calidad. Antes
+            # `not quality_hybrid` la desactivaba: la cláusula de región que el
+            # paso de sujeto descartaba ("'the walls' cubre 39.4% pero no
+            # coincide con una cara; se descarta") desaparecía de la
+            # instrucción y el color de pared nunca se pedía en modo calidad
+            # (edit_1792086034: paredes intactas con el mismo prompt que en
+            # edit_1792086138 sí las pintó). El acabado TOP se aplica después
+            # del pegado, igual que en la ruta única (run_quality_enhance_after_edit).
+            if (_compound_depth == 0
                     and self._split_compound_instruction(prompt)):
                 clauses = self._split_compound_instruction(prompt)
                 sources = self._split_compound_instruction(prompt_raw)
@@ -5279,6 +5770,10 @@ class ImgEditorManager:
                 compound_pose = False
                 compound_body = False
                 compound_local = False
+                # v5.1215: «que esté en una playa» no admite ancla: la escena
+                # se regenera aunque las caras cambien (prioridad del usuario:
+                # que quede bien). Misma concesión que la postura.
+                compound_scenario = False
                 compound_direction = "change"
                 compound_intensity = 0.0
                 for clause, source in zip(clauses, sources):
@@ -5289,6 +5784,8 @@ class ImgEditorManager:
                     )
                     if clause_facts.get("pose"):
                         compound_pose = True
+                    if clause_facts.get("scenario"):
+                        compound_scenario = True
                     if clause_facts.get("body") and (
                             float(clause_facts.get("body_intensity", 0.0))
                             > compound_intensity):
@@ -5339,7 +5836,11 @@ class ImgEditorManager:
                 generation_image = img
                 generation_mask = None
                 local_box = None
-                if union is not None:
+                # v5.1215: con cláusula de escenario no hay ventana local ni
+                # ancla: la escena completa se regenera (misma concesión que
+                # la postura). El usuario acepta que las caras cambien.
+                compound_unanchored = bool(compound_pose or compound_scenario)
+                if union is not None and not compound_unanchored:
                     generation_image, generation_mask, local_box = (
                         self._appearance_work_region(img, union)
                     )
@@ -5349,12 +5850,14 @@ class ImgEditorManager:
                     # Same client flags as the single-instruction path: the
                     # measured zone is the sampler hole and the paste, and
                     # the photo stays anchored so the room survives. A pose
-                    # still redraws the frame.
+                    # or a scenario still redraws the frame.
                     compound_authority = bool(
                         compound_pose or compound_body or compound_local
+                        or compound_scenario
                     )
                     compound_preserve = bool(
-                        (compound_body and not compound_pose) or compound_local
+                        not compound_unanchored
+                        and (compound_body or compound_local)
                     )
                     # The full sentence dilutes a clause's exposure score
                     # ("bald and naked" reads as weak body, 0.23 < 0.50,
@@ -5364,7 +5867,7 @@ class ImgEditorManager:
                     fast_prompt = self._compose_generation_prompt(
                         self._compound_change_list(prompt),
                         engine="longcat", magnitude=0.85,
-                        pose_change=compound_pose,
+                        pose_change=compound_unanchored,
                         body_transform=compound_body,
                         body_direction=compound_direction,
                         body_intensity=compound_intensity,
@@ -5373,7 +5876,11 @@ class ImgEditorManager:
                         fast_prompt += f" Avoid: {negative_prompt}."
                     print(
                         "[ImgEditor] Un pase, 12 pasos, fuerza 1.00, "
-                        f"{len(clauses)} cambios juntos",
+                        f"{len(clauses)} cambios juntos"
+                        + (
+                            "; escenario nuevo, la escena completa sale del modelo"
+                            if compound_scenario else ""
+                        ),
                         flush=True,
                     )
                     fast_result, fast_msg = fast_client.generate(
@@ -5387,11 +5894,23 @@ class ImgEditorManager:
                         lora_name=lora_name, lora_strength=lora_strength,
                         progress_callback=progress_callback,
                         cancel_check=cancel_check,
-                        num_inference_steps=12, denoise=1.0, no_kontext=False,
+                        num_inference_steps=12, denoise=1.0,
+                        no_kontext=compound_unanchored,
                     )
                 if fast_result is not None:
                     generated = fast_result.image.convert("RGB")
-                    if union is not None:
+                    if union is not None and not compound_unanchored:
+                        dropped_face = self._degenerate_faces_mask(
+                            img, generated, source_faces,
+                        )
+                        if dropped_face is not None:
+                            union = Image.fromarray(
+                                np.minimum(
+                                    np.asarray(union),
+                                    255 - np.asarray(dropped_face),
+                                ).astype(np.uint8),
+                                "L",
+                            )
                         output = self._integrate_local_generation(
                             img, generated, union, local_box,
                             keep_measured_mask=True,
@@ -5401,6 +5920,18 @@ class ImgEditorManager:
                             f"{len(zones)} zonas medidas pegadas, "
                             "el resto de la foto se conserva"
                         )
+                    elif compound_unanchored:
+                        output = generated
+                        if compound_scenario:
+                            note = (
+                                f"un solo pase Turbo ({len(clauses)} cambios); "
+                                "escenario nuevo, la escena completa sale del modelo"
+                            )
+                        else:
+                            note = (
+                                f"un solo pase Turbo ({len(clauses)} cambios); "
+                                "postura nueva, la geometría sale del modelo"
+                            )
                     else:
                         output = generated
                         note = (
@@ -5411,6 +5942,25 @@ class ImgEditorManager:
                         output = output.resize(img.size, Image.Resampling.LANCZOS)
                     if unmeasured:
                         note += " | sin zona medida: " + ", ".join(unmeasured)
+                    if quality_hybrid:
+                        from roop.img_editor.top_tier_finish import run_quality_enhance_after_edit
+                        output, finish_note, quality_analysis = run_quality_enhance_after_edit(
+                            output, img, enhance_tier=enhance_tier,
+                            use_generative=False,
+                            preserve_faces=bool(quality_preserve_faces),
+                            progress_callback=progress_callback,
+                            cancel_check=cancel_check,
+                            quality_steps=quality_steps,
+                        )
+                        self._last_quality_analysis = quality_analysis
+                        if cancel_check and cancel_check():
+                            return None, "Cancelado", None
+                        note += f" | Turbo + {finish_note}"
+                        print(
+                            "[ImgEditor] Calidad con prompt: Turbo (compuesto) "
+                            "+ acabado clásico",
+                            flush=True,
+                        )
                     note += " | cumplimiento visual no verificado"
                     print(f"[ImgEditor] {note}", flush=True)
                     return output, f"{fast_msg}; {note}", None
@@ -5430,8 +5980,18 @@ class ImgEditorManager:
                     authority_facts.get("local_region") or ambiguous_region
                 ) and not quality_hybrid
                 recolor_edit = region_edit and bool(authority_facts.get("surface_recolor"))
+                # v5.1215: «que esté en una playa» pide escena nueva; el
+                # usuario acepta que la cara original cambie si así queda
+                # bien. Como la postura, manda la regeneración completa: ni
+                # ancla ni ventana local.
+                scenario_edit = bool(
+                    authority_facts.get("scenario")
+                    and not authority_facts["pose"]
+                    and not authority_facts["body"]
+                )
                 prompt_authority = bool(
                     authority_facts["authority"] or appearance_edit or region_edit
+                    or scenario_edit
                 )
                 # A change that does not ask for a new pose keeps every pixel
                 # outside the measured region. A camera move is handled before
@@ -5441,6 +6001,8 @@ class ImgEditorManager:
                     or appearance_edit
                     or region_edit
                 )
+                if scenario_edit:
+                    preserve_frame = False
                 subject_mask = None
                 paste_limit = None
                 subject_passes = []
@@ -5450,16 +6012,28 @@ class ImgEditorManager:
                     # the original instruction before allowing any repaint;
                     # the translation must not turn its object into another.
                     edit_text = (score_raw or prompt).strip()
-                    subject_passes = self._proposed_region_passes(
-                        img, edit_text, self._get_clipseg_masker(), source_faces,
+                    # v5.1209: medir PRIMERO, igual que la ruta compuesta
+                    # (_compound_clause_zone). El planner local en español
+                    # propone 'cuadros' y CLIPSeg no lee español (0,00 %); la
+                    # query EN de la misma frase medía 11,4 % y no se
+                    # preguntaba, así que "quita los cuadros" abortaba sin
+                    # generar (foto intacta, edición del 15/10 a las 16:51).
+                    subject_passes = self._measured_region_passes(
+                        img, score_raw, prompt,
+                        surface_recolor=False,
+                        faces=source_faces,
                     )
-                    if subject_passes:
-                        translated_instruction = self._ambiguous_region_translation(edit_text)
-                        if not translated_instruction:
-                            return img, "Traducción local no disponible; foto conservada | cumplimiento visual no verificado", None
-                        subject_passes = [
-                            {**item, "text": translated_instruction} for item in subject_passes
-                        ]
+                    if not subject_passes:
+                        subject_passes = self._proposed_region_passes(
+                            img, edit_text, self._get_clipseg_masker(), source_faces,
+                        )
+                        if subject_passes:
+                            translated_instruction = self._ambiguous_region_translation(edit_text)
+                            if not translated_instruction:
+                                return img, "Traducción local no disponible; foto conservada | cumplimiento visual no verificado", None
+                            subject_passes = [
+                                {**item, "text": translated_instruction} for item in subject_passes
+                            ]
                 elif region_edit:
                     subject_passes = self._measured_region_passes(
                         img, score_raw, prompt,
@@ -5501,6 +6075,61 @@ class ImgEditorManager:
                                     "deliver_region": False,
                                     "measured_request": True,
                                 }]
+                        # v5.1211 (medido, sin formas ni palabras): si la parte
+                        # que el segmentador midió está CONTENIDA en la cabeza,
+                        # el agujero de generación pasa a ser la cabeza — con el
+                        # agujero de 0,7% que «calvo» mide sobre un pelo
+                        # existente el modelo no puede quitar el pelo que queda
+                        # fuera (edit_1792085759 siguió con pelo;
+                        # edit_1792085849, por la ruta de cabeza, salió calvo) —
+                        # y el pegado mide el cambio real dentro de esa cabeza
+                        # (doctrina «cambio medido ∩ permitido»): el pelo
+                        # quitado es cambio y entra; pelo, gafas o cara que el
+                        # modelo no cambió no entran.
+                        if (len(subject_passes) == 1
+                                and subject_passes[0].get("measured_request")
+                                and not subject_passes[0].get("deliver_region")
+                                and subject_passes[0].get("person") is not None):
+                            measured_item = subject_passes[0]
+                            head_zone = self._head_zone_for_subject(
+                                img, measured_item["person"], source_faces,
+                                announce=False,
+                            )
+                            if head_zone is not None and measured_item.get("mask") is not None:
+                                part = np.asarray(
+                                    measured_item["mask"].convert("L").resize(
+                                        img.size, Image.Resampling.NEAREST,
+                                    )
+                                ) >= 96
+                                head = np.asarray(
+                                    head_zone.convert("L").resize(
+                                        img.size, Image.Resampling.NEAREST,
+                                    )
+                                ) >= 96
+                                part_px = int(part.sum())
+                                inside = (
+                                    float((part & head).sum()) / part_px
+                                    if part_px else 0.0
+                                )
+                                if part_px >= 48 and inside >= 0.85:
+                                    print(
+                                        "[ImgEditor] La parte pedida mide dentro "
+                                        f"de la cabeza ({inside:.0%}): el agujero "
+                                        "es la cabeza y el pegado es el cambio "
+                                        "medido en ella",
+                                        flush=True,
+                                    )
+                                    subject_passes = [{
+                                        **measured_item,
+                                        "mask": head_zone,
+                                        "paste_change_only": True,
+                                    }]
+                                    # v5.1213: esta ruta entrega el mismo
+                                    # cambio de apariencia anclado a la cabeza
+                                    # que el plan focal; la medición de pelo
+                                    # residual tiene que cubrirla también.
+                                    _head_hole_plan = True
+                                    _head_hole_zone = head_zone
                     if appearance_edit and not subject_passes and not tried_head:
                         recovered = self._appearance_head_pass(
                             img, score_raw, prompt, source_faces,
@@ -5523,8 +6152,6 @@ class ImgEditorManager:
                         extended = self._complete_request_surface(
                             img, surface, whole, source_faces,
                             masker=self._get_clipseg_masker(),
-                            negative_query="chair",
-                            positive_query="plant",
                         )
                         if extended is not None:
                             surface = extended
@@ -5550,6 +6177,34 @@ class ImgEditorManager:
                             "coverage": coverage,
                         })
                     subject_passes = kept_passes
+                if (region_edit and not recolor_edit
+                        and authority_facts.get("structural_remove")
+                        and subject_passes):
+                    # v5.1209: lo que se ELIMINA vive entre los parches de la
+                    # zona medida (los cuadros sobre la pared medida; las
+                    # hojas sueltas del caso planta) y FastEdit no toca nada
+                    # fuera de la máscara (0 % medido el 15/10). El cierre
+                    # ocurre dentro de la propia caja de la zona y después se
+                    # restan las personas; nada se escribe fuera de ella.
+                    closed_passes = []
+                    for item in subject_passes:
+                        zone = item.get("mask")
+                        finished = (
+                            self._closed_structural_zone(img, zone, source_faces)
+                            if zone is not None else None
+                        )
+                        if finished is None:
+                            closed_passes.append(item)
+                            continue
+                        coverage = float(
+                            (np.asarray(finished.convert("L")) >= 96).mean()
+                        )
+                        closed_passes.append({
+                            **item,
+                            "mask": finished,
+                            "coverage": coverage,
+                        })
+                    subject_passes = closed_passes
                 if preserve_frame:
                     if len(subject_passes) == 1:
                         subject_mask = subject_passes[0]["mask"]
@@ -5575,7 +6230,9 @@ class ImgEditorManager:
                                 flush=True,
                             )
                 body_edit = bool(authority_facts["body"] and not authority_facts["pose"])
-                if appearance_edit and len(subject_passes) > 1:
+                if scenario_edit:
+                    frame_note = "escenario nuevo, la escena completa sale del modelo"
+                elif appearance_edit and len(subject_passes) > 1:
                     frame_note = "cada zona medida, el resto de la foto se conserva"
                 elif appearance_edit and subject_mask is not None:
                     frame_note = "solo la zona medida, el resto de la foto se conserva"
@@ -5749,14 +6406,20 @@ class ImgEditorManager:
                         elif prompt_authority:
                             # Pose may change the frame. A body change keeps the
                             # camera and only replaces the requested body state.
+                            # v5.1215: un escenario nuevo pide que la escena
+                            # cambie — el wrapper recibe el mismo gesto que la
+                            # postura para no escribir «keep the same room»
+                            # contra «que esté en una playa».
                             fast_prompt = self._compose_generation_prompt(
                                 edit_text, engine="longcat", magnitude=0.85,
-                                pose_change=bool(authority_facts["pose"]),
+                                pose_change=bool(authority_facts["pose"]) or scenario_edit,
                                 body_transform=bool(authority_facts["body"]),
                                 body_direction=str(authority_facts["body_direction"]),
                                 body_intensity=float(authority_facts["body_intensity"]),
                             )
-                            if authority_facts["pose"] and authority_facts["body"]:
+                            if scenario_edit:
+                                authority_label = "Escenario"
+                            elif authority_facts["pose"] and authority_facts["body"]:
                                 authority_label = "Postura y cuerpo"
                             elif authority_facts["pose"]:
                                 authority_label = "Postura"
@@ -5796,7 +6459,7 @@ class ImgEditorManager:
                                 "num_inference_steps": 12, "denoise": 1.0,
                                 # The local body pass keeps the photo anchored;
                                 # the full-photo body pass does not.
-                                "no_kontext": not body_local,
+                                "no_kontext": generation_mask is None,
                             }
                         )
                         if appearance_edit and generation_mask is not None and not deliver_region:
@@ -5852,26 +6515,31 @@ class ImgEditorManager:
                                 )
                                 if repair_msg:
                                     fast_msg = f"{fast_msg}; {repair_msg}"
-                            if body_edit and body_request_region is not None:
+                            if body_edit and subject_mask is not None:
                                 zone_box = (
                                     local_box
                                     if local_box is not None
                                     else (0, 0, img.size[0], img.size[1])
                                 )
-                                output = self._integrate_local_generation(
-                                    img, output, body_request_region, zone_box,
-                                    keep_measured_mask=True,
+                                body_zone = self._body_paste_zone(
+                                    img, output, subject_mask, body_request_region,
+                                    [score_raw, edit_text], zone_box,
                                 )
-                                body_zone = body_request_region
+                                output = (
+                                    self._integrate_local_generation(
+                                        img, output, body_zone, zone_box,
+                                        keep_measured_mask=True,
+                                    ) if body_zone is not None else img
+                                )
                                 print(
                                     "[ImgEditor] Cuerpo: la zona pedida se pega "
                                     "entera; el resto de la persona se conserva",
                                     flush=True,
                                 )
-                                if local_box is not None:
+                                if local_box is not None and body_zone is not None:
                                     refined = self._second_focused_pass(
                                         fast_client, output, img,
-                                        body_request_region, local_box, gen_size,
+                                        body_zone, local_box, gen_size,
                                         fast_prompt, negative_prompt, seed,
                                         prompt_authority, preserve_frame,
                                         vision_reference, lora_name, lora_strength,
@@ -5890,6 +6558,9 @@ class ImgEditorManager:
                                         subject_passes[0].get("measured_request")
                                         or subject_passes[0].get("deliver_region")
                                     )
+                                    # v5.1211: cabeza como agujero pega el
+                                    # cambio medido, no la máscara entera.
+                                    and not subject_passes[0].get("paste_change_only")
                                 )
                                 output = self._integrate_local_generation(
                                     img, output, subject_mask, local_box,
@@ -5983,17 +6654,22 @@ class ImgEditorManager:
                                     fast_msg = f"{fast_msg}; segundo intento falló: {retry_msg}"
                                 if retry_result is not None:
                                     output = retry_result.image.convert("RGB")
-                                    if body_edit and body_request_region is not None:
+                                    if body_edit and subject_mask is not None:
                                         zone_box = (
                                             local_box
                                             if local_box is not None
                                             else (0, 0, img.size[0], img.size[1])
                                         )
-                                        output = self._integrate_local_generation(
-                                            img, output, body_request_region, zone_box,
-                                            keep_measured_mask=True,
+                                        body_zone = self._body_paste_zone(
+                                            img, output, subject_mask, body_request_region,
+                                            [score_raw, edit_text], zone_box,
                                         )
-                                        body_zone = body_request_region
+                                        output = (
+                                            self._integrate_local_generation(
+                                                img, output, body_zone, zone_box,
+                                                keep_measured_mask=True,
+                                            ) if body_zone is not None else img
+                                        )
                                     elif local_box is not None:
                                         keep_request = bool(
                                             len(subject_passes) == 1
@@ -8625,14 +9301,22 @@ class ImgEditorManager:
 
             # The local visual verifier has called unchanged hair a success in
             # real follow-up edits. Measure the named scalp independently.
-            if (result is not None and final_mask is not None
-                    and locals().get("_focal_head_plan", False)
+            # v5.1213: el hueco de cabeza (Fix F) entrega el mismo cambio de
+            # apariencia anclado a la cabeza que el plan focal, y la receta
+            # anclada conserva el pelo que el modelo todavía ve — la medición
+            # cubre ambas rutas y el reintento mide cuánto queda.
+            _hair_plan_zone = None
+            if result is not None and locals().get("_focal_head_plan", False):
+                _hair_plan_zone = final_mask
+            elif result is not None and locals().get("_head_hole_plan", False):
+                _hair_plan_zone = locals().get("_head_hole_zone")
+            if (_hair_plan_zone is not None
                     and self._is_bald_request(prompt_pre_rewrite)):
                 _hair_masker = None
                 try:
                     _hair_masker = self._get_clipseg_masker()
                     _hair_coverage = self._bald_hair_coverage(
-                        img, result, final_mask, _hair_masker,
+                        img, result, _hair_plan_zone, _hair_masker,
                     )
                     if _hair_coverage is not None:
                         _hair_before, _hair_after = _hair_coverage

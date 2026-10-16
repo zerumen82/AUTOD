@@ -60,6 +60,14 @@ CONCEPTS: Dict[str, list] = {
         "blanco negro escala grises paleta tinte tono vestido rojo pelo azul cielo",
         "change color of clothing hair sky water dress to another tone",
         "cambiar color de ropa pelo cielo agua vestido a otro tono",
+        # v5.1209 — el encuadre de "pintar" también es recolor: sin esta
+        # descripción "pinta las paredes de gris" medía 0,149 (< suelo 0,20)
+        # e "Paint the walls in grey" 0,000 → ruta global sin ancla (15/10).
+        # El ancla lleva la ACCIÓN y el color, nunca el sustantivo de la
+        # superficie: "remove the paint from the wall" comparte "paint" y
+        # "wall" con el objeto y con 0,432 volteaba la eliminación a recolor.
+        "paint over repaint give a coat of paint in one solid color gray grey white black",
+        "dar una mano de pintura repintar pintar encima de un color sólido gris blanco negro",
     ],
     "attribute_quality": [
         "improve quality sharpness detail clarity resolution enhance deblur sharper",

@@ -4,7 +4,32 @@ from roop.img_editor.flux_gen_comfy_client import (
     get_installed_generation_engines,
 )
 from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices, get_compatible_dropdown_choices, preview_modifiers
-from roop.img_editor.gen_prompt_config import get_generate_ui_config
+from roop.img_editor.gen_prompt_config import get_generate_ui_config, get_lora_catalog
+
+
+def _lora_dropdown_choices():
+    """Dropdown de LoRA: Auto, Sin LoRA y el catálogo completo visible.
+
+    El usuario ve y elige sus LoRAs (v5.1210); la elección manual se aplica
+    sin gates con la fuerza del catálogo.
+    """
+    choices = [
+        ("🤖 Auto (según escena)", "Auto"),
+        ("🚫 Sin LoRA", "None"),
+    ]
+    for entry in get_lora_catalog():
+        tags = []
+        if entry.get("nsfw"):
+            tags.append("NSFW")
+        if entry.get("sdxl_only"):
+            tags.append("SDXL")
+        if entry.get("pony_only"):
+            tags.append("Pony")
+        label = str(entry.get("label") or entry.get("file") or "")
+        if tags:
+            label = f"{label} ({', '.join(tags)})"
+        choices.append((label, str(entry.get("file") or "")))
+    return choices
 
 
 CSS_STYLE = """
@@ -62,13 +87,23 @@ def build_gen_ui():
                 "`config/model_configs.json` → `img2img_denoise`). Con LongCat la usa "
                 "como referencia de edición._"
             )
+            # Ruta por defecto en config/generation_prompt.json →
+            # generate_ui.default_route. Decisión del usuario 2026-10-16:
+            # Generate y el Editor son herramientas paralelas e
+            # independientes; Generate NO debe enrutar sola una petición al
+            # Editor. "editor" sigue disponible como elección manual.
+            _route_value = str(
+                get_generate_ui_config().get("default_route", "img2img")
+            ).strip().lower()
+            if _route_value not in ("auto", "editor", "img2img"):
+                _route_value = "img2img"
             route = gr.Dropdown(
                 choices=[
                     ("Auto (detecta si es una edición)", "auto"),
                     ("Image Editor (cambios guiados)", "editor"),
                     ("img2img (variar la foto)", "img2img"),
                 ],
-                value="auto",
+                value=_route_value,
                 label="Ruta con imagen de referencia",
             )
             ref_image = gr.Image(label="Foto de partida", type="pil", height=300)
@@ -145,8 +180,15 @@ def build_gen_ui():
             nsfw_content = gr.Checkbox(
                 label="🔞 Contenido NSFW",
                 value=bool(get_generate_ui_config().get("nsfw_content_default", False)),
-                info="Actívalo para añadir el prefijo y las LoRA adultas.",
+                info="Permiso para el sesgo adulto: solo se aplica si el prompt lo pide (el prompt manda).",
             )
+
+        lora_choice = gr.Dropdown(
+            choices=_lora_dropdown_choices(),
+            value="Auto",
+            label="LoRA",
+            info="Auto la elige según la escena; lo que tú elijas se aplica tal cual.",
+        )
 
         gr.Markdown("_👆 Prompt + GENERAR ya funciona: los defaults (photoreal, natural, piel detallada) son los más realistas. Los extras son opcionales._")
 
@@ -221,6 +263,7 @@ def build_gen_ui():
         "enhance_quality": enhance_quality,
         "use_rewriter": use_rewriter,
         "nsfw_content": nsfw_content,
+        "lora_choice": lora_choice,
         "modifier_preview": modifier_preview,
         "width": width,
         "height": height,

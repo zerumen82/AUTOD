@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Importaciones basicas
 from roop.capturer import get_image_frame, get_video_frame  # noqa: E402 -- native DLL setup above
-from roop.faceswap_config import get_faceswap_config  # noqa: E402 -- native DLL setup above
+from roop.faceswap_config import get_faceswap_config, landmarks_fit_bbox  # noqa: E402 -- native DLL setup above
 
 # Variable global simple (sin inicializacion automatica)
 FACE_ANALYSER = None
@@ -402,12 +402,8 @@ def _has_face_geometry(face, max_tilt=None):
         # Un falso positivo (texto/patrón/mano marcado como "cara") suele tener los
         # kps FUERA del bbox: el head predictor regresó landmarks coherentes para
         # otra región. Margen 2% del lado mayor (1-2px) por imprecisión de regresión.
-        _bx1, _by1, _bx2, _by2 = [float(v) for v in face.bbox]
-        _bwk = max(_bx2 - _bx1, _by2 - _by1)
-        _marg = max(2.0, 0.02 * _bwk)
-        for _p in kpsf:
-            if _p[0] < _bx1 - _marg or _p[0] > _bx2 + _marg or _p[1] < _by1 - _marg or _p[1] > _by2 + _marg:
-                return False
+        if not landmarks_fit_bbox(kpsf, face.bbox):
+            return False
         if max_tilt is not None:
             _tilt = abs(np.degrees(np.arctan2(float(re[1] - le[1]), float(re[0] - le[0]))))
             if _tilt > float(max_tilt):
@@ -1108,7 +1104,24 @@ def extract_face_images(
         # frame). RetinaFace @1024 a menudo NO detecta caras >50% del frame.
         # Mismos fallbacks que el path de source: (a) pasada det_size 640,
         # (b) padding gris (la cara "se aleja" del detector), (c) CPU.
-        if not faces:
+        # v5.1203 — el rescate a 640 ya no exige "sin caras": una única
+        # detección minúcula también deja fuera al primer plano. Medido en
+        # 02457 (perfil casi 90°): la pasada inicial veía SOLO a la persona
+        # de fondo (47x64 px, 0,5% del frame) y la adulta principal (358x653
+        # px, 40% del frame) solo aparece a det_size 640. Umbral 0.12/0.08 =
+        # el mismo `needs_closeup` de get_all_faces_smart (retrato <0.85).
+        needs_closeup_rescue = not faces
+        if faces:
+            _h_t0, _w_t0 = img_rgb.shape[:2]
+            _aspect_t0 = _w_t0 / float(max(1, _h_t0))
+            _max_ratio_t0 = 0.08 if _aspect_t0 < 0.85 else 0.12
+            needs_closeup_rescue = all(
+                ((f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+                < _max_ratio_t0 * _w_t0 * _h_t0
+                for f in faces
+            )
+
+        if needs_closeup_rescue:
             try:
                 _orig_ds = getattr(FACE_ANALYSER, "det_size", None)
                 _orig_is = None
@@ -1118,9 +1131,22 @@ def extract_face_images(
                     FACE_ANALYSER.det_size = (640, 640)
                     if hasattr(FACE_ANALYSER, "det_model") and FACE_ANALYSER.det_model is not None:
                         FACE_ANALYSER.det_model.input_size = (640, 640)
-                    faces = detect_faces_robust(img_to_detect, FACE_ANALYSER, target_thresh)
-                    if faces:
-                        print(f"[FACES] Primer plano: det_size 640 detectó {len(faces)} cara(s)")
+                    _cu_faces = detect_faces_robust(img_to_detect, FACE_ANALYSER, target_thresh)
+                    if _cu_faces:
+                        # Fusionar sin perder lo ya detectado: la misma cara a
+                        # dos escalas es duplicada; una distinta se añade.
+                        from roop.face_util_rotation import _same_face_boxes
+                        _merged = list(faces)
+                        for _nf in _cu_faces:
+                            if not any(
+                                _same_face_boxes(_nf.bbox, _ef.bbox) for _ef in _merged
+                            ):
+                                _merged.append(_nf)
+                        faces = _merged
+                        print(
+                            f"[FACES] Primer plano: det_size 640 detectó "
+                            f"{len(_cu_faces)} cara(s) ({len(faces)} total)"
+                        )
                 finally:
                     if _orig_ds is not None:
                         FACE_ANALYSER.det_size = _orig_ds

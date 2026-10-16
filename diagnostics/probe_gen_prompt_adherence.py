@@ -4,14 +4,21 @@
 Reproduce el fallo reportado («CASTILLO CON UNICORNIOS, ESTILO DIBUJO» salió
 mujer desnuda) a nivel de ensamblado de prompt y valida los dos gates nuevos:
 
-  [1] Gate NSFW (checkbox «Contenido NSFW»):
-        OFF → sin prefijo adulto, sin anti-censor, sin LoRA adulta.
-        ON  → comportamiento actual intacto (prefijo nsfw + anti-censor).
+  [1] Obediencia del prompt (v5.1210): el checkbox «Contenido NSFW» ya NO
+        decide solo. El prefijo adulto, el anti-censor y las LoRAs adultas
+        automáticas solo entran si el PROMPT mide intención adulta
+        (adult_gate en config/generation_prompt.json). Un prompt neutro con
+        el checkbox ON recibe cero sesgo adulto — el prompt manda siempre.
+        ON + prompt adulto → el sesgo adulto sigue intacto.
   [2] Gate de estilo: si el prompt pide un estilo no fotorreal, caen el tipo
       de imagen fotorreal, el suffix de piel de la UI y photoreal_tail.
   [3] Control fotorreal: un prompt que NO pide otro estilo conserva la cola.
-  [4] LoRA del catálogo: entradas "nsfw": true fuera con el gate apagado.
+  [4] LoRAs: auto con gate adulto medido; la elección del usuario en el
+      dropdown manda por encima de los gates (su elección es intención
+      explícita) y usa la fuerza del catálogo.
   [5] Contrato APK (10 posicionales en api_name=generate_image) intacto.
+  [7] UI con LoRA visible: dropdown lora_choice cableado a generate_image_ui
+      y ausente del contrato legacy.
 
 Sin red ni GPU: no renderiza (el render real va aparte, en diagnostics/out/).
 """
@@ -75,14 +82,47 @@ check("OFF: sin prefijo adulto en positivo",
       not any(t in castle_off.lower() for t in ADULT_POS))
 check("OFF: sin bloques anti-censor en negativo",
       not any(t in p_off["neg"].lower() for t in ADULT_NEG))
-check("ON: prefijo adulto presente (comportamiento previo)",
-      all(t in castle_on.lower() for t in ADULT_POS))
-check("ON: anti-censor en negativo (comportamiento previo)",
-      "censored" in p_on["neg"].lower() and "clothed" in p_on["neg"].lower())
+check("ON+neutro: sin prefijo adulto en positivo (el prompt manda)",
+      not any(t in castle_on.lower() for t in ADULT_POS))
+check("ON+neutro: sin bloques anti-censor en negativo",
+      not any(t in p_on["neg"].lower() for t in ADULT_NEG))
 check("OFF/ON: la escena del usuario llega intacta en ambos",
       "castle with unicorns" in castle_off.lower() and "castle with unicorns" in castle_on.lower())
 check("OFF: marca inject_nsfw en los params", p_off.get("inject_nsfw") is False)
 check("ON: marca inject_nsfw en los params", p_on.get("inject_nsfw") is True)
+
+# ------------------------------------------- [1b] Prompt adulto + NSFW ON
+print("\n[1b] Prompt que SÍ mide intención adulta (el sesgo sigue intacto)")
+adult_on, p_adult = client._prepare_prompt_intelligent(
+    "nude woman lying on a bed, photorealistic", prompt_modifiers=MODS, inject_nsfw=True,
+)
+print(f"    NSFW ON + adulto → {adult_on}")
+check("ON+adulto: prefijo adulto presente", all(t in adult_on.lower() for t in ADULT_POS))
+check("ON+adulto: anti-censor en negativo",
+      "censored" in p_adult["neg"].lower() and "clothed" in p_adult["neg"].lower())
+
+# ------------------------------------------- [1c] Gate medido (umbral)
+print("\n[1c] adult_gate medido (config/generation_prompt.json → gen_semantic)")
+from roop.img_editor.gen_semantic import prompt_requests_adult_content, score_adult_gate
+GATE_CASES = [
+    ("castle with unicorns, drawing style", False),
+    ("photorealistic portrait of a woman", False),
+    ("woman in a bikini by the pool", False),
+    ("family having barbecue in the garden", False),
+    ("woman sleeping in bed, photorealistic", False),
+    ("hot sexy woman in a leather jacket, studio light", False),
+    ("nude woman lying on a bed", True),
+    ("explicit sex scene between a man and a woman", True),
+    ("topless sunbather on the sand", True),
+    ("nsfw photo of a woman from behind", True),
+    ("desnuda de pie frente a la ventana", True),
+    ("mujer desnuda en el sofá", True),
+]
+for text, expected in GATE_CASES:
+    score = score_adult_gate(text)
+    got = prompt_requests_adult_content(text)
+    print(f"    score={score:.3f} gate={'ON' if got else 'OFF'} (esperado {'ON' if expected else 'OFF'}) | {text}")
+    check(f"adult_gate {'ON' if expected else 'OFF'}: {text}", got == expected)
 
 # ---------------------------------------------------------------- [2] Gate estilo
 print("\n[2] Gate de estilo (conceptos + umbral en config/generation_prompt.json)")
@@ -179,23 +219,88 @@ check("OFF: sin ninguna LoRA adulta", not (off_files & nsfw_entries))
 check("ON: entra la LoRA adulta de 'always'", bool(on_files & nsfw_entries))
 check("OFF ⊆ ON (el gate solo quita)", off_files <= on_files)
 
-print("\n[4b] Prefijos SDXL con NSFW OFF")
+print("\n[4b] Prefijos SDXL: el contenido adulto exige intención adulta medida")
 for alias in ("pony_realism", "cyberrealistic_pony"):
     for compact in (False, True):
         off_prefix = get_effective_prefix(
             alias, "photoreal", client._model_configs,
             has_style_modifier=compact, is_sdxl=True, inject_nsfw=False,
         )
-        on_prefix = get_effective_prefix(
+        on_adult_prefix = get_effective_prefix(
+            alias, "photoreal", client._model_configs,
+            has_style_modifier=compact, is_sdxl=True, inject_nsfw=True,
+            adult_intent=True,
+        )
+        on_neutral_prefix = get_effective_prefix(
+            alias, "photoreal", client._model_configs,
+            has_style_modifier=compact, is_sdxl=True, inject_nsfw=True,
+            adult_intent=False,
+        )
+        default_neutral_prefix = get_effective_prefix(
             alias, "photoreal", client._model_configs,
             has_style_modifier=compact, is_sdxl=True, inject_nsfw=True,
         )
         check(f"{alias} compact={compact}: OFF sin rating_explicit",
               "rating_explicit" not in off_prefix.lower())
-        check(f"{alias} compact={compact}: ON conserva rating_explicit",
-              "rating_explicit" in on_prefix.lower())
+        check(f"{alias} compact={compact}: ON+adulto conserva rating_explicit",
+              "rating_explicit" in on_adult_prefix.lower())
+        check(f"{alias} compact={compact}: ON+neutro sin rating_explicit",
+              "rating_explicit" not in on_neutral_prefix.lower())
+        check(f"{alias} compact={compact}: sin adult_intent explícito obedece al prompt",
+              "rating_explicit" not in default_neutral_prefix.lower())
         check(f"{alias} compact={compact}: OFF conserva calidad",
               "score_9" in off_prefix.lower())
+        check(f"{alias} compact={compact}: ON+neutro conserva calidad",
+              "score_9" in on_neutral_prefix.lower())
+
+# ------------------------------------------- [4c] LoRAs: gate + elección
+print("\n[4c] _resolve_lora_stack: auto con gate adulto, la elección del usuario manda")
+_orig_exists4, _orig_sdxl4 = lora_mod._lora_exists, lora_mod._is_sdxl_lora
+lora_mod._lora_exists = lambda n: True
+lora_mod._is_sdxl_lora = lambda n: True
+_was_sdxl = client._is_sdxl
+client._is_sdxl = True
+pony_conf = client._model_configs["pony_realism"]
+try:
+    auto_neutral = client._resolve_lora_stack(
+        "Auto", None, pony_conf,
+        prompt_en="castle with unicorns, drawing style",
+        inject_nsfw=True, adult_intent=False,
+    )[0]
+    auto_default = client._resolve_lora_stack(
+        "Auto", None, pony_conf,
+        prompt_en="castle with unicorns, drawing style",
+        inject_nsfw=True,
+    )[0]
+    auto_adult = client._resolve_lora_stack(
+        "Auto", None, pony_conf,
+        prompt_en="nsfw explicit adult uncensored nude scene",
+        inject_nsfw=True, adult_intent=True,
+    )[0]
+    manual = client._resolve_lora_stack(
+        "nsfw-xl-2.1.safetensors", None, pony_conf,
+        prompt_en="castle with unicorns, drawing style",
+        inject_nsfw=False, adult_intent=False,
+    )[0]
+finally:
+    lora_mod._lora_exists, lora_mod._is_sdxl_lora = _orig_exists4, _orig_sdxl4
+    client._is_sdxl = _was_sdxl
+
+nsfw_auto_neutral = {f.lower() for f, _s in auto_neutral} & nsfw_entries
+nsfw_auto_default = {f.lower() for f, _s in auto_default} & nsfw_entries
+nsfw_auto_adult = {f.lower() for f, _s in auto_adult} & nsfw_entries
+print(f"    auto+neutro → {sorted(auto_neutral) or '(ninguna)'}")
+print(f"    auto+adulto → {sorted(auto_adult) or '(ninguna)'}")
+print(f"    manual      → {manual}")
+check("auto+neutro+NSFW ON: sin LoRAs adultas (gate medido)",
+      not nsfw_auto_neutral)
+check("auto sin adult_intent explícito: el prompt decide (neutro → sin adultas)",
+      not nsfw_auto_default)
+check("auto+adulto+NSFW ON: entra la LoRA adulta", bool(nsfw_auto_adult))
+check("usuario elige LoRA adulta con NSFW OFF: se aplica (su elección manda)",
+      bool(manual) and manual[0][0].lower() == "nsfw-xl-2.1.safetensors")
+check("elección manual usa la fuerza del catálogo (0.50)",
+      bool(manual) and abs(float(manual[0][1]) - 0.50) < 1e-6)
 
 # ---------------------------------------------------------------- [5] Contrato APK
 print("\n[5] Contrato APK (GradioClient.callGenerate → api_name=generate_image)")
@@ -230,6 +335,16 @@ src_android = open(
 ).read()
 check("Android ofrece Q4 como primera opción", 'arrayOf("flux_dev_q4", "flux_dev_abliterated"' in src_android)
 check("Android migra preferencias por alias", 'putString("genEngineAlias"' in src_android)
+
+# ---------------------------------------------------------------- [7] LoRA visible
+print("\n[7] LoRA visible en la UI y elegido por el usuario")
+check("ui.py declara lora_choice en ui_comp", '"lora_choice": lora_choice' in src_ui)
+check("ui.py construye el dropdown con el catálogo", "get_lora_catalog" in src_ui)
+check("events cablea lora_choice en generate_image_ui",
+      'ui_comp["lora_choice"]' in src_events.split("api_name=\"generate_image_ui\"")[0])
+check("events pasa la elección al cliente como lora_name", "lora_name=" in src_events)
+check("legacy NO incluye lora_choice (contrato de 10 intacto)",
+      "lora_choice" not in legacy_seg)
 
 # ---------------------------------------------------------------- [6] Sintaxis
 print("\n[6] Sintaxis")

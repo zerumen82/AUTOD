@@ -3,7 +3,7 @@
 """Modificadores opcionales para GENERAR — 5 selectores, cobertura amplia sin pisarse."""
 
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 ModifierOption = Tuple[str, str]
 
@@ -236,6 +236,7 @@ def get_effective_prefix(
     is_sdxl: bool = True,
     inject_nsfw: bool = True,
     style_override: bool = False,
+    adult_intent: Optional[bool] = None,
 ) -> str:
     """Prefijo del modelo desde config.
     Para modelos explicit, inyecta nsfw_tags del config al inicio (cada modelo especifica los suyos).
@@ -245,17 +246,22 @@ def get_effective_prefix(
     SFW configurado o elimina de él los tags NSFW configurados.
     style_override=True (el prompt pide un estilo no fotorreal): se omite el
     boilerplate fotorreal (prefix_compact/prefix/fallback).
+    adult_intent (v5.1210): el contenido adulto exige AMBOS — el checkbox
+    (permiso) Y intención adulta medida del prompt. None u False → el prompt
+    manda siempre: ni nsfw_tags ni rating_explicit en escenas neutrales
+    («CASTILLO CON UNICORNIOS» salía mujer desnuda, 08/10).
     """
     conf = model_configs.get(model_alias, model_configs.get("default", {}))
     is_explicit = bool(conf.get("explicit", False))
-    nsfw_tags = (conf.get("nsfw_tags") or "").strip() if inject_nsfw else ""
+    do_adult = bool(inject_nsfw) and bool(adult_intent)
+    nsfw_tags = (conf.get("nsfw_tags") or "").strip() if do_adult else ""
 
     def configured_prefix(key: str) -> str:
-        value = conf.get(f"{key}_sfw") if not inject_nsfw else None
+        value = conf.get(f"{key}_sfw") if not do_adult else None
         if value is None:
             value = conf.get(key, "")
         value = str(value or "")
-        if inject_nsfw or not value:
+        if do_adult or not value:
             return value
         blocked = {
             tag.strip().casefold()
@@ -342,6 +348,7 @@ def assemble_generation_prompt(
     is_sdxl: bool = True,
     inject_nsfw: bool = True,
     style_override: bool = False,
+    adult_intent: Optional[bool] = None,
 ) -> Tuple[str, str, str]:
     """Monta prompt: prefijo mínimo → escena usuario (primero) → estilo → extras.
     Recorta por presupuesto CLIP (~77 tokens) sin tocar el texto del usuario.
@@ -349,7 +356,13 @@ def assemble_generation_prompt(
     style_override=True → el prompt pide un estilo no fotorreal: se caen el
     tipo de imagen fotorreal, el suffix de estilo/piel de la UI y la cola
     photoreal_tail (el prompt manda sobre los desplegables).
+    adult_intent=None → se mide sobre la escena del usuario (v5.1210): el
+    prefijo adulto, el rating_explicit y la cola de anatomía solo entran si
+    el PROMPT pide contenido adulto; el checkbox es permiso, no disparador.
     """
+    if adult_intent is None:
+        from roop.img_editor.gen_semantic import prompt_requests_adult_content
+        adult_intent = prompt_requests_adult_content((translated or ""))
     exclude = ("image_type", "skin_finish") if style_override else ()
     style_frag, extras_joined, extra_list, image_type = _split_style_and_extras(
         modifiers, exclude_categories=exclude,
@@ -364,6 +377,7 @@ def assemble_generation_prompt(
         model_alias, image_type, model_configs,
         has_style_modifier=has_style, is_sdxl=is_sdxl,
         inject_nsfw=inject_nsfw, style_override=style_override,
+        adult_intent=adult_intent,
     )
     scene = (translated or "").strip().rstrip(",").strip()
     scene_words = len(scene.split()) if scene else 0
@@ -386,6 +400,9 @@ def assemble_generation_prompt(
     if (
         is_sdxl
         and inject_nsfw
+        # v5.1210: la cola de anatomía adulta solo para escenas que miden
+        # intención adulta; un prompt neutro no debe recibir esos tokens.
+        and adult_intent
         and _model_explicit(model_alias, model_configs)
         and scene_needs_anatomy_integrity(scene)
         and extras_cfg.get("anatomy_integrity_positive")
@@ -556,13 +573,22 @@ def get_effective_negative(
     is_sdxl: bool = True,
     inject_nsfw: bool = True,
     style_override: bool = False,
+    adult_intent: Optional[bool] = None,
 ) -> str:
     """Refuerza negativo según config del modelo + reglas generales (anti-censor, anti-stylize para photoreal).
     Los términos específicos de cada modelo (scores, anti-illustrated fuertes, etc.) van en su negative_prompt del JSON.
 
     inject_nsfw=False → sin bloques adultos (anti-censor / multi-subject / anti-dismembered).
     style_override=True → sin anti_stylize (no se pelea con el estilo pedido).
+    adult_intent=None → se mide sobre prompt_en (v5.1210): el anti-censor
+    (que empuja FUERA ropa/censura, es decir hacia desnudos) solo entra si
+    el prompt pide contenido adulto — el negativo también obedece al prompt.
+    Los bloques multi-person/anatomía siguen siendo escena-medidos: no
+    crean contenido, solo apartan artefactos.
     """
+    if adult_intent is None:
+        from roop.img_editor.gen_semantic import prompt_requests_adult_content
+        adult_intent = prompt_requests_adult_content(prompt_en or "")
 
     neg = _dedupe_comma_list((base_negative or "").strip())
     mods = modifiers or {}
@@ -593,7 +619,10 @@ def get_effective_negative(
         if block:
             neg = _prepend_negative_tokens(neg, block)
 
-    if is_explicit:
+    # v5.1210: anti-censor solo con intención adulta medida. Este bloque
+    # empuja "clothed, censored..." fuera del negativo — sobre una escena
+    # neutra es presión hacia desnudos con la caja de la percha abierta.
+    if is_explicit and adult_intent:
         block = extras_cfg.get("anti_censor_negative", "")
         if block:
             neg = _prepend_negative_tokens(neg, block)

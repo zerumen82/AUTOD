@@ -63,3 +63,21 @@ def get_style_gate_config() -> Dict[str, Any]:
         "concepts": list(raw.get("concepts") or []),
         "threshold": float(raw.get("threshold", 0.25)),
     }
+
+
+def get_adult_gate_config() -> Dict[str, Any]:
+    """Gate adulto: decide si el PROMPT pide contenido adulto.
+
+    El checkbox «Contenido NSFW» es solo permiso; sin esta señal medida el
+    prefijo adulto, el anti-censor y las LoRAs adultas automáticas NUNCA se
+    inyectan — el prompt manda siempre (v5.1210, «CASTILLO CON UNICORNIOS»
+    salía mujer desnuda por el prefijo de 08/10).
+
+    Concepts (descripciones EN/ES) + threshold calibrado con16 escenas
+    neutrales y9 adultas (FP=0, FN=0; neutro máx 0,095 / adulto mín 0,152).
+    """
+    raw = get_generation_prompt_config().get("adult_gate") or {}
+    return {
+        "concepts": list(raw.get("concepts") or []),
+        "threshold": float(raw.get("threshold", 0.13)),
+    }

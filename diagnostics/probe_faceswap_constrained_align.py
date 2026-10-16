@@ -69,7 +69,10 @@ for output_size in (128, 256):
     check(f"scale parameter changes constrained M {output_size}",
           np.isclose(inverse_side(wider_matrix, output_size), expected_side * 0.9))
 
-    oversized = (template - template.mean(axis=0)) * 20 + 500
+    # Keep landmarks inside their measured bbox while the inverse crop still
+    # exceeds the configured cap. Out-of-bbox points now reject before warp;
+    # they cannot serve as the positive scale/roll constraint fixture.
+    oversized = (template - template.mean(axis=0)) * 11 + 500
     rotation = np.array([[0.8, -0.6], [0.6, 0.8]], dtype=np.float32)
     oversized = (oversized - 500) @ rotation.T + 500
     oversized_original = face_align.estimate_norm(oversized, output_size)

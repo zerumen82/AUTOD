@@ -1,6 +1,20 @@
 # spec/02 — Requisitos (historias)
 
-Historia activa: **H-GEN-001 — Generate versátil** (aprobada por el usuario el 2026-10-03: «Todo: 0+1+2+3»; motor por defecto sin cambiar).
+Trabajo activo: corrección de los fallos del proyecto autorizada el 2026-10-13 («arreglalo todo», confirmado: fallos del proyecto). Las historias siguientes conservan sus criterios y límites de validación.
+
+## Continuación de correcciones — 2026-10-13
+
+Dentro de H-EDIT-003/H-EDIT-004 y las deudas ya declaradas, sin sustituir Turbo ni el modelo FaceSwap y sin instalar dependencias:
+
+- [ ] Toda edición corporal localizada conserva el ancla espacial, tanto con parte medida como con persona de respaldo; se comprueba el workflow real.
+- [ ] Las superficies no consultan objetos fijos ajenos a la instrucción; la protección de otras personas usa la evidencia visual existente. Ningún mensaje atribuye SAM2/GrabCut a una operación que no los ejecuta.
+- [ ] Los compuestos conservan todas las zonas medidas de cada cláusula; una petición explícita de postura mantiene el contrato de permitir nueva geometría.
+- [ ] El reintento corporal comprueba cambio dentro de la zona pedida; cambios colaterales no cuentan como aplicación. Los fixtures respetan el tamaño real de la ventana.
+- [ ] Los controles existentes de Generate, FaceSwap y Animate corresponden a capacidades ejecutadas o explican su límite antes de iniciar trabajo.
+- [ ] Lint/compilación, probes pertinentes, reviewer APPROVE y tester PASS, con logs de la versión final. Las mejoras visuales requieren muestras reales adicionales y validación del usuario; los contratos no las certifican.
+
+Prioridad confirmada después: revisar FaceSwap por caras y calidad incorrectas en las salidas de `output`. Corregir el contrato general de geometría de H-FS-004: los cinco landmarks deben pertenecer a su bbox, independientemente de confianza y orientación. Reutilizar el margen de contención vigente, declarado en configuración; rechazar o rescatar desde una referencia válida antes de estimar la matriz. No sustituir modelo, identidad, escala ni umbrales de boca. Verificación con contratos CPU y retratos no explícitos; la revisión del lote no autoriza regenerar imágenes sexuales explícitas.
+
 
 ## H-GEN-001.1 — Controles avanzados en la UI (Fase 1)
 
@@ -31,7 +45,7 @@ Historia activa: **H-GEN-001 — Generate versátil** (aprobada por el usuario e
 
 - [x] Campo de imagen opcional en Generate.
 - [x] Si hay imagen y **no** hay instrucción de edición: img2img con referencia (`LoadImage` + `VAEEncode`, denoise < 1 tomado de config).
-- [x] Si hay imagen **e** instrucción de edición (añadir/quitar persona u objeto, ropa, fondo, POV/ángulo, pose): se enruta a `generate_intelligent()` del Editor y el resultado se muestra en Generate.
+- [x] Si hay imagen **e** instrucción de edición (añadir/quitar persona u objeto, ropa, fondo, POV/ángulo, pose): se enruta a `generate_intelligent()` del Editor y el resultado se muestra en Generate. **Actualización 2026-10-16**: la ruta por defecto pasó de `auto` a `img2img` (`generate_ui.default_route` en `config/generation_prompt.json`) porque el usuario quiere Generate y Editor **paralelos e independientes**: Generate ya no enruta sola al Editor; `editor`/`auto` son elección manual en el desplegable. Verificado: UI construida con `route.value='img2img'`, adherencia 108/0 y contrato APK 31/31.
 - [x] Sin imagen: txt2img como hasta ahora (regresión cero).
 
 ## H-GEN-001.6 — VRAM, progreso, calidad y muestras (Fase 3)
@@ -60,6 +74,7 @@ Decisiones ya aprobadas por el usuario el 2026-10-04: checkbox NSFW manual, gate
 - [ ] El contrato de diez parámetros de la APK, Image Editor y FaceSwap siguen funcionando; el endpoint `/generate_image` respondió por HTTP con diez argumentos y la APK debug compiló, pero falta instalarla en un teléfono y la validación visual de Editor/FaceSwap continúa abierta.
 - [x] Render real por la ruta servida `/generate_image_ui`: `generate/gen_1791179741.png`, 768×512, seed 123456, castillo y unicornio en ilustración, inspeccionado visualmente; 20/20 pasos ComfyUI y estado «Listo».
 - [x] Review final y verificación independiente de Generate: reviewer APPROVE y sd-tester PASS de la versión final (72/0 y 31/0 repetidos; PNG abierto y verificado; APK debug y SHA256 comprobados). El tester no repitió el HTTP servido ni probó la APK instalada en un teléfono.
+- [x] A/B real sobre el motor por defecto (2026-10-16): `probe_gen_castillo_real.py` parametrizado por motor (`--engine`, default `get_default_generation_engine()`); `flux_dev_q4` semilla 123456 con NSFW OFF/ON produce salidas **byte-idénticas** (SHA256 `7db9c50e…`; el ON lo sirve la caché de ComfyUI porque el workflow final es el mismo) y la imagen es el castillo con unicornios en estilo dibujo. El checkbox ya no secuestra el prompt no adulto en la ruta por defecto. Con `flux_dev_abliterated` el prompt también llegó idéntico ON/OOFF, pero ese motor renderiza una mancha adulta incluso con OFF (cautela documentada; no es el default).
 
 ## H-FS-003 — Perfil, halo y selección del enhancer
 

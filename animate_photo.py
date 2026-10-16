@@ -10,6 +10,7 @@ def get_project_root():
     return os.path.dirname(os.path.abspath(__file__))
 
 MODELS_DIR = os.path.join(get_project_root(), "ui", "tob", "ComfyUI", "models")
+SUPPORTED_ENGINES = ("framepack", "wan_video")
 
 
 def _get_vae_channels(vae_path):
@@ -646,6 +647,14 @@ class AnimatePhoto:
     def animate_image(self, image_pil=None, prompt="", output_path="output.mp4",
                       model="wan_video", frames=33, fps=16, steps=25, cfg=5.5, timeout=1800, t2v_mode=False,
                       lora_name=None, lora_strength=1.0, progress_callback=None, cancel_check=None):
+        if model not in SUPPORTED_ENGINES:
+            print(f"[AnimatePhoto] Motor no implementado: {model}")
+            return False
+        if model == "framepack" and t2v_mode:
+            print("[AnimatePhoto] FramePack necesita una imagen de entrada")
+            return False
+        if model == "framepack" and not self._ensure_framepack_models():
+            return False
         self._refresh_base()
         if not self.check_comfyui_status():
             print("[AnimatePhoto] ComfyUI no responde en /system_stats")
@@ -692,11 +701,7 @@ class AnimatePhoto:
             return False
 
         if model == "framepack":
-            self._ensure_framepack_models()
             wf = self.build_framepack_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh)
-        elif model != "wan_video":
-            print(f"[AnimatePhoto] Motor {model} no implementado aquí; usando WanVideo para respetar prompt.")
-            wf = self.build_wan_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh, t2v_mode=t2v_mode, lora_name=lora_name, lora_strength=lora_strength)
         else:
             wf = self.build_wan_workflow(fname, prompt, frames, fps, steps, cfg, width=nw, height=nh, t2v_mode=t2v_mode, lora_name=lora_name, lora_strength=lora_strength)
 

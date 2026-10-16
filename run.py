@@ -221,6 +221,94 @@ from pathlib import Path
 Path._original_unlink = Path.unlink
 Path.unlink = resilient_unlink
 
+class _SessionTee:
+    """Duplica un stream (stdout/stderr) a un archivo de sesión de la UI.
+
+    La consola conserva todo lo suyo; el archivo es la única pista cuando
+    la consola se cierra antes que el proceso (incidente 2026-10-13: la
+    stderr de la sesión no se capturó y el lote murió sin rastro). Si el
+    proceso muere por fuera (TerminateProcess / cerrar la consola en
+    Windows), atexit no corre y el archivo queda SIN la marca de fin: su
+    ausencia diagnostica muerte externa y el PID de la cabecera permite
+    correlacionarla con eventos de Windows o con el log del lote activo.
+    """
+
+    def __init__(self, stream, log_file):
+        self._stream = stream
+        self._log_file = log_file
+
+    def write(self, data):
+        try:
+            self._log_file.write(data)
+            self._log_file.flush()
+        except Exception:
+            pass
+        return self._stream.write(data)
+
+    def flush(self):
+        try:
+            self._log_file.flush()
+        except Exception:
+            pass
+        try:
+            self._stream.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _open_ui_session_log():
+    """Abre logs/ui_start_<ts>.log y voltea stdout+stderr ahí.
+
+    Mantiene solo los últimos 10 archivos de sesión (misma política que
+    logs/process_*.log). Devuelve None si el log no pudo abrirse: la UI
+    nunca debe caer por esta salvaguarda.
+    """
+    import atexit
+    try:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, f"ui_start_{time.strftime('%Y%m%d_%H%M%S')}.log")
+        log_file = open(log_path, "w", encoding="utf-8", errors="replace")
+        log_file.write(f"=== AUTO-AUTO UI — sesión {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+        log_file.write(f"PID: {os.getpid()}\n")
+        log_file.write(f"CommandLine: {sys.argv}\n")
+        log_file.write(f"CWD: {os.getcwd()}\n\n")
+        log_file.flush()
+        sys.stdout = _SessionTee(sys.stdout, log_file)
+        sys.stderr = _SessionTee(sys.stderr, log_file)
+
+        def _close_ui_session_log():
+            try:
+                log_file.write(f"\n=== UI EXIT (PID {os.getpid()}) ===\n")
+                log_file.close()
+            except Exception:
+                pass
+
+        atexit.register(_close_ui_session_log)
+        # Limpieza: conservar solo los últimos 10 ui_start_*.log
+        try:
+            logs = sorted(
+                (os.path.join(log_dir, f) for f in os.listdir(log_dir)
+                 if f.startswith("ui_start_") and f.endswith(".log")),
+                key=os.path.getmtime,
+            )
+            while len(logs) > 10:
+                os.remove(logs.pop(0))
+        except Exception:
+            pass
+        print(f"[INFO] Sesión de UI volcada a: {log_path} (PID {os.getpid()})")
+        return log_path
+    except Exception as e:
+        try:
+            print(f"[WARNING] No se pudo abrir el log de sesión de la UI: {e}")
+        except Exception:
+            pass
+        return None
+
+
 def setup_runtime():
     print("\n[STEP 1] Preparando entorno NVIDIA/CUDA...")
     
@@ -266,6 +354,7 @@ def setup_runtime():
                     print(f"Error cargando {dll}: {e}")
 
 if __name__ == "__main__":
+    _open_ui_session_log()
     setup_runtime()
     
     # Preparar rutas de Python

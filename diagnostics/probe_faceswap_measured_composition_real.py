@@ -280,7 +280,8 @@ def main():
             source, source_crop = source_faces[args.source_index]
             metadata["source_detected_count"] = len(source_faces)
             metadata["source_face"] = face_record(source, source_crop)
-            write_image(output / "source_crop.png", source_crop)
+            # extract_face_images returns RGB crops; OpenCV writes BGR.
+            write_image(output / "source_crop.png", cv2.cvtColor(source_crop, cv2.COLOR_RGB2BGR))
             baseline_class = load_baseline(args.baseline)
             for index, photo in enumerate(args.targets):
                 case_output = output / f"case_{index}_{photo.stem}"
@@ -296,7 +297,7 @@ def main():
                     continue
                 target, target_crop = faces[args.target_index]
                 case["target_face"] = face_record(target, target_crop)
-                write_image(case_output / "target_crop.png", target_crop)
+                write_image(case_output / "target_crop.png", cv2.cvtColor(target_crop, cv2.COLOR_RGB2BGR))
                 points = np.asarray(target.kps, dtype=np.float32)
                 eye_relative = float(np.linalg.norm(points[1] - points[0])) / float(target.bbox[2] - target.bbox[0])
                 case["eye_relative"] = eye_relative

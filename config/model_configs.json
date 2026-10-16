@@ -168,6 +168,8 @@
     "img2img_denoise": 0.65
   },
   "faceswap": {
+    "landmark_bbox_margin_fraction": 0.02,
+    "landmark_bbox_margin_pixels": 2.0,
     "align_constrain_scale_dev": 0.35,
     "align_constrain_crop_to_bbox_ratio": 1.5,
     "align_constrain_translate_bbox_fraction": 0.75,

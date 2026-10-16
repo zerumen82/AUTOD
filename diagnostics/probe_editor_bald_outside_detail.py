@@ -23,6 +23,10 @@ def lap_var(gray):
 
 for p in (IN_PATH, MASK_PATH, OUT_PATH):
     if not os.path.exists(p):
+        if p == OUT_PATH:
+            print(f"SKIP: artefacto historico ausente ({OUT_PATH}); "
+                  "la salida de la sesion 2026-10-01 no esta en el repo")
+            sys.exit(0)
         print(f"FALTA {p}")
         sys.exit(1)
 

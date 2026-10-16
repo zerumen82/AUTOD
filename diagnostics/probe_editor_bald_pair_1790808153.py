@@ -21,9 +21,13 @@ OUT_PATH = os.path.join("img_editor", "edit_1790808153.png")
 ok = True
 
 
-def need(path):
+def need(path, historical=False):
     global ok
     if not os.path.exists(path):
+        if historical:
+            print(f"SKIP: artefacto historico ausente ({path}); "
+                  "la salida de la sesion 2026-10-01 no esta en el repo")
+            sys.exit(0)
         print(f"FALTA {path}")
         ok = False
         return None
@@ -32,7 +36,7 @@ def need(path):
 
 inp = cv2.imread(need(IN_PATH))
 msk = cv2.imread(need(MASK_PATH), cv2.IMREAD_GRAYSCALE)
-out = cv2.imread(need(OUT_PATH))
+out = cv2.imread(need(OUT_PATH, historical=True))
 
 if not ok:
     sys.exit(1)

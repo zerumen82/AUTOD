@@ -4,7 +4,11 @@
 
 from typing import Dict
 
-from roop.img_editor.gen_prompt_config import get_gen_thresholds, get_style_gate_config
+from roop.img_editor.gen_prompt_config import (
+    get_adult_gate_config,
+    get_gen_thresholds,
+    get_style_gate_config,
+)
 
 _analyzer = None
 
@@ -81,3 +85,25 @@ def prompt_requests_nonphotoreal_style(prompt_en: str) -> bool:
     Umbrales y conceptos en config/generation_prompt.json → style_gate.
     """
     return score_style_gate(prompt_en) >= get_style_gate_config()["threshold"]
+
+
+def score_adult_gate(prompt_en: str) -> float:
+    """0..1 — solape del prompt con los conceptos de contenido adulto."""
+    cfg = get_adult_gate_config()
+    concepts = cfg.get("concepts") or []
+    if not concepts or not (prompt_en or "").strip():
+        return 0.0
+    scorer = getattr(_nlp(), "_score_texts", None) or getattr(_nlp(), "_score", None)
+    if scorer is None:
+        return 0.0
+    return float(scorer(prompt_en, concepts))
+
+
+def prompt_requests_adult_content(prompt_en: str) -> bool:
+    """True si el prompt MIDE intención de contenido adulto.
+
+    Sin esta señal el prefijo adulto/anti-censor/LoRAs adultas no se inyecta
+    jamás (el prompt manda, v5.1210). Umbrales y conceptos en
+    config/generation_prompt.json → adult_gate.
+    """
+    return score_adult_gate(prompt_en) >= get_adult_gate_config()["threshold"]

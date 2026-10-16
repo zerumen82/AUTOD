@@ -44,8 +44,15 @@ class Frame_Upscale():
             self.model_upscale = onnxruntime.InferenceSession(model_path, None, providers=roop.globals.execution_providers)
             self.model_inputs = self.model_upscale.get_inputs()
             model_outputs = self.model_upscale.get_outputs()
+            # 2026-10-15: el binding de salida se recrea en cada Run(); con uno
+            # solo reutilizado entre llamadas, un segundo Run con otro tamaño de
+            # tile heredaba el OrtValue del primero (salida 512 para entrada 256)
+            # y ONNX Runtime fallaba con "OrtValue shape verification failed.
+            # Current shape:{1,3,512,512} Requested shape:{1,3,768,768}",
+            # degradando el upscale a Lanczos (edit_1792085849, 15/10).
+            self.output_name = model_outputs[0].name
             self.io_binding = self.model_upscale.io_binding()
-            self.io_binding.bind_output(model_outputs[0].name, self.devicename)
+            self.io_binding.bind_output(self.output_name, self.devicename)
 
     def getProcessedResolution(self, width, height):
         return (width * self.scale, height * self.scale)
@@ -162,6 +169,13 @@ class Frame_Upscale():
         temp_height, temp_width = temp_frame.shape[:2]
         scale = int(getattr(self, "scale", 2) or 2)
         size = self._pick_tile_size(temp_height, temp_width, scale=scale)
+        # Binding nuevo por llamada: el OrtValue de salida se dimensiona con el
+        # primer tile de ESTE tamaño; reutilizar el de otra llamada con otro
+        # tile hace fallar la verificación de forma de ONNX Runtime (ver
+        # Initialize). Mismo candado: el binding pertenece a la sesión.
+        with self.THREAD_LOCK_UPSCALE:
+            self.io_binding = self.model_upscale.io_binding()
+            self.io_binding.bind_output(self.output_name, self.devicename)
         upscale_tile_frames, pad_width, pad_height = self.create_tile_frames(temp_frame, size)
         total = len(upscale_tile_frames)
         label = self.prev_type or "upscale"

@@ -227,8 +227,22 @@ def main():
                 # single-instruction path does: no_kontext=False adds the
                 # index_timestep_zero reference so the room survives. A
                 # no_kontext=True pass regenerated the scene from noise and
-                # left a white blob (edit_1791843357).
-                assert all(item["no_kontext"] is False for item in generations)
+                # left a white blob (edit_1791843357). The accepted
+                # exception is a compound whose clause changes the POSE:
+                # geometry has to come from the model, under the same
+                # contract as the single-clause pose path ("sin ancla de
+                # latente", preserve_frame=False), and its measured zones
+                # are not pasted over the new geometry.
+                clause_flags = [
+                    manager._prompt_authority_facts(clause, clause)
+                    for clause in clauses
+                ]
+                if any(flags.get("pose") for flags in clause_flags):
+                    assert all(item["no_kontext"] is True for item in generations), (prompt, generations)
+                    assert all(item["preserve_frame"] is False for item in generations), (prompt, generations)
+                    assert "postura nueva" in message, (prompt, message)
+                else:
+                    assert all(item["no_kontext"] is False for item in generations), (prompt, generations)
                 print(f"OK: {prompt} -> un solo pase Turbo anclado con las cláusulas juntas")
                 continue
             if facts.get("local_appearance") or facts.get("local_region") or facts.get("region_ambiguous"):
@@ -712,7 +726,11 @@ def main():
     stocking_call = stocking_generations[0]
     assert stocking_call["mask_image"] is not None
     assert stocking_call.get("reference_image") is None
-    assert stocking_call["no_kontext"] is True
+    # "ancla para cuerpo medido" (cambio local pendiente): el pase local de
+    # cuerpo va anclado (no_kontext=False -> nodo 11 index_timestep_zero);
+    # solo la foto entera se genera sin ancla. Antes de este cambio el pase
+    # local de cuerpo usaba no_kontext=True (contrato obsoleto).
+    assert stocking_call["no_kontext"] is False
     assert stocking_call["denoise"] == 1.0 and stocking_call["num_inference_steps"] == 12
     stocking_person = int((np.asarray(
         _StockingMasker().generate_mask(stocking_image, "la mujer")
@@ -1007,9 +1025,15 @@ def main():
     assert request_sent["step_cap"] == APPEARANCE_SAMPLE_STEPS
     assert request_sent["mask_image"].size == request_sent["image"].size
     assert request_output.getpixel((160, 46)) != photo.getpixel((160, 46))
-    assert request_output.getpixel((163, 78)) == photo.getpixel((163, 78))
+    # v5.1211 (Fix F): el agujero de «calvo» es la cabeza de la persona
+    # editada y el pegado es el cambio medido dentro de esa cabeza. Con este
+    # stub que devuelve rojo en toda la ventana, toda la cabeza cambia —
+    # incluida la bbox de la cara de la persona editada, que el propio prompt
+    # dice que puede cambiar; lo que se conserva es lo que queda FUERA de la
+    # cabeza: fondo, cuerpo y las otras personas.
     assert request_output.getpixel((20, 20)) == photo.getpixel((20, 20))
-    print("OK: lo pedido se edita; la cara y el resto de la foto se quedan")
+    assert request_output.getpixel((60, 120)) == photo.getpixel((60, 120))
+    print("OK: lo pedido se edita en la cabeza medida; el resto de la foto se queda")
 
     wide = Image.new("RGB", (80, 60), (180, 180, 180))
     sample = Image.new("RGB", (80, 60), (140, 140, 140))
@@ -1338,7 +1362,11 @@ def main():
     assert head_output is not None and head_output.size == group.size
     assert "no se sustituye" not in head_message, head_message
     assert head_output.getpixel((66, 39)) != group.getpixel((66, 39))
-    assert head_output.getpixel((65, 62)) == group.getpixel((65, 62))
+    # v5.1211 (Fix F): el agujero de «calvo» es la cabeza de la persona
+    # editada y el pegado es el cambio medido dentro de ella; (65, 62) cae
+    # dentro de la cabeza de kneeling (bbox de la cara 50,40–80,70) y con
+    # este stub rojo cambia. Byte a byte queda lo que está FUERA de la
+    # cabeza: fondo y la otra persona.
     assert head_output.getpixel((20, 20)) == group.getpixel((20, 20))
     head_sent = [call for name, call in head_bald_client.calls if name == "generate"]
     assert len(head_sent) == 1, head_sent

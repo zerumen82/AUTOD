@@ -72,6 +72,40 @@ def main():
     assert missing == []
     print("OK: parte ausente en persona detiene el recolor")
 
+    # v5.1214: a measured surface that only BLEEDS over a face edge is not
+    # that person. The old guard fired on any face touch (15% of the bbox),
+    # so the measured wall behind a full-body person was discarded as «a
+    # person without its part» and never painted. A face largely inside the
+    # region is still a person: the abstention below keeps that contract.
+    bleeding_wall = rectangle((0, 0, 80, 120))  # covers ~33% of the face bbox
+    with (
+        patch.object(manager, "_subject_queries", return_value=["the wall"]),
+        patch.object(manager, "_get_clipseg_masker", return_value=Segmenter(bleeding_wall)),
+        patch.object(manager, "_request_region_on_subject", return_value=None),
+        patch.object(manager, "_continue_measured_region", return_value=bleeding_wall) as continued,
+    ):
+        bleeding = manager._measured_region_passes(
+            PHOTO, "las paredes deben ser grises", "the walls must be grey",
+            surface_recolor=True, faces=[face],
+        )
+    assert len(bleeding) == 1 and not bleeding[0].get("requested_part")
+    assert np.array_equal(np.asarray(bleeding[0]["mask"]), np.asarray(bleeding_wall))
+    continued.assert_called_once()
+    print("OK: superficie que roza una cara no se descarta como persona")
+
+    # The abstention still holds for a real person: the face sits inside the
+    # measured region and no requested part was found.
+    assert manager._region_contains_a_face(
+        np.asarray(woman), [face], SIZE[0], SIZE[1],
+    )
+    assert not manager._region_contains_a_face(
+        np.asarray(bleeding_wall), [face], SIZE[0], SIZE[1],
+    )
+    assert not manager._region_contains_a_face(
+        np.asarray(wall), [face], SIZE[0], SIZE[1],
+    )
+    print("OK: la contención de la cara dentro de la región separa persona de superficie")
+
     # A wall has no facial overlap, so recoloring the measured surface still
     # follows the previous continuation path.
     with (
