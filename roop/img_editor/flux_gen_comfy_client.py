@@ -156,8 +156,7 @@ def resolve_generation_engine(engine_id: str) -> Tuple[str, Optional[str]]:
                 return engine_id, filename
         return engine_id, None
 
-    pony = _resolve_registry_alias("pony_realism", files)
-    return "pony_realism", pony
+    return engine_id, None
 
 
 def _gguf_model_exists(filename: str) -> bool:
@@ -235,6 +234,7 @@ class FluxGenComfyClient:
         self._is_longcat = False
         self._is_longcat_turbo = False
         self._is_sdxl = False
+        self._is_hart = False
         self._model_configs = self._load_model_configs()
 
     def _load_model_configs(self):
@@ -260,7 +260,7 @@ class FluxGenComfyClient:
         try:
             r = requests.get(f"{get_comfyui_url()}/system_stats", timeout=5)
             return r.status_code == 200
-        except:
+        except requests.RequestException:
             return False
 
     def _model_exists(self, subdir: str, name: str) -> bool:
@@ -296,6 +296,10 @@ class FluxGenComfyClient:
         auto_strength = float(conf.get("auto_lora_strength", 0.55))
 
         if requested not in ("", "None", "Auto"):
+            from roop.img_editor.gen_lora_resolver import lora_selection_error
+            error = lora_selection_error(requested, self._alias, self._is_sdxl)
+            if error:
+                raise ValueError(error)
             if lora_strength is not None:
                 strength = float(lora_strength)
             else:
@@ -309,9 +313,12 @@ class FluxGenComfyClient:
                     float(catalog.get("strength", auto_strength)) if catalog else auto_strength
                 )
             log = f"{requested}@{strength:.2f}"
+            print(f"[GenFlux] LoRA manual: {log}")
             return [(requested, strength)], "", log
 
         if requested == "None" or not (self._is_sdxl and conf.get("explicit", False)):
+            if requested != "None":
+                print(f"[GenFlux] LoRA Auto: catálogo automático SDXL no activo para {self._alias}.")
             return [], "", ""
 
         if adult_intent is None:
@@ -327,7 +334,11 @@ class FluxGenComfyClient:
             if boost:
                 print(f"[GenFlux] LoRA boost prompt: {boost}")
         else:
-            print("[GenFlux] Auto LoRA: ninguna LoRA de escena encontrada")
+            from roop.img_editor.gen_prompt_config import get_lora_catalog
+            from roop.img_editor.gen_lora_resolver import _lora_exists
+            automatic = [entry for entry in get_lora_catalog() if not entry.get("manual_only")]
+            missing = sum(not _lora_exists(entry.get("file", "")) for entry in automatic)
+            print(f"[GenFlux] Auto LoRA: ninguna automática para esta escena; {missing}/{len(automatic)} archivos del catálogo automático no instalados. Las entradas manuales se eligen en LoRA.")
         return [(f, s) for f, s, _lbl in picks], boost, log
 
     def _chain_lora_loaders(self, wf: Dict, last_model, last_clip, lora_stack: List[Tuple[str, float]], start_id: int = 20):
@@ -362,6 +373,7 @@ class FluxGenComfyClient:
 
     def load(self, flux_version="pony_realism") -> Tuple[bool, str]:
         """Configura los modelos a usar"""
+        self._loaded = False
         flux_alias_map = {
             "longcat": "LongCat-Image-Edit-Turbo-Q4_K_S.gguf",
             "longcat_full": "LongCat-Image-Edit-Q4_K_S.gguf",
@@ -451,8 +463,9 @@ class FluxGenComfyClient:
         checks.append(("vae", self._vae_name, "VAE"))
 
         missing = []
-        for d, f, l in checks:
-            if not self._model_exists(d, f): missing.append(f)
+        for subdir, filename, _label in checks:
+            if not self._model_exists(subdir, filename):
+                missing.append(filename)
         
         if missing:
             return False, f"Faltan archivos: {', '.join(missing)}"
@@ -470,7 +483,7 @@ class FluxGenComfyClient:
             if self._is_longcat:
                 final = f"Instruction: {final}"
             return final
-        except:
+        except Exception:
             return prompt
 
     def _prepare_prompt_intelligent(
@@ -618,7 +631,7 @@ class FluxGenComfyClient:
                     final_prompt = translated
                     if final_prompt.lower().startswith("instruction:"):
                         final_prompt = final_prompt[12:].strip()
-            except:
+            except Exception:
                 final_prompt = prompt
 
             conf = self._get_model_conf()
@@ -653,8 +666,19 @@ class FluxGenComfyClient:
     ) -> Tuple[Optional[GenResult], str]:
 
         comfy_url = get_comfyui_url()
-        if not self.is_available(): return None, "ComfyUI no disponible"
-        if not self._loaded: self.load()
+        if not self.is_available():
+            return None, "ComfyUI no disponible"
+        if not self._loaded:
+            loaded, load_msg = self.load()
+            if not loaded:
+                return None, load_msg
+
+        # Validar la elección manual antes de subir referencias o preparar el prompt.
+        if (lora_name or "Auto").strip() not in ("", "Auto", "None"):
+            from roop.img_editor.gen_lora_resolver import lora_selection_error
+            error = lora_selection_error(lora_name.strip(), self._alias, self._is_sdxl)
+            if error:
+                return None, error
 
         if init_image is not None:
             path_type = "IMG2IMG con imagen de referencia"
@@ -891,13 +915,16 @@ class FluxGenComfyClient:
                 pos_cond = "6"
 
             # FluxGuidance solo para FLUX.1 (no FLUX.2)
-            if self._clip_type != "flux2" and actual_cfg > 1.0:
+            if self._clip_type == "flux" and not self._is_longcat and actual_cfg > 1.0:
                 wf["14"] = {"class_type": "FluxGuidance", "inputs": {"conditioning": [pos_cond, 0], "guidance": actual_cfg}}
                 positive_input = ["14", 0]
                 ksampler_cfg = 1.0
             else:
                 positive_input = [pos_cond, 0]
                 ksampler_cfg = actual_cfg
+
+            if ksampler_cfg == 1.0 and current_neg:
+                print("[GenFlux] Negativo sin efecto: el muestreo usa CFG=1; se conserva el texto para otros modelos.")
 
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": current_neg, "clip": last_clip}}
 
@@ -1053,5 +1080,6 @@ class FluxGenComfyClient:
 _gen_client = None
 def get_flux_gen_client() -> FluxGenComfyClient:
     global _gen_client
-    if _gen_client is None: _gen_client = FluxGenComfyClient()
+    if _gen_client is None:
+        _gen_client = FluxGenComfyClient()
     return _gen_client

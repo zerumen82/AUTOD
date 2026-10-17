@@ -66,6 +66,18 @@ def _normalize_stray_word_punctuation(text: str) -> str:
     return re.sub(r"(?<=\s)\.(?=\w)", "", text or "")
 
 
+def _normalize_glued_list_punctuation(text: str) -> str:
+    """Separa una coma pegada a la palabra siguiente («gato,sentado»).
+
+    SentencePiece entrenado en prosa fragmenta «follandola,explicito» como
+    palabra desconocida y el token sale sin traducir en la salida (log real
+    00:22-00:42: «explicito» llegó al modelo de imagen en español). La coma
+    con espacio es la puntuación con la que el modelo fue entrenado. Solo
+    cambia espacios; no toca vocabulario ni intención del prompt.
+    """
+    return re.sub(r",(?=\S)", ", ", text or "")
+
+
 def _offline_translate(prompt: str):
     """Traducción ES→EN local y determinista.
 
@@ -88,6 +100,15 @@ def _offline_translate(prompt: str):
             tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
             model = AutoModelForSeq2SeqLM.from_pretrained(model_dir, local_files_only=True)
             model.eval()
+            # v5.1223 (cosmético): la config de Marian trae max_length=512 y
+            # generate() pasa max_new_tokens → transformers avisaba EN CADA
+            # llamada («Both max_new_tokens and max_length seem to have been
+            # set»). La condición exige max_length None en la config del
+            # modelo (transformers/generation/utils.py:2339) y generate()
+            # recalcula max_length = max_new_tokens + input_ids_length, así
+            # que el comportamiento de la traducción no cambia: solo desaparece
+            # el aviso.
+            model.generation_config.max_length = None
             _offline_translator = (tokenizer, model, torch)
             print(f"[Translate:Local] Modelo ES→EN cargado desde {model_dir}", flush=True)
         tokenizer, model, torch = _offline_translator
@@ -105,8 +126,11 @@ def _offline_translate(prompt: str):
         normalized_punctuation = _normalize_stray_word_punctuation(source)
         if normalized_punctuation != source:
             print("[Translate:Local] Eliminado punto suelto antes de una palabra", flush=True)
-        corrected_source = _normalize_unambiguous_spanish_spelling(normalized_punctuation)
-        if corrected_source != normalized_punctuation:
+        normalized_list = _normalize_glued_list_punctuation(normalized_punctuation)
+        if normalized_list != normalized_punctuation:
+            print("[Translate:Local] Separada coma pegada a una palabra", flush=True)
+        corrected_source = _normalize_unambiguous_spanish_spelling(normalized_list)
+        if corrected_source != normalized_list:
             print("[Translate:Local] Corregida duplicación ortográfica inequívoca antes de traducir", flush=True)
         source = corrected_source
         words = max(1, len(re.findall(r"\w+", source)))

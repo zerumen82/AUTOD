@@ -5,6 +5,7 @@
     "multi_person_structural": 0.08,
     "lora_scene_min_score": 0.12,
     "flux_max_tail_parts": 5,
+    "max_extra_modifiers": 4,
     "route_structural": 0.30,
     "route_pose": 0.15,
     "route_attribute": 0.25
@@ -36,7 +37,8 @@
       "nude naked nudity fully naked topless bare body bare skin undressed without clothes",
       "desnudo desnuda desnudez sin ropa cuerpo desnudo en pelota",
       "sex sexual intercourse fucking erotic intimate xxx pornographic porn nsfw uncensored adult content",
-      "sexo relación sexual follar erótico erótica xxx pornográfico porno contenido adulto sin censura"
+      "sexo relación sexual follar erótico erótica xxx pornográfico porno contenido adulto sin censura",
+      "orgy orgies orgy scene group sex explicit explicito explícito orgía"
     ],
     "threshold": 0.13
   },
@@ -52,6 +54,18 @@
     "min_overlap_ratio": 0.28
   },
   "lora_catalog": [
+    {
+      "file": "Amateur_Flash_v2.safetensors",
+      "label": "Amateur Flash (estilo fotográfico)",
+      "pony_only": true,
+      "manual_only": true
+    },
+    {
+      "file": "sdsFILM_v40-sdxl-V1.safetensors",
+      "label": "sdsFILM (estilo fotográfico)",
+      "sdxl_only": true,
+      "manual_only": true
+    },
     {
       "file": "nsfw-xl-2.1.safetensors",
       "anchors": ["nsfw explicit adult uncensored nude scene"],

@@ -339,7 +339,7 @@ check("Android migra preferencias por alias", 'putString("genEngineAlias"' in sr
 # ---------------------------------------------------------------- [7] LoRA visible
 print("\n[7] LoRA visible en la UI y elegido por el usuario")
 check("ui.py declara lora_choice en ui_comp", '"lora_choice": lora_choice' in src_ui)
-check("ui.py construye el dropdown con el catálogo", "get_lora_catalog" in src_ui)
+check("ui.py construye el dropdown con el catálogo instalado compatible", "get_available_lora_catalog" in src_ui)
 check("events cablea lora_choice en generate_image_ui",
       'ui_comp["lora_choice"]' in src_events.split("api_name=\"generate_image_ui\"")[0])
 check("events pasa la elección al cliente como lora_name", "lora_name=" in src_events)

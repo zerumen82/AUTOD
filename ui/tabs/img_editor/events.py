@@ -122,7 +122,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                 quality_preserve_faces=True,
                 quality_deposter=True, quality_upscale=True,
                 quality_color=True, quality_realism=True,
-                progress=gr.Progress()):
+                progress=gr.Progress(), source="?"):
     with state._generation_lock:
         if state.is_generating:
             _txt = "Ya hay una transformacion en proceso"
@@ -148,7 +148,8 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         # de despacho, no del pipeline.
         print(
             f"[ImgEditor] Solicitud recibida prompt={p_text[:60]!r} "
-            f"engine={engine_val} calidad={bool(quality_mode)}",
+            f"engine={engine_val} calidad={bool(quality_mode)} "
+            f"origen={source}",
             flush=True,
         )
         progress(0, desc="Preparando")
@@ -361,6 +362,24 @@ def _show_quality_options(enabled):
     return gr.update(visible=bool(enabled))
 
 
+def _on_generate_desktop(*args, **kwargs):
+    """Botón ✨ TRANSFORMAR del escritorio; el origen va al log."""
+    kwargs.setdefault("source", "desktop")
+    return on_generate(*args, **kwargs)
+
+
+def _on_generate_api_options(*args, **kwargs):
+    """Endpoint /edit_options (app Android)."""
+    kwargs.setdefault("source", "api/edit_options")
+    return on_generate(*args, **kwargs)
+
+
+def _on_generate_api_legacy(*args, **kwargs):
+    """Endpoint /edit (apps antiguas instaladas)."""
+    kwargs.setdefault("source", "api/edit")
+    return on_generate(*args, **kwargs)
+
+
 def wire_events(ui_comp):
     desktop_inputs = [
         ui_comp["input_img"], ui_comp["prompt"],
@@ -372,29 +391,41 @@ def wire_events(ui_comp):
         ui_comp["quality_color"], ui_comp["quality_realism"],
     ]
     outputs = [ui_comp["output_img"], ui_comp["status"], ui_comp["mask_preview"]]
-    # concurrency_limit was added in Gradio 4.  The running installation can
-    # still be 3.x, where passing it prevents the whole tab from wiring.  The
-    # generation lock in on_generate protects both versions.
-    try:
-        import inspect
-        click_params = inspect.signature(ui_comp["gen_btn"].click).parameters
-    except (TypeError, ValueError):
-        click_params = {}
-    generate_kwargs = {"api_name": "edit_select"}
-    if "concurrency_limit" in click_params:
-        generate_kwargs["concurrency_limit"] = None
-    ui_comp["gen_btn"].click(on_generate, desktop_inputs, outputs, **generate_kwargs)
+
+    # Concurrencia ilimitada en TODOS los listeners de on_generate. Medido
+    # 2026-10-16 (gradio 6.13.0): con la concurrencia por defecto (1) un
+    # segundo envío mientras corre quedaba ENCOLADO y se ejecutaba tras el
+    # primero sin rechazo — el «procesado dos veces» de 18:56/19:00 (dos
+    # pasadas de ~3 min para un solo pedido). Con None el envío en caliente
+    # corre en paralelo y la guarda de on_generate lo rechaza en voz alta
+    # («Ya hay una transformacion en proceso»). Los listeners de API del
+    # móvil se comportan igual: un envío mientras corre responde, no cola.
+    def _bind_generate(btn, inputs, fn, api_name):
+        try:
+            return btn.click(
+                fn, inputs, outputs,
+                api_name=api_name, concurrency_limit=None,
+            )
+        except TypeError:
+            # Gradio 3.x no acepta concurrency_limit y pasarlo rompe el
+            # cableado de toda la pestaña; ahí la guarda del handler es la
+            # única protección.
+            return btn.click(fn, inputs, outputs, api_name=api_name)
+
+    _bind_generate(
+        ui_comp["gen_btn"], desktop_inputs, _on_generate_desktop, "edit_select",
+    )
     # Nine arguments, ending in Restaurar caras. The phone app posts this list.
     # The four step checkboxes stay off this endpoint so that call still works;
     # missing steps mean every finish step stays on.
-    ui_comp["legacy_options_btn"].click(
-        on_generate, desktop_inputs[:-4], outputs,
-        api_name="edit_options",
+    _bind_generate(
+        ui_comp["legacy_options_btn"], desktop_inputs[:-4],
+        _on_generate_api_options, "edit_options",
     )
     # Eight arguments, without Restaurar caras. Older installed apps use this.
-    ui_comp["legacy_api_btn"].click(
-        on_generate, desktop_inputs[:-5], outputs,
-        api_name="edit",
+    _bind_generate(
+        ui_comp["legacy_api_btn"], desktop_inputs[:-5],
+        _on_generate_api_legacy, "edit",
     )
     ui_comp["quality_mode"].change(
         fn=_show_quality_options,

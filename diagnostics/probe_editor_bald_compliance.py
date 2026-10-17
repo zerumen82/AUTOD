@@ -89,6 +89,22 @@ def capture(label, photo, prompt_es, prompt_en):
     assert output is not None, message
     kwargs = stub.kwargs
     assert kwargs, "el manager no llamó al modelo"
+    if ImgEditorManager._is_bald_request(prompt_es):
+        # Receta «calvo» (log real 21:51, edit_1792180391): el modelo quitó
+        # el pelo pero conservó la diadema con pompones y pintó el cuero
+        # cabelludo gris — cabeza de «gorrito». El prompt despachado debe
+        # definir el estado calvo: cuero cabelludo pelado, sin cubierta y
+        # con tono de piel natural.
+        dispatch_prompt = str(kwargs.get("prompt") or "")
+        assert (
+            "shaved scalp" in dispatch_prompt
+            and "headband" in dispatch_prompt
+            and "natural skin tone" in dispatch_prompt
+        ), (
+            "la receta calvo no define cuero cabelludo pelado sin cubierta "
+            f"ni tono natural: {dispatch_prompt}"
+        )
+        print("[CAPTURE] receta calvo presente en el prompt (pelado, sin diadema, tono natural)")
     keep = ("prompt", "negative_prompt", "num_inference_steps", "guidance_scale",
             "denoise", "seed", "keep_source_pixels", "preserve_frame",
             "prompt_authority", "no_kontext", "step_cap")

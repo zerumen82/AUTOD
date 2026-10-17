@@ -1,12 +1,11 @@
 import os
-import os
 import queue
 import threading
 import time
 import gradio as gr
 
 from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client
-from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices, get_compatible_dropdown_choices, preview_modifiers
+from roop.img_editor.gen_prompt_modifiers import get_compatible_dropdown_choices, preview_modifiers
 from roop.img_editor.comfy_progress import build_generation_progress_html, format_duration
 from roop.img_editor.gen_prompt_config import get_generate_ui_config
 from roop.output_paths import get_generation_output_dir
@@ -167,6 +166,9 @@ def on_generate_image(
         updates = queue.Queue()
         result = {"image": None, "status": "", "error": None}
         use_editor_route = _route_is_editor(route, prompt, ref_image)
+        if use_editor_route and (lora_choice or "Auto").strip() not in ("", "Auto", "None"):
+            yield None, "❌ La ruta Image Editor no aplica las LoRAs de Generate. Elige img2img o Sin LoRA.", *btn_idle()
+            return
 
         def progress_callback(prog):
             updates.put(_progress_html_from_prog(prog))
@@ -348,6 +350,33 @@ def on_generate_image(
 
 
 def wire_events(ui_comp):
+    def _on_engine_change(engine, selected):
+        from .ui import _lora_dropdown_choices
+        choices = _lora_dropdown_choices(engine)
+        valid = {value for _, value in choices}
+        return gr.update(choices=choices, value=selected if selected in valid else "Auto")
+
+    ui_comp["engine_model"].change(
+        fn=_on_engine_change,
+        inputs=[ui_comp["engine_model"], ui_comp["lora_choice"]],
+        outputs=[ui_comp["lora_choice"]],
+        queue=False,
+    )
+
+    def _on_guidance_change(engine, cfg):
+        from .ui import _generation_control_info
+        cfg_info, negative_info, _ = _generation_control_info(engine, cfg)
+        return gr.update(info=cfg_info), gr.update(info=negative_info)
+
+    for component in ("engine_model", "cfg_scale"):
+        bind_event = ui_comp[component].input if component == "cfg_scale" else ui_comp[component].change
+        bind_event(
+            fn=_on_guidance_change,
+            inputs=[ui_comp["engine_model"], ui_comp["cfg_scale"]],
+            outputs=[ui_comp["cfg_scale"], ui_comp["negative_prompt"]],
+            queue=False,
+        )
+
     def handle_shape(orient):
         w, h = set_orientation(orient)
         return gr.update(value=w), gr.update(value=h)
@@ -361,8 +390,11 @@ def wire_events(ui_comp):
     def _on_style_change(style, light, frame, skin, grade):
         l_choices, l_safe = get_compatible_dropdown_choices(style, "lighting", light)
         f_choices, f_safe = get_compatible_dropdown_choices(style, "framing", frame)
-        preview = preview_modifiers(style, l_safe, skin, f_safe, grade or "auto")
-        return gr.update(choices=l_choices, value=l_safe), gr.update(choices=f_choices, value=f_safe), preview
+        s_choices, s_safe = get_compatible_dropdown_choices(style, "skin_finish", skin)
+        c_choices, c_safe = get_compatible_dropdown_choices(style, "color_grade", grade)
+        preview = preview_modifiers(style, l_safe, s_safe, f_safe, c_safe)
+        return (gr.update(choices=l_choices, value=l_safe), gr.update(choices=f_choices, value=f_safe),
+                gr.update(choices=s_choices, value=s_safe), gr.update(choices=c_choices, value=c_safe), preview)
 
     def _on_modifiers_change(style, light, frame, skin, grade):
         return preview_modifiers(style, light, skin, frame, grade or "auto")
@@ -375,7 +407,7 @@ def wire_events(ui_comp):
     ui_comp["image_style"].change(
         fn=_on_style_change,
         inputs=_modifier_inputs,
-        outputs=[ui_comp["lighting"], ui_comp["shot_framing"], ui_comp["modifier_preview"]],
+        outputs=[ui_comp["lighting"], ui_comp["shot_framing"], ui_comp["skin_finish"], ui_comp["color_grade"], ui_comp["modifier_preview"]],
     )
     for _comp in ("lighting", "shot_framing", "skin_finish", "color_grade"):
         ui_comp[_comp].change(

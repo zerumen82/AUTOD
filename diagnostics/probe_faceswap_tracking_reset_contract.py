@@ -21,6 +21,8 @@ from types import ModuleType, SimpleNamespace
 import cv2
 import numpy as np
 
+from roop.faceswap_config import get_faceswap_config
+
 
 ROOT = Path(__file__).resolve().parents[1]
 METHODS = {
@@ -43,11 +45,13 @@ def manager_class(path):
     source_class = next(n for n in module.body if isinstance(n, ast.ClassDef)
                         and n.name == 'ProcessMgr')
     source_class.body = [n for n in source_class.body
-                         if isinstance(n, ast.FunctionDef) and n.name in METHODS]
-    assert {n.name for n in source_class.body} == METHODS
+                         if isinstance(n, ast.FunctionDef)
+                         and n.name in METHODS | {'_destination_match_threshold'}]
+    assert METHODS <= {n.name for n in source_class.body}
     source_class.decorator_list = []
     isolated = ast.Module(body=[source_class], type_ignores=[])
     namespace = {'os': os, 'cv2': cv2, 'np': np, 'traceback': traceback,
+                 'get_faceswap_config': get_faceswap_config,
                  'roop': SimpleNamespace(globals=SimpleNamespace(selected_face_references={}))}
     quality = ast.parse((ROOT / 'roop' / 'quality_enhancements.py').read_text(encoding='utf-8'))
     histogram = next(n for n in quality.body if isinstance(n, ast.FunctionDef)

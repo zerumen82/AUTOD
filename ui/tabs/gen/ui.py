@@ -3,21 +3,22 @@ from roop.img_editor.flux_gen_comfy_client import (
     get_default_generation_engine,
     get_installed_generation_engines,
 )
-from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices, get_compatible_dropdown_choices, preview_modifiers
-from roop.img_editor.gen_prompt_config import get_generate_ui_config, get_lora_catalog
+from roop.img_editor.gen_prompt_modifiers import get_dropdown_choices, preview_modifiers
+from roop.img_editor.gen_prompt_config import get_generate_ui_config
+from roop.img_editor.gen_lora_resolver import get_available_lora_catalog
 
 
-def _lora_dropdown_choices():
-    """Dropdown de LoRA: Auto, Sin LoRA y el catálogo completo visible.
-
-    El usuario ve y elige sus LoRAs (v5.1210); la elección manual se aplica
-    sin gates con la fuerza del catálogo.
-    """
+def _lora_dropdown_choices(engine_model=None):
+    """Solo archivos instalados de la familia del motor seleccionado."""
+    from roop.img_editor.flux_gen_comfy_client import FluxGenComfyClient
     choices = [
         ("🤖 Auto (según escena)", "Auto"),
         ("🚫 Sin LoRA", "None"),
     ]
-    for entry in get_lora_catalog():
+    client = FluxGenComfyClient()
+    loaded, _ = client.load(engine_model or get_default_generation_engine())
+    entries = get_available_lora_catalog(client._alias, client._is_sdxl) if loaded else []
+    for entry in entries:
         tags = []
         if entry.get("nsfw"):
             tags.append("NSFW")
@@ -30,6 +31,18 @@ def _lora_dropdown_choices():
             label = f"{label} ({', '.join(tags)})"
         choices.append((label, str(entry.get("file") or "")))
     return choices
+
+
+def _generation_control_info(engine_model, cfg_scale=0):
+    from roop.img_editor.flux_gen_comfy_client import FluxGenComfyClient
+    client = FluxGenComfyClient()
+    client.load(engine_model or get_default_generation_engine())
+    cfg = float(cfg_scale or client._get_model_conf().get("cfg", 1.0))
+    distilled = client._clip_type == "flux" and not client._is_longcat
+    negative_active = cfg != 1.0 and not (distilled and cfg > 1.0)
+    cfg_info = "Guía propia de FLUX; el muestreo usa CFG=1." if distilled and cfg > 1 else "CFG real del muestreo; 0 usa la configuración del modelo."
+    negative_info = "En txt2img/img2img se aplica al muestreo; vacío usa el negativo del modelo." if negative_active else "En txt2img/img2img no influye con esta guía: el muestreo usa CFG=1."
+    return cfg_info, negative_info, negative_active
 
 
 CSS_STYLE = """
@@ -105,6 +118,7 @@ def build_gen_ui():
                 ],
                 value=_route_value,
                 label="Ruta con imagen de referencia",
+                info="Image Editor usa su motor y estilos, sin LoRAs de Generate. Recibe semilla, pasos, CFG y negativo.",
             )
             ref_image = gr.Image(label="Foto de partida", type="pil", height=300)
 
@@ -136,7 +150,7 @@ def build_gen_ui():
                     label="Color / gradación",
                 )
 
-        modifier_preview = gr.HTML("")
+        modifier_preview = gr.HTML(preview_modifiers("photoreal", "natural", "detailed", "auto", "auto"))
 
         with gr.Row():
             orientation = gr.Radio(
@@ -184,10 +198,10 @@ def build_gen_ui():
             )
 
         lora_choice = gr.Dropdown(
-            choices=_lora_dropdown_choices(),
+            choices=_lora_dropdown_choices(_default),
             value="Auto",
             label="LoRA",
-            info="Auto la elige según la escena; lo que tú elijas se aplica tal cual.",
+            info="Solo instaladas compatibles con el modelo. Las LoRAs SDXL/Pony requieren esos modelos; FLUX y LongCat usan otra familia.",
         )
 
         gr.Markdown("_👆 Prompt + GENERAR ya funciona: los defaults (photoreal, natural, piel detallada) son los más realistas. Los extras son opcionales._")
@@ -203,6 +217,7 @@ def build_gen_ui():
             )
 
         with gr.Accordion("⚙️ Avanzado (vacío/0 = automático)", open=False):
+            _cfg_info, _negative_info, _ = _generation_control_info(_default)
             with gr.Row():
                 seed = gr.Number(
                     value=0, precision=0,
@@ -215,17 +230,19 @@ def build_gen_ui():
                 cfg_scale = gr.Number(
                     value=0.0,
                     label="CFG (0 = del modelo)",
+                    info=_cfg_info,
                 )
             negative_prompt = gr.Textbox(
                 label="Negative prompt (vacío = el del modelo)",
                 lines=2,
+                info=_negative_info,
             )
             with gr.Row():
                 enhance_tier = gr.Radio(
                     choices=[("HD (1920px)", "hd"), ("4K (3840px)", "4k")],
                     value="hd",
-                    label="Calidad de salida",
-                    info="Lado mayor del acabado; ampliar no inventa detalle.",
+                    label="Perfil de acabado",
+                    info="HD/4K ajusta el acabado; no fija el tamaño final. La resolución de generación se elige en Ancho/Alto.",
                 )
                 samples = gr.Radio(
                     choices=[("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")],

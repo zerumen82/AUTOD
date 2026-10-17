@@ -19,18 +19,36 @@ def _loras_dir() -> str:
 
 
 def _lora_exists(name: str) -> bool:
-    return bool(name) and os.path.isfile(os.path.join(_loras_dir(), name))
+    path = _lora_path(name)
+    return bool(path) and os.path.isfile(path)
 
 
-_SDXL_LORA_CACHE: Dict[str, bool] = {}
-_CLIP_LORA_CACHE: Dict[str, bool] = {}
+def _lora_path(name: str) -> str:
+    """Solo archivos dentro de la raíz de LoRAs, incluidos subdirectorios."""
+    if not name or os.path.isabs(name) or os.path.splitdrive(name)[0]:
+        return ""
+    root = os.path.realpath(_loras_dir())
+    path = os.path.realpath(os.path.join(root, name))
+    try:
+        if os.path.normcase(os.path.commonpath([root, path])) != os.path.normcase(root):
+            return ""
+    except ValueError:
+        return ""
+    return path
+
+
+_SDXL_LORA_CACHE: Dict[Tuple[str, int, int], bool] = {}
+_CLIP_LORA_CACHE: Dict[Tuple[str, int, int], bool] = {}
 
 
 def lora_has_clip_keys(filename: str) -> bool:
-    key = filename.lower()
+    path = _lora_path(filename)
+    if not path or not os.path.isfile(path):
+        return False
+    stat = os.stat(path)
+    key = (path, stat.st_mtime_ns, stat.st_size)
     if key in _CLIP_LORA_CACHE:
         return _CLIP_LORA_CACHE[key]
-    path = os.path.join(_loras_dir(), filename)
     has = False
     try:
         from safetensors import safe_open
@@ -46,21 +64,31 @@ def lora_has_clip_keys(filename: str) -> bool:
 
 
 def _is_sdxl_lora(filename: str) -> bool:
-    key = filename.lower()
+    path = _lora_path(filename)
+    if not path or not os.path.isfile(path):
+        return False
+    stat = os.stat(path)
+    key = (path, stat.st_mtime_ns, stat.st_size)
     if key in _SDXL_LORA_CACHE:
         return _SDXL_LORA_CACHE[key]
-    path = os.path.join(_loras_dir(), filename)
     ok = False
     try:
         from safetensors import safe_open
         with safe_open(path, framework="pt") as sf:
-            for k in sf.keys():
-                if k.startswith("lora_unet_") or k.startswith("lora_te"):
-                    ok = True
-                    break
-                if k.startswith("diffusion_model.") or "lora_transformer" in k:
-                    ok = False
-                    break
+            meta = sf.metadata() or {}
+            base = meta.get("ss_base_model_version", "").lower()
+            arch = meta.get("modelspec.architecture", "").lower()
+            keys = list(sf.keys())
+            adapter = any("lora_down.weight" in k or "lora_A.weight" in k for k in keys)
+            ok = adapter and (base.startswith("sdxl") or "stable-diffusion-xl" in arch)
+            if adapter and not base and not arch:
+                # SDXL cross-attention usa contexto de 2048; SD1/2 no.
+                ok = any(
+                    k.startswith("lora_unet_") and "attn2_to_k" in k
+                    and k.endswith("lora_down.weight")
+                    and sf.get_slice(k).get_shape()[-1] == 2048
+                    for k in keys
+                )
     except Exception:
         ok = False
     _SDXL_LORA_CACHE[key] = ok
@@ -70,6 +98,30 @@ def _is_sdxl_lora(filename: str) -> bool:
 def _is_pony_model(model_alias: str) -> bool:
     a = (model_alias or "").lower()
     return a in ("pony_realism", "cyberrealistic_pony") or "pony" in a
+
+
+def lora_selection_error(filename: str, model_alias: str, is_sdxl: bool) -> str:
+    if not _lora_path(filename):
+        return "Ruta de LoRA inválida: debe estar dentro de la carpeta de LoRAs."
+    if not _lora_exists(filename):
+        return f"LoRA no instalada: {filename}."
+    if not _is_sdxl_lora(filename):
+        return f"LoRA no reconocida como adaptador SDXL compatible: {filename}."
+    if not is_sdxl:
+        return f"La LoRA {filename} requiere un modelo SDXL; no sirve con {model_alias}."
+    entry = next((e for e in get_lora_catalog()
+                  if os.path.normpath(e.get("file", "")).casefold()
+                  == os.path.normpath(filename).casefold()), {})
+    if entry.get("pony_only") and not _is_pony_model(model_alias):
+        return f"La LoRA {filename} requiere un modelo Pony."
+    if entry.get("sdxl_only") and _is_pony_model(model_alias):
+        return f"La LoRA {filename} está configurada para SDXL base, no Pony."
+    return ""
+
+
+def get_available_lora_catalog(model_alias: str, is_sdxl: bool) -> List[Dict]:
+    return [entry for entry in get_lora_catalog()
+            if not lora_selection_error(entry.get("file", ""), model_alias, is_sdxl)]
 
 
 def _score_entry(prompt_en: str, entry: Dict) -> float:
@@ -98,6 +150,8 @@ def resolve_scene_loras(
     multi_person = is_multi_person_scene(prompt_en)
 
     for entry in get_lora_catalog():
+        if entry.get("manual_only"):
+            continue
         if not include_nsfw and entry.get("nsfw"):
             continue
         if not entry.get("always"):
@@ -118,6 +172,8 @@ def resolve_scene_loras(
 
     scored = []
     for entry in get_lora_catalog():
+        if entry.get("manual_only"):
+            continue
         if not include_nsfw and entry.get("nsfw"):
             continue
         if entry.get("always"):

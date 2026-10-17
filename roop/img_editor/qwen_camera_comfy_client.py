@@ -23,9 +23,18 @@ LIGHTNING_LORA = "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
 CLIP = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
 MMPROJ = "Qwen2.5-VL-7B-Instruct-mmproj-f16.gguf"
 VAE = "qwen_image_vae.safetensors"
-# 768 px on the long side finished a cold Qwen run on this 8 GB GPU in
-# 129.8 s. 1152 px only finished after the weights were already resident.
-CAMERA_SIDE = 768
+# v5.1222: la LoRA de ángulos necesita ~1 MP para REENCUADRAR. Medido
+# 2026-10-17 (diagnostics/out/pov_experiments_20261017.png): con la
+# entrada directa a 768 px la salida RECONSTRUÍA la escena sin mover la
+# cámara (runs reales 00:11 / 02:38 / 16:53: correlación 0.83 frente a
+# 0.35 de un movimiento real) y con FluxKontextImageScale (~1 MP, igual
+# que la workflow de referencia del autor — oficina 28/09 sí se movió)
+# la misma foto/pose/semilla salió REENCUADRADA (correlación -0.08) en
+# 197 s sobre esta 8 GB: sin coste de tiempo ni de VRAM.
+# El único tope de la SUBIDA acota decode/envío de fotos gigantes; el
+# lienzo lo decide node9 y es constante (~1 MP) para cualquier entrada,
+# así que el presupuesto de la ruta (stall 300 s / run 420 s) se mantiene.
+UPLOAD_SIDE = 2048
 
 # Presupuestos de la ruta de cámara, medidos en esta máquina (2026-10-16,
 # con MUSICIA/ACE-Step compartiendo el equipo): la carga fría + prep tardó
@@ -156,11 +165,16 @@ class QwenCameraComfyClient:
             "7": {"class_type": "CLIPLoaderGGUF", "inputs": {
                 "clip_name": CLIP, "type": "qwen_image"}},
             "8": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
-            "10": {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["8", 0]}},
+            # v5.1222: el escalado ~1 MP de la workflow de referencia del
+            # autor; sin él la LoRA reconstruía la escena en vez de
+            # reencuadrarla (medido, ver UPLOAD_SIDE). VAEEncode e image1
+            # salen de este nodo.
+            "9": {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}},
+            "10": {"class_type": "VAEEncode", "inputs": {"pixels": ["9", 0], "vae": ["8", 0]}},
             "11": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
-                "clip": ["7", 0], "prompt": prompt, "vae": ["8", 0], "image1": ["1", 0]}},
+                "clip": ["7", 0], "prompt": prompt, "vae": ["8", 0], "image1": ["9", 0]}},
             "12": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
-                "clip": ["7", 0], "prompt": "", "vae": ["8", 0], "image1": ["1", 0]}},
+                "clip": ["7", 0], "prompt": "", "vae": ["8", 0], "image1": ["9", 0]}},
             "13": {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {
                 "conditioning": ["11", 0], "reference_latents_method": "index_timestep_zero"}},
             "14": {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {
@@ -223,14 +237,15 @@ class QwenCameraComfyClient:
         try:
             buffer = io.BytesIO()
             camera_input = image.convert("RGB")
-            # The old FluxKontextImageScale expanded every input to ~1 MP,
-            # including mobile photos uploaded at 800 px. That made Qwen
-            # unpredictable on 8 GB and ignored the client's 768 px cap.
-            # Use an explicit, modest render size even for smaller uploads.
-            scale = CAMERA_SIDE / max(camera_input.size)
-            width = max(16, round(camera_input.width * scale / 16) * 16)
-            height = max(16, round(camera_input.height * scale / 16) * 16)
-            camera_input = camera_input.resize((width, height), Image.Resampling.LANCZOS)
+            # v5.1222: el lienzo lo decide node9 (FluxKontextImageScale,
+            # ~1 MP — medido en UPLOAD_SIDE). Aquí solo se acota el envío
+            # de fotos gigantes; una foto que ya cabe viaja intacta.
+            scale = min(1.0, UPLOAD_SIDE / max(camera_input.size))
+            if scale < 1.0:
+                width = max(16, round(camera_input.width * scale / 16) * 16)
+                height = max(16, round(camera_input.height * scale / 16) * 16)
+                camera_input = camera_input.resize((width, height), Image.Resampling.LANCZOS)
+            width, height = camera_input.size
             camera_input.save(buffer, format="PNG")
             buffer.seek(0)
             uploaded = requests.post(f"{url}/upload/image", files={

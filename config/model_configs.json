@@ -168,6 +168,12 @@
     "img2img_denoise": 0.65
   },
   "faceswap": {
+    "matching_distance_default": 0.20,
+    "occlusion_support_threshold": 0.1,
+    "occlusion_min_fraction": 0.01,
+    "occlusion_max_fraction": 0.40,
+    "mouth_occlusion_min_evidence": 0.18,
+    "mouth_occlusion_min_ring_evidence": 0.12,
     "landmark_bbox_margin_fraction": 0.02,
     "landmark_bbox_margin_pixels": 2.0,
     "align_constrain_scale_dev": 0.35,

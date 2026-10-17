@@ -139,7 +139,7 @@ check('pm: defaults de reintento antes del try',
 check('pm: guard de prerrequisitos del reintento',
       'if cap is None or fourcc is None or temp_output is None or end_frame is None:' in src_pm)
 check('pm: reintento llama a process_frame con file_path',
-      'self.process_frame(frame, enable_temporal_smoothing=True, file_path=video_path)' in src_pm)
+      'self.process_frame(frame, enable_temporal_smoothing=temporal_smoothing, file_path=video_path)' in src_pm)
 check('pm: out.release blindado', 'if out is not None:\n                    out.release()' in src_pm)
 
 # [6] ProcessMgr: gate de segmentación ausente usa hold medido + contador

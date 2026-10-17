@@ -120,6 +120,13 @@ def main():
         # The conjunction strip leaves "go naked" without the person; the
         # global pass must still name the person the user asked about.
         ("EL HOMBRE DEBE SER CALVO E IR DESNUDO", "Man must be bald and go naked"),
+        # Sufijo corporal con sujeto equivocado (log real 19:49): el sufijo
+        # de desnudez nombraba al SOFÁ (primer sujeto del compuesto) en vez
+        # de la mujer que pedía la desnudez → sofá sin pintar y zona dañada.
+        (
+            "el sofa debe ser gris, las paredes deben ser grises, la mujer debe ir desnuda",
+            "the sofa must be grey, the walls must be grey, the woman must go naked",
+        ),
     )
     source = Image.new("RGB", (48, 32), "white")
     manager = ImgEditorManager()
@@ -239,6 +246,24 @@ def main():
                     assert all("fully nude" not in item.lower() for item in prompts), prompts
                 else:
                     assert any("fully nude" in item.lower() for item in prompts), prompts
+                    # El sufijo de desnudez nombra al sujeto de LA CLÁUSULA
+                    # CORPORAL (log real 19:49: «The sofa is fully nude» cuando
+                    # la desnudez la pedía la mujer → sofá intacto, zona
+                    # dañada). La cláusula sin sujeto no exige nombre aquí
+                    # («calvo e ir desnudo» se cubre con el sujeto global).
+                    joined = " ".join(prompts).lower()
+                    assert "sofa is fully nude" not in joined, joined
+                    for clause in clauses:
+                        clause_f = manager._prompt_authority_facts(clause, clause)
+                        if (clause_f.get("body")
+                                and clause_f.get("body_direction") == "uncover"):
+                            nude_subject = (
+                                manager._visual_subject_description(clause) or ""
+                            ).strip(" ,.;")
+                            if nude_subject:
+                                assert f"{nude_subject} is fully nude" in joined, (
+                                    nude_subject, joined,
+                                )
                 # A subject-less body clause must reach the model with the
                 # person named, or the global pass edits whoever it picks.
                 stripped_body = [
@@ -338,9 +363,13 @@ def main():
         print("OK: Calidad con prompt -> Turbo único + acabado clásico, sin restauración facial")
 
         retry_client = RetryClient()
+        import contextlib
+        import io
+        retry_log = io.StringIO()
         with (patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Make the wall blue"),
               patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=retry_client),
-              patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish)):
+              patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish),
+              contextlib.redirect_stdout(retry_log)):
             retried, retry_message, _ = manager.generate_intelligent(
                 image=source, prompt="Pon la pared azul", engine="longcat",
                 quality_mode=True, quality_preserve_faces=False,
@@ -350,6 +379,12 @@ def main():
         assert len(attempts) == 2
         assert "not yet been changed" in attempts[1]["prompt"]
         assert "segundo intento" in retry_message
+        # La consola debe anunciar el segundo render ANTES de generarlo: la
+        # noche del 2026-10-16 el usuario vio dos renders seguidos sin línea
+        # alguna que explicara el segundo (log 23:55, run 15).
+        console = retry_log.getvalue()
+        assert "Cambio casi nulo sobre la foto; segundo intento" in console, console
+        assert "Segundo intento aplicado:" in console, console
         print("OK: Calidad reintenta una salida idéntica con la petición visible")
 
         unchanged_client = RetryClient(always_white=True)
@@ -391,6 +426,24 @@ def main():
         body_transform=True, body_direction="uncover", body_intensity=0.70,
     )
     assert "fully nude" in naked_prompt.lower(), naked_prompt
+    # v5.1217 — typo en la grafía del usuario (log real 23:40 «ir ddesnuda»):
+    # la cláusula cruda midió direction="change" con intensity=0.70 y ganaba
+    # por intensidad, así que el sufijo de desnudez se caía aunque la
+    # traducción de la MISMA petición ya midiera uncover. La dirección de la
+    # petición no depende de una sola grafía.
+    typo = manager._prompt_authority_facts(
+        "la mujer de en medio debe ir ddesnuda",
+        "The woman in the middle must go naked",
+    )
+    assert typo["body"] and typo["body_direction"] == "uncover", typo
+    assert typo["body_intensity"] >= 0.60, typo
+    typo_prompt = manager._compose_generation_prompt(
+        "The woman in the middle must go naked", engine="longcat", magnitude=0.85,
+        body_transform=True, body_direction=typo["body_direction"],
+        body_intensity=typo["body_intensity"],
+    )
+    assert "fully nude" in typo_prompt.lower(), typo_prompt
+    print("OK: typo «ddesnuda» conserva la dirección uncover y el sufijo desnudez")
 
 
     class _Face:

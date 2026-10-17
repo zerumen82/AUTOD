@@ -736,7 +736,7 @@ class ProcessMgr:
                                 _s = self._calculate_similarity(_tf_emb, getattr(_vf, 'embedding', None))
                                 if _s > _best_sim:
                                     _best_sim, _best_tf = _s, _tf
-                    if _best_tf is not None and (_best_sim > 0.28 or _in_random):
+                    if _best_tf is not None and (_best_sim > self._destination_match_threshold(0.28) or _in_random):
                         face_ref_data = {
                             'face_obj': _best_tf,
                             'embedding': _best_tf.embedding,
@@ -750,7 +750,7 @@ class ProcessMgr:
                     else:
                         print(
                             f"[FOTO] {filename}: sin referencia por archivo ni match "
-                            f">=0.28 entre {len(target_faces)} destinos y {len(valid_faces)} caras "
+                            f">{self._destination_match_threshold(0.28):.2f} entre {len(target_faces)} destinos y {len(valid_faces)} caras "
                             f"(best={max(0.0, _best_sim):.3f}); evaluando recuperación"
                         )
 
@@ -779,7 +779,7 @@ class ProcessMgr:
                             sim = self._calculate_similarity(_ref_emb, face.embedding)
                             _all_pairs.append({'face': face, 'sim': sim, 'ref': _ref})
                     # v5.1100: 0.35→0.28 — ref de baja calidad (cara pequeña en UI) ya no pierde el match
-                    _good = [p for p in _all_pairs if p['sim'] > 0.28]
+                    _good = [p for p in _all_pairs if p['sim'] > self._destination_match_threshold(0.28)]
                     if _good:
                         if _random_multi:
                             # MODO ALEATORIO MULTI-DESTINO: el usuario seleccionó 2-3 caras
@@ -886,7 +886,7 @@ class ProcessMgr:
                         _weak = max((p['sim'] for p in _all_pairs), default=0.0)
                         print(
                             f"[FOTO] {filename}: match débil contra su referencia "
-                            f"(mejor sim de {len(_photo_bank)} ref(s)={max(_weak, 0.0):.3f} <= 0.28, "
+                            f"(mejor sim de {len(_photo_bank)} ref(s)={max(_weak, 0.0):.3f} <= {self._destination_match_threshold(0.28):.2f}, "
                             f"caras detectadas={len(valid_faces)}); evaluando recuperación"
                         )
 
@@ -1398,10 +1398,25 @@ class ProcessMgr:
         except Exception:
             return None
 
+    def _destination_match_threshold(self, base_threshold):
+        """Adjust destination identity gates; source identity scores stay raw."""
+        default = float(get_faceswap_config()['matching_distance_default'])
+        value = getattr(getattr(self, 'options', None), 'face_distance_threshold', default)
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = default
+        if not np.isfinite(value):
+            value = default
+        value = float(np.clip(value, 0.0, 1.0))
+        if value == default:
+            return base_threshold
+        return float(np.clip(base_threshold + default - value, 0.0, 1.0))
+
     def _selected_target_is_unique(self, candidate, faces, video_basename):
         """Confirm a low detector score using the selected destination identity."""
         candidate_sim = self._bank_best_sim(getattr(candidate, 'embedding', None), video_basename)
-        if candidate_sim is None or candidate_sim < 0.35:
+        if candidate_sim is None or candidate_sim < self._destination_match_threshold(0.35):
             return False
         others = [
             self._bank_best_sim(getattr(face, 'embedding', None), video_basename)
@@ -1764,7 +1779,7 @@ class ProcessMgr:
             # and near last known position, accept with low sim threshold.
             # Spatial proximity + single face + sane det_score + area consistency
             # make false positives extremely unlikely even at threshold 0.02.
-            accept = sim >= min_sim - 0.005  # v5.1027: epsilon para evitar falsos negativos por precisión flotante
+            accept = sim >= self._destination_match_threshold(min_sim - 0.005)  # v5.1027: epsilon para evitar falsos negativos por precisión flotante
             if not accept and not multi_face and last_center is not None:
                 center = get_face_center(face)
                 if center:
@@ -1776,7 +1791,7 @@ class ProcessMgr:
                     if dist < max(300, face_w * 2.0):
                         det = getattr(face, 'det_score', 0.5)
                         if det > 0.10:
-                            accept = sim >= max(0.22, min_sim - 0.20)  # v5.1053: floor 0.02→0.22 (exquisito)
+                            accept = sim >= self._destination_match_threshold(max(0.22, min_sim - 0.20))  # v5.1053: floor 0.02→0.22 (exquisito)
                             # v5.1027: Fix last_bbox_val undefined → usar _last_swap_bbox
                             last_bbox_ref = self._last_swap_bbox.get(video_basename) if hasattr(self, '_last_swap_bbox') else None
                             if not accept and last_bbox_ref is not None:
@@ -1790,7 +1805,7 @@ class ProcessMgr:
                                 # un closeup legítimo crece 10-30x la última swap y el
                                 # tope 6.0 lo mataba (log 095800: tramos sin swap).
                                 if 0.18 <= area_ratio <= (100.0 if self._is_large_face(face.bbox, frame_shape) else 6.0):
-                                    accept = sim >= max(0.20, min_sim - 0.30)  # v5.1053: floor 0.02→0.20 (exquisito)
+                                    accept = sim >= self._destination_match_threshold(max(0.20, min_sim - 0.30))  # v5.1053: floor 0.02→0.20 (exquisito)
 
             if accept:
                 # v5.1051: ANTI-FALLBACK A CARA EQUIVOCADA (póster/foto pequeña).
@@ -1847,7 +1862,7 @@ class ProcessMgr:
             # el bucle los rechaza con `continue` y NUNCA llegan a candidates.
             # Los mismos 3 gates del bucle (mini-cara + cortada + área vs última swap).
             if (re_fails + 1) >= 3 and tracking_emb is not None:
-                _rescue_min = 0.48 if multi_face else 0.38
+                _rescue_min = self._destination_match_threshold(0.48 if multi_face else 0.38)
                 for face in valid_faces:
                     if not hasattr(face, 'embedding') or face.embedding is None:
                         continue
@@ -1924,7 +1939,7 @@ class ProcessMgr:
                         _fs = max(_fs, _bk)
                     if tracking_emb is not None:
                         _fs = max(_fs, float(self._calculate_similarity(tracking_emb, _fg.embedding)))
-                    if _fs < min_sim - 0.005:
+                    if _fs < self._destination_match_threshold(min_sim - 0.005):
                         continue  # rechazo legítimo por sim (ya cubierto por el print)
                     _gw = _fg.bbox[2] - _fg.bbox[0] if (hasattr(_fg, 'bbox') and _fg.bbox is not None) else 0
                     _gh = _fg.bbox[3] - _fg.bbox[1] if (hasattr(_fg, 'bbox') and _fg.bbox is not None) else 0
@@ -1971,7 +1986,7 @@ class ProcessMgr:
                     if frame_shape is not None and face.bbox is not None and self._is_bbox_clipped_by_frame(face.bbox, frame_shape, allow_partial_overflow=True):
                         continue
                     track_sim = float(self._calculate_similarity(tracking_emb, face.embedding))
-                    if track_sim >= (0.26 if multi_face else 0.20):  # v5.1053: 0.10→0.20/0.26 (exquisito)
+                    if track_sim >= self._destination_match_threshold(0.26 if multi_face else 0.20):  # v5.1053: 0.10→0.20/0.26 (exquisito)
                         area = self._largest_face_area(face)
                         candidates.append((track_sim, area, face))
             if not candidates and re_fails >= 10:
@@ -2040,8 +2055,8 @@ class ProcessMgr:
         # o está cerca de la última posición conocida; lejos + débil = otra cara.
         # Los casos duros (perfiles con sim 0.15-0.22) siguen recuperándose vía el
         # umbral progresivo de v5.1005 (re_fails baja min_sim → mode pasa a emb).
-        re_search_mode = "spatial" if best_sim < min_sim else "emb"
-        if re_search_mode == "spatial" and best_sim < 0.30 and video_basename:
+        re_search_mode = "spatial" if best_sim < self._destination_match_threshold(min_sim) else "emb"
+        if re_search_mode == "spatial" and best_sim < self._destination_match_threshold(0.30) and video_basename:
             _lb_re = getattr(self, '_last_swap_bbox', {}).get(video_basename)
             if _lb_re is not None:
                 try:
@@ -2493,7 +2508,7 @@ class ProcessMgr:
                             best_score = score
                             best_match = face
 
-                    if best_match and best_score > 0.35:
+                    if best_match and best_score > self._destination_match_threshold(0.35):
                         selected_face = best_match
                         selection_method = f"usuario (score={best_score:.2f})"
                     else:
@@ -2511,16 +2526,16 @@ class ProcessMgr:
                             if hasattr(f, 'bbox') and f.bbox is not None
                             and (f.bbox[2] - f.bbox[0]) >= 32 and (f.bbox[3] - f.bbox[1]) >= 32
                         ]
-                        if len(_non_tiny) == 1:
+                        if len(_non_tiny) == 1 and self._destination_match_threshold(0.35) <= 0.35:
                             selected_face = _non_tiny[0]
                             selection_method = "auto-única-cara (sin ambigüedad)"
                             print(
-                                f"[SELECTED_FACES_FRAME] Sin match de identidad ({best_score:.2f} < 0.35) "
+                                f"[SELECTED_FACES_FRAME] Sin match de identidad ({best_score:.2f} <= {self._destination_match_threshold(0.35):.2f}) "
                                 f"pero hay UNA sola cara en el frame — ancla sin ambigüedad"
                             )
                         else:
                             print(
-                                f"[SELECTED_FACES_FRAME] Sin match de identidad ({best_score:.2f} < 0.35) "
+                                f"[SELECTED_FACES_FRAME] Sin match de identidad ({best_score:.2f} <= {self._destination_match_threshold(0.35):.2f}) "
                                 f"con {len(valid_faces)} cara(s) en el frame — NO se ancla ninguna "
                                 f"(esperando la cara seleccionada; frame sin swap)"
                             )
@@ -2812,14 +2827,14 @@ class ProcessMgr:
         # candidato correcto (con mejor best_score por proximidad) se rechazaba
         # aunque tuviera sim decente (0.66 vs top 0.95) → ghost/hold → parpadeo.
         ok = (
-            cand_sim >= min_sim
+            cand_sim >= self._destination_match_threshold(min_sim)
             and cand_sim >= top_sim - 0.15
             and margin >= min_margin
         )
         # v5.1074b: Retry aún más laxo — aceptar si candidato tiene sim razonable
         if not ok and multi_face:
             ok = (
-                cand_sim >= min_sim - 0.08
+                cand_sim >= self._destination_match_threshold(min_sim - 0.08)
                 and cand_sim >= top_sim - 0.25
                 and margin >= 0.04  # v5.1100: 0.02→0.04 — margin 0.02 en multi-face = dos personas indistinguibles → NO aceptar (caer a Lost/hold), era la fuga de "cara donde no toca"
             )
@@ -2866,7 +2881,7 @@ class ProcessMgr:
             _bank_sim = self._bank_best_sim(face.embedding, video_basename)
             if _bank_sim is not None:
                 sim = max(sim, _bank_sim)
-            if sim < min_sim:
+            if sim < self._destination_match_threshold(min_sim):
                 continue
             center = get_face_center(face)
             if anchor_center and center:
@@ -3183,7 +3198,7 @@ class ProcessMgr:
                             else:
                                 emb_thresh = 0.32  # v5.1021: 0.38→0.32
 
-                            if emb_score >= emb_thresh:
+                            if emb_score >= self._destination_match_threshold(emb_thresh):
                                 score += emb_score * emb_weight
                             else:
                                 # v5.1004: Si la cara está muy cerca del ancla espacial
@@ -3537,7 +3552,7 @@ class ProcessMgr:
                                 # v5.1053: EXQUISITO — umbrales subidos (0.18→0.30, 0.28→0.34, 0.38→0.42):
                                 # el fallback ampliado aceptaba sim 0.18-0.28 en multi-face = otra persona
                                 emb_thresh_exp = 0.30 if (scene_state.get('is_close_up') and lost_count > 0) else (0.34 if scene_state.get('is_close_up') else 0.42)
-                                if emb_score >= emb_thresh_exp:
+                                if emb_score >= self._destination_match_threshold(emb_thresh_exp):
                                     score = emb_score * 0.30
                             # v5.1053: EXQUISITO — aceptación solo-espacial (sin identidad) SOLO en
                             # single-face. En multi-face dos personas pueden estar adyacentes.
@@ -3545,7 +3560,7 @@ class ProcessMgr:
                                 min_sim_fallback = 0.25
                                 if original_embedding is not None and hasattr(face, 'embedding') and face.embedding is not None:
                                     emb_score = float(self._calculate_similarity(original_embedding, face.embedding))
-                                    if emb_score >= min_sim_fallback:
+                                    if emb_score >= self._destination_match_threshold(min_sim_fallback):
                                         score = max(0.05, 0.25 * (1.0 - dist / expanded_threshold))
                             if score > best_score:
                                 best_score = score
@@ -4369,6 +4384,33 @@ class ProcessMgr:
             return None, None
 
     @staticmethod
+    def _localize_mouth_occlusion(mask, points):
+        """Rescata un único objeto oral medido; no recorta una máscara ambigua."""
+        if mask is None or points is None:
+            return None
+        occ = np.asarray(mask, dtype=np.float32)
+        if occ.ndim != 2 or not occ.size or not np.isfinite(occ).all():
+            return None
+        settings = get_faceswap_config()
+        support = occ > settings["occlusion_support_threshold"]
+        count, labels = cv2.connectedComponents(support.astype(np.uint8))
+        areas = np.bincount(labels.ravel(), minlength=count)
+        selected = None
+        for label in range(1, count):
+            fraction = float(areas[label]) / occ.size
+            if not settings["occlusion_min_fraction"] <= fraction <= settings["occlusion_max_fraction"]:
+                continue
+            candidate = np.where(labels == label, occ, 0.0)
+            oral, ring = ProcessMgr._mouth_occlusion_evidence(candidate, points)
+            if (oral <= settings["mouth_occlusion_min_evidence"]
+                    or ring <= settings["mouth_occlusion_min_ring_evidence"]):
+                continue
+            if selected is not None:
+                return None
+            selected = candidate
+        return selected
+
+    @staticmethod
     def _mouth_occlusion_evidence(mask, points):
         """Measure an occlusion over the lips and just beyond them."""
         if mask is None or points is None:
@@ -4911,6 +4953,8 @@ class ProcessMgr:
             return result_frame
 
     def _process_face_swap_v21(self, source_face, target_face, result_frame, original_frame, enable_temporal_smoothing=False, person_idx=0, photo_path=None):
+        # Base de composición acumulada: el original solo sirve para medir/referenciar.
+        composite_base = result_frame.copy()
         ProcessMgr._swap_call_count += 1
         call_num = ProcessMgr._swap_call_count
         # A previous face can return before composite and leave its mouth
@@ -4936,11 +4980,11 @@ class ProcessMgr:
         try:
             if not hasattr(source_face, 'embedding') or source_face.embedding is None:
                 print(f"[SWAP_SKIP] Frame {call_num}: cara origen sin embedding; no se puede usar inswapper_256", flush=True)
-                return original_frame
+                return composite_base
 
             if not hasattr(target_face, 'bbox') or target_face.bbox is None:
                 print(f"[SWAP_SKIP] Frame {call_num}: cara destino sin bbox", flush=True)
-                return original_frame
+                return composite_base
 
             # v5.1202: Gate de coherencia kps↔bbox. La matriz de alineación se
             # estima SOLO con los 5 kps (norm_crop2); si el regresor los devuelve
@@ -5357,7 +5401,7 @@ class ProcessMgr:
             x2, y2 = min(result_frame.shape[1], int(x2)), min(result_frame.shape[0], int(y2))
             
             if x2 <= x1 or y2 <= y1:
-                return original_frame
+                return composite_base
 
             face_w = x2 - x1
             face_h = y2 - y1
@@ -5397,7 +5441,7 @@ class ProcessMgr:
                     if hold_blend < 0.10:
                         if call_num % 25 == 1:
                             print(f"[TRACK] Frame {call_num}: ghost fade completo → original")
-                        return original_frame
+                        return composite_base
                     # v5.1001: usar bbox predicha de ghost_face (desplazada con dx,dy) en vez de last_bbox
                     if not hasattr(self, '_last_swap_bbox'):
                         self._last_swap_bbox = {}
@@ -5426,10 +5470,10 @@ class ProcessMgr:
                         )
                     if call_num % 25 == 1:
                         print(f"[TRACK] Frame {call_num}: ghost post-corte → original")
-                    return original_frame
+                    return composite_base
                 if call_num % 25 == 1:
                     print(f"[TRACK] Frame {call_num}: ghost sin histórico → original")
-                return original_frame
+                return composite_base
 
             # v5.1012: Skip-hold con timeout reducido — después de 6 frames, fuerza swap nuevo
             skip_hold_count_attr = f'_skip_hold_count_{video_basename}'
@@ -5453,7 +5497,7 @@ class ProcessMgr:
                     if call_num % 10 == 1:
                         print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
                     setattr(self, skip_hold_count_attr, skip_hold_count + 1)
-                    return original_frame
+                    return composite_base
                 # Timeout: forzar swap nuevo aunque det_score sea bajo
                 if call_num % 30 == 1:
                     print(f"[SKIP_HOLD_TIMEOUT] Frame {call_num}: timeout {skip_hold_count} holds → forzando swap")
@@ -5472,7 +5516,7 @@ class ProcessMgr:
             if res_data is None:
                 with open(os.path.join(os.path.dirname(__file__), '..', 'debug_swap.log'), 'a') as lf:
                     lf.write(f"[SWAP_FAIL] Frame {call_num}: FaceSwap devolvió None\n")
-                return original_frame
+                return composite_base
             
             # res_data puede ser (swapped_face, M) o solo swapped_face
             if isinstance(res_data, tuple):
@@ -5812,36 +5856,21 @@ class ProcessMgr:
                     raw_swapped_aligned, reference_region,
                     feature_points=_occ_pts, interior_mask=_occ_interior,
                 )
-                # A broad frontal mask can be hair/background plus a real
-                # object over the mouth. Its global >40% gate would discard
-                # the object too. Recheck only those broad masks using the
-                # five-point face location, and require evidence both on and
-                # beyond the lips before accepting the localized mask.
+                occ_settings = get_faceswap_config()
+                occ_support = float(occ_settings["occlusion_support_threshold"])
+                occ_min = float(occ_settings["occlusion_min_fraction"])
+                occ_max = float(occ_settings["occlusion_max_fraction"])
+                # La primera detección ya usa guías. Repetirla no localiza nada:
+                # rescatar solo un componente oral inequívoco de la máscara medida.
                 if (not is_profile and not occ_low_quality
                         and (mouth_open or mouth_geometry_preserve)
                         and occ_mask_aligned is not None
-                        and float(np.mean(occ_mask_aligned > 0.1)) > 0.40):
-                    _front_pts, _front_interior = self._profile_occlusion_guides(
-                        M, getattr(target_face, 'kps', None), (x1, y1, x2, y2),
-                        raw_swapped_aligned.shape, reference_region.shape,
-                    )
-                    if _front_pts is not None:
-                        _front_occ = detect_foreground_occlusion(
-                            raw_swapped_aligned, reference_region,
-                            feature_points=_front_pts, interior_mask=_front_interior,
-                        )
-                        _front_frac = float(np.mean(_front_occ > 0.1))
-                        _oral, _oral_ring = self._mouth_occlusion_evidence(
-                            _front_occ, _front_pts,
-                        )
-                        if 0.01 <= _front_frac <= 0.40 and _oral > 0.18 and _oral_ring > 0.12:
-                            occ_mask_aligned = _front_occ
-                            if call_num % 50 == 1:
-                                print(
-                                    f"[OCCLUSION_RESCUE] Frontal boca objeto "
-                                    f"(frac={_front_frac:.2f}, lips={_oral:.2f}, ring={_oral_ring:.2f})",
-                                    flush=True,
-                                )
+                        and float(np.mean(occ_mask_aligned > occ_support)) > occ_max):
+                    localized = self._localize_mouth_occlusion(occ_mask_aligned, _occ_pts)
+                    if localized is not None:
+                        occ_mask_aligned = localized
+                        if call_num % 50 == 1:
+                            print("[OCCLUSION_RESCUE] Componente oral único medido", flush=True)
                 # v5.1073: Si GFPGAN 512px upscale está activo, reference_region es 512x512
                 # pero occ_mask_aligned es 256x256 (de raw_swapped_aligned). Redimensionar
                 # para que coincidan en mouth bitwise_and.
@@ -5850,14 +5879,14 @@ class ProcessMgr:
                     occ_h, occ_w = occ_mask_aligned.shape[:2]
                     if occ_h != ref_h or occ_w != ref_w:
                         occ_mask_aligned = cv2.resize(occ_mask_aligned, (ref_w, ref_h), interpolation=cv2.INTER_LINEAR)
-                occ_frac = float(np.mean(occ_mask_aligned > 0.1)) if occ_mask_aligned is not None and occ_mask_aligned.size > 1 else 0.0
+                occ_frac = float(np.mean(occ_mask_aligned > occ_support)) if occ_mask_aligned is not None and occ_mask_aligned.size > 1 else 0.0
                 occ_strength = (0.65 if is_small_face else (0.65 if is_profile else 0.80))  # v5.1100: small 0.50→0.65 — con 0.50 una mano deja 50% de swap visible a través (oclusión fallida)
                 occ_applied = False  # v5.1052: el refuerzo de máscara no debe pisar una oclusión real
 
                 if occ_low_quality:
                     if call_num % 100 == 1:
                         print(f"[QUALITY] Oclusión SKIP (lejana/baja calidad: {min(face_w, face_h)}px, det={getattr(target_face, 'det_score', 1.0):.2f} — ruido, no objeto)")
-                elif occ_frac >= 0.01 and occ_frac <= 0.40 and np.max(occ_mask_aligned) > 0.1:
+                elif occ_min <= occ_frac <= occ_max and np.max(occ_mask_aligned) > occ_support:
                     # Una máscara que ocupa casi media cara no localiza un objeto
                     # con suficiente precisión. En los logs se aplicaban máscaras
                     # de 41-55%, debilitando tanto el swap como la boca.
@@ -5882,13 +5911,13 @@ class ProcessMgr:
                     occ_applied = True
                     if call_num % 100 == 1:
                         print(f"[QUALITY] Oclusión aplicada (fuerza={occ_strength:.2f}, cap=0.88, frac={occ_frac*100:.0f}%)")
-                elif call_num % 100 == 1 and occ_frac > 0.40:
+                elif call_num % 100 == 1 and occ_frac > occ_max:
                     print(f"[QUALITY] Oclusión SKIP (frac={occ_frac*100:.0f}% > 40% — máscara no localizada)")
 
                 # La misma máscara se consulta después para decidir si se pegan
                 # píxeles originales sobre la boca. Una máscara global rechazada
                 # tampoco constituye prueba de que haya un objeto en los labios.
-                if occ_low_quality or occ_frac > 0.40:
+                if occ_low_quality or occ_frac > occ_max:
                     occ_mask_aligned = np.zeros_like(occ_mask_aligned)
 
                 # v5.78: Erosión adaptativa — más suave en perfil / boca abierta / primer plano
@@ -5911,22 +5940,8 @@ class ProcessMgr:
                     final_mask = cv2.erode(final_mask, kernel_e, iterations=1)
                     final_mask = cv2.GaussianBlur(final_mask, (blur_sz, blur_sz), 0)
 
-                # v5.83/94/993/1071/1072b: Content-feather para caras 60-120px, perfiles Y closeup profiles.
-                # v5.1152: Closeup profiles ahora también lo necesitan — antes se saltaban y tenían borde más duro.
-                # Solo se salta en is_very_small_face (<60px) donde el ruido domina.
-                # v5.1216: En fotos individuales se omite — final_mask con GaussianBlur ya realiza el blend
-                # continuo; emborronar warped_face a 13-25px en la transición destruía la textura (440->355)
-                # y producía el halo/blur elíptico percibido alrededor del rostro.
-                if not is_very_small_face and not getattr(self, '_is_single_photo', False):
-                    content_blur_sz = int(max(13, min(25, blur_sz + 3))) | 1
-                    tent = np.clip(1.0 - np.abs(final_mask - 0.5) * 2.0, 0, 1.0)
-                    warp_gate = (np.max(warped_face.astype(np.float32), axis=2) > 8).astype(np.float32)
-                    warp_gate = cv2.GaussianBlur(warp_gate, (9, 9), 0)
-                    tent = tent * warp_gate
-                    if np.max(tent) > 0.01:
-                        blurred_face = cv2.GaussianBlur(warped_face, (content_blur_sz, content_blur_sz), 0)
-                        tent_3ch = cv2.merge([tent, tent, tent])
-                        warped_face = (warped_face.astype(np.float32) * (1.0 - tent_3ch) + blurred_face.astype(np.float32) * tent_3ch).astype(np.uint8)
+                # La máscara alfa suavizada funde la transición también en vídeo.
+                # No desenfocar además los píxeles: esa segunda mezcla crea el halo.
 
                 # v5.75: Tail truncation mínimo 0.005 — solo elimina ruido, no mata caras pequeñas
                 final_mask = np.clip((final_mask - 0.005) / (1.0 - 0.005), 0, 1.0)
@@ -6266,9 +6281,13 @@ class ProcessMgr:
                     # ×1.1↔×1.5 frame a frame con XSeg estable → flicker de intensidad del swap.
                     _raw_factor = 0.92 / _mmax
                     _boost_key = f'_mask_boost_ema_{video_basename}'
-                    _prev_factor = getattr(self, _boost_key, _raw_factor)
-                    _boost_factor = 0.70 * _raw_factor + 0.30 * _prev_factor
-                    setattr(self, _boost_key, _boost_factor)
+                    _boost_factor = _raw_factor
+                    if enable_temporal_smoothing and not is_single_photo:
+                        _prev_factor = getattr(self, _boost_key, _raw_factor)
+                        _boost_factor = 0.70 * _raw_factor + 0.30 * _prev_factor
+                        setattr(self, _boost_key, _boost_factor)
+                    elif hasattr(self, _boost_key):
+                        delattr(self, _boost_key)
                     final_mask = np.clip(final_mask * _boost_factor, 0, 1.0)
                     if call_num % 50 == 1:
                         print(f"[MASK_BOOST] Frame {call_num}: máscara débil max={_mmax:.3f} → ×{_boost_factor:.2f} (swap visible)")
@@ -6314,7 +6333,7 @@ class ProcessMgr:
             if final_mask is None:
                 self._mouth_blend_mask = None
                 self._mouth_blend_factor = 0.0
-                return original_frame
+                return composite_base
             blend_mask = self._widen_mask_for_blend(final_mask, face_w, face_h, original_frame.shape)
             # v5.1024: Gradiente frontal suave sobre blend_mask (post-widening)
             blend_mask = self._apply_forehead_gradient(
@@ -6378,7 +6397,7 @@ class ProcessMgr:
                 self._mouth_blend_factor = 0.0
 
             result_frame = (warped_face.astype(np.float32) * composite_mask + 
-                           original_frame.astype(np.float32) * (1.0 - composite_mask)).astype(np.uint8)
+                           composite_base.astype(np.float32) * (1.0 - composite_mask)).astype(np.uint8)
 
             # v5.76: Suavizado temporal SOLO en máscara facial (nunca en todo el frame)
             if enable_temporal_smoothing and prev_frame_result is not None and not is_ghost:
@@ -6445,7 +6464,7 @@ class ProcessMgr:
 
             if blend_mask is not None:
                 result_frame = self._soothe_swap_ring(
-                    result_frame, original_frame, blend_mask, face_w, face_h,
+                    result_frame, composite_base, blend_mask, face_w, face_h,
                 )
 
             # v5.1204 — H-FS-004: en FOTOS, medido en marco, la cara pegada
@@ -6464,6 +6483,10 @@ class ProcessMgr:
                     print(f"[QUALITY] nitidez pegada: {_paste_sharp_note}", flush=True)
                 except Exception as paste_sharp_err:
                     print(f"[QUALITY] Compensación de nitidez pegada omitida: {paste_sharp_err}", flush=True)
+
+            # Postpasos no deben redondear ni desteñir caras previas fuera del soporte actual.
+            outside_current = composite_mask[:, :, 0] <= 0.0
+            result_frame[outside_current] = composite_base[outside_current]
 
             if call_num <= 3:
                 cv2.imwrite(os.path.join(debug_dir, f'04_final_result_f{call_num}.png'), result_frame)
@@ -6501,7 +6524,7 @@ class ProcessMgr:
         except Exception as e:
             print(f"[DEBUG] Error en _process_face_swap_v21: {e}", flush=True)
             traceback.print_exc()
-            return original_frame
+            return composite_base
             
         finally:
             # Limpieza de memoria
@@ -6586,7 +6609,9 @@ class ProcessMgr:
             print(f"[SIMILARITY_ERROR] {e}")
             return 0.0
 
-    def run_batch_inmem(self, video_path, output_path, start_frame=0, end_frame=None, fps=24.0, num_threads=1, skip_audio=False):
+    def run_batch_inmem(self, video_path, output_path, start_frame=0, end_frame=None, fps=24.0, num_threads=1, skip_audio=False, temporal_smoothing=None):
+        if temporal_smoothing is None:
+            temporal_smoothing = bool(getattr(roop.globals, 'temporal_smoothing', True))
         _log = r'D:\PROJECTS\AUTOAUTO\debug_swap.log'
         with open(_log, 'a') as lf:
             lf.write(f"[RUN_BATCH] INICIO video_path={video_path}\n")
@@ -6736,7 +6761,7 @@ class ProcessMgr:
                 
                 try:
                     # Procesar frame secuencialmente con smoothing
-                    processed = self.process_frame(frame, enable_temporal_smoothing=True, file_path=video_path)
+                    processed = self.process_frame(frame, enable_temporal_smoothing=temporal_smoothing, file_path=video_path)
                     if processed is not None:
                         out.write(processed)
                     else:
@@ -6845,7 +6870,7 @@ class ProcessMgr:
                     break
                 
                 try:
-                    processed_frame = self.process_frame(frame, enable_temporal_smoothing=True, file_path=video_path)
+                    processed_frame = self.process_frame(frame, enable_temporal_smoothing=temporal_smoothing, file_path=video_path)
                     if processed_frame is not None:
                         out.write(processed_frame)
                         processed_count += 1

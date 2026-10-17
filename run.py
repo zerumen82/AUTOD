@@ -353,8 +353,41 @@ def setup_runtime():
                 except Exception as e:
                     print(f"Error cargando {dll}: {e}")
 
+def set_console_icon():
+    """Icono de AutoAuto en la ventana de consola (título y barra de tareas).
+
+    La consola de Python muestra el icono de python.exe por defecto; con
+    WM_SETICON sobre la ventana de consola se comparte el icono del
+    proyecto (assets/icon.ico), el mismo que usa la ventana pywebview.
+    """
+    try:
+        kernel32 = ctypes.windll.kernel32
+        user32 = ctypes.windll.user32
+        kernel32.GetConsoleWindow.restype = ctypes.c_void_p
+        hwnd = kernel32.GetConsoleWindow()
+        if not hwnd:
+            return False
+        icon_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico",
+        )
+        if not os.path.exists(icon_path):
+            return False
+        user32.LoadImageW.restype = ctypes.c_void_p
+        hicon = user32.LoadImageW(None, icon_path, 1, 0, 0, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+        if not hicon:
+            return False
+        WM_SETICON = 0x0080
+        user32.SendMessageW(hwnd, WM_SETICON, 1, hicon)  # ICON_BIG (título)
+        user32.SendMessageW(hwnd, WM_SETICON, 0, hicon)  # ICON_SMALL (barra de tareas)
+        return True
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
     _open_ui_session_log()
+    if set_console_icon():
+        print("[INFO] Icono de AutoAuto aplicado a la ventana de consola")
     setup_runtime()
     
     # Preparar rutas de Python

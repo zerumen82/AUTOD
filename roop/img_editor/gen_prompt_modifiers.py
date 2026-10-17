@@ -18,8 +18,9 @@ PHOTOREAL_IMAGE_TYPES = frozenset({"photoreal", "amateur_street", "smartphone"})
 USER_SCENE_WEIGHT = 1.6
 LONG_SCENE_WORDS = 24
 
-# Máximo: 1 estilo + 2 añadidos más (evita diluir la escena del usuario)
-MAX_EXTRA_MODIFIERS = 2
+def _max_extra_modifiers() -> int:
+    from roop.img_editor.gen_prompt_config import get_gen_thresholds
+    return max(0, int(get_gen_thresholds().get("max_extra_modifiers", len(CATEGORY_ORDER) - 1)))
 
 CATEGORY_ORDER: List[str] = [
     "image_type",
@@ -208,11 +209,12 @@ def _resolve_modifier_parts(modifiers: Dict[str, str]) -> Tuple[List[Tuple[str, 
         if frag:
             result.append((cat, frag))
 
-    if len(result) > 1 + MAX_EXTRA_MODIFIERS:
-        style_parts = [x for x in result if x[0] == "image_type"]
-        other_parts = [x for x in result if x[0] != "image_type"]
-        kept_others = other_parts[:MAX_EXTRA_MODIFIERS]
-        dropped = other_parts[MAX_EXTRA_MODIFIERS:]
+    style_parts = [x for x in result if x[0] == "image_type"]
+    other_parts = [x for x in result if x[0] != "image_type"]
+    limit = _max_extra_modifiers()
+    if len(other_parts) > limit:
+        kept_others = other_parts[:limit]
+        dropped = other_parts[limit:]
         for cat, _ in dropped:
             opt = modifiers.get(cat, "auto") or "auto"
             capped_labels.append(UI_LABELS.get(cat, {}).get(opt, opt))
@@ -311,7 +313,6 @@ def get_effective_prefix(
 
     # Inyectar nsfw_tags al inicio si explicit y no están ya en el prefix
     if is_explicit and nsfw_tags:
-        nsfw_lower = nsfw_tags.lower()
         prefix_lower = prefix.lower()
         # Solo inyectar si ningún tag de nsfw_tags está ya en prefix
         already_present = any(tag.strip().lower() in prefix_lower for tag in nsfw_tags.split(",") if tag.strip())
@@ -408,12 +409,13 @@ def assemble_generation_prompt(
         and extras_cfg.get("anatomy_integrity_positive")
     ):
         tail_parts.append(extras_cfg["anatomy_integrity_positive"])
-    if photoreal_tail and image_type in PHOTOREAL_IMAGE_TYPES:
-        tail_parts.append(photoreal_tail.rstrip(", ").strip())
     if style_frag and style_frag.lower() not in prefix.lower():
         tail_parts.append(style_frag)
     if extras_joined:
         tail_parts.extend(extra_list)
+    # Las elecciones UI preceden al boilerplate del modelo cuando hay límite.
+    if photoreal_tail and image_type in PHOTOREAL_IMAGE_TYPES:
+        tail_parts.append(photoreal_tail.rstrip(", ").strip())
 
     max_tail = int(get_gen_thresholds().get("flux_max_tail_parts", 5))
     if not is_sdxl and image_type in PHOTOREAL_IMAGE_TYPES and len(tail_parts) > max_tail:
@@ -451,6 +453,10 @@ def assemble_generation_prompt(
         return frozenset(_stem_w(w) for w in re.findall(r"\w+", seg.lower()))
 
     _prefix_norm = re.sub(r",\s*,", ",", prefix).strip().strip(",").strip()
+    selected_extra_segments = {
+        segment.strip().casefold()
+        for fragment in extra_list for segment in fragment.split(",") if segment.strip()
+    }
     _seen_frags = set()
     _clean_parts = []
     for _pi, _p in enumerate(body_parts):
@@ -475,7 +481,8 @@ def assemble_generation_prompt(
             # significativo (>=4 letras) ya visto = redundante.
             _sig = {w for w in _sw if len(w) >= 4}
             _words_in_seg = [w.strip() for w in re.findall(r"\w+", _s.lower())]
-            if len(_words_in_seg) <= 5 and _sig and (_sig & _seen_frags):
+            if (_s.casefold() not in selected_extra_segments
+                    and len(_words_in_seg) <= 5 and _sig and (_sig & _seen_frags)):
                 continue  # solape parcial en cola corta: duplicado
             if _sw:
                 _seen_frags |= set(_sw)
@@ -509,6 +516,7 @@ def assemble_generation_prompt(
     est = _estimate_clip_tokens(final)
     if is_sdxl and est > CLIP_TOKEN_BUDGET:
         core_parts = [style_frag] if style_frag else []
+        core_parts.extend(part for part in extra_list if part not in core_parts)
         if photoreal_tail:
             for p in photoreal_tail.rstrip(", ").split(","):
                 p = p.strip()
@@ -521,7 +529,7 @@ def assemble_generation_prompt(
         est = _estimate_clip_tokens(final)
 
     if est > CLIP_TOKEN_BUDGET - 5:
-        print(f"[GenFlux] [Warn] Prompt ~{est} tokens (CLIP ~{CLIP_TOKEN_BUDGET}); cola UI recortada")
+        print(f"[GenFlux] [Warn] Prompt ~{est} tokens (CLIP ~{CLIP_TOKEN_BUDGET}); escena y selecciones UI conservadas, puede usar varios bloques")
 
     return final, suffix_display, image_type
 
@@ -716,6 +724,6 @@ def preview_modifiers(
         )
         html += (
             f"<div style='margin-top:4px;font-size:11px;color:#64748b;'>"
-            f"Omitido (máx. {MAX_EXTRA_MODIFIERS} extras): {ctags}</div>"
+            f"Omitido (máx. {_max_extra_modifiers()} extras): {ctags}</div>"
         )
     return html

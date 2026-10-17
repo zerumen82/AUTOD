@@ -17,6 +17,7 @@ Cliente falsificado: no se genera ninguna imagen.
 
 import contextlib
 import io
+import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -40,6 +41,12 @@ class RecorderClient:
 
 
 def main():
+    # Artefacto de sesion (foto real 2026-10-15): no se trackea en git y puede
+    # no estar en disco. Sin el no hay medida real de CLIPSeg sobre cabeza.
+    if not os.path.exists("img_editor/edit_1792085759.png"):
+        print("SKIP: artefacto historico ausente (img_editor/edit_1792085759.png); "
+              "la foto de la sesion 2026-10-15 no esta en el repo")
+        return
     source = Image.open("img_editor/edit_1792085759.png").convert("RGB")
     manager = ImgEditorManager()
 

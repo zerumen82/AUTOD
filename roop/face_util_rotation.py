@@ -294,7 +294,10 @@ def get_all_faces_with_rotation(frame: np.ndarray, min_score: float = None, for_
                 # 2. Probar rotaciones adicionales para capturar perfiles extremos
                 #    v5.11: siempre intentar rotaciones (no solo si original falló)
                 h, w = frame_rgb.shape[:2]
-                for angle in ([90, 270, 180] if include_180 else [90, 270]):
+                angles = ([90, 270, 180] if include_180 else [90, 270])
+                if getattr(roop.globals, 'autorotate_faces', True) is False:
+                    angles = []
+                for angle in angles:
                     try:
                         if angle == 90:
                             rotated = cv2.rotate(frame_rgb, cv2.ROTATE_90_CLOCKWISE)

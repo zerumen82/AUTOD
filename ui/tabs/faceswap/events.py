@@ -383,7 +383,8 @@ def wire_events(ui_comp):
     
     # --- FILTRADO ---
     def on_filter_change(gender, size):
-        if not hasattr(state, 'ALL_DETECTED_FACES_DATA'): return gr.update()
+        if not hasattr(state, 'ALL_DETECTED_FACES_DATA'):
+            return gr.update()
         filtered = logic.get_filtered_faces(state.ALL_DETECTED_FACES_DATA, gender, size)
         state.SELECTION_FACES_DATA = filtered
         thumbs = [_normalize_face_thumb(util.convert_to_gradio(img, is_rgb=True), 300) for _, img in filtered]
@@ -394,7 +395,8 @@ def wire_events(ui_comp):
 
     # --- ENHANCER PREVIEW ---
     def on_enhancer_preview_click(frame_num, enhancer, blend):
-        if not state.list_files_process: return gr.update(), gr.update()
+        if not state.list_files_process:
+            return gr.update(), gr.update()
         
         face_idx = getattr(state, 'TEMP_SELECTED_FACE_INDEX', None)
         if face_idx is None: 
@@ -781,7 +783,8 @@ def wire_events(ui_comp):
         state.CURRENT_DETECTED_KEY = None
         roop.globals.TARGET_FACES.clear()
         ui.globals.ui_target_thumbs.clear()
-        if hasattr(roop.globals, 'selected_face_references'): roop.globals.selected_face_references.clear()
+        if hasattr(roop.globals, 'selected_face_references'):
+            roop.globals.selected_face_references.clear()
         state.list_files_process = loaded_entries
         state.selected_preview_index = 0
         roop.globals.face_swap_mode = 'selected'
@@ -863,7 +866,8 @@ def wire_events(ui_comp):
     ui_comp["bt_browse_path"].click(fn=on_browse_and_load, outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
 
     def jump_frame(current_f, delta):
-        if not state.list_files_process: return gr.update(), None
+        if not state.list_files_process:
+            return gr.update(), None
         entry = state.list_files_process[state.selected_preview_index]
         new_f = max(1, min(entry.endframe, int(current_f or 1) + delta))
         from roop.capturer import get_video_frame
@@ -878,7 +882,8 @@ def wire_events(ui_comp):
     ui_comp["bt_jump_fwd_100"].click(fn=lambda f: jump_frame(f, 100), inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"]], queue=False)
 
     def on_frame_change(frame_num):
-        if not state.list_files_process: return None, gr.update()
+        if not state.list_files_process:
+            return None, gr.update()
         filename = state.list_files_process[state.selected_preview_index].filename
         from roop.capturer import get_video_frame
         frame = get_video_frame(filename, int(frame_num or 1))
@@ -887,7 +892,8 @@ def wire_events(ui_comp):
     ui_comp["preview_frame_num"].release(fn=on_frame_change, inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["previewimage"], ui_comp["preview_frame_num"]])
 
     def navigate_file(direction):
-        if not state.list_files_process: return gr.update(), None, gr.update(), gr.update()
+        if not state.list_files_process:
+            return gr.update(), None, gr.update(), gr.update()
         state.selected_preview_index = min(len(state.list_files_process)-1, state.selected_preview_index + 1) if direction == "next" else max(0, state.selected_preview_index - 1)
         entry = state.list_files_process[state.selected_preview_index]
         roop.globals.target_path = entry.filename
@@ -977,7 +983,7 @@ def wire_events(ui_comp):
     start_event = ui_comp["bt_start"].click(
         fn=on_start_process,
         inputs=[
-            ui_comp["fake_preview"], ui_comp["autorotate"], ui_comp["smoothing"],
+            ui_comp["autorotate"], ui_comp["smoothing"],
             ui_comp["face_distance"], ui_comp["blend_ratio"], ui_comp["enhancer_blend"], ui_comp["enhancer"],
             ui_comp["source_random"],
         ],
@@ -989,7 +995,8 @@ def wire_events(ui_comp):
         queue=False,
     )
     ui_comp["bt_stop"].click(fn=None, cancels=[start_event], queue=False)
-    if "bt_open_output" in ui_comp: ui_comp["bt_open_output"].click(fn=lambda: ui.globals.open_output_folder())
+    if "bt_open_output" in ui_comp:
+        ui_comp["bt_open_output"].click(fn=lambda: ui.globals.open_output_folder())
 
 def on_input_page_change(delta):
     total = len(ui.globals.ui_input_thumbs)
@@ -1001,7 +1008,7 @@ def on_target_page_change(delta):
     state.current_target_page = max(0, min(max(0, (total-1)//state.FACES_PER_PAGE), state.current_target_page + delta))
     return (logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(total, "target"))
 
-def on_start_process(fake_preview, auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer, source_random):
+def on_start_process(auto_rot, temp_smooth, dist, blend, enhancer_blend, enhancer, source_random):
     from ui.tabs.faceswap.logic import start_swap
     from ui.job_cancel import clear as clear_cancel, SCOPE_FACESWAP
     clear_cancel(SCOPE_FACESWAP)

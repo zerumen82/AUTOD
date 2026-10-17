@@ -4,7 +4,6 @@ import socket
 import threading
 import time
 import requests
-import pathlib
 import cv2
 import numpy as np
 
@@ -96,7 +95,7 @@ def find_available_port(start_port=7861, max_attempts=10):
                 return port
         except OSError:
             continue
-    raise OSError(f"No hay puerto libre")
+    raise OSError("No hay puerto libre")
 
 
 def is_gradio_running(url, timeout=5):
@@ -153,8 +152,6 @@ def run():
             print(f"[SERVER] Reutilizando AutoAuto existente en {existing_server_url}")
         
         # Configurar manejo de excepciones asyncio
-        import asyncio
-        import logging
         
         print("[INIT] Configurando asyncio...")
         
@@ -183,10 +180,10 @@ def run():
 
         # Parche Gradio routes para SSE stream disconnection limpia (evita RuntimeError / 404 de ASGI)
         try:
-            import gradio.routes
+            import gradio.routes  # noqa: F401 - comprueba que el módulo se importa
             # Verificación de que gradio.routes está cargado sin excepciones
             print("[OK] Patch Gradio SSE aplicado")
-        except Exception as e:
+        except Exception:
             pass
 
         if existing_server_url:
@@ -266,8 +263,6 @@ def run():
                 WM_SETICON = 0x0080
                 ICON_SMALL = 0
                 ICON_BIG = 1
-                IMAGE_ICON = 1
-                LR_LOADFROMFILE = 0x0010
                 GCLP_HICON = -14
                 GCLP_HICONSM = -34
 
@@ -391,7 +386,7 @@ def batch_process_regular(
             _log_name = f"process_{datetime.now():%Y%m%d_%H%M%S}.log"
             _log_path = os.path.join(r'D:\PROJECTS\AUTOAUTO\logs', _log_name)
             _batch_log_file = open(_log_path, 'w', encoding='utf-8')
-            _batch_log_file.write(f"=== AUTO-AUTO v5.1190 — BATCH FOTOS ===\n")
+            _batch_log_file.write("=== AUTO-AUTO v5.1190 — BATCH FOTOS ===\n")
             _batch_log_file.write(f"Start: {datetime.now()}\n")
             _batch_log_file.write(f"PID: {os.getpid()}\n")
             _batch_log_file.write(f"Files: {total_files}\n\n")
@@ -482,7 +477,8 @@ def batch_process_regular(
                         start_frame=start_frame,
                         end_frame=end_frame if end_frame > 0 else None,
                         fps=fps,
-                        skip_audio=getattr(roop.globals, 'skip_audio', False)
+                        skip_audio=getattr(roop.globals, 'skip_audio', False),
+                        temporal_smoothing=temporal_smoothing,
                     ):
                         # El porcentaje principal es global del lote; el mensaje conserva
                         # el avance local del video para evitar lecturas ambiguas en la UI.
@@ -605,7 +601,8 @@ def batch_process_with_options(list_files_process, options, progress_callback):
                     start_frame=start_frame,
                     end_frame=end_frame if end_frame > 0 else None,
                     fps=fps,
-                    skip_audio=True
+                    skip_audio=True,
+                    temporal_smoothing=bool(getattr(roop.globals, 'temporal_smoothing', True)),
                 ):
                     pass  # Consumir generador
             else:

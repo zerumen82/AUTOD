@@ -5,7 +5,7 @@ import cv2
 import re
 from types import SimpleNamespace
 from typing import Optional, Tuple, Dict
-from PIL import Image
+from PIL import Image, ImageFilter
 import numpy as np
 from roop.utils import get_vram_gb
 
@@ -115,6 +115,174 @@ class ImgEditorManager:
                 if float(pixel_change[y:y + max(1, h // 8), x:x + max(1, w // 8)].mean()) >= 2.5:
                     return False
         return True
+
+    @staticmethod
+    def _edit_leaves_a_ghost(
+        original: Image.Image, edited: Image.Image,
+        change_floor: float = 0.004, change_ceiling: float = 0.60,
+        corr_min: float = 0.45, amp_max: float = 0.75,
+    ) -> bool:
+        """Detecta el resto fantasma del material original tras un cambio real.
+
+        Log 2026-10-17 01:49 (calvo sobre foto 718x600): el modelo no
+        reemplazó el pelo, lo DESVANECIÓ hacia el fondo a opacidad parcial;
+        la cáscara resultante midió cambio (no era no-op) así que se pegó tal
+        cual y quedó el halo. La firma medida de ese fantasma, dentro de los
+        píxeles que sí cambiaron, es doble: la estructura de alta frecuencia
+        del original sigue legible (correlación alta entre HF(original) y
+        HF(editado)) mientras su amplitud cae (el material perdió contraste).
+        Un reemplazo real reescribe la textura: la correlación se rompe.
+        Devuelve False en no-ops (los cubre `_edit_is_nearly_unchanged`) y en
+        regeneraciones de escena (casi todo el encuadre cambia).
+        """
+        sample_size = (
+            512, max(1, int(round(512 * original.height / max(1, original.width))))
+        )
+        if original.height > original.width:
+            sample_size = (
+                max(1, int(round(512 * original.width / original.height))), 512,
+            )
+        a = np.asarray(
+            original.convert("RGB").resize(sample_size, Image.Resampling.BILINEAR),
+            dtype=np.float32,
+        )
+        b = np.asarray(
+            edited.convert("RGB").resize(sample_size, Image.Resampling.BILINEAR),
+            dtype=np.float32,
+        )
+        pixel_change = np.abs(a - b).max(axis=2)
+        changed = pixel_change > 12
+        changed_frac = float(changed.mean())
+        if changed_frac < change_floor or changed_frac > change_ceiling:
+            return False
+        gray_a = Image.fromarray(a.mean(axis=2).astype(np.uint8), "L")
+        gray_b = Image.fromarray(b.mean(axis=2).astype(np.uint8), "L")
+        hf_a = np.asarray(gray_a, dtype=np.float32) - np.asarray(
+            gray_a.filter(ImageFilter.GaussianBlur(2)), dtype=np.float32
+        )
+        hf_b = np.asarray(gray_b, dtype=np.float32) - np.asarray(
+            gray_b.filter(ImageFilter.GaussianBlur(2)), dtype=np.float32
+        )
+        fa = hf_a[changed]
+        fb = hf_b[changed]
+        std_a = float(fa.std())
+        std_b = float(fb.std())
+        if std_a < 1.0:
+            return False
+        corr = float(np.corrcoef(fa.ravel(), fb.ravel())[0, 1])
+        return bool(corr >= corr_min and (std_b / std_a) <= amp_max)
+
+    @staticmethod
+    def _detect_edit_faces(image: Image.Image):
+        """Caras del resultado editado, en coordenadas de la propia imagen.
+
+        CPU para no pelear la VRAM con ComfyUI (FaceAnalysis CUDA ya se
+        liberó antes de generar). Umbral 0.20, el mismo del preflight, y un
+        segundo pase ampliado si el primero ve menos de dos caras (patrón de
+        _build_person_removal_mask: una cara pequeña de foto pequeña no se
+        caza a primera pasada).
+        """
+        try:
+            from roop.face_util import get_face_analyser_cpu, preprocess_image_for_detection
+            analyser = get_face_analyser_cpu()
+            if analyser is None:
+                return []
+            bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+            faces = list(analyser.get(bgr) or [])
+            if len(faces) < 2:
+                seen = {tuple(int(v) for v in f.bbox) for f in faces}
+                enhanced = preprocess_image_for_detection(bgr)
+                for extra in analyser.get(enhanced) or []:
+                    key = tuple(int(v) for v in extra.bbox)
+                    if key not in seen:
+                        faces.append(extra)
+                        seen.add(key)
+            return [
+                f for f in faces
+                if float(getattr(f, "det_score", 0.0) or 0.0) >= 0.20
+            ]
+        except Exception:
+            return []
+
+    def _added_face_mask(
+        self, original: Image.Image, edited: Image.Image, faces,
+    ) -> Optional[Image.Image]:
+        """Máscara sobre las caras que el modelo pintó y la foto no tiene.
+
+        Log 2026-10-17 10:23 (calvo sobre foto 2847x4263): la entrada trajo
+        2 caras («2 cara(s)» del arranque) y el modelo pintó una TERCERA cara
+        sobre la coronilla mientras obedecía el calvo; el pegado por cambio
+        medido la conserva porque textura nueva mide como cambio real, y ni
+        el no-op ni el fantasma la cogen (contenido nuevo, correlación HF
+        rota). Una persona que nadie pidió se mide igual que Fix D mide una
+        cara colapsada: cada cara detectada en el resultado debe caer cerca
+        de una cara de la entrada; una cuyo centro queda a más de 0.6 de su
+        propia altura de TODO centro de la fuente no pertenece a nadie, y su
+        bbox (más un margen del 20%) vuelve como máscara para que el caller
+        restaure la foto original ahí. Devuelve None cuando no hay nada que
+        rechazar (sin referencia no se juzga: ruta de cámara y fotos sin
+        caras quedan fuera).
+        """
+        if original is None or edited is None or not faces:
+            return None
+        try:
+            canvas = edited.convert("RGB")
+            if canvas.size != original.size:
+                canvas = canvas.resize(original.size, Image.Resampling.LANCZOS)
+            generated = self._detect_edit_faces(canvas)
+            if not generated:
+                return None
+            source_centers = []
+            for face in faces:
+                try:
+                    x1, y1, x2, y2 = [float(v) for v in face.bbox]
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                if x2 > x1 and y2 > y1:
+                    source_centers.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+            if not source_centers:
+                return None
+            bad = np.zeros((original.height, original.width), dtype=np.uint8)
+            found = False
+            soft_sigma = 3.0
+            for face in generated:
+                try:
+                    x1, y1, x2, y2 = [float(v) for v in face.bbox]
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                w, h = x2 - x1, y2 - y1
+                if w < 16 or h < 16:
+                    continue
+                cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                distance = min(
+                    ((cx - sx) ** 2 + (cy - sy) ** 2) ** 0.5
+                    for sx, sy in source_centers
+                )
+                if distance <= 0.6 * h:
+                    continue
+                radius = max(6, int(round(0.10 * max(w, h))))
+                bx1 = max(0, int(x1) - radius)
+                by1 = max(0, int(y1) - radius)
+                bx2 = min(original.width, int(x2) + radius)
+                by2 = min(original.height, int(y2) + radius)
+                if bx2 - bx1 < 4 or by2 - by1 < 4:
+                    continue
+                bad[by1:by2, bx1:bx2] = 255
+                found = True
+                soft_sigma = max(soft_sigma, radius / 3.0)
+                print(
+                    f"[ImgEditor] Cara en el resultado a {distance:.0f} px "
+                    f"de cualquier cara de la foto ({bx2 - bx1}x{by2 - by1}): "
+                    "es nueva, no estaba en la entrada",
+                    flush=True,
+                )
+            if not found:
+                return None
+            soft = cv2.GaussianBlur(bad, (0, 0), soft_sigma)
+            soft = np.clip(soft.astype(np.int32) * 2, 0, 255).astype(np.uint8)
+            return Image.fromarray(soft, "L")
+        except Exception:
+            return None
 
     def _get_semantic_analyzer(self, full_ai: bool = False):
         if self.semantic_analyzer is None:
@@ -760,7 +928,42 @@ class ImgEditorManager:
                     except Exception:
                         full_exposure = False
                     if full_exposure:
-                        _subject = (self._visual_subject_description(raw) or "").strip(" ,.;")
+                        # v5.1216: en un compuesto el sujeto del sufijo debe
+                        # ser el de la cláusula CORPORAL, no el primer sujeto
+                        # del texto (log real 19:49: «el sofá debe ser gris,
+                        # las paredes deben ser grises, la mujer debe ir
+                        # desnuda» escribió «The sofa is fully nude» — el
+                        # sofá nunca se pinto de gris y la zona salió dañada).
+                        # Selección medida: la cláusula con mayor señal
+                        # corporal del mismo analizador (sin listas nuevas).
+                        _suffix_clause = raw
+                        _suffix_clauses = self._split_compound_instruction(raw) or [raw]
+                        if len(_suffix_clauses) > 1:
+                            try:
+                                def _body_signal(_clause):
+                                    _scores = scorer.score_concepts(
+                                        self._requested_change_scope(_clause)
+                                        or _clause,
+                                    )
+                                    return max(
+                                        float(_scores.get("attribute_body", 0.0)),
+                                        float(_scores.get("attribute_uncover", 0.0)),
+                                    )
+                                _best_clause = max(_suffix_clauses, key=_body_signal)
+                                # Si la cláusula corporal no nombra sujeto
+                                # («…calvo e ir desnudo») se conserva el sujeto
+                                # del texto entero, como hasta hoy.
+                                _best_subject = (
+                                    self._visual_subject_description(_best_clause)
+                                    or ""
+                                ).strip(" ,.;")
+                                if _best_subject:
+                                    _suffix_clause = _best_clause
+                            except Exception:
+                                _suffix_clause = raw
+                        _subject = (
+                            self._visual_subject_description(_suffix_clause) or ""
+                        ).strip(" ,.;")
                         if _subject:
                             # Name the person: "The person" with two people in
                             # the frame is read as any of them.
@@ -775,7 +978,7 @@ class ImgEditorManager:
                 elif body_direction == "cover" and float(body_intensity) >= 0.30:
                     base += " The person is fully dressed, body covered with warm clothing."
                 elif body_transform:
-                    print(f"[ImgEditor] Sufijo de estado omitido (señal corporal débil intensity={float(body_intensity):.2f} < 0.30 — el texto del usuario manda)", flush=True)
+                    print(f"[ImgEditor] Sufijo de estado omitido (dirección={body_direction}, intensity={float(body_intensity):.2f} — sin estado medido que describir; el texto del usuario manda)", flush=True)
             # v5.1131 — CADENA DE WRAPPERS: el body-branch de arriba es la AUTORIDAD
             # para body_transform (incluye el sufijo por dirección uncover/cover).
             # Antes esta cadena corría SIEMPRE después y SOBREESCRIBÍA el wrapper
@@ -823,6 +1026,11 @@ class ImgEditorManager:
             )
             if _bypass_enforce and is_longcat and not quality_only:
                 base += " The requested change must be clearly visible in the result; do not preserve the previous state of what was asked to change. Leave every other person in the photo exactly as they are."
+            # Receta «calvo» medida (log real 21:51, edit_1792180391): ver
+            # _bald_recipe_tail — pelo fuera, diadema conservada y cuero
+            # cabelludo gris = «gorrito».
+            if is_longcat:
+                base += self._bald_recipe_tail(raw)
             print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
             age_hint = ""
             # Solo si claramente madura (InsightFace se equivoca ±10) y NUNCA en
@@ -2621,6 +2829,11 @@ class ImgEditorManager:
         crop_w = int(local_box[2]) - int(local_box[0])
         crop_h = int(local_box[3]) - int(local_box[1])
         if crop_w < 2 or crop_h < 2 or not gen_size:
+            print(
+                f"[ImgEditor] Refino focal omitido: ventana de trabajo "
+                f"{crop_w}x{crop_h} sin tamaño de generación usable",
+                flush=True,
+            )
             return None
         scale_up = max(crop_w / max(1, int(gen_size[0])),
                        crop_h / max(1, int(gen_size[1])))
@@ -2644,6 +2857,14 @@ class ImgEditorManager:
             zone_full.paste(zone, (bx, by))
             focal = self._crop_focal_context(edited, zone_full, report=False)
             if focal is None:
+                # Sin esta marca el refino desaparecía sin explicación (log
+                # real 01:21: pegado x3.34 y ni «Refino focal» ni motivo).
+                print(
+                    f"[ImgEditor] Refino focal omitido: el cambio medido no "
+                    f"abre una ventana focal (escala {scale_up:.2f}x sin "
+                    "aprovechar)",
+                    flush=True,
+                )
                 return None
             zoom_image, zoom_mask, zoom_box = focal
             zoom_w = zoom_box[2] - zoom_box[0]
@@ -3299,10 +3520,28 @@ class ImgEditorManager:
                 })
         body_hits = [item for item in judged if item["body"]]
         if body_hits:
-            leading = max(body_hits, key=lambda item: item["intensity"])
+            # v5.1217: la dirección mide tokens, no fonética: un typo
+            # («ddesnuda», log real 23:40) deja su cláusula en "change" con
+            # intensity=0.70 y, al ganar esa cláusula por intensidad, el
+            # sufijo de desnudez se caía aunque la otra grafía de la MISMA
+            # petición ya medía uncover ("go naked" también 0,70). La
+            # dirección pertenece a la petición, no a una sola grafía: si la
+            # cláusula líder no midió dirección, gana la dirección medida de
+            # la siguiente cláusula corporal más fuerte.
+            ordered = sorted(
+                body_hits, key=lambda item: item["intensity"], reverse=True,
+            )
+            leading = ordered[0]
             facts["body"] = True
-            facts["body_direction"] = leading["direction"]
             facts["body_intensity"] = leading["intensity"]
+            direction = str(leading["direction"])
+            if direction not in ("uncover", "cover"):
+                direction = next(
+                    (str(item["direction"]) for item in ordered[1:]
+                     if str(item["direction"]) in ("uncover", "cover")),
+                    direction,
+                )
+            facts["body_direction"] = direction
         facts["authority"] = bool(facts["pose"] or facts["body"])
         # v5.1215: el escenario medido manda sobre la región local. Un
         # cambio de escenario no es «pintar una zona»: pide escena nueva y
@@ -3342,22 +3581,53 @@ class ImgEditorManager:
         )
         return facts
 
+    def _visual_subject_descriptions(self, text: str) -> list:
+        """Visual subject phrases of one instruction, deduped by spelling."""
+        if not text or not text.strip():
+            return []
+        pieces = [part.strip() for part in re.split(r"\s*[,;]\s*", text) if part.strip()]
+        pieces.append(text.strip())
+        out, seen = [], set()
+        for piece in pieces:
+            description = self._visual_subject_description(piece)
+            key = description.casefold()
+            if description and key not in seen:
+                seen.add(key)
+                out.append(description)
+        return out
+
     def _subject_queries(self, raw_prompt: str, translated_prompt: str) -> list:
         """Visual subject phrases, one entry per spelling regardless of case."""
-        queries = []
-        seen = set()
+        queries, seen = [], set()
         for text in (translated_prompt, raw_prompt):
-            if not text or not text.strip():
-                continue
-            pieces = [part.strip() for part in re.split(r"\s*[,;]\s*", text) if part.strip()]
-            pieces.append(text.strip())
-            for piece in pieces:
-                description = self._visual_subject_description(piece)
+            for description in self._visual_subject_descriptions(text):
                 key = description.casefold()
-                if description and key not in seen:
+                if key not in seen:
                     seen.add(key)
                     queries.append(description)
         return queries
+
+    def _translated_subject_counterpart(
+        self, query: str, raw_prompt: str, translated_prompt: str,
+    ) -> str:
+        """Same visual subject as `query` but spelled in the translated text.
+
+        The measured mask can win with either spelling (log real 22:25,
+        edit_1792182345: 'Man' midió 0,01% y 'el hombre' 6,6% → el grupo
+        quedó con el texto en español y la instrucción despachada a LongCat
+        viajó sin traducir; el cumplimiento fue casi nulo y el hombre siguió
+        con pelo). El emparejamiento es por posición: ambos textos se
+        parten en las mismas cláusulas y el traductor es fiel.
+        """
+        raw_descriptions = self._visual_subject_descriptions(raw_prompt)
+        translated_descriptions = self._visual_subject_descriptions(translated_prompt)
+        key = (query or "").casefold()
+        for index, description in enumerate(raw_descriptions):
+            if description.casefold() == key:
+                if index < len(translated_descriptions):
+                    return translated_descriptions[index]
+                return ""
+        return ""
 
     @staticmethod
     def _grow_measured_subject(region: np.ndarray, faces, width: int, height: int) -> Optional[np.ndarray]:
@@ -3494,6 +3764,18 @@ class ImgEditorManager:
         groups = []
         for items in clusters.values():
             names = {item["query"].casefold() for item in items}
+            # La máscara puede ganar con cualquiera de las dos grafías (log
+            # 22:25: 'Man' midió 0,01% y 'el hombre' 6,6% → instrucción
+            # despachada en español y cumplimiento casi nulo). El nombre se
+            # empareja por posición con su traducción para que el TEXTO que
+            # viaja al modelo sea el traducido aunque la consulta cruda
+            # haya medido la máscara.
+            for item in items:
+                counterpart = self._translated_subject_counterpart(
+                    item["query"], raw_prompt, translated_prompt,
+                )
+                if counterpart:
+                    names.add(counterpart.casefold())
             chosen = [piece for subject, piece in english if subject in names or (not subject and len(clusters) == 1)]
             if not chosen:
                 chosen = [piece for subject, piece in original if subject in names or (not subject and len(clusters) == 1)]
@@ -3803,9 +4085,23 @@ class ImgEditorManager:
         raw_prompt: str,
         translated_prompt: str,
         faces,
+        detected_faces=None,
     ) -> list:
-        """One tight mask per person named in the instruction."""
-        if not faces:
+        """One tight mask per person named in the instruction.
+
+        The face-overlap gate accepts every DETECTED face, not only the
+        credible ones (log real 22:51, edit_1792184313): el hombre a cuatro
+        patas se detectó con det 0.31 frente al 0.89 de la mujer, el suelo
+        de credibilidad descartó SU cara y la máscara 'Man' (que cubría su
+        cabeza al 93,9%) no encontró cara que la confirmara → «Sujeto no
+        medido» y la foto salió SIN EDITAR. Aquí la corroboración es la
+        propia máscara de la consulta del sujeto cubriendo una caja
+        detectada; el suelo de credibilidad sigue vigente para los anclajes
+        de calor/head, donde nada más corrobora la detección (el speck del
+        pie de 27×22 px en fast_1792015141).
+        """
+        gate_faces = detected_faces if detected_faces is not None else faces
+        if not gate_faces:
             return []
         queries = self._subject_queries(raw_prompt, translated_prompt)
         if not queries:
@@ -3831,7 +4127,7 @@ class ImgEditorManager:
             region = np.asarray(candidate.convert("L"))
             if region.shape[:2] != (height, width):
                 region = cv2.resize(region, (width, height), interpolation=cv2.INTER_LINEAR)
-            limited = self._grow_measured_subject(region, faces, width, height)
+            limited = self._grow_measured_subject(region, gate_faces, width, height)
             if limited is None:
                 if coverage >= 0.04:
                     print(
@@ -3865,6 +4161,7 @@ class ImgEditorManager:
 
     def _compound_clause_zone(
         self, image: Image.Image, clause: str, source: str, facts: dict, faces,
+        detected_faces=None,
     ) -> Optional[Image.Image]:
         """Paste zone of one compound clause, measured without generating.
 
@@ -3886,7 +4183,9 @@ class ImgEditorManager:
                 faces=faces,
             )
         else:
-            passes = self._measured_subject_passes(image, raw, translated, faces)
+            passes = self._measured_subject_passes(
+                image, raw, translated, faces, detected_faces=detected_faces,
+            )
             if not passes and facts.get("local_appearance"):
                 recovered = self._appearance_head_pass(image, raw, translated, faces)
                 if recovered is not None:
@@ -4169,6 +4468,11 @@ class ImgEditorManager:
             scope_missing = body_pass and body_zone is None
             if ((self._edit_is_nearly_unchanged(before, updated) or scope_missing)
                     and not (cancel_check and cancel_check())):
+                print(
+                    "[ImgEditor] Cambio casi nulo en la zona; segundo intento "
+                    "Turbo con la instrucción de refuerzo",
+                    flush=True,
+                )
                 retry_prompt = (
                     f"The input photo has not yet been changed. Do this visible edit now: {item['text']}. "
                     "Keep the pose and the framing. "
@@ -4177,6 +4481,7 @@ class ImgEditorManager:
                 )
                 if negative_prompt:
                     retry_prompt += f" Avoid: {negative_prompt}."
+                retry_prompt += self._bald_recipe_tail(item["text"])
                 try:
                     retry, retry_msg = client.generate(
                         image=work_image, prompt=retry_prompt,
@@ -4220,8 +4525,10 @@ class ImgEditorManager:
                         )
                     elif updated.size != current.size:
                         updated = updated.resize(current.size, Image.Resampling.LANCZOS)
+                    print(f"[ImgEditor] Segundo intento aplicado: {retry_msg}", flush=True)
                     messages.append(f"segundo intento: {retry_msg}")
                 else:
+                    print(f"[ImgEditor] Segundo intento falló: {retry_msg}", flush=True)
                     messages.append(f"segundo intento falló: {retry_msg}")
             if body_pass and pass_mask is not None:
                 if body_zone is None:
@@ -4267,7 +4574,20 @@ class ImgEditorManager:
             r"\b(?:who|that|which|que)\b", text[:match.start()], flags=re.I
         ):
             match = matches[1]
-        return text[:match.start()].strip(" ,.;") if match else ""
+        if match:
+            return text[:match.start()].strip(" ,.;")
+        # v5.1221: una cláusula que ABRE con sintagma determinante nombra a
+        # su sujeto aunque el verbo posterior no esté en el patrón («the
+        # woman wears no stockings»: wears no casa con is/has/go/tiene; sin
+        # sujeto la cláusula no midió persona ni zona — log real 13:47:
+        # «zonas medidas=0», foto entera regenerada sin verificación y la
+        # pierna que cruza hacia el hombre salió con apariencia de media).
+        # Solo gramática, sin lista de prendas: el primer sintagma inicial
+        # es la propuesta; el segmentador y la compuerta de cara siguen        # decidiendo si esa persona existe en la foto.
+        lead = ImgEditorManager._determiner_phrases(text)
+        if lead and text.lower().startswith(lead[0].lower()):
+            return lead[0]
+        return ""
 
     @staticmethod
     def _attach_subject(clause: str, subject: str) -> str:
@@ -4321,6 +4641,25 @@ class ImgEditorManager:
     @staticmethod
     def _is_bald_request(prompt: str) -> bool:
         return bool(re.search(r"\b(?:bald|balding|calvo|calva)\b", prompt or "", flags=re.I))
+
+    @staticmethod
+    def _bald_recipe_tail(text: str) -> str:
+        """Definición del estado calvo en los prompts despachados.
+
+        Log real 21:51 (edit_1792180391): el modelo quitó el pelo pero
+        conservó la diadema con pompones sobre la cabeza y pintó el cuero
+        cabelludo gris — la cabeza salió como un «gorrito» blanco. Toda
+        plantilla que despacha una cláusula calvo define el estado pedido:
+        cuero cabelludo pelado, sin cubierta y con el tono natural de la
+        piel de esa persona.
+        """
+        if not ImgEditorManager._is_bald_request(text):
+            return ""
+        return (
+            " A bald head means a completely shaved scalp: no hair and no"
+            " headband, hat or any headwear on the head; the bare scalp"
+            " keeps the person's natural skin tone and texture."
+        )
 
     @staticmethod
     def _bald_hair_coverage(source: Image.Image, result: Image.Image,
@@ -5539,6 +5878,9 @@ class ImgEditorManager:
         detected_age = None
         shot_type = "unknown"
         source_faces = []
+        # Detected list, no credibility floor: only the subject-mask gate
+        # uses it (the credibility floor stays for heat/head anchors).
+        detected_faces = []
         # The camera route does not use age, composition or face embeddings.
         # FaceAnalysis reserves GPU memory before Qwen loads on 8 GB cards.
         skip_face_preflight = bool(
@@ -5561,6 +5903,7 @@ class ImgEditorManager:
                 if analyser is not None:
                     faces = detect_faces_robust(img_bgr, analyser, 0.20)
                     if faces:
+                        detected_faces = list(faces)
                         source_faces = self._credible_faces(faces)
                         ages = [getattr(f, 'age', None) for f in faces if getattr(f, 'age', None) is not None]
                         if ages:
@@ -5814,6 +6157,7 @@ class ImgEditorManager:
                         compound_local = True
                     zone = self._compound_clause_zone(
                         img, clause, source, clause_facts, source_faces,
+                        detected_faces=detected_faces,
                     )
                     if zone is not None:
                         zones.append(zone)
@@ -5931,6 +6275,25 @@ class ImgEditorManager:
                             img, generated, union, local_box,
                             keep_measured_mask=True,
                         )
+                        # v5.1218: el compuesto también pega a escala ×N
+                        # sobre foto grande (log 01:19: 6390x4263 → lienzo
+                        # 1248x832, paste x5.12 → la zona medida y su entorno
+                        # quedaban suaves, «pintados»). El refino focal
+                        # regenera la zona ya pegada en su zoom nativo.
+                        if local_box is not None:
+                            refined = self._second_focused_pass(
+                                fast_client, output, img, union, local_box,
+                                generated.size, fast_prompt, negative_prompt,
+                                seed, compound_authority, compound_preserve,
+                                None, lora_name, lora_strength,
+                                {"num_inference_steps": 12, "denoise": 1.0},
+                                progress_callback, cancel_check,
+                            )
+                            if refined is not None:
+                                output = refined
+                                fast_msg = (
+                                    f"{fast_msg}; refino focal de la zona medida"
+                                )
                         note = (
                             f"un solo pase Turbo ({len(clauses)} cambios); "
                             f"{len(zones)} zonas medidas pegadas, "
@@ -6059,6 +6422,7 @@ class ImgEditorManager:
                 elif preserve_frame:
                     subject_passes = self._measured_subject_passes(
                         img, score_raw, prompt, source_faces,
+                        detected_faces=detected_faces,
                     )
                     tried_head = False
                     if appearance_edit and not subject_passes:
@@ -6455,6 +6819,7 @@ class ImgEditorManager:
                                 "exactly as in the input. Do not alter anything else. "
                                 "Keep people anatomically coherent, with no missing or extra limbs."
                             )
+                            fast_prompt += self._bald_recipe_tail(prompt)
                         else:
                             fast_prompt = (
                                 "Instruction: Edit this exact photo. "
@@ -6462,6 +6827,7 @@ class ImgEditorManager:
                                 "Make all requested changes clearly visible. "
                                 "Keep people anatomically coherent, with no missing or extra limbs."
                             )
+                            fast_prompt += self._bald_recipe_tail(prompt)
                         if negative_prompt:
                             # Turbo uses CFG=1 and does not encode a separate
                             # negative branch, so keep user exclusions in text.
@@ -6567,6 +6933,13 @@ class ImgEditorManager:
                                         fast_msg = (
                                             f"{fast_msg}; refino focal de la zona medida"
                                         )
+                                else:
+                                    print(
+                                        "[ImgEditor] Refino focal omitido: "
+                                        f"ventana={local_box is not None} "
+                                        f"zona corporal={body_zone is not None}",
+                                        flush=True,
+                                    )
                             elif local_box is not None:
                                 keep_request = bool(
                                     len(subject_passes) == 1
@@ -6625,29 +6998,102 @@ class ImgEditorManager:
                                 )
                         if quality_hybrid or prompt_authority:
                             no_op = self._edit_is_nearly_unchanged(img, output)
-                            if multi_output is None and no_op and not (cancel_check and cancel_check()):
-                                if prompt_authority and authority_facts["pose"]:
-                                    retry_prompt = (
-                                        f"The input photo has not yet been changed. Do this visible edit now: {edit_text}. "
-                                        "The requested pose or body change must be obvious. "
-                                        "Do not keep the previous pose or the previous state of what was asked to change. "
-                                        "Leave every other person as they are."
+                            # v5.1219: un fantasma NO es no-op: el modelo
+                            # desvaneció el material original a opacidad
+                            # parcial (log 01:49: cáscara gris sobre el
+                            # cuero cabelludo con el tono de la pared) y el
+                            # pegado lo conservó porque midió cambio. Firma:
+                            # estructura HF retenida + amplitud caída.
+                            ghost = (
+                                (not no_op)
+                                and self._edit_leaves_a_ghost(img, output)
+                            )
+                            # v5.1220: una cara que el modelo pinta donde la
+                            # foto no tiene ninguna (log 10:23: tercera cara
+                            # sobre la coronilla del calvo; la foto entró
+                            # con 2 caras y salió con 3). El pegado por
+                            # cambio medido la conserva porque es textura
+                            # nueva; ni el no-op ni el fantasma la cogen.
+                            added_face = (
+                                (not no_op) and (not ghost)
+                                and self._added_face_mask(
+                                    img, output,
+                                    detected_faces or source_faces,
+                                ) is not None
+                            )
+                            if (multi_output is None
+                                    and (no_op or ghost or added_face)
+                                    and not (cancel_check and cancel_check())):
+                                if added_face:
+                                    print(
+                                        "[ImgEditor] Cara añadida por el modelo "
+                                        "sin contrapartida en la foto; segundo "
+                                        "intento Turbo con las mismas personas",
+                                        flush=True,
                                     )
-                                elif prompt_authority:
                                     retry_prompt = (
-                                        f"The input photo has not yet been changed. Do this visible edit now: {edit_text}. "
+                                        "The previous edit painted a new face "
+                                        "or person that is not in the input "
+                                        "photo. The result must contain exactly "
+                                        "the same people as the input: no face "
+                                        "may be added, copied or duplicated. "
+                                        f"Do this visible edit now: {edit_text}. "
+                                        "Keep the pose and the framing, and "
+                                        "leave every original person exactly "
+                                        "where they are."
+                                    )
+                                elif ghost:
+                                    print(
+                                        "[ImgEditor] Resto fantasma del material "
+                                        "original dentro de la zona cambiada; "
+                                        "segundo intento Turbo con reemplazo "
+                                        "completo (sin resto translúcido)",
+                                        flush=True,
+                                    )
+                                    retry_prompt = (
+                                        "The previous edit only faded the original "
+                                        "content instead of replacing it, which "
+                                        "leaves a translucent ghost of the "
+                                        "original. Do this visible edit now: "
+                                        f"{edit_text}. "
+                                        "Fully replace the previous material: no "
+                                        "translucent remnant of it may remain, "
+                                        "the new content must be fully opaque. "
                                         "Keep the pose and the framing. "
-                                        "Do not keep the previous state of what was asked to change. "
-                                        "Leave every other person as they are."
+                                        "Leave every other part of the photo "
+                                        "exactly as it is."
                                     )
                                 else:
-                                    retry_prompt = (
-                                        f"The input photo has not yet been changed. Do this visible edit now: {prompt}. "
-                                        "The requested change must be obvious in the result. "
-                                        "Preserve unrelated people, objects, anatomy and the camera view."
+                                    print(
+                                        "[ImgEditor] Cambio casi nulo sobre la foto; "
+                                        "segundo intento Turbo con la instrucción de refuerzo",
+                                        flush=True,
                                     )
+                                    if prompt_authority and authority_facts["pose"]:
+                                        retry_prompt = (
+                                            f"The input photo has not yet been changed. Do this visible edit now: {edit_text}. "
+                                            "The requested pose or body change must be obvious. "
+                                            "Do not keep the previous pose or the previous state of what was asked to change. "
+                                            "Leave every other person as they are."
+                                        )
+                                    elif prompt_authority:
+                                        retry_prompt = (
+                                            f"The input photo has not yet been changed. Do this visible edit now: {edit_text}. "
+                                            "Keep the pose and the framing. "
+                                            "Do not keep the previous state of what was asked to change. "
+                                            "Leave every other person as they are."
+                                        )
+                                    else:
+                                        retry_prompt = (
+                                            f"The input photo has not yet been changed. Do this visible edit now: {prompt}. "
+                                            "The requested change must be obvious in the result. "
+                                            "Preserve unrelated people, objects, anatomy and the camera view."
+                                        )
                                 if negative_prompt:
                                     retry_prompt += f" Avoid: {negative_prompt}."
+                                retry_prompt += self._bald_recipe_tail(
+                                    edit_text if prompt_authority else prompt
+                                )
                                 try:
                                     retry_result, retry_msg = fast_client.generate(
                                         image=generation_image, prompt=retry_prompt,
@@ -6668,6 +7114,7 @@ class ImgEditorManager:
                                     retry_result, retry_msg = None, str(retry_error)
                                 if retry_result is None:
                                     fast_msg = f"{fast_msg}; segundo intento falló: {retry_msg}"
+                                    print(f"[ImgEditor] Segundo intento falló: {retry_msg}", flush=True)
                                 if retry_result is not None:
                                     output = retry_result.image.convert("RGB")
                                     if body_edit and subject_mask is not None:
@@ -6714,7 +7161,56 @@ class ImgEditorManager:
                                             keep_measured_mask=True,
                                         )
                                         body_zone = generation_mask
+                                    # El retry también pega a escala ×N sobre
+                                    # foto grande (log 01:22: x3.34 sin
+                                    # refinar); el mismo zoom nativo que la
+                                    # pasada principal le corresponde aquí.
+                                    refine_subject = (
+                                        body_zone
+                                        if body_edit and body_zone is not None
+                                        else subject_mask
+                                    )
+                                    if local_box is not None and refine_subject is not None:
+                                        refined = self._second_focused_pass(
+                                            fast_client, output, img,
+                                            refine_subject, local_box, gen_size,
+                                            fast_prompt, negative_prompt, seed,
+                                            prompt_authority, preserve_frame,
+                                            vision_reference, lora_name,
+                                            lora_strength, appearance_sample,
+                                            progress_callback, cancel_check,
+                                        )
+                                        if refined is not None:
+                                            output = refined
+                                            fast_msg = (
+                                                f"{fast_msg}; refino focal de la zona medida"
+                                            )
+                                    # v5.1220: si el retry vuelve a pintar la
+                                    # misma cara, esa región se restaura de
+                                    # la foto original: una foto no gana
+                                    # personas por un defecto del modelo.
+                                    leftover_face = self._added_face_mask(
+                                        img, output,
+                                        detected_faces or source_faces,
+                                    )
+                                    if (leftover_face is not None
+                                            and output.size == img.size):
+                                        output = Image.composite(
+                                            img, output, leftover_face,
+                                        )
+                                        fast_msg = (
+                                            f"{fast_msg}; cara añadida "
+                                            "restaurada de la foto original"
+                                        )
+                                        print(
+                                            "[ImgEditor] El segundo intento "
+                                            "conserva una cara añadida; esa "
+                                            "región se restaura de la foto "
+                                            "original",
+                                            flush=True,
+                                        )
                                     fast_msg = f"{fast_msg}; segundo intento: {retry_msg}"
+                                    print(f"[ImgEditor] Segundo intento aplicado: {retry_msg}", flush=True)
                                     no_op = self._edit_is_nearly_unchanged(img, output)
                                 if body_edit and body_zone is None:
                                     fast_msg = (

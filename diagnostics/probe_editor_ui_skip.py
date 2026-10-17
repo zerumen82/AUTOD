@@ -27,7 +27,7 @@ from PIL import Image
 
 sys.path.insert(0, os.getcwd())
 
-from ui.tabs.img_editor.events import on_generate  # noqa: E402
+from ui.tabs.img_editor.events import on_generate, wire_events  # noqa: E402
 
 
 SOURCE = os.path.join("ui", "tob", "ComfyUI", "input", "fast_1790331799.png")
@@ -48,7 +48,61 @@ class FakeClient:
         return SimpleNamespace(image=Image.new("RGB", (256, 256), "red")), "OK (stub)"
 
 
+def _check_wiring_concurrency():
+    """Todos los listeners de on_generate deben ser de concurrencia ilimitada.
+
+    Medido 2026-10-16 (gradio 6.13.0): los listeners de API sin
+    concurrency_limit quedaban con la concurrencia por defecto (1) y un
+    segundo envío mientras la primera petición corría se ENCOLABA y se
+    ejecutaba tras ella sin rechazo («procesado dos veces», 18:56/19:00 de
+    la sesión real). Con None el envío en caliente corre en paralelo y la
+    guarda de on_generate lo rechaza en voz alta.
+    """
+
+    class FakeComponent:
+        def __init__(self, name):
+            self.name = name
+            self.clicks = []
+            self.changes = []
+
+        def click(self, fn=None, inputs=None, outputs=None, **kwargs):
+            self.clicks.append({"fn": fn, "inputs": inputs, **kwargs})
+            return self
+
+        def change(self, fn=None, inputs=None, outputs=None, **kwargs):
+            self.changes.append({"fn": fn, **kwargs})
+            return self
+
+    keys = (
+        "input_img", "prompt", "engine", "denoise", "autoregressive",
+        "auto_iterations", "quality_mode", "quality_options", "enhance_tier",
+        "quality_preserve_faces", "quality_deposter", "quality_upscale",
+        "quality_color", "quality_realism", "output_img", "status",
+        "mask_preview", "bt_use_as_input", "bt_open_folder",
+    )
+    ui_comp = {key: FakeComponent(key) for key in keys}
+    for name in ("gen_btn", "legacy_options_btn", "legacy_api_btn"):
+        ui_comp[name] = FakeComponent(name)
+    wire_events(ui_comp)
+    for btn_name, api in (
+        ("gen_btn", "edit_select"),
+        ("legacy_options_btn", "edit_options"),
+        ("legacy_api_btn", "edit"),
+    ):
+        clicks = ui_comp[btn_name].clicks
+        assert clicks, f"{btn_name} no se conectó en wire_events"
+        click = clicks[0]
+        assert click.get("api_name") == api, click
+        assert click.get("concurrency_limit") is None, (
+            f"{btn_name} sin concurrencia ilimitada: un envío en caliente se "
+            f"encolaría y se ejecutaría sin rechazo ({click})"
+        )
+    print("OK: los tres listeners de on_generate corren en paralelo y la "
+          "guarda rechaza los envíos en caliente")
+
+
 def main():
+    _check_wiring_concurrency()
     if not os.path.exists(SOURCE):
         print(f"FALTA {SOURCE}")
         sys.exit(1)

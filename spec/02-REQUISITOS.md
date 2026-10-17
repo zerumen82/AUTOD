@@ -1,5 +1,7 @@
 # spec/02 — Requisitos (historias)
 
+Decisión H-FS-005 (2026-10-17): el usuario confirma conectar Similitud al matching destino conservando exactamente los umbrales vigentes en el valor por defecto. Menor valor exige mayor similitud; selección de fuente y márgenes de ambigüedad intactos. Confirma retirar «Previsualizar Swap (Realtime)», conservando los previews existentes.
+
 Trabajo activo: corrección de los fallos del proyecto autorizada el 2026-10-13 («arreglalo todo», confirmado: fallos del proyecto). Las historias siguientes conservan sus criterios y límites de validación.
 
 ## Continuación de correcciones — 2026-10-13
@@ -75,6 +77,30 @@ Decisiones ya aprobadas por el usuario el 2026-10-04: checkbox NSFW manual, gate
 - [x] Render real por la ruta servida `/generate_image_ui`: `generate/gen_1791179741.png`, 768×512, seed 123456, castillo y unicornio en ilustración, inspeccionado visualmente; 20/20 pasos ComfyUI y estado «Listo».
 - [x] Review final y verificación independiente de Generate: reviewer APPROVE y sd-tester PASS de la versión final (72/0 y 31/0 repetidos; PNG abierto y verificado; APK debug y SHA256 comprobados). El tester no repitió el HTTP servido ni probó la APK instalada en un teléfono.
 - [x] A/B real sobre el motor por defecto (2026-10-16): `probe_gen_castillo_real.py` parametrizado por motor (`--engine`, default `get_default_generation_engine()`); `flux_dev_q4` semilla 123456 con NSFW OFF/ON produce salidas **byte-idénticas** (SHA256 `7db9c50e…`; el ON lo sirve la caché de ComfyUI porque el workflow final es el mismo) y la imagen es el castillo con unicornios en estilo dibujo. El checkbox ya no secuestra el prompt no adulto en la ruta por defecto. Con `flux_dev_abliterated` el prompt también llegó idéntico ON/OOFF, pero ese motor renderiza una mancha adulta incluso con OFF (cautela documentada; no es el default).
+
+## H-GEN-003 — LoRAs instaladas y compatibles en Generate (2026-10-17)
+
+Continuación autorizada: revisar las LoRAs locales antes de descartarlas/copiar (sesión OpenCode del 17/10) y «continua y solucionemos los problemas de Generate». Corrección de disponibilidad y compatibilidad; no cambia el motor por defecto ni los gates del prompt. El usuario está probando POV: no reiniciar UI ni ocupar la GPU para estas comprobaciones.
+
+- [x] El selector ofrece únicamente archivos instalados compatibles con el motor elegido; cambiar de motor conserva una selección válida o vuelve a Auto.
+- [x] Una selección manual ausente, inválida o incompatible devuelve error antes de subir imágenes o enviar workflows. La elección válida conserva la fuerza del catálogo y no depende del clasificador de intención.
+- [x] Las dos LoRAs de estilo ya existentes en WebUI se copian sin sobrescribir a la carpeta de ComfyUI, con hashes comprobados; el catálogo declara SDXL/Pony y selección manual, sin añadirlas automáticamente a escenas.
+- [x] Auto explica por consola cuándo el motor no admite el catálogo automático SDXL; ninguna selección manual se ignora en rutas delegadas.
+- [x] Los cuatro modificadores extra seleccionados llegan al ensamblado (límite en configuración); no desaparecen plano/color por los defaults de luz/piel. Las opciones incompatibles se ajustan en los cuatro selectores y el preview inicial muestra los defaults.
+- [x] LongCat conserva CFG real del JSON/override; FLUX.1 mantiene FluxGuidance y su negativo a CFG=1 se explica en UI/logs. HD/4K se identifica como perfil de acabado, sin prometer una resolución final que el flujo no garantiza.
+- [ ] Contratos de disponibilidad/compatibilidad rojo→verde, regresión Generate/APK, lint y compilación verdes; reviewer APPROVE y tester independiente. La carga GPU y el efecto visual siguen sin verificarse hasta prueba real en un momento que no interfiera con el Editor.
+
+## H-FS-005 — composición y controles FaceSwap (2026-10-17)
+
+Alcance autorizado por «SOLUCIONALO» tras la auditoría del 17/10. Conservar modelos, identidad origen, selección destino, umbrales vigentes y funcionamiento de Generate/Editor/Android; no instalar dependencias ni reiniciar la UI activa. Las decisiones sobre el slider «Similitud» y preview realtime se consultan al usuario mientras avanzan las correcciones independientes.
+
+- [ ] Componer una segunda cara conserva swaps previos fuera de su zona, también ante saltos/errores de esa cara; el original sigue siendo la referencia para detección, oclusión y color.
+- [ ] Vídeo principal y fallback reciben el valor real de suavizado temporal desde UI/core; llamadores antiguos conservan el default existente.
+- [ ] Auto-Rotar desactivado omite solo pasadas rotadas, conservando detección original y rescates de escala; activado conserva el comportamiento anterior.
+- [ ] El rescate frontal localiza componentes de la máscara ya medida, exige evidencia oral/anillo y cobertura vigentes y se abstiene si no hay un único candidato; no repite el mismo detector ni amplía el gate del 40 %.
+- [ ] Vídeo usa máscara alfa suavizada conservando textura del parche; no desenfoca los píxeles del swap en la transición. Verificar un vídeo completo permitido, sin equiparar un clip corto con certificación de perfiles/cortes largos.
+- [ ] Controles de similitud/preview corregidos según la decisión pendiente del usuario, sin un éxito simulado ni controles que aparenten funcionar.
+- [ ] Probes rojo→verde, lint y compilación afectados verdes, reviewer APPROVE y tester PASS. Registrar inferencias reales y evidencia visual permitida, límites y pendientes en MEMORY.md.
 
 ## H-FS-003 — Perfil, halo y selección del enhancer
 
