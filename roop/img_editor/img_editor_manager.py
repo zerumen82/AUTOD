@@ -3953,6 +3953,112 @@ class ImgEditorManager:
             print(f"[ImgEditor] Propuesta local de zona no disponible: {exc}", flush=True)
             return []
 
+    def _grow_recolor_surface(
+        self, image: Image.Image, region, faces=(), masker=None,
+    ) -> Optional[Image.Image]:
+        """Follow the measured color to the end of the surface.
+
+        A recolor that names no distinct part requests the WHOLE surface
+        («las paredes son de color gris» asks for the walls, not a patch of
+        them). The segmenter lights only the fragment where its query is
+        most visible — 5,8 % of the hotel photo (edit 22:39 of 17/10,
+        ui_start_20261017_220140) — and `_continue_measured_region` only
+        fills holes INSIDE that fragment, so the sampler hole and the paste
+        covered a feathered patch and the rest of the wall kept its old
+        color (edit_1792269760: the recurring patchy-walls defect, this
+        time from coverage, not from routing — the v5.1209 recolor route
+        did activate).
+
+        The bound is the surface's own color envelope: the p90 spread of
+        the measured fragment plus the same flat separation of 18 this path
+        already uses. The surface's own shading stays in; the next surface
+        (headboard, sheet, skin, curtain) lies past it and connectivity
+        ends there. The person and measured-object guards run before the
+        flood, the same guards the person path uses.
+        """
+        seed = np.asarray(region)
+        if seed.ndim > 2:
+            seed = seed[..., 0]
+        seed = seed >= 96
+        if int(seed.sum()) < 48:
+            return None
+        height, width = seed.shape
+        photo = np.asarray(image.convert("RGB"), dtype=np.float32)
+        if photo.shape[:2] != (height, width):
+            photo = cv2.resize(
+                photo, (width, height), interpolation=cv2.INTER_AREA,
+            ).astype(np.float32)
+        long_side = max(height, width)
+        if long_side > 768:
+            # The same work size as the other mask math: the color
+            # distances of a 43 MP frame stall the edit before anything is
+            # generated.
+            scale = 768.0 / float(long_side)
+            work_size = (
+                max(1, int(round(width * scale))),
+                max(1, int(round(height * scale))),
+            )
+            small_faces = []
+            for face in faces or []:
+                box = tuple(float(value) * scale for value in face.bbox)
+                small_faces.append(SimpleNamespace(bbox=box))
+            grown = self._grow_recolor_surface(
+                image.resize(work_size, Image.Resampling.BOX),
+                cv2.resize(
+                    seed.astype(np.uint8) * 255, work_size,
+                    interpolation=cv2.INTER_NEAREST,
+                ),
+                faces=small_faces, masker=masker,
+            )
+            if grown is None:
+                return None
+            return grown.resize((width, height), Image.Resampling.NEAREST)
+        ys, xs = np.where(seed)
+        span = max(
+            int(ys.max() - ys.min() + 1), int(xs.max() - xs.min() + 1),
+        )
+        erode_r = max(2, int(round(span * 0.06)))
+        erode_k = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (erode_r * 2 + 1, erode_r * 2 + 1),
+        )
+        core = cv2.erode(seed.astype(np.uint8), erode_k) > 0
+        if int(core.sum()) < 48:
+            core = seed
+        median_color = np.median(photo[core], axis=0)
+        color_distance = np.linalg.norm(photo - median_color, axis=2)
+        spread = float(np.percentile(color_distance[core], 90))
+        limit = max(spread + 18.0, 18.0)
+        same = color_distance <= limit
+        same |= seed
+        same = ImgEditorManager._drop_other_person_contact(
+            photo, same, seed, faces or (),
+        )
+        same = ImgEditorManager._drop_measured_object(
+            photo, same, seed, faces or (), masker, None, None,
+        )
+        touch = seed & same
+        if int(touch.sum()) < 48:
+            return None
+        _count, labels = cv2.connectedComponents(
+            same.astype(np.uint8), connectivity=8,
+        )
+        keep = np.zeros(seed.shape, dtype=bool)
+        for label in np.unique(labels[touch]):
+            label = int(label)
+            if label:
+                keep |= labels == label
+        added = int((keep & ~seed).sum())
+        if added < 48:
+            return None
+        print(
+            f"[ImgEditor] La zona recolor sigue la superficie completa "
+            f"(+{added} px); donde el color cambia queda fuera",
+            flush=True,
+        )
+        merged = np.where(keep, 255, 0).astype(np.uint8)
+        merged = cv2.GaussianBlur(merged, (31, 31), 0)
+        return Image.fromarray(merged, "L")
+
     def _measured_region_passes(
         self, image: Image.Image, raw_prompt: str, translated_prompt: str,
         surface_recolor: bool = False, faces=(),
@@ -4069,8 +4175,21 @@ class ImgEditorManager:
                 flush=True,
             )
             return []
-        mask = self._continue_measured_region(Image.fromarray(best).convert("L"), best)
-        zone = mask if mask is not None else Image.fromarray(best).convert("L")
+        zone = None
+        if surface_recolor and requested is None:
+            # A recolor that names no distinct part IS the whole surface
+            # («las paredes son de color gris»); the segmenter fragment is
+            # one patch of it. Follow the measured color to where the
+            # surface ends instead of painting a feathered patch on an
+            # otherwise untouched wall (edit_1792269760).
+            zone = self._grow_recolor_surface(
+                image, best, faces=faces, masker=masker,
+            )
+        if zone is None:
+            mask = self._continue_measured_region(
+                Image.fromarray(best).convert("L"), best,
+            )
+            zone = mask if mask is not None else Image.fromarray(best).convert("L")
         if surface_recolor:
             zone = self._close_recolor_halo(image, zone, faces) or zone
         return [{

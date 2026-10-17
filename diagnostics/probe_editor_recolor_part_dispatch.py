@@ -14,7 +14,17 @@ from roop.img_editor.img_editor_manager import ImgEditorManager
 
 
 SIZE = (160, 120)
-PHOTO = Image.new("RGB", SIZE, (130, 120, 110))
+# The measured surface is one flat color; everything beyond it is a
+# different-colored neighbour (curtain). v5.1225: a whole-surface recolor
+# follows its own color until the color changes, so the scene needs a real
+# color boundary — a single flat frame is one surface as far as the
+# measurement can tell.
+PHOTO_ARR = np.zeros((SIZE[1], SIZE[0], 3), np.float32)
+PHOTO_ARR[:] = np.array([130, 120, 110], np.float32)
+PHOTO_ARR[:, 90:] = np.array([60, 90, 160], np.float32)
+PHOTO = Image.fromarray(PHOTO_ARR.astype(np.uint8))
+NEIGHBOR = np.zeros((SIZE[1], SIZE[0]), bool)
+NEIGHBOR[:, 90:] = True
 
 
 def rectangle(box):
@@ -89,8 +99,15 @@ def main():
             surface_recolor=True, faces=[face],
         )
     assert len(bleeding) == 1 and not bleeding[0].get("requested_part")
-    assert np.array_equal(np.asarray(bleeding[0]["mask"]), np.asarray(bleeding_wall))
-    continued.assert_called_once()
+    # v5.1225: the whole-surface recolor follows its own color to where the
+    # color changes. The measured fragment stays inside the zone, the
+    # different-colored neighbour stays out, and the fragment-only
+    # continuation that used to end the flow no longer runs.
+    zone = np.asarray(bleeding[0]["mask"]) >= 96
+    fragment = np.asarray(bleeding_wall) >= 96
+    assert (zone & fragment).sum() == fragment.sum()
+    assert float((zone & NEIGHBOR).sum()) / int(NEIGHBOR.sum()) <= 0.05
+    assert not continued.called
     print("OK: superficie que roza una cara no se descarta como persona")
 
     # The abstention still holds for a real person: the face sits inside the
@@ -106,8 +123,8 @@ def main():
     )
     print("OK: la contención de la cara dentro de la región separa persona de superficie")
 
-    # A wall has no facial overlap, so recoloring the measured surface still
-    # follows the previous continuation path.
+    # A wall has no facial overlap; the same color-following applies without
+    # the person guards interfering.
     with (
         patch.object(manager, "_subject_queries", return_value=["the wall"]),
         patch.object(manager, "_get_clipseg_masker", return_value=Segmenter(wall)),
@@ -119,9 +136,14 @@ def main():
             surface_recolor=True, faces=[face],
         )
     assert len(background) == 1 and not background[0].get("requested_part")
-    assert np.array_equal(np.asarray(background[0]["mask"]), np.asarray(wall))
-    continued.assert_called_once()
-    print("OK: superficie sin persona conserva el flujo anterior")
+    # v5.1225: same flood for a surface with no face overlap; the neighbour
+    # of another color still stays out.
+    zone = np.asarray(background[0]["mask"]) >= 96
+    fragment = np.asarray(wall) >= 96
+    assert (zone & fragment).sum() == fragment.sum()
+    assert float((zone & NEIGHBOR).sum()) / int(NEIGHBOR.sum()) <= 0.05
+    assert not continued.called
+    print("OK: superficie sin persona sigue su color y deja al vecino fuera")
 
     # Structural region edits never acquire the recolor-only part flag. They
     # retain the ordinary path, including eligibility for face-repair later.

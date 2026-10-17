@@ -1243,7 +1243,14 @@ def main():
             return [SimpleNamespace(bbox=(70, 20, 100, 55), age=34, det_score=0.9)]
         return []
 
-    photo = Image.new("RGB", (120, 80), (180, 170, 160))
+    # v5.1225: the wall surface is one flat color and a different-colored
+    # curtain closes it on the right. A whole-surface recolor follows its
+    # color, so the distant pixel stays byte-identical exactly where the
+    # color changes, not where the segmenter fragment happened to end.
+    photo_arr = np.zeros((80, 120, 3), np.float32)
+    photo_arr[:] = np.array([180, 170, 160], np.float32)
+    photo_arr[:, 98:] = np.array([90, 110, 150], np.float32)
+    photo = Image.fromarray(photo_arr.astype(np.uint8))
     order_client = FakeClient()
     with (patch("ui.tabs.comfy_launcher.is_comfyui_running", return_value=True),
           patch("roop.face_util.get_face_analyser", return_value=object()),
