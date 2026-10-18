@@ -4,6 +4,49 @@ Decisión H-FS-005 (2026-10-17): el usuario confirma conectar Similitud al match
 
 Trabajo activo: corrección de los fallos del proyecto autorizada el 2026-10-13 («arreglalo todo», confirmado: fallos del proyecto). Las historias siguientes conservan sus criterios y límites de validación.
 
+## Completar código pendiente — 2026-10-18
+
+Instrucción del usuario: «SIGUE HASTA DEJARLO SOLO PRUEBAS. TODO EL CÓDIGO».
+Completar las correcciones pendientes en los flujos existentes y dejar una lista
+verificable de pruebas reales y validaciones visuales. Conservar elecciones
+vigentes de motor/modelo, compatibilidad Android y cómputo local. No instalar
+paquetes/modelos, hacer commits ni reiniciar procesos activos.
+
+- [ ] Cámara: las poses ya admitidas de altura, distancia y combinaciones de
+  orientación se conservan mediante medición de conceptos, sin regex de usuario;
+  parámetros de decisión en configuración y contratos de regresión.
+- [ ] Editor/Generate: corregir fallos reproducidos del código pendiente y
+  completar configuración de los defaults ya elegidos. Preservar máscaras
+  manuales, instrucción completa, personas/regiones no solicitadas y APK.
+  Aclaración posterior del usuario: las máscaras se habían eliminado de la
+  edición global Kontext. No reintroducir pintado manual en la UI; escritorio
+  y Android conservan su entrada Image y sus trece/ocho/nueve parámetros.
+- [ ] FaceSwap: contrastar deudas con implementación vigente; completar los
+  defectos de código reproducidos sin cambiar modelo/identidad ni recuperar
+  soluciones rechazadas. Separar comprobaciones de código y calidad del modelo.
+- [ ] Lint, compilación, contratos pertinentes, revisión independiente y bitácora;
+  actualizar spec con pendientes actuales en vez de marcar como resueltos
+  defectos visuales todavía observados. Las pruebas pueden descubrir más código
+  necesario: un defecto de calidad conocido no se convierte en «solo pruebas».
+
+## Continuación del Editor — 2026-10-18: contrato compuesto de Kontext
+
+Continuación solicitada con «CONTINUA». Se verifica el contrato previo documentado
+en `diagnostics/probe_editor_kontext_default_20261018.py`: Kontext sin máscara
+manual recibe la instrucción compuesta completa, como edición global por prompt.
+El splitter legado no debe convertirla en varias subediciones que omiten cláusulas
+sin región confirmada. Se conservan el gate de cámara y las máscaras manuales.
+
+- [x] Contrato CPU rojo→verde: rewriter con varias regiones, una generación
+  Kontext y ambas cláusulas presentes; sin recursión por regiones.
+- [x] Prueba GPU no explícita de sustitución de chaqueta por blazer roja:
+  guardar traza, salida única y medición de rojo; la variación del lienzo por sí
+  sola no acredita obediencia. Inspección visual y límites en MEMORY.md.
+- [x] Lint y compilación afectados, regresión pertinente, reviewer y tester.
+  No cerrar calidad general ni la revisión de cámara con esta comprobación.
+- [ ] Blazer de corte exacto, casos adicionales y validación visual del usuario:
+  la muestra genera cuero rojo, pero conserva corte y costuras de cazadora.
+
 ## Continuación de correcciones — 2026-10-13
 
 Dentro de H-EDIT-003/H-EDIT-004 y las deudas ya declaradas, sin sustituir Turbo ni el modelo FaceSwap y sin instalar dependencias:
@@ -94,12 +137,13 @@ Continuación autorizada: revisar las LoRAs locales antes de descartarlas/copiar
 
 Alcance autorizado por «SOLUCIONALO» tras la auditoría del 17/10. Conservar modelos, identidad origen, selección destino, umbrales vigentes y funcionamiento de Generate/Editor/Android; no instalar dependencias ni reiniciar la UI activa. Las decisiones sobre el slider «Similitud» y preview realtime se consultan al usuario mientras avanzan las correcciones independientes.
 
-- [ ] Componer una segunda cara conserva swaps previos fuera de su zona, también ante saltos/errores de esa cara; el original sigue siendo la referencia para detección, oclusión y color.
-- [ ] Vídeo principal y fallback reciben el valor real de suavizado temporal desde UI/core; llamadores antiguos conservan el default existente.
-- [ ] Auto-Rotar desactivado omite solo pasadas rotadas, conservando detección original y rescates de escala; activado conserva el comportamiento anterior.
-- [ ] El rescate frontal localiza componentes de la máscara ya medida, exige evidencia oral/anillo y cobertura vigentes y se abstiene si no hay un único candidato; no repite el mismo detector ni amplía el gate del 40 %.
-- [ ] Vídeo usa máscara alfa suavizada conservando textura del parche; no desenfoca los píxeles del swap en la transición. Verificar un vídeo completo permitido, sin equiparar un clip corto con certificación de perfiles/cortes largos.
-- [ ] Controles de similitud/preview corregidos según la decisión pendiente del usuario, sin un éxito simulado ni controles que aparenten funcionar.
+- [x] Componer una segunda cara conserva swaps previos fuera de su zona, también ante saltos/errores de esa cara; el original sigue siendo la referencia para detección, oclusión y color (contratos CPU).
+- [x] Vídeo principal y fallback reciben el valor real de suavizado temporal desde UI/core; llamadores antiguos conservan el default existente (contratos CPU).
+- [x] Auto-Rotar desactivado omite solo pasadas rotadas, conservando detección original y rescates de escala; activado conserva el comportamiento anterior (contratos CPU).
+- [x] El rescate frontal localiza componentes de la máscara ya medida, exige evidencia oral/anillo y cobertura vigentes y se abstiene si no hay un único candidato; no repite el mismo detector ni amplía el gate del 40 % (contratos CPU).
+- [x] Código de vídeo usa máscara alfa suavizada conservando textura del parche; no desenfoca los píxeles del swap en la transición (contratos CPU).
+- [ ] Verificar un vídeo completo permitido, sin equiparar un clip corto con certificación de perfiles/cortes largos.
+- [x] Controles de similitud/preview corregidos según la decisión del usuario del encabezado, sin un éxito simulado ni controles que aparenten funcionar (Gradio y callback reales aislados de inferencia).
 - [ ] Probes rojo→verde, lint y compilación afectados verdes, reviewer APPROVE y tester PASS. Registrar inferencias reales y evidencia visual permitida, límites y pendientes en MEMORY.md.
 
 ## H-FS-003 — Perfil, halo y selección del enhancer

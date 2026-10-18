@@ -6,7 +6,12 @@ Fuente: `AGENTS.md` (proyecto) + `C:/Users/INdaHouse/.agents/AGENTS.md` (global)
 
 1. **El usuario decide alcance, diseño y prioridades.** Ningún agente decide en silencio; siempre opciones concretas con recomendación.
 2. **SDD**: toda funcionalidad nueva tiene historia en `spec/02-REQUISITOS.md` antes de código.
-3. **Turbo es el motor de edición elegido por el usuario** (`LongCat-Image-Edit-Turbo-Q4_K_S.gguf`, denoise 1,0). No cambiar a Full sin aprobación.
+3. **Conservar los motores elegidos por el usuario.** La elección histórica de
+   LongCat usa Turbo (`LongCat-Image-Edit-Turbo-Q4_K_S.gguf`), sin cambio silencioso
+   a Full. La UI del Editor arranca actualmente con Kontext Q4_K_M, según
+   `editor_ui.default_engine` (decisión del 18/10 y contrato existente).
+   Kontext conserva su edición global por prompt, sin reintroducir pintado de
+   máscaras en la UI.
 4. **Generate y Image Editor deben convivir**: cambiar un flujo no puede romper el otro (`AGENTS.md` del proyecto, "Objetivo").
 5. **Sin hardcode**: parámetros en `config/` (`model_configs.json`, `generation_prompt.json`), no valores mágicos en el código.
 6. **Local-first**: todo el cómputo es en la máquina; el único servicio es ComfyUI local en el puerto 8188.

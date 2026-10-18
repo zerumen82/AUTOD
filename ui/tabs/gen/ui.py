@@ -167,8 +167,8 @@ def build_gen_ui():
             # get_installed_generation_engines (es GGUF diffusion, no checkpoint)
             # pero el gen client lo soporta nativo (flux_alias_map).
             _apk_choices = [
-                ("FLUX Dev Q4", "flux_dev_q4"),
-                ("FLUX Abliterated (ultra realista)", "flux_dev_abliterated"),
+                ("FLUX Dev Q4 (seguro, por defecto)", "flux_dev_q4"),
+                ("FLUX Abliterated (ultra realista, NSFW)", "flux_dev_abliterated"),
                 ("FLUX Schnell (rápido ~8 pasos)", "schnell"),
                 ("FLUX.2 Klein 4B base", "klein_base"),
             ]
@@ -177,9 +177,10 @@ def build_gen_ui():
                 if _c[1] not in _existing:
                     _engines.append(_c)
             engine_model = gr.Dropdown(
-                choices=_engines or [("FLUX Abliterated (ultra realista)", "flux_dev_abliterated")],
+                choices=_engines or [("FLUX Dev Q4 (seguro, por defecto)", "flux_dev_q4")],
                 value=_default,
                 label="Modelo",
+                info="Por defecto: FLUX Dev Q4 (no adulto). Los modelos NSFW (Abliterated, Chroma, SDXL explícitos) solo en este desplegable.",
             )
 
         with gr.Row():
@@ -201,7 +202,7 @@ def build_gen_ui():
             choices=_lora_dropdown_choices(_default),
             value="Auto",
             label="LoRA",
-            info="Solo instaladas compatibles con el modelo. Las LoRAs SDXL/Pony requieren esos modelos; FLUX y LongCat usan otra familia.",
+            info="Solo instaladas compatibles con el modelo. Las LoRAs SDXL/Pony requieren esos modelos; FLUX usa otra familia.",
         )
 
         gr.Markdown("_👆 Prompt + GENERAR ya funciona: los defaults (photoreal, natural, piel detallada) son los más realistas. Los extras son opcionales._")

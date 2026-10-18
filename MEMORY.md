@@ -1,5 +1,36 @@
 # MEMORY.md — AutoAuto
 
+## Generate — modelo por defecto que obedece el prompt (v5.1227) + revisión de controles — 2026-10-18
+
+- Petición: «QUIERO UN MODELO MEJOR POR DEFECTO EN GENERATE. Y QUE OBEDEZCA AL PRMPT. REVIOSA LOS CONTROLES DE GENERATE».
+- **Revisión de controles (todo cableado, verificado en código + probes)**: prompt → traducción Marian → modificadores (tipo/encuadre/piel/color/rewriter) → ensamblado → workflow; ruta con referencia (auto/editor/img2img, decisión del usuario 2026-10-16); orientación↔ancho/alto; modelo (desplegable + APK legacy de 10 args intacto); nitidez ESRGAN; NSFW (solo permiso, el prompt manda); LoRA (Auto/None/catálogo por familia, cambio de motor refresca el desplegable); avanzados semilla/pasos/CFG/negativo/perfil HD-4K/muestras (0/vacío = del modelo, overrides pasan a `generate_ai`); progreso+cancelación+unload post-generación. El aviso «Negativo sin efecto: CFG=1» es **correcto y documentado en la UI**: FLUX.1 lleva la guía en el nodo FluxGuidance y el muestreo va a CFG=1 (estilo distilled); el negativo solo influye en SDXL/LongCat-full-cfg.
+- **Default anterior**: `flux_dev_q4` (FLUX.1 Dev Q4_K, 20 pasos, guía 3.5) — buen fotorrealismo pero con las **direcciones de rechazo intactas** (puede suavizar/rechazar prompts adultos) y sin el flag `explicit` del catálogo. Candidatos instalados medidos: `schnell` (más rápido, peor Following), `longcat*` (modelo de EDICIÓN — su sitio es img2img con foto; en T2I usa imagen gris neutra), SDXL Pony/Juggernaut (peor Following que FLUX), `klein_base`/`klein_9b` (no cableados en el desplegable de Generate).
+- Fix **v5.1227 (revertido a decisión de usuario)**: `config/generation_prompt.json` → `generate_ui.default_engine = "flux_dev_q4"` — default NO-NSFW, sin direcciones de rechazo adultas, clava prompts benignos. `flux_dev_abliterated` sigue como opción NSFW en el desplegable (no como default). Conf 20 pasos / guía 3.5 / `explicit: false`. Contrato fail→pass `diagnostics/probe_gen_default_engine_20261018.py` (9 checks: config, archivo instalado, conf steps=20/cfg=3.5/explicit=false, load(), desplegable UI, abliterated+y chroma como opciones NSFW): **verde 9/9**.
+- Contrato viejo `probe_gen_prompt_adherence`: 3 aserciones atadas al default **anterior** actualizadas a la nueva decisión; el guard «el auto-scan jamás elige un modelo adulto sin config» se conserva y ahora se prueba con pony_realism (explicit) como único instalado → **108 OK / 0 FAIL**. Batería total **34/34** (7 Generate + 27 Editor, `-u`) + ruff E9,F63,F7,F82 + py_compile verdes.
+- **Pendientes**: (1) la UI activa no tiene v5.1227 (ni v5.1226 del POV): relanzar para cargarlo; validación visual de generación = del usuario. (2) La APK Android sigue ofreciendo `flux_dev_q4` como primera opción (preferencia propia de la app, sin tocar). (3) Sin commitear (orden pendiente; lote v5.1226+v5.1227).
+
+## Image Editor — «cambia el POV» elegía el ángulo por regex; pose medida por conceptos (v5.1226), 2026-10-18
+
+- Petición: «np haCE CAMBIO DE POV» + «NO QUIERO HARDCODING» (log `ui_start_20261018_001751.log`, edit 00:47 «CAMBIA EL POV, CORNUDO POV», salida `edit_1792277509.png`).
+- **Defecto medido**: la ruta POV SÍ se activó (detección OK, `FaceAnalysis omitido para cambio de cámara`, QwenCamera corrió 231 s con el lienzo ~1 MP de v5.1222), pero `camera_pose()` no conocía la primera persona: «pov» sin más descriptores caía al **default fijo** `front-right quarter view elevated shot medium shot` — regex hardcodeados de azimut/altura/distancia en `qwen_camera_comfy_client.py`. «CORNUDO POV» = primera persona (ojos del observador); el LoRA de ángulos solo tiene poses de tercera persona (96 = 8 azimuts × 4 alturas × 3 distancias) y la aproximación entrenada más cercana al POV es `front view …` (la cámara donde estarían los ojos del observador, frente al sujeto).
+- Fix **v5.1226 sin hardcodeo**: (1) `CAMERA_POSES` en `nlp/semantic_analyzer.py` — anclas de CONCEPTO naturales EN/ES por candidata y eje, mismo patrón que `CONCEPTS` (describen conceptos de cámara, no palabras trigger; sin «view/vista/camera/angle/change» sueltos que diluyen o secuestran la medida — lección v5.1209); (2) `score_camera_pose()` mide instrucción↔ancla con el MISMO `_score_texts` del analizador ligero (coverage 0,75 + density 0,35, CPU determinista); (3) `camera_pose()` = argmax por eje, con los defaults diseñados SOLO bajo `CAMERA_SIGNAL=0.12` (altura sin azimut medido → mantiene el frente; sin señal alguna → quarter-elevated visible de siempre). **Los regex de cámara se borraron.**
+- Contrato fail→pass `diagnostics/probe_editor_camera_pose_pov_20261018.py` (10 checks: 4 POV + 6 regresiones): **rojo demostrado** (5 casos caían al ángulo stock, exit 1) → verde 10/10. Contrato previo `probe_editor_viewpoint_dispatch` (ruta de cámara, presupuestos y 3 poses exactas) intacto.
+- Calibración medida: «desde» y «angle» sueltos en anclas secuestraban la altura (token-atomicidad del matcher) — retirados; «primera»≈«primer» (fuzzy exacto) mide close-up en distancia para «PRIMERA PERSONA» — documentado como comportamiento estable.
+- Suite CPU **27/27** (26 previos + el nuevo); ruff E9,F63,F7,F82 + py_compile verdes. El fallo aislado de `probe_editor_wall_instructions_20261015` fue **entorno** (crash nativo mientras el usuario usaba la GPU con otra app — MUSICIA; confirmado por él: «estaba con otra app usando la GPU»); relanzado PASS exit 0, su ruta no toca la de cámara.
+- **Límite honesto**: el LoRA NO puede un POV de primera persona real (cuerpo del observador en cuadro) — eso es del tab Generate. **Confirmado en producción**: la UI relanzada a las 02:26 corre v5.1226 (log `ui_start_20261018_022619.log` línea 190: `[QwenCamera] <sks> front view eye-level shot medium shot` — la pose medida ya se aplica, 382 s, salida 2048×1360); el usuario reporta «sigue sin cambiar el pov»: el resultado es la pose más cercana que el LoRA entrena y en fotos ya frontales el movimiento es mínimo por diseño de la herramienta. Sin commitear (orden pendiente).
+
+
+## Image Editor — LongCat retirado, Kontext como motor por defecto — 2026-10-18
+
+- **LongCat retirado** del Editor y de Generate (era modelo de EDICIÓN; en T2I usaba imagen gris neutra). Sustituido por **FLUX.1 Kontext Q4_K_M** (`flux1-kontext-dev-Q4_K_M.gguf`, 6.46 GB) como motor por defecto y régimen fuerte.
+- `config/generation_prompt.json`: `route_editor.default_engine = "kontext"` (era "longcat"); `generate_ui.default_engine = "flux_dev_q4"` (era "flux_dev_abliterated"). Se añadió bloque `kontext` en `config/model_configs.json` (steps=20, cfg=3.5, region_proposal, ambiguous_translation). Los alias legacy `longcat`/`longcat_full`/`imagine` se normalizan a Kontext en el router y en el cliente de edición para compatibilidad con UIs/APKs antiguas.
+- `ui/tabs/img_editor/ui.py`: desplegable del Editor ya no ofrece LongCat ni LongCat Full; solo Kontext (Auto/default, Qwen Cámara, Kontext, Klein 4B, Klein 9B) + compatibilidad "imagine".
+- `ui/tabs/gen/ui.py`: desplegable de Generate ahora empieza con "FLUX Dev Q4 (seguro, por defecto)"; abliterated marcado como NSFW.
+- Router del Editor (`img_editor_manager.py`): `_route_edit_engine` y `_route_body_engine` devuelven Kontext para todo excepto POV/postura (que van a Qwen Cámara). `_select_longcat_version` devuelve siempre el archivo Kontext Q4_K_M.
+- Cliente de edición (`flux_edit_comfy_client.py`): `load()` default = `flux1-kontext-dev-Q4_K_M.gguf`; normaliza alias LongCat → Kontext; `_appearance_sampling_config` lee del bloque `kontext` del config.
+- Contratos: `diagnostics/probe_editor_kontext_default_20261018.py` (default UI = kontext, cuerpo se queda en kontext, POV → Qwen, petición focal se queda en kontext sin máscara, compuesto kontext = una pasada global) → **todos OK**. `diagnostics/probe_editor_api_contract_20261018.py` (entrada Image sin lienzo de máscaras, contratos 13/9/8 intactos, PNG sin pérdida, kontext recibe foto sin máscara) → **todos PASS**.
+- **Pendiente**: validación visual del usuario en el Editor (traslado de ropa, cambio de color, POV) = del usuario. Sin commitear (orden pendiente).
+
 ## Image Editor — paredes a medio pintar por cobertura de zona + refino focal explicado (v5.1225), 2026-10-17
 
 - Petición: «revisa el edit de ahora. ¿por qué lo hace dos veces?» + «ha vuelto al mismo problema con las paredes y las ediciones» (log `ui_start_20261017_220140.log`, edits 22:02-22:42 sobre foto hotel 6395×4263: «el hombre es calvo» y «el hombre es calvo, las paredes son de color gris»; resultados `edit_1792267858.png` y `edit_1792269760.png`).
@@ -8,14 +39,14 @@
 - Fix v5.1225: nuevo `_grow_recolor_surface` — un recolor de superficie SIN parte distinta («las paredes son de color gris» pide la superficie COMPLETA) sigue el color de la propia superficie: mediana del fragmento erosionado, envelope p90 + la separación plana 18 que este camino ya usa, conectividad 8 vecinos conservando solo componentes que tocan la medida, y las mismas guardas del camino de persona (`_drop_other_person_contact`, `_drop_measured_object`). Cableado en `_measured_region_passes` SOLO cuando `surface_recolor and requested is None`; la parte distinta medida (`requested`) y el resto de rutas intactos.
 - Contrato fail→pass `diagnostics/probe_editor_recolor_surface_zone_20261017.py`: escena sintética con pared crema en degradado + cabecero madera + sábanas + persona, fragmento CLIPSeg del 4,6 %. **Rojo demostrado** (pared 8,4 %, roja 14,6 % = solo fragmento, exit 1) → verde (pared **88,0 %**, madera 2,6 %, sábanas 0,5 %, piel 0 %; pared roja 100 %, vecina crema 1,2 % — sin sobrecrecimiento).
 - Regresiones de la suite: los escenarios planos de un solo color de `probe_editor_recolor_part_dispatch` y `probe_editor_compound_fast_dispatch` quedaban cubiertos enteros por el flood (en una foto plana TODO es una superficie). Escenas actualizadas con frontera de color realista (cortina de otro color) conservando los contratos: máscara contiene el fragmento, el vecino de otro color queda fuera, sin continuación de fragmento, fondo lejano byte a byte donde el color cambia.
-- Suite CPU **26/26 PASS** (25 fijos + el nuevo); ruff E9,F63,F7,F82 + py_compile verdes. Sin commitear (orden pendiente); entra en producción al relanzar la UI (decisión del usuario). Validación visual pendiente del usuario: paredes grises uniformes en su foto, sin parche junto a la lámpara.
+- Suite CPU **26/26 PASS** (25 fijos + el nuevo); ruff E9,F63,F7,F82 + py_compile verdes. **Commiteado y pusheado en `4b6fcd4` (2026-10-18)** con v5.1224. Validación visual pendiente del usuario: paredes grises uniformes en su foto, sin parche junto a la lámpara.
 
 ## Generate — gate adulto se caía con las traducciones reales de Marian (v5.1224), 2026-10-17
 
 - Contexto: dentro del reporte de LoRAs (H-GEN-003 ya cerrada y commiteada en `0b833b0`); hallazgo nuevo medido por esta sesión. El gate adulto (`prompt_requests_adult_content`, config `adult_gate` de `generation_prompt.json`) mide la **traducción EN**, y con prompts largos (~23 palabras) `_score_texts` exige 2+ coincidencias exactas en UN concepto para cruzar el umbral 0,13 (`coverage·0.75 + density·0.35`).
 - Evidencia (log real `ui_start_20261017_154703.log`, 10 corridas 16:04-19:30): el mismo prompt ES se traduce con variantes de Marian — «practice SEX … EXPLICIT PENETRATION» → 0,1430 **ON**; «SEXUAL RELATIONS WITH … EXPLICITE PENETRATION» → 0,0715 **OFF**; «practice dogging …» → 0,0999 **OFF**. «relations» no está en ningún concepto y «sexual» solo cae en el concepto largo → media pasada. Resultado: **5 de 10 corridas adultas salieron sin prefijo adulto/anti-censor** («el prompt manda» decidió mal por ruido del traductor, no por el prompt del usuario).
 - Fix v5.1224 **solo config**: nueva línea en `adult_gate.concepts` = `"sexual relations penetration cuckold dogging"` (cada token con evidencia en la producción: «sexual relations» = salida de Marian para «relaciones sexuales»; «penetration» para «PENETRACION»; «cuckold» y «dogging» pasan íntegros). Umbral 0,13 intacto; `_score_texts` NO tocado (el mismo scorer rutea el Editor → blast radius). Ninguna palabra suelta cruza 0,13 en prompts largos (1 match ≈ 0,10); disparo = 2+ de la línea, misma característica del gate actual.
-- Contrato fail→pass `diagnostics/probe_gen_adult_gate_translations_20261017.py`: **rojo demostrado** (0,0715 y 0,0999 → OFF, exit 1) → verde (0,4104/0,2052/0,2114 → ON) con 9 regresiones del contrato previo (`probe_gen_adult_gate_20261017`) intactas. Suite CPU **25/25 PASS**, ruff E9,F63,F7,F82 + py_compile verdes. Config y probe **sin commitear** (orden pendiente).
+- Contrato fail→pass `diagnostics/probe_gen_adult_gate_translations_20261017.py`: **rojo demostrado** (0,0715 y 0,0999 → OFF, exit 1) → verde (0,4104/0,2052/0,2114 → ON) con 9 regresiones del contrato previo (`probe_gen_adult_gate_20261017`) intactas. Suite CPU **25/25 PASS**, ruff E9,F63,F7,F82 + py_compile verdes. Config y probe **commiteados en `4b6fcd4` (2026-10-18)**.
 - Pendiente: el fix entra en producción al relanzar la UI (decisión del usuario). Relacionado y NO tocado: el AVISO de traducción con falso positivo (`penetracion→penetration`) sigue declarado como deuda desde v5.1223.
 
 ## FaceSwap — correcciones de composición y controles H-FS-005 en verificación, 2026-10-17
@@ -840,3 +871,140 @@ Actualizado: 2026-10-13. Esta es la memoria de trabajo condensada. El historial 
 - Fix C (compuesto): el pase compuesto cablea `_second_focused_pass` tras la integracion (misma receta 12 pasos / fuerza 1.00; vision_reference=None porque el compuesto no usa referencia visual). Con los numeros del log real, esto regeneraria las zonas medidas del compuesto a zoom nativo en vez de x5.12.
 - Verificacion (rojo-verde): probe_editor_focused_refine ampliado (contratos de skip visibles); probe_editor_compound_fast_dispatch pillado por probe un UnboundLocal real (`vision_reference` no existia en la rama compuesta, corregido a None); suite editor 20/20 exit=0; probe_gen_adult_gate_20261017 PASS; probe_gen_prompt_adherence 108/0; ruff E9,F63,F7,F82 y py_compile limpios.
 - Estado: la UI se cerro sola ([EXIT] Ventana cerrada) tras guardar edit_1792193216 - relanzada despues con los fixes cargados. Validacion visual del usuario pendiente; sin orden no se commitea nada.
+
+
+## GENERAR - checkpoints sin censura descargados y categorizados por prefijo, 2026-10-18
+- Peticion del usuario: "descargalos y separalos por realista, ilustracion y demas". Autorizacion explicita de descarga registrada antes de empezar; log `logs/download_uncensored_models_20261018.log`.
+- Organizacion elegida: prefijos de categoria y todo plano (`REAL_` fotorreal, `ILUS_` ilustracion, `DIT_` DiT GGUF, `VAE_` VAE). Motivo medido: `_list_generation_checkpoint_files()` (flux_gen_comfy_client.py:65) usa `os.listdir` sin recursion, asi que las subcarpetas no saldrian en el desplegable de Generate.
+- Descargador propio (`scripts/download_uncensored_models.py`) porque `hf_hub_download` no arrancaba con ficheros de 6,5 GB: con Xet (hf_xet instalado) se quedaba en 0 bytes y con `HF_HUB_DISABLE_XET=1` tampoco progresaba (dos intentos, >5 min cada uno, `.incomplete` = 0 MB). Medido en esta maquina: 1 conexion 0,5 MB/s, 8 conexiones Range 3,7 MB/s; espejo hf-mirror.com mas lento (0,24 MB/s). Contrato: `<final>.part` + estado de chunks en `.part.json`, rename al nombre final solo con el tamano exacto declarado por el Hub.
+- Alias nuevos cableados y verificados con el resolutor real: `lustify4`, `biglove_xl4`, `wai_illustrious_v17`, `noobai_vpred`, `illustrious_xl_v2` (GENERATION_MODEL_REGISTRY) y `chroma` (FLUX_GEN_REGISTRY + flux_alias_map), con entradas en `config/model_configs.json`. Match de los 10 nombres de archivo contra el registro: cada alias resuelve a un unico archivo, sin colisiones con pony_realism/juggernaut/cyberrealistic/realism_engine.
+- NoobAI V-Pred va con sampler euler + scheduler normal (v-pred no admite Karras). bigASP v2.5 es flow-matching SDXL y el workflow SDXL actual no tiene ModelSamplingSD3: se descarga pero NO se registra hasta adaptar el muestreo.
+- Pendiente: validacion visual real de los 5 SDXL y de Chroma, y decidir el CFG definitivo de Chroma (config inicial CFG 1.0 tipo schnell). El desplegable solo ve los alias nuevos tras reiniciar la app AutoAuto; ComfyUI no necesita reinicio.
+
+
+## GENERAR - verificacion de los checkpoints sin censura y hallazgo v-pred / dominio del prompt, 2026-10-18
+- Descarga cerrada: 8/8 ficheros, 0 fallos, 44,4 GB en 1 h 20 min (log `logs/download_uncensored_models_20261018.log`). El descargador propio solo validaba tamano, asi que `diagnostics/verify_uncensored_models_20261018.py` compara el SHA256 local con el oid LFS que publica el Hub: **coinciden en los 8**. Sin `.part` ni restos de staging.
+- Visibilidad medida: ComfyUI (puerto 8188, cola vacia) lista los 6 en `CheckpointLoaderSimple`, `DIT_chroma1-hd_q4_k_m.gguf` en `UnetLoaderGGUF` y `VAE_sdxl_fp16_fix.safetensors` en `VAELoader`. El desplegable de Generate se construye con `get_installed_generation_engines()` (ui/tabs/gen/ui.py:161), que es la lista que ya se verifico; no hay segunda lista en `config/generation_prompt.json`.
+- Contrato de workflow por alias (`probe_gen_uncensored_models_20261018.py` fase 1): lustify4 y biglove_xl4 con dpmpp_2m_sde_gpu/karras a cfg 5,0 y 5,5; wai e illustrious con euler_ancestral/karras a cfg 6,0 y 28 pasos; noobai con euler/normal a cfg 5,0 y 30 pasos; chroma con UnetLoaderGGUF + DualCLIPLoaderGGUF a cfg 1,0.
+- **Hallazgo 1 (el modelo no estaba roto, lo estaba mi prueba)**: la imagen negra de NoobAI no venia ni del post-acabado (la muestra cruda de ComfyUI ya era negra: mean 3,7 / std 5,9) ni del workflow (el diff del JSON demuestra que cliente y workflow minimo son identicos salvo el nombre de fichero: solo difieren `client_id` y `filename_prefix`). La matriz prompt x seeds (`diag_noobai_prompt_domain_20261018.py`, 30 pasos, cfg 5,0, euler/normal) dio: prompt fotorreal de bosque **oscuro en los 3 seeds** (mediana 3-6, p95 48-101) y prompt de personaje anime **imagen real en los 3** (mean 43,7-79,5, p95 206-255). NoobAI es un modelo de personajes anime entrenado con tags de booru: probarlo con un bosque fotorreal era una prueba rota. Tambien medido: a 12 pasos sale submuestreada y casi negra, y a 28-30 (la recomendacion del modelo) sale normal.
+- **Hallazgo 2 (nodo redundante)**: ComfyUI autodetecta v-prediction por la clave `v_pred` del safetensors. Medido: `ILUS_noobai_xl_vpred_1.safetensors` tiene 2516 tensores y esa marca, `ILUS_illustrious_xl_v2.safetensors` tiene 2515 y ninguna, y el resultado es **identico con y sin el nodo** `ModelSamplingDiscrete`. Nueva funcion `_checkpoint_has_v_pred_key()` en flux_gen_comfy_client.py: el override solo se inserta si el checkpoint no trae la clave, que era el caso que se muestreaba como epsilon.
+- Correcciones aplicadas: (1) el nodo v-pred pasa a ser condicional y solo por la marca del fichero, nunca por palabras del nombre; (2) el probe de humo usa ahora los pasos de la config en vez de 12, y un prompt del dominio de cada modelo (personaje para `ILUS_*`, retrato fotoreal para `REAL_`, paisaje neutro para chroma); (3) la comprobacion de salida pasa de `std>20` a `std>20 y p95>120`: con std sola pasaba una imagen casi negra con destellos (std 34, mediana 6), y los umbrales salen de lo medido (prompts rotos p95 48-101, imagenes reales 206-255).
+- Render real final (`--real`, 6 modelos, 768x512, semilla 4242, prompt de dominio, pasos de config, exit=0): lustify4 std 79,1 p95 238 (62s); biglove_xl4 std 53,1 p95 178 (62s); wai_illustrious_v17 std 75,4 p95 252 (63s); **noobai_vpred std 85,8 p95 252 (65s, antes salia negra)**; illustrious_xl_v2 std 67,8 p95 254 (81s); chroma std 52,8 p95 200 (146s). Muestras en `diagnostics/out/gen_uncensored_20261018/`; la calidad la valida el usuario con los ojos, un probe solo puede afirmar que no sale negra.
+- Ruff limpio en todos los ficheros tocados (los 40 errores que devuelve `ruff check diagnostics/` en bloque son de probes antiguos de otros diagnosticos, no de esta descarga). Sin commitear nada.
+- Trazabilidad del diagnostico en `diagnostics/`: `verify_uncensored_models_20261018.py` (tamano + SHA256 + registro), `probe_gen_uncensored_models_20261018.py` (contrato + render real, con `--only` y `--no-hash`), `diag_noobai_vpred_sampling_20261018.py` (matriz de muestreo), `diag_raw_vs_polished_20261018.py` (cruda vs post-acabado), `diag_noobai_real_workflow_20261018.py` (prompt real del cliente), `diag_noobai_workflow_diff_20261018.py` (diff de JSON), `diag_noobai_vpred_sampling5_20261018.py` (repeticiones en una sesion) y `diag_noobai_prompt_domain_20261018.py` (el decisivo).
+- Aviso: no se puede confiar en comparar resultados entre sesiones de ComfyUI para este modelo - el mismo workflow, mismo seed y mismos parametros dieron mean 69,6 en una sesion y 19,7 en otra. Dentro de una sesion si es determinista (repeticiones identicas al byte). Por eso las matrices se hacen con repeticiones en una sola sesion.
+
+## Continuación 2026-10-18 — Kontext compuesto: instrucción completa antes del splitter
+
+- Petición actual: «CONTINUA». Reconstruido el trabajo desde archivos/probes recientes:
+  el default Kontext y su contrato global estaban documentados en
+  `probe_editor_kontext_default_20261018.py`, pero no en la última bitácora.
+  Se retomó la compuerta no explícita de chaqueta vaquera → blazer roja.
+  ComfyUI 8188 estaba activo con cola vacía; UI 7861 no respondía. No se
+  reinició ningún proceso, no se instalaron paquetes ni se hicieron commits.
+- Causa reproducida CPU y GPU: el rewriter proponía varias regiones; el splitter
+  legado las convertía en subediciones también para Kontext. Una cláusula sin
+  máscara segura se omitía y el resto podía ir a Flux Fill. Baseline real
+  `logs/continue_kontext_strong_before_20261018.log`: 120,5 s, 1/2 regiones,
+  rojo del torso 19,0→18,7 % (-0,3 pp), compuerta EXIT 1. Imagen/traza/métricas
+  `diagnostics/out/edit_strong_kontext_20261018/1792338057787951000/`.
+- Fix mínimo `img_editor_manager.py`: el splitter del rewriter excluye Kontext;
+  sigue su rama EDIT global con la instrucción completa. Cámaras y máscaras
+  manuales conservan sus gates. Eliminado comentario que prometía obediencia
+  universal sin prueba. `spec/02` registra el contrato antes del cambio.
+- Tester independiente: nuevo contrato CPU en
+  `probe_editor_kontext_default_20261018.py` falla antes por subedición y pasa
+  después: una carga/generación Kontext, ambas cláusulas, sin máscara/recursión.
+  Control LongCat Full conserva dos subediciones regionales. PASS 2/2;
+  `diagnostics/probe_editor_kontext_compound_{red,green}_20261018.log`.
+- Probe GPU fuerte ahora comprueba cola vacía, crea directorio único, conserva
+  traza/métricas y falla si no alcanza su criterio cromático. Se corrigió el
+  texto que equiparaba ese criterio con obediencia; también el texto del probe
+  corporal que equiparaba >1 % de píxeles cambiados con cumplimiento. Ese probe
+  corporal explícito NO se ejecutó en esta continuación.
+- Render real después del fix, misma foto/petición y semillas no fijadas:
+  `logs/continue_kontext_strong_after_20261018.log`, 201,8 s, EXIT 0; una pasada
+  Kontext Q4_K_M, guidance 3,5, 20 pasos, referencia offset; rojo 19,0→63,2 %
+  (+44,2 pp). Evidencia fresca
+  `diagnostics/out/edit_strong_kontext_20261018/1792338249643359400/`.
+  Inspección visual root: chaqueta roja de aspecto cuero, cara/pose/calle
+  conservadas; el corte sigue parecido a la chaqueta vaquera original. No se
+  certifica blazer exacta, generalidad ni calidad con una sola imagen.
+- Ruff completo y py_compile verdes en manager y tres probes tocados.
+  Diff afectado verde reconociendo CRLF (`core.whitespace` con `cr-at-eol`);
+  el check global sin ese ajuste señala CRLF en cambios heredados de config.
+  Reviewer APPROVE acotado al splitter+compuerta; no aprueba el lote heredado.
+- Deuda real detectada por reviewer, CHANGES_REQUESTED del lote de cámara:
+  `low angle shot`, `high angle shot`, `close-up shot`, `full body shot` y
+  combinaciones detrás/izquierda tienen regresiones CPU de pose. El probe POV
+  existente pasa 10/10 sin cubrirlas. `CAMERA_SIGNAL=0.12` está fuera de config.
+  Registrado en spec/03; sin cambiar diseño/anclas en esta continuación.
+  H-EDIT-003/H-EDIT-004 siguen abiertas; validación visual del usuario pendiente.
+- Verificación final: regresión `probe_editor_viewpoint_dispatch` EXIT 0
+  (`logs/continue_viewpoint_regression_20261018.log`). Tester independiente
+  abrió original, baseline y resultado real: PASS acotado al despacho y al
+  cambio cromático/material visible; confirma corte/costuras de cazadora,
+  blazer exacta parcial/no confirmada. PNG after decodificable (578029 bytes).
+  La validación visual del usuario continúa pendiente.
+
+## Completar código pendiente — 2026-10-18, instrucción y correcciones vigentes
+
+- Usuario: «SIGUE HASTA DEJARLO SOLO PRUEBAS. TODO EL CÓDIGO»; se auditó
+  spec/código/logs actuales, conservando los motores elegidos y los límites de
+  instalación/reinicio/commits. Se aplicó skill fix y roles editor/reviewer/tester.
+- Cámara: reproducidos 8 fallos de 13 (altura, distancia, atrás/izquierda).
+  La medida incluye frases entrenadas discriminantes y anclas; normalización de
+  acentos solo cámara; vocabulario compartido derivado de candidatas. Señal 0,12
+  y fracción 0,5 en `config/camera_pose.json`, carga validada. Verde 13/13,
+  96/96 combinaciones, POV 10/10, escalado y despacho. Reviewer independiente
+  APPROVE acotado. No se afirma POV real en primera persona: no existe entre
+  las 96 poses del LoRA. Logs `diagnostics/probe_editor_camera_pose_regressions_{red,green}_20261018.log`.
+- Chroma: la auditoría descubrió una arquitectura incorrecta, no un parámetro
+  pendiente de gusto. Usaba FLUX dual CLIP-L+T5, sin opciones T5 y CFG1.
+  Corregido a T5 único `type=chroma`, `T5TokenizerOptions` con min_padding1 y
+  min_length0, CFG real 3,8 en config y overrides conservados. Sin FluxGuidance;
+  FLUX/SDXL conservan sus workflows. Referencia primaria del autor:
+  https://huggingface.co/lodestones/Chroma1-HD/blob/main/ComfyUI_Chroma1-HD_T2I-workflow.json
+  y código ComfyUI local. Nuevo probe rojo→verde, seis contratos de modelos
+  verdes, reviewer APPROVE. No hay render nuevo de Chroma: los renders previos
+  pertenecen al workflow anterior y no validan el corregido.
+- Traducción: cinco cognados correctos eran falsos residuos del gate fuzzy
+  (incluido PENETRACION→penetration). Se usa solo `target.spm` ya instalado
+  para reconocer una palabra destino completa antes de marcar parecido como
+  residuo. Passthrough exacto/typos siguen protegidos; falta de recurso conserva
+  gate anterior. Sin pesos, listas manuales, nuevos paquetes ni red. 12/12
+  contratos verdes y reviewer APPROVE; no certifica género/fidelidad universal.
+- Default UI Editor pasa a `editor_ui.default_engine` en
+  `config/generation_prompt.json`, independiente de Generate; se conserva
+  Kontext. La UI construida prueba valor real, override desde configuración y
+  rechazo explícito de motor inválido. Default Generate permanece el elegido
+  el 18/10; no se cambia por comparativas históricas.
+- Corrección de alcance del root: al interpretar una deuda antigua añadí un
+  lienzo de pintado manual. El usuario recordó «PERO NO HABIAMOS ELIMINADO
+  LAS MASCARAS?». Se retiraron por completo ese lienzo, su entrada legacy
+  auxiliar, su cableado y su probe nuevo. UI final = gr.Image, no ImageEditor;
+  eventos originales. Los logs de la prueba retirada son historia, no prueba
+  de una función entregada. El probe vigente
+  `probe_editor_api_contract_20261018.py` verifica entrada Image en escritorio
+  y Android (13/9/8), y Kontext recibe foto original/mask_image=None/global.
+  Transferencias en PNG mantienen todos los píxeles; WebP anterior alteraba
+  hasta 2 niveles incluso en un parche uniforme. Reviewer APPROVE de este
+  estado final SIN lienzo; no se añaden máscaras a la ruta Kontext.
+- FaceSwap: la auditoría encontró H-FS-005 ya implementada y APPROVE del 17/10;
+  SHA ProcessMgr idéntico (`f740f731...`). 12/12 probes con InferenceSession
+  prohibida, tracking 453/453 e integración 27/27. Solo se corrigieron dos
+  probes: warmup de FaceAnalysis que hacía inferencia al cablear la UI y
+  aserto obsoleto de identidad del frame (ahora exige composición previa
+  independiente y original intacto). Primer pase del probe antiguo cargó
+  CUDA incidentalmente antes del aislamiento; terminó su proceso sin parar
+  UI/renders. Root revisó los dos cambios y dio APPROVE. Evidencia
+  `diagnostics/out/faceswap_code_audit_20261018/`. No hay render FaceSwap nuevo
+  ni certificación visual; los A/B antiguos sin metadata no constan terminados.
+- Verificación root: batería final de 9 módulos 9/9 exit0 en
+  `logs/code_completion_final_suite_20261018.json`; Generate adherence 108/108,
+  legacy APK 31/31, controles Gradio 5/5. Ruff completo de los archivos tocados
+  verde; lint crítico de roop/ui salvo ComfyUI externo verde y compileall de
+  roop/ui/tabs/ui/main.py/run.py verde. JSON de tres configs válido sin claves
+  duplicadas; diff global verde con CRLF reconocido, sin ocultar finales como
+  espacios sobrantes. No APK recompilada/instalada ni pruebas reales nuevas
+  durante esta fase de completar código.

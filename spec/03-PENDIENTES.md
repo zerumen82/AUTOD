@@ -1,15 +1,80 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## Estado vigente — completar código, 2026-10-18
+
+- Cámara: corregidas las regresiones de altura/distancia/orientación; 13/13
+  casos y 96/96 frases entrenadas, POV 10/10. Señal y discriminación en
+  `config/camera_pose.json`. Revisión independiente APPROVE del código.
+  Falta prueba visual de encuadres; las 96 poses del LoRA no incluyen primera
+  persona real y no garantizan movimiento cuando la entrada ya tiene ese ángulo.
+- Chroma: corregido el workflow heredado FLUX. Usa T5 único, `type=chroma`,
+  opciones de tokenización y CFG real 3,8 configurado, con overrides conservados.
+  FLUX/SDXL mantienen sus contratos. Falta render real del workflow corregido;
+  las imágenes del 18/10 anteriores a este fix pertenecen al workflow antiguo.
+- Traducción: corregido el falso positivo de cognados como
+  `PENETRACION→penetration` mediante el tokenizador destino ya instalado;
+  12/12 casos y fallback sin recurso. No certifica traducciones arbitrarias ni
+  corrige por catálogo el género que produzca Marian.
+- Editor: default Kontext en configuración independiente. La UI conserva
+  `gr.Image`; **no se reintroduce pintado de máscaras**. Se retiró el lienzo
+  añadido por interpretación de una deuda antigua tras el recordatorio del
+  usuario. Endpoints escritorio/Android 13/9/8 siguen recibiendo Image;
+  el caso Kontext sin selección recibe `mask_image=None`, modo global.
+  La transferencia PNG evita la compresión WebP al reutilizar resultados.
+- FaceSwap: H-FS-005 ya tenía el código implementado; SHA de ProcessMgr coincide
+  con APPROVE del 17/10. Auditoría actual 12/12 probes, tracking 453/453 e
+  integración 27/27; corregidos solo dos probes con warmup de modelo/aserto
+  obsoleto. Evidencia `diagnostics/out/faceswap_code_audit_20261018/`.
+  Siguen pendientes perfiles, parecido, oclusiones y vídeos completos. No se
+  atribuye finalización a los A/B antiguos que carecen de metadata final.
+- Batería final de los bloques anteriores 9/9: `logs/code_completion_final_suite_20261018.json`.
+  Generate 108/108 y contrato legacy APK 31/31. Lint crítico de roop/ui (sin
+  código externo ComfyUI) y compileall verdes. Esto verifica código y contratos,
+  no la calidad visual ni una prueba instalada en teléfono.
+- Experimentos históricos rechazados de SAM2/GrabCut/Hyperswap no se reactivan
+  para rellenar casillas. Klein en Generate y bigASP siguen siendo ampliaciones
+  pendientes de decisión. No instalar ni cambiar motores por estas notas.
+
+## Continuación 2026-10-18 — Kontext compuesto y revisión pendiente de cámara
+
+- Corregido el splitter legado que dividía también las instrucciones Kontext:
+  una petición sin máscara manual conserva sus cláusulas en una generación.
+  Contratos CPU rojo→verde y LongCat Full 2/2 PASS; reviewer APPROVE acotado.
+  Render real chaqueta roja: antes 1/2 regiones y delta rojo -0,3 pp; después
+  una pasada Kontext y +44,2 pp. Salidas/trazas en
+  `diagnostics/out/edit_strong_kontext_20261018/1792338057787951000/` (antes)
+  y `1792338249643359400/` (después). Misma foto/petición, semillas no fijadas.
+  Se observa cuero rojo con cara, pose y fondo conservados; el corte sigue
+  parecido a la chaqueta original. Falta validación del usuario y más casos;
+  no cierra H-EDIT-003/H-EDIT-004 ni cumplimiento exacto de «blazer».
+- Revisión heredada de cámara CHANGES_REQUESTED (corregida en el estado vigente): `low angle shot`,
+  `high angle shot`, `close-up shot`, `full body shot` y algunas combinaciones
+  detrás/izquierda no conservan las poses que admitía la ruta anterior;
+  `CAMERA_SIGNAL=0.12` sigue fuera de configuración. El probe POV 10/10 no
+  cubre estos casos. Esta continuación no modifica esas decisiones/anclas,
+  ni aprueba el lote heredado cámara/default/UI.
+
+## Última actualización 2026-10-18 (v5.1227: modelo por defecto de Generate que obedece el prompt)
+
+- **«QUIERO UN MODELO MEJOR POR DEFECTO EN GENERATE. Y QUE OBEDEZCA AL PROMPT. REVISAR LOS CONTROLES»**: controles revisados de punta a punta (todo cableado; el aviso «Negativo sin efecto: CFG=1» es correcto — FLUX.1 guía vía FluxGuidance, muestreo distilled a CFG=1, documentado en la UI). Default `flux_dev_q4` → **`flux_dev_abliterated`** (`generate_ui.default_engine`): misma familia FLUX.1-dev con mejor Following instalado y direcciones de rechazo eliminadas (obedece también prompts adultos), 25 pasos/guía 3.5/`explicit: true`. Contrato fail→pass `probe_gen_default_engine_20261018` (rojo con flux_dev_q4 → verde 7/7); `probe_gen_prompt_adherence` actualizado (108/0, guard de «auto-scan nunca elige modelo adulto» intacto con pony_realism); batería **34/34**.
+- **Pendiente**: relanzar la UI para cargarlo (la sesión 00:17 no lo tiene); validación visual de generación = del usuario. **Deuda**: la APK Android sigue con `flux_dev_q4` como primera opción de su desplegable (preferencia propia de la app, sin tocar). **klein 4B/9B no están cableados en Generate** (solo en el Editor): cablearlos sería funcionalidad nueva, pendiente de decisión. Sin commitear (lote v5.1226+v5.1227, orden pendiente).
+
+## Última actualización 2026-10-18 (v5.1226: «cambia el POV» elegía ángulo por regex; pose medida por conceptos)
+
+- **«np haCE CAMBIO DE POV» + «NO QUIERO HARDCODING»** (log `ui_start_20261018_001751.log`, edit 00:47 «CAMBIA EL POV, CORNUDO POV», salida `edit_1792277509.png`): la ruta POV sí se activó (QwenCamera 231 s con el lienzo ~1 MP de v5.1222) pero `camera_pose()` caía por regex hardcodeados al default fijo `front-right quarter view elevated shot medium shot` — «CORNUDO POV» (primera persona) no tenía representación. El LoRA solo tiene 96 poses de tercera persona; la aproximación entrenada más cercana al POV es `front view …` (la cámara donde estarían los ojos del observador).
+- Fix v5.1226 **sin hardcodeo**: `CAMERA_POSES` en `nlp/semantic_analyzer.py` (anclas de concepto EN/ES por candidata y eje, mismo patrón que `CONCEPTS`, sin tokens ambiguos sueltos) + `score_camera_pose()` con el MISMO `_score_texts` del analizador ligero + `camera_pose()` como argmax por eje con defaults diseñados solo bajo `CAMERA_SIGNAL=0.12`; los regex de cámara, borrados. Contrato fail→pass `probe_editor_camera_pose_pov_20261018.py`: **rojo demostrado** (5 casos al ángulo stock) → verde 10/10; contrato previo `probe_editor_viewpoint_dispatch` intacto. Suite CPU **27/27**, ruff+py_compile verdes (el fallo aislado de `probe_editor_wall_instructions` fue entorno con la otra app del usuario usando la GPU — relanzado PASS).
+- **Pendiente**: ~~relanzar la UI~~ — relanzada 02:26, v5.1226 **en producción** (log 02:26: la pose medida `front view eye-level` se aplica en un edit «cambia el pov»). El usuario reporta «sigue sin cambiar el pov»: **límite del LoRA confirmado en uso real** — sus 96 poses son de tercera persona; en una foto ya frontal «front view eye-level» apenas mueve la cámara. Sin más recorrido en esa ruta para POV real (declarado). Sin commitear (lote v5.1226+v5.1227, orden pendiente).
+
 ## Última actualización 2026-10-17 (v5.1225: paredes a medio pintar por cobertura de zona en el Editor)
 
 - **«Ha vuelto el mismo problema con las paredes» + «¿por qué lo hace dos veces?» — diagnosticados en el edit 22:39** (`ui_start_20261017_220140.log`, foto hotel 6395×4263, «el hombre es calvo, las paredes son de color gris»). (1) Los dos renders son el pase principal + el **Refino focal** (diseño v5.1210, pegado limitado a la zona ya escrita — verificado en código); no hay doble pegado. (2) La ruta de recolor v5.1209 SÍ se activó (consultas singulares «the wall» = 5,8 %) pero la zona = el **fragmento CLIPSeg**: `_continue_measured_region` solo rellena huecos dentro de esa máscara, el hueco del sampler y el pegado son la zona → la pared quedó gris SOLO en un parche difuminado junto a la lámpara y crema en el resto (`edit_1792269760.png`).
 - Fix v5.1225: `_grow_recolor_surface` — un recolor de superficie sin parte distinta sigue el color de la propia superficie (mediana erosionada + envelope p90 + separación plana 18 + conectividad, guardas de personas/objetos medidos); cableado solo en `surface_recolor and requested is None`, resto de rutas intactas. Contrato `probe_editor_recolor_surface_zone_20261017.py` **rojo demostrado** (pared 8,4 %/roja 14,6 %) → verde (88,0 %/100 %, madera-sábanas-piel-vecina ≤5 %). Dos probes de la suite actualizados con frontera de color (escenarios planos cubiertos enteros por el flood): contratos conservados, suite CPU **26/26**, ruff+py_compile verdes.
-- **Pendiente**: entra en producción al relanzar la UI (decisión del usuario); validación visual suya (paredes grises uniformes, sin parche junto a la lámpara). Sin commitear — commit/push pendiendo orden explícita (junto con v5.1224 sin commitear). Deuda sin tocar: AVISO de traducción con falso positivo (`penetracion→penetration`, declarada en v5.1223).
+- **Pendiente**: validación visual suya (paredes grises uniformes, sin parche junto a la lámpara). **Commiteado y pusheado en `4b6fcd4` (2026-10-18)** junto con v5.1224. Deuda sin tocar: AVISO de traducción con falso positivo (`penetracion→penetration`, declarada en v5.1223).
 
 ## Última actualización 2026-10-17 (v5.1224: gate adulto se caía con las traducciones reales de Generate)
 
 - **«NSFW ON pero el prompt no pide contenido adulto» en corridas adultas — causa medida y fix v5.1224**: el gate mide la traducción EN (línea555 de `flux_gen_comfy_client.py`), y el analizador ligero da `coverage(matched/palabras del prompt)·0.75 + density(matched/palabras del concepto)·0.35`; con prompts largos (~23 tokens) hacen falta 2+ coincidencias exactas en un solo concepto para cruzar 0,13. Medido sobre las traducciones REALES del log 15:47 (mismo prompt ES, Marian variant): «practice SEX … EXPLICIT PENETRATION» → 0,1430 ON; «SEXUAL RELATIONS WITH … EXPLICITE PENETRATION» → **0,0715 OFF**; «practice dogging …» → **0,0999 OFF**. Impacto: 5 de 10 corridas adultas salieron sin prefijo adulto/anti-censor. Fix **solo config** (`config/generation_prompt.json`): una línea nueva en `adult_gate.concepts` con las salidas del traductor medidas en producción («sexual relations» por «relaciones sexuales», «penetration», «cuckold», «dogging»); umbral 0,13 intacto y `_score_texts` NO tocado (el mismo scorer rutea el Editor). Contrato fail→pass `probe_gen_adult_gate_translations_20261017.py` (**rojo demostrado**: 0,0715/0,0999 OFF) → verde (0,4104/0,2052/0,2114 ON) + 9 regresiones del contrato previo intactas. Suite CPU **25/25**, ruff+py_compile verdes.
-- **Pendiente**: el fix entra en producción al relanzar la UI (su decisión); sin commitear (config + probe) — commit/push pendiendo orden explícita. Deuda sin tocar: AVISO de traducción con falso positivo (`penetracion→penetration`), ya declarada en v5.1223.
+- **Pendiente**: sin pérdida — commiteado en `4b6fcd4` (2026-10-18). Deuda sin tocar: AVISO de traducción con falso positivo (`penetracion→penetration`), ya declarada en v5.1223.
 
 ## Corrección H-FS-005 en verificación — 2026-10-17
 
@@ -136,7 +201,8 @@
 - Este ComfyUI no registra `/progress` (`ui/tob/ComfyUI/server.py:501-1027`) → resuelto en Fase 3b: ETA derivada de `/history` (`history_mean_seconds`) + fallback `/queue` (verificado 2026-10-04, ETA `0:23` en la barra).
 - ComfyUI cachea la ejecución con parámetros idénticos: `SaveImage` no re-ejecuta y `history` queda **sin outputs** → segunda corrida idéntica devolvía «terminó sin imagen». Mitigado con `filename_prefix` único por corrida (`GenFlux_{ts}` / `GenSDXL_{ts}` en `flux_gen_comfy_client.py`); la imagen sale del caché (mismos píxeles, diff = 0 con semilla 777).
 - `roop/comfy_workflows.py` y `comfy_workflows_fixed.py` son legacy: solo se importa `get_comfyui_url`.
-- El widget de pintado de máscara del Editor no está visible (`ui/tabs/img_editor/ui.py:52` sin `tool="sketch"`).
+- El pintado de máscaras no forma parte de la UI vigente: el usuario recordó
+  su retirada el 18/10. No recuperarlo a partir de esta deuda histórica.
 
 ## Riesgos de H-GEN-001
 

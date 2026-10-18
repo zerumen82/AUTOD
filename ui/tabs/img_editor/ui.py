@@ -1,5 +1,7 @@
 import gradio as gr
 
+from roop.img_editor.gen_prompt_config import get_editor_ui_config
+
 
 CSS_STYLE = """
     .img-editor-container {
@@ -49,7 +51,9 @@ def build_img_editor_ui():
 
         with gr.Row():
             with gr.Column(scale=1):
-                input_img = gr.Image(label="Imagen de Entrada", type="pil", height=480)
+                input_img = gr.Image(
+                    label="Imagen de Entrada", type="pil", format="png", height=480,
+                )
 
                 prompt = gr.Textbox(
                     label="¿Qué quieres cambiar?",
@@ -112,18 +116,23 @@ def build_img_editor_ui():
                 legacy_options_btn = gr.Button(visible=False)
 
                 with gr.Accordion("⚙️ Opciones", open=False):
+                    engine_choices = [
+                        ("🎨 Auto: motor según la instrucción (POV→Qwen, cuerpo fuerte→Kontext)", "kontext"),
+                        ("📷 Qwen Cámara (POV/ángulos, ~1152px en 8 GB)", "qwen_camera"),
+                        ("Compatibilidad app antigua (Kontext)", "imagine"),
+                        ("✨ FLUX.2 Klein 4B (img2img rápido, 4 pasos, entra en 8GB)", "klein"),
+                        ("⚠️ FLUX.2 Klein 9B (NO entra en 8GB, usar solo con 12GB+)", "klein_9b"),
+                        ("🎯 FLUX.1 Kontext Q4_K_M (12B, ~6.5GB)", "kontext"),
+                    ]
+                    default_engine = get_editor_ui_config().get("default_engine")
+                    if default_engine not in {value for _label, value in engine_choices}:
+                        raise ValueError(
+                            "editor_ui.default_engine debe nombrar un motor del Editor "
+                            "en config/generation_prompt.json"
+                        )
                     engine = gr.Dropdown(
-                        choices=[
-                            ("🎨 Auto: LongCat rápido; Qwen si pides otro ángulo", "longcat"),
-                            ("📷 Qwen Cámara (POV/ángulos, ~1152px en 8 GB)", "qwen_camera"),
-                            ("Compatibilidad app antigua (LongCat)", "imagine"),
-                             ("✨ FLUX.2 Klein 4B (img2img rápido, 4 pasos, entra en 8GB)", "klein"),
-                             ("⚠️ FLUX.2 Klein 9B (NO entra en 8GB, usar solo con 12GB+)", "klein_9b"),
-                            ("🎨 LongCat Full fijo (35 pasos, sin auto)", "longcat_full"),
-                            ("🧩 Qwen-Image-Edit Q5 (20B, edición precisa, ~4.4GB)", "qwen_edit"),
-                            ("🎯 FLUX.1 Kontext Q2 (12B, ~3.8GB, calidad reducida)", "kontext"),
-                        ],
-                        value="longcat", label="Motor"
+                        choices=engine_choices,
+                        value=default_engine, label="Motor"
                     )
                     with gr.Row():
                         denoise = gr.Slider(minimum=0.0, maximum=1.0, step=0.05, value=0.0,

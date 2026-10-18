@@ -19,19 +19,28 @@ GENERATION_MODEL_REGISTRY: List[Tuple[str, Tuple[str, ...], str, int, bool]] = [
     ("juggernaut_xl", ("juggernaut",), "Juggernaut Ragnarok", 1, True),
     ("cyberrealistic_pony", ("cyberrealistic", "pony"), "CyberRealistic Pony v1.8", 2, False),
     ("realism_engine", ("realismengine", "reprise"), "Realism Engine", 3, True),
+    # Categorias con prefijo de archivo: REAL_ fotorrealista, ILUS_ ilustracion.
+    ("lustify4", ("lustify",), "LUSTIFY v4 (fotorreal)", 4, True),
+    ("biglove_xl4", ("biglove", "xl4"), "Big Love XL4 (fotorreal)", 5, False),
+    ("wai_illustrious_v17", ("wai", "illustrious"), "WAI Illustrious v17 (ilustracion)", 6, False),
+    ("noobai_vpred", ("noobai",), "NoobAI-XL V-Pred 1.0 (ilustracion)", 7, True),
+    ("illustrious_xl_v2", ("illustriousxl",), "Illustrious XL v2.0 (ilustracion base)", 8, True),
 ]
 
 GENERATION_SKIP_CHECKPOINTS = ("framepack", "wan2", "qwenimage", "qwen_image")
 
-# GGUF txt2img (FLUX) — orden negativo = primero en UI. Abliterated = calidad; Schnell = velocidad.
+# GGUF txt2img (FLUX) — orden negativo = primero en UI. Q4 = default seguro no-NSFW;
+# Abliterated/Chroma/SDXL-explicit = opciones NSFW solo en desplegable.
 FLUX_GEN_REGISTRY: List[Tuple[str, str, str, int]] = [
-    ("flux_dev_abliterated", "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf", "FLUX Abliterated (ultra realista)", -20),
+    ("flux_dev_q4", "flux1-dev-Q4_K.gguf", "FLUX Dev Q4 (seguro, por defecto)", -20),
+    ("flux_dev_abliterated", "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf", "FLUX Abliterated (ultra realista, NSFW)", -19),
     ("schnell", "flux1-schnell-Q4_K_S.gguf", "FLUX Schnell (rápido ~8 pasos)", -15),
-    ("flux_dev_q4", "flux1-dev-Q4_K.gguf", "FLUX Dev Q4", -10),
     # Motores que load() ya soporta vía flux_alias_map: se muestran también en la UI.
-    ("longcat", "LongCat-Image-Edit-Turbo-Q4_K_S.gguf", "LongCat Turbo (edición, rápido)", -6),
-    ("longcat_full", "LongCat-Image-Edit-Q4_K_S.gguf", "LongCat Full (edición, más calidad)", -5),
+    # LongCat = modelo de EDICIÓN retirado de Generate (sustituido por Kontext en el
+    # Editor); se conserva el alias por compatibilidad pero ya no se lista.
     ("flux_q2", "flux1-dev-Q2_K.gguf", "FLUX Dev Q2 (ligero)", -4),
+    # Chroma usa T5 único y CFG real; no usa la guía destilada de FLUX.1.
+    ("chroma", "DIT_chroma1-hd_q4_k_m.gguf", "Chroma1-HD (sin censura, NSFW)", -12),
 ]
 
 GENERATION_ALIAS_FILES = {
@@ -123,6 +132,34 @@ def get_checkpoint_architecture(filename: str) -> str:
             arch = "unknown"
     _CHECKPOINT_ARCH_CACHE[key] = arch
     return arch
+
+
+_VPRED_KEY_CACHE: Dict[str, bool] = {}
+
+
+def _checkpoint_has_v_pred_key(filename: str) -> bool:
+    """
+    ¿Trae el safetensors la clave `v_pred`?
+
+    Medido 2026-10-18 con ILUS_noobai_xl_vpred_1.safetensors (2516 tensores, con la
+    marca; Illustrious eps tiene 2515 y sin ella): ComfyUI autodetecta v-pred por
+    esa clave y el resultado es identico con y sin el nodo ModelSamplingDiscrete,
+    asi que el override solo hace falta si el checkpoint no la trae.
+    """
+    key = (filename or "").lower()
+    if key in _VPRED_KEY_CACHE:
+        return _VPRED_KEY_CACHE[key]
+    has_key = False
+    path = _checkpoint_file_path(filename)
+    if path:
+        try:
+            from safetensors import safe_open
+            with safe_open(path, framework="pt") as sf:
+                has_key = "v_pred" in sf.keys()
+        except Exception:
+            has_key = False
+    _VPRED_KEY_CACHE[key] = has_key
+    return has_key
 
 
 def _resolve_registry_alias(alias: str, files: List[str]) -> Optional[str]:
@@ -221,11 +258,11 @@ class GenResult:
             self.extra_images = []
 
 class FluxGenComfyClient:
-    """Cliente para generacion pura (txt2img) en ComfyUI usando FLUX/LongCat/SDXL"""
+    """Cliente para generacion pura (txt2img) en ComfyUI usando FLUX/SDXL"""
     def __init__(self):
         self._loaded = False
-        self._flux_version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
-        self._alias = "longcat"
+        self._flux_version = "flux1-dev-Q4_K.gguf"
+        self._alias = "flux_dev_q4"
         self._clip_name = None
         self._clip_name2 = None
         self._clip_type = "flux"
@@ -375,13 +412,17 @@ class FluxGenComfyClient:
         """Configura los modelos a usar"""
         self._loaded = False
         flux_alias_map = {
-            "longcat": "LongCat-Image-Edit-Turbo-Q4_K_S.gguf",
-            "longcat_full": "LongCat-Image-Edit-Q4_K_S.gguf",
+            # LongCat retirado de Generate (era modelo de EDICIÓN; en T2I usaba
+            # imagen gris neutra). Se conserva el alias → Kontext por
+            # compatibilidad con UIs/APKs que aún lo envíen.
+            "longcat": "flux1-kontext-dev-Q4_K_M.gguf",
+            "longcat_full": "flux1-kontext-dev-Q4_K_M.gguf",
             "klein_base": "flux-2-klein-base-4b-Q4_K_S.gguf",
             "flux_q2": "flux1-dev-Q2_K.gguf",
             "flux_dev_abliterated": "T8-flux.1-dev-abliterated-V2-GGUF-Q4_K_M.gguf",
             "flux_dev_q4": "flux1-dev-Q4_K.gguf",
             "schnell": "flux1-schnell-Q4_K_S.gguf",
+            "chroma": "DIT_chroma1-hd_q4_k_m.gguf",
             "hart": "hart",
         }
 
@@ -431,6 +472,10 @@ class FluxGenComfyClient:
             self._clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
             self._clip_type = "longcat_image"
             self._vae_name = "ae.safetensors"
+        elif self._alias == "chroma":
+            self._clip_name = self._get_model_conf()["text_encoder"]
+            self._clip_type = "chroma"
+            self._vae_name = "ae.safetensors"
         elif "schnell" in real_model.lower():
             self._clip_name = "t5-v1_1-xxl-encoder-Q4_K_S.gguf"
             self._clip_type = "flux"
@@ -452,14 +497,16 @@ class FluxGenComfyClient:
             return True, "Listo (HART)"
 
         checks = [("diffusion_models", self._flux_version, "Modelo")]
-        # Always require the standard clips for reliable pure T2I in Generate
-        checks.append(("text_encoders", "clip_l.safetensors", "CLIP L"))
-        checks.append(("text_encoders", "t5-v1_1-xxl-encoder-Q4_K_S.gguf", "T5"))
-        # For longcat we also prefer its special clip if present (used in Image Editor)
-        if self._clip_name and self._model_exists("text_encoders", self._clip_name):
-            checks.append(("text_encoders", self._clip_name, "CLIP LongCat"))
-        if self._is_dual_clip and self._clip_name2:
-            checks.append(("text_encoders", self._clip_name2, "CLIP 2"))
+        if self._clip_type == "chroma":
+            checks.append(("text_encoders", self._clip_name, "T5 Chroma"))
+        else:
+            # Preserve the existing dependency checks for FLUX/LongCat.
+            checks.append(("text_encoders", "clip_l.safetensors", "CLIP L"))
+            checks.append(("text_encoders", "t5-v1_1-xxl-encoder-Q4_K_S.gguf", "T5"))
+            if self._clip_name and self._model_exists("text_encoders", self._clip_name):
+                checks.append(("text_encoders", self._clip_name, "CLIP LongCat"))
+            if self._is_dual_clip and self._clip_name2:
+                checks.append(("text_encoders", self._clip_name2, "CLIP 2"))
         checks.append(("vae", self._vae_name, "VAE"))
 
         missing = []
@@ -683,8 +730,9 @@ class FluxGenComfyClient:
         if init_image is not None:
             path_type = "IMG2IMG con imagen de referencia"
         else:
-            path_type = "PURE T2I (recomendado para GENERAR sin foto)" if not self._is_longcat else "EDIT (LongCat - mejor con foto de referencia)"
-        print(f"[GenFlux] Usando path: {path_type} para {self._flux_version} (ultra realista SIN CENSURA, ligero para 8GB - usa 'schnell' para velocidad)")
+            path_type = "PURE T2I (recomendado para GENERAR sin foto)" if not self._is_longcat else "EDIT (Kontext - mejor con foto de referencia)"
+        _adult = " (NSFW: solo por elección del usuario)" if self._get_model_conf().get("explicit") else ""
+        print(f"[GenFlux] Usando path: {path_type} para {self._flux_version}{', cfg=' + str(conf.get('cfg')) if conf else ''}{_adult}")
 
         start = time.time()
         w, h = (width // 64) * 64, (height // 64) * 64
@@ -845,6 +893,19 @@ class FluxGenComfyClient:
             if lora_stack:
                 last_model, last_clip = self._chain_lora_loaders(wf, last_model, last_clip, lora_stack)
 
+            # v5.1219: checkpoints v-prediction. Si el safetensors trae la clave
+            # `v_pred`, ComfyUI autodetecta v-pred y el nodo sobra (medido: imagen
+            # identica con y sin el). Solo se fuerza el muestreo cuando NO la trae,
+            # que es el caso que se muestreaba como epsilon y daba imagen negra.
+            # La marca vive en la config del modelo, no en el nombre del archivo.
+            if conf.get("v_prediction") and not _checkpoint_has_v_pred_key(self._flux_version):
+                wf["12"] = {
+                    "class_type": "ModelSamplingDiscrete",
+                    "inputs": {"model": last_model, "sampling": "v_prediction", "zsnr": True},
+                    "_meta": {"title": "ModelSamplingDiscrete (v_prediction + zsnr)"},
+                }
+                last_model = ["12", 0]
+
             wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": final_prompt, "clip": last_clip}}
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": current_neg, "clip": last_clip}}
             wf["8"] = {
@@ -901,6 +962,10 @@ class FluxGenComfyClient:
                 if self._clip_type == "flux2":
                     # FLUX.2 Klein: usa Qwen3 clip, sin FluxGuidance
                     wf["3"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": self._clip_name, "type": "flux2"}}
+                elif self._clip_type == "chroma":
+                    # Official Chroma workflow: T5/PixArt tokenizer, no CLIP-L.
+                    clip_loader = "CLIPLoaderGGUF" if self._clip_name.lower().endswith(".gguf") else "CLIPLoader"
+                    wf["3"] = {"class_type": clip_loader, "inputs": {"clip_name": self._clip_name, "type": "chroma"}}
                 else:
                     # Standard FLUX GGUF models
                     wf["3"] = {"class_type": "DualCLIPLoaderGGUF", "inputs": {"clip_name1": "clip_l.safetensors", "clip_name2": "t5-v1_1-xxl-encoder-Q4_K_S.gguf", "type": "flux"}}
@@ -908,13 +973,25 @@ class FluxGenComfyClient:
                 last_model = ["2", 0]
                 last_clip = ["3", 0]
 
+                if self._clip_type == "chroma":
+                    tokenizer = conf["tokenizer"]
+                    wf["18"] = {
+                        "class_type": "T5TokenizerOptions",
+                        "inputs": {
+                            "clip": last_clip,
+                            "min_padding": int(tokenizer["min_padding"]),
+                            "min_length": int(tokenizer["min_length"]),
+                        },
+                    }
+                    last_clip = ["18", 0]
+
                 if lora_stack:
                     last_model, last_clip = self._chain_lora_loaders(wf, last_model, last_clip, lora_stack)
 
                 wf["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": final_prompt, "clip": last_clip}}
                 pos_cond = "6"
 
-            # FluxGuidance solo para FLUX.1 (no FLUX.2)
+            # Only distilled FLUX.1 uses FluxGuidance; Chroma keeps sampler CFG.
             if self._clip_type == "flux" and not self._is_longcat and actual_cfg > 1.0:
                 wf["14"] = {"class_type": "FluxGuidance", "inputs": {"conditioning": [pos_cond, 0], "guidance": actual_cfg}}
                 positive_input = ["14", 0]

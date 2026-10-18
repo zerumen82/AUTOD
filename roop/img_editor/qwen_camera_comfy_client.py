@@ -4,7 +4,6 @@ import io
 import os
 import re
 import time
-import unicodedata
 
 import requests
 from PIL import Image
@@ -15,6 +14,7 @@ from roop.img_editor.flux_edit_comfy_client import (
     GenResult, _queue_is_idle, _server_vram_free_mb, _sync_unload,
     get_models_base,
 )
+from roop.img_editor.nlp.semantic_analyzer import camera_pose_config, score_camera_pose
 
 
 UNET = "qwen-image-edit-2511-Q2_K.gguf"
@@ -53,59 +53,35 @@ CAMERA_ROUTE_BUDGET_S = 720
 CAMERA_RETRY_MIN_S = 300
 
 
-def _fold(value):
-    return "".join(c for c in unicodedata.normalize("NFD", value.lower())
-                   if unicodedata.category(c) != "Mn")
-
-
 def camera_pose(raw_prompt: str, translated_prompt: str = ""):
-    """Map a requested camera position to one of the LoRA's 96 trained poses."""
-    text = _fold(f"{raw_prompt} {translated_prompt}")
-    back = bool(re.search(r"\b(back|behind|rear|espalda|detras|desde atras|opposite|opuesto)\b", text))
-    left = bool(re.search(r"\b(left|izquierda|izquierdo)\b", text))
-    right = bool(re.search(r"\b(right|derecha|derecho)\b", text))
-    if back and left:
-        azimuth = "back-left quarter view"
-    elif back and right:
-        azimuth = "back-right quarter view"
-    elif back:
-        azimuth = "back view"
-    elif left:
-        azimuth = "left side view" if re.search(
-            r"\b(side|lateral|perfil|profile|desde la izquierda|from the left)\b", text
-        ) else "front-left quarter view"
-    elif right:
-        azimuth = "right side view" if re.search(
-            r"\b(side|lateral|perfil|profile|desde la derecha|from the right)\b", text
-        ) else "front-right quarter view"
-    elif re.search(r"\b(side|lateral|perfil|profile)\b", text):
-        azimuth = "right side view"
-    elif re.search(r"\b(front|frente|frontal)\b", text):
-        azimuth = "front view"
-    else:
-        # Vertical camera requests keep the front azimuth. A generic "change
-        # POV" needs a visible move, so use a quarter view instead.
-        azimuth = "front view" if re.search(
-            r"\b(overhead|top.down|bird.?s.eye|cenital|picado|high.angle|"
-            r"elevated|elevado|desde arriba|desde lo alto|low.angle|"
-            r"contrapicado|desde abajo)\b", text) else "front-right quarter view"
+    """Pick one of the angle LoRA's 96 trained poses by measured concepts.
 
-    if re.search(r"\b(overhead|top.down|bird.?s.eye|cenital|desde arriba|desde lo alto|picado|high.angle)\b", text):
-        elevation = "high-angle shot"
-    elif re.search(r"\b(elevated|elevado|desde arriba|desde lo alto)\b", text):
-        elevation = "elevated shot"
-    elif re.search(r"\b(low.angle|from below|contrapicado|desde abajo)\b", text):
-        elevation = "low-angle shot"
-    elif re.search(r"\b(eye.level|nivel de los ojos)\b", text):
-        elevation = "eye-level shot"
-    else:
-        elevation = "elevated shot" if azimuth == "front-right quarter view" else "eye-level shot"
+    Each axis takes its highest-scoring trained phrase against the
+    CAMERA_POSES concept anchors (same _score_texts engine as the rest of
+    the editor; no word lists in code). The designed defaults only apply
+    when a whole axis stays below the measurement signal."""
+    scores = score_camera_pose(f"{raw_prompt} {translated_prompt}")
+    signal = camera_pose_config()["signal_threshold"]
 
-    if re.search(r"\b(close.?up|primer plano|cerca|cercano)\b", text):
-        distance = "close-up"
-    elif re.search(r"\b(wide|full.body|plano general|cuerpo entero|lejos|alejado)\b", text):
-        distance = "wide shot"
-    else:
+    def _best(axis):
+        phrases = scores[axis]
+        phrase = max(phrases, key=phrases.get)
+        return phrase, phrases[phrase]
+
+    azimuth, az_score = _best("azimuth")
+    elevation, el_score = _best("elevation")
+    distance, di_score = _best("distance")
+    if az_score < signal:
+        if el_score >= signal:
+            # Un encuadre solo de altura mantiene el frente (previa).
+            azimuth = "front view"
+        else:
+            # Genérico sin medida: movimiento visible (default diseñado).
+            azimuth = "front-right quarter view"
+    if el_score < signal:
+        elevation = ("eye-level shot" if azimuth != "front-right quarter view"
+                     else "elevated shot")
+    if di_score < signal:
         distance = "medium shot"
     return f"<sks> {azimuth} {elevation} {distance}"
 

@@ -318,16 +318,16 @@ src_ui = open("ui/tabs/gen/ui.py", encoding="utf-8").read()
 check("checkbox en la UI", 'label="🔞 Contenido NSFW"' in src_ui)
 check("checkbox exportado en ui_comp", '"nsfw_content": nsfw_content' in src_ui)
 check("alias Q4 aceptado por Gradio aunque falte el archivo",
-      '("FLUX Dev Q4", "flux_dev_q4")' in src_ui.split("_apk_choices = [", 1)[1].split("]", 1)[0])
+      '("FLUX Dev Q4 (seguro, por defecto)", "flux_dev_q4")' in src_ui.split("_apk_choices = [", 1)[1].split("]", 1)[0])
 from roop.img_editor.gen_prompt_config import get_generate_ui_config
 from roop.img_editor.flux_gen_comfy_client import get_default_generation_engine
 check("default de Generate en config", get_generate_ui_config().get("default_engine") == "flux_dev_q4")
 check("NSFW apagado al abrir", get_generate_ui_config().get("nsfw_content_default") is False)
-check("motor normal instalado elegido", get_default_generation_engine() == "flux_dev_q4")
+check("motor por defecto instalado elegido", get_default_generation_engine() == "flux_dev_q4")
 from unittest.mock import patch
 with patch("roop.img_editor.flux_gen_comfy_client.get_installed_generation_engines",
-           return_value=[("FLUX Abliterated", "flux_dev_abliterated")]):
-    check("sin motor normal no elige Abliterated automáticamente",
+           return_value=[("PonyRealism", "pony_realism")]):
+    check("sin motor normal instalado no se elige solo un modelo adulto",
           get_default_generation_engine() is None)
 src_android = open(
     "android_app/autoapp/app/src/main/java/com/autoauto/app/MainActivity.kt",

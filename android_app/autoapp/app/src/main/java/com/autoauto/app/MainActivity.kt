@@ -116,23 +116,23 @@ class MainActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     // Aliases = valores EXACTOS que espera el servidor (img_editor_manager / flux_gen_comfy_client).
-    // v5.1111: klein_9b -> klein (9B requiere >=12GB VRAM, en 8GB siempre daba error) + kontext
-    // (régimen EDIT fuerte); gen: flux1_schnell->schnell, flux2_klein->klein_base (antes caían
-    // en fallback silencioso a SDXL pony). El primer valor debe existir entre
-    // las opciones del Dropdown de Gradio, incluso en Modo Calidad.
-    private val engines = arrayOf("longcat", "longcat", "klein", "longcat_full", "kontext", "qwen_edit")
+    // LongCat retirado (sustituido por Kontext): los alias legacy se normalizan
+    // a kontext en el servidor. La APK conserva los valores por compatibilidad
+    // con preferencias guardadas; el servidor los resuelve a Kontext.
+    // gen: Q4 = default seguro no-NSFW; abliterated/Chroma/SDXL-explicit = NSFW en desplegable.
+    private val engines = arrayOf("kontext", "kontext", "klein", "kontext", "kontext", "qwen_edit")
     private val engineLabels = arrayOf(
-        "Auto (LongCat Turbo)",
-        "LongCat Edit (sigue instrucciones)",
+        "Auto (Kontext)",
+        "Kontext (sigue instrucciones)",
         "FLUX.2 Klein 4B (rápido)",
-        "LongCat Full (35 pasos)",
+        "Kontext fuerte (legacy LongCat Full)",
         "Kontext (edición fuerte)",
         "Qwen-Image-Edit Q5 (20B)"
     )
     private val genEngines = arrayOf("flux_dev_q4", "flux_dev_abliterated", "schnell", "klein_base")
     private val genEngineLabels = arrayOf(
-        "FLUX Dev Q4",
-        "FLUX Abliterated (ultra realista)",
+        "FLUX Dev Q4 (seguro, por defecto)",
+        "FLUX Abliterated (NSFW)",
         "FLUX Schnell (rápido)",
         "FLUX.2 Klein 4B (rápido + realista)"
     )

@@ -31,6 +31,12 @@
 ### Config
 - `config/model_configs.json` → steps/cfg/sampler por motor (leído en `flux_gen_comfy_client.py:224-240`).
 - `config/generation_prompt.json` → prefijos, `lora_catalog`.
+- `config/generation_prompt.json/editor_ui` → default del Editor independiente
+  de Generate y de los defaults compatibles de la API antigua.
+- `config/camera_pose.json` → señal de medición y discriminación de candidatos
+  de cámara; las 96 frases entrenadas siguen siendo el contrato del LoRA.
+- Chroma usa T5 único con loader `type=chroma`, opciones del tokenizador y CFG
+  real de `model_configs.json`; FLUX mantiene su workflow dual y FluxGuidance.
 
 ## Reglas de integración Generate ↔ Editor
 

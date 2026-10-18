@@ -116,6 +116,38 @@
     "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
     "img2img_denoise": 0.65
   },
+  "kontext": {
+    "name": "FLUX.1 Kontext Q4_K_M (motor del Editor)",
+    "explicit": false,
+    "steps": 20,
+    "cfg": 3.5,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "negative_prompt": "blurry, low quality, deformed",
+    "img2img_denoise": 0.65,
+    "appearance_edit": {
+      "denoise": 1.0,
+      "spatial_reference": true
+    },
+    "region_edit": {
+      "denoise": 1.0,
+      "spatial_reference": true
+    },
+    "region_proposal": {
+      "enabled": true,
+      "max_coverage": 0.90,
+      "model_path": "models/llm/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "context_size": 8192,
+      "gpu_layers": 0,
+      "ambiguous_translation": {
+        "enabled": true,
+        "max_tokens": 256,
+        "temperature": 0.0,
+        "repeat_penalty": 1.05,
+        "system_prompt": "Translate the image editing instruction into English. Preserve the exact requested action, all affected objects, and all location relationships. Preserve negation, exclusions and obligation: mandatory requirements must remain mandatory, not suggestions. In particular, Spanish debe or deben means must, not should. If it is already in English, repeat it unchanged. Return only the complete translated instruction. Do not interpret, simplify, or add anything."
+      }
+    }
+  },
   "longcat": {
     "name": "LongCat Turbo",
     "explicit": false,
@@ -156,6 +188,96 @@
     "sampler": "euler_ancestral",
     "scheduler": "simple",
     "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
+    "img2img_denoise": 0.65
+  },
+  "lustify4": {
+    "name": "LUSTIFY v4",
+    "explicit": true,
+    "nsfw_tags": "nsfw, uncensored adult content, explicit adult scene",
+    "multi_subject": true,
+    "steps": 30,
+    "cfg": 5.0,
+    "sampler": "dpmpp_2m_sde_gpu",
+    "scheduler": "karras",
+    "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, comic, illustration, digital art, 3d render, cgi, painting, drawing, plastic skin, doll, figurine, airbrushed, over smooth, low quality, worst quality, deformed, disfigured, monochrome",
+    "prefix": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "prefix_compact": "photorealistic RAW photograph, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy, natural proportions, dslr, depth of field, real life photography",
+    "img2img_denoise": 0.65
+  },
+  "biglove_xl4": {
+    "name": "Big Love XL4",
+    "explicit": true,
+    "nsfw_tags": "nsfw, uncensored adult content, explicit adult scene",
+    "multi_subject": true,
+    "steps": 30,
+    "cfg": 5.5,
+    "sampler": "dpmpp_2m_sde_gpu",
+    "scheduler": "karras",
+    "negative_prompt": "lowres, blurry, bad anatomy, bad hands, text, watermark, cartoon, anime, manga, comic, illustration, digital art, 3d render, cgi, painting, drawing, plastic skin, doll, figurine, airbrushed, low quality, worst quality, deformed, disfigured",
+    "prefix": "photorealistic, RAW photo, realistic, sharp focus, ",
+    "prefix_compact": "photorealistic RAW photograph, ",
+    "photoreal_tail": "photorealistic, raw photo, film grain, detailed skin texture, natural skin pores, sharp focus, natural lighting, realistic human anatomy, natural proportions, dslr, depth of field",
+    "img2img_denoise": 0.65
+  },
+  "wai_illustrious_v17": {
+    "name": "WAI Illustrious v17",
+    "explicit": true,
+    "nsfw_tags": "nsfw, rating_explicit, explicit adult content",
+    "multi_subject": true,
+    "steps": 28,
+    "cfg": 6.0,
+    "sampler": "euler_ancestral",
+    "scheduler": "karras",
+    "negative_prompt": "worst quality, low quality, normal quality, lowres, bad anatomy, bad hands, extra fingers, fewer fingers, text, watermark, signature, jpeg artifacts, sketch, monochrome",
+    "prefix": "masterpiece, best quality, ",
+    "prefix_compact": "masterpiece, best quality, ",
+    "img2img_denoise": 0.65
+  },
+  "noobai_vpred": {
+    "name": "NoobAI-XL V-Pred 1.0",
+    "explicit": true,
+    "nsfw_tags": "nsfw, rating_explicit, explicit adult content",
+    "multi_subject": true,
+    "v_prediction": true,
+    "steps": 30,
+    "cfg": 5.0,
+    "sampler": "euler",
+    "scheduler": "normal",
+    "negative_prompt": "worst quality, low quality, normal quality, lowres, bad anatomy, bad hands, extra fingers, fewer fingers, text, watermark, signature, jpeg artifacts, sketch",
+    "prefix": "masterpiece, best quality, ",
+    "prefix_compact": "masterpiece, best quality, ",
+    "img2img_denoise": 0.65
+  },
+  "illustrious_xl_v2": {
+    "name": "Illustrious XL v2.0",
+    "explicit": true,
+    "nsfw_tags": "nsfw, rating_explicit, explicit adult content",
+    "multi_subject": true,
+    "steps": 28,
+    "cfg": 6.0,
+    "sampler": "euler_ancestral",
+    "scheduler": "karras",
+    "negative_prompt": "worst quality, low quality, normal quality, lowres, bad anatomy, bad hands, extra fingers, fewer fingers, text, watermark, signature, jpeg artifacts, sketch, monochrome",
+    "prefix": "masterpiece, best quality, ",
+    "prefix_compact": "masterpiece, best quality, ",
+    "img2img_denoise": 0.65
+  },
+  "chroma": {
+    "name": "Chroma1-HD (sin censura)",
+    "explicit": true,
+    "nsfw_tags": "nsfw, uncensored adult content, explicit adult scene",
+    "multi_subject": true,
+    "steps": 30,
+    "cfg": 3.8,
+    "text_encoder": "t5-v1_1-xxl-encoder-Q4_K_S.gguf",
+    "tokenizer": {
+      "min_padding": 1,
+      "min_length": 0
+    },
+    "sampler": "euler",
+    "scheduler": "simple",
+    "negative_prompt": "low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, flat colors, text, watermark, cartoon, 3d render",
     "img2img_denoise": 0.65
   },
   "default": {

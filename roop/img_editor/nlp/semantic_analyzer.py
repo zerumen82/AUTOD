@@ -6,9 +6,12 @@ Sin hardcoding de prompts de usuario: no hay `if "desnuda"`, ni listas de
 verbos/colores del usuario. Solo hay **conceptos** (anclas) y distancias
 (embedding o solapamiento ligero). El routing se decide por scores relativos.
 """
+import json
 import os
 import re
-from typing import Dict, Optional
+import unicodedata
+from functools import lru_cache
+from typing import Dict
 
 SentenceTransformer = None
 util = None
@@ -166,6 +169,117 @@ _AXIS_KEYS = {
         "attribute_appearance",
     ],
 }
+
+# --- Cámaras (v5.1226) ----------------------------------------------------
+# La LoRA de ángulos solo produce sus frases entrenadas (8 azimuts ×
+# 4 alturas × 3 distancias = 96 poses); la pose se elige midiendo la
+# instrucción contra estas descripciones de concepto con el MISMO motor
+# _score_texts. Los textos describen conceptos de cámara, no palabras
+# trigger de usuario: sin "view", "vista", "camera", "angle" ni "change"
+# sueltos (tokens ambiguos que diluirían o secuestrarían la medida, v5.1209).
+CAMERA_POSES: Dict[str, Dict[str, list]] = {
+    "azimuth": {
+        "front view": [
+            "pov first person over the shoulder primera persona mirando "
+            "por los ojos de alguien sobre el hombro",
+            "frente frontal enfrente cara a cara mirando a la persona",
+        ],
+        "back view": [
+            "atras espalda trasera por detras de la persona behind rear",
+        ],
+        "left side view": [
+            "izquierda perfil izquierdo lado izquierdo left side profile lateral",
+        ],
+        "right side view": [
+            "derecha perfil derecho lado derecho right side profile lateral",
+        ],
+        "front-left quarter view": [
+            "diagonal izquierda delante tres cuartos front quarter left",
+        ],
+        "front-right quarter view": [
+            "diagonal derecha delante tres cuartos front quarter right",
+        ],
+        "back-left quarter view": [
+            "atras izquierda diagonal trasera tres cuartos behind left quarter",
+        ],
+        "back-right quarter view": [
+            "atras derecha diagonal trasera tres cuartos behind right quarter",
+        ],
+    },
+    "elevation": {
+        "high-angle shot": [
+            "overhead bird eye from above top down cenital picado arriba",
+        ],
+        "elevated shot": [
+            "elevated elevado raised mas alto que los ojos higher",
+        ],
+        "eye-level shot": [
+            "eye level altura de los ojos nivel de la mirada",
+        ],
+        "low-angle shot": [
+            "contrapicado abajo bajo por debajo upwards looking under",
+        ],
+    },
+    "distance": {
+        "close-up": [
+            "primer plano muy cerca tight crop detalle de la cara cerca",
+        ],
+        "medium shot": [
+            "plano medio media distancia medio cuerpo",
+        ],
+        "wide shot": [
+            "plano general cuerpo entero escena completa lejos alejado wide",
+            "full body entire scene distant framing",
+        ],
+    },
+}
+
+@lru_cache(maxsize=1)
+def camera_pose_config() -> dict:
+    """Camera measurement policy, independent of image models and GPU state."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+    with open(os.path.join(root, "config", "camera_pose.json"), encoding="utf-8") as stream:
+        config = json.load(stream)
+    for key in ("signal_threshold", "shared_candidate_fraction"):
+        value = config[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 1:
+            raise ValueError(f"Invalid camera pose configuration: {key}={value!r}")
+    return config
+
+_camera_scorer = None
+
+
+def score_camera_pose(prompt: str) -> Dict[str, Dict[str, float]]:
+    """(frase entrenada -> score) por eje de cámara, medido prompt↔ancla."""
+    global _camera_scorer
+    if _camera_scorer is None:
+        _camera_scorer = LightLocalIntentAnalyzer()
+    if not prompt or not prompt.strip():
+        return {axis: {phrase: 0.0 for phrase in candidates}
+                for axis, candidates in CAMERA_POSES.items()}
+    # Compare the actual trained phrases as well as their concept descriptions.
+    # Shared phrase vocabulary carries no axis choice (e.g. view, shot, angle).
+    # Derive it from the candidates instead of maintaining a trigger word list.
+    def normalize(text):
+        return "".join(c for c in unicodedata.normalize("NFKD", text)
+                       if not unicodedata.combining(c))
+
+    normalized_prompt = normalize(prompt)
+    fraction = camera_pose_config()["shared_candidate_fraction"]
+    scores = {}
+    for axis, candidates in CAMERA_POSES.items():
+        tokens = {phrase: _camera_scorer._tokenize(normalize(phrase))
+                  for phrase in candidates}
+        vocabulary = set().union(*tokens.values())
+        shared = {token for token in vocabulary
+                  if sum(token in words for words in tokens.values()) / len(tokens) >= fraction}
+        scores[axis] = {}
+        for phrase, anchors in candidates.items():
+            distinctive_phrase = " ".join(sorted(tokens[phrase] - shared))
+            scores[axis][phrase] = _camera_scorer._score_texts(
+                normalized_prompt, [normalize(anchor) for anchor in anchors] + [distinctive_phrase])
+    return scores
 
 
 def _resolve_semantic_model(model_name: str = "all-MiniLM-L6-v2"):
@@ -471,7 +585,9 @@ class LightLocalIntentAnalyzer(_ConceptRouterMixin):
                 return "exact"
             return "partial"
         if len(left) >= 5 and len(right) >= 5:
-            fold = lambda token: re.sub(r"(.)\1+", r"\1", token)
+            def fold(token):
+                return re.sub(r"(.)\1+", r"\1", token)
+
             if fold(left) == fold(right):
                 return "exact"
         return "none"

@@ -128,9 +128,17 @@ class UIControls(unittest.TestCase):
         import roop.globals as globals_
         from ui.tabs.faceswap.ui import build_faceswap_ui
         from ui.tabs.faceswap.events import wire_events, on_start_process
-        with gr.Blocks() as demo:
-            controls = build_faceswap_ui()
-            wire_events(controls)
+        # Wiring the real tab normally warms FaceAnalysis, including CUDA.
+        # This callback contract needs no detector; isolate that boundary so
+        # running the advertised CPU probe cannot allocate model sessions.
+        with patch('ui.tabs.faceswap.events._warmup_face_analyser_async') as warmup, \
+             patch('roop.face_util.get_face_analyser', side_effect=AssertionError(
+                 'CPU UI contract must not load FaceAnalysis')) as load_analyser:
+            with gr.Blocks() as demo:
+                controls = build_faceswap_ui()
+                wire_events(controls)
+        warmup.assert_called_once_with()
+        load_analyser.assert_not_called()
         self.assertNotIn('fake_preview', controls)
         self.assertEqual(controls['face_distance'].value, .20)
         with TestClient(App.create_app(demo)) as client:

@@ -30,13 +30,15 @@ SURFACE_CONTINUATION_DENOISE = 0.60
 def _appearance_sampling_config(recipe_key="appearance_edit"):
     path = os.path.join(get_project_root(), "config", "model_configs.json")
     with open(path, encoding="utf-8") as stream:
-        model = json.load(stream)["longcat"]
+        _cfg = json.load(stream)
+        # LongCat retirado → bloque kontext; fallback legacy longcat.
+        model = _cfg.get("kontext") or _cfg.get("longcat")
     appearance = model[recipe_key]
     steps = int(model["steps"])
     denoise = float(appearance["denoise"])
     spatial_reference = appearance["spatial_reference"]
     if steps < 1 or not 0.0 < denoise <= 1.0 or not isinstance(spatial_reference, bool):
-        raise ValueError("Invalid LongCat appearance sampling configuration")
+        raise ValueError("Invalid Kontext appearance sampling configuration")
     return steps, denoise, spatial_reference
 
 
@@ -45,7 +47,7 @@ REGION_SAMPLE_STEPS, REGION_SAMPLE_DENOISE, REGION_SPATIAL_REFERENCE = _appearan
 
 
 def measured_appearance_sample(has_mask: bool) -> dict:
-    """One LongCat pass for a measured appearance or surface region.
+    """One Kontext pass for a measured appearance or surface region.
 
     A measured region uses the configured native schedule and the original
     spatial reference. Full-strength noise without that reference added a
@@ -74,7 +76,7 @@ def measured_region_sample(has_mask: bool) -> dict:
 
 
 def longcat_turbo_denoise(preserve_frame, has_mask, keep_source_pixels, requested=1.0, prompt_authority=False):
-    """Strength for LongCat Turbo.
+    """Strength para Kontext (nombre legacy por compatibilidad de imports).
 
     A measured region that keeps the photo pixels uses the requested strength.
     Region edits request 1.0. A measured appearance edit requests
@@ -198,7 +200,13 @@ class FluxEditComfyClient:
             print(f"[FluxClient] FALTA MODELO: {path}")
         return exists
 
-    def load(self, flux_version="flux2-klein-4b-Q4_K_S.gguf") -> Tuple[bool, str]:
+    def load(self, flux_version="flux1-kontext-dev-Q4_K_M.gguf") -> Tuple[bool, str]:
+        # LongCat retirado (sustituido por Kontext): normalizar alias legacy.
+        _LONGCAT_TO_KONTEXT = {
+            "LongCat-Image-Edit-Turbo-Q4_K_S.gguf": "flux1-kontext-dev-Q4_K_M.gguf",
+            "LongCat-Image-Edit-Q4_K_S.gguf": "flux1-kontext-dev-Q4_K_M.gguf",
+        }
+        flux_version = _LONGCAT_TO_KONTEXT.get(flux_version, flux_version)
         comfy_url = get_comfyui_url()
         if not self.is_available():
             return False, f"ComfyUI no responde en {comfy_url}. ¿Está iniciado?"
@@ -315,20 +323,15 @@ class FluxEditComfyClient:
             clip_type = "flux"
             self._dual_clip = True
             self._clip_name2 = clip_name2
-        elif flux_version == "LongCat-Image-Edit-Turbo-Q4_K_S.gguf":
+        elif flux_version in ("LongCat-Image-Edit-Turbo-Q4_K_S.gguf", "LongCat-Image-Edit-Q4_K_S.gguf"):
+            # Legacy: nunca debe llegar aquí (normalizado a Kontext arriba);
+            # se conserva la rama por compatibilidad con versiones ya cargadas.
             clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
             clip_type = "longcat_image"
             self._dual_clip = False
             self._is_gguf_clip = False
             self._clip_name2 = None
-            self._is_longcat_turbo = True
-        elif flux_version == "LongCat-Image-Edit-Q4_K_S.gguf":
-            clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
-            clip_type = "longcat_image"
-            self._dual_clip = False
-            self._is_gguf_clip = False
-            self._clip_name2 = None
-            self._is_longcat_turbo = False
+            self._is_longcat_turbo = ("Turbo" in flux_version)
         elif flux_version == "Qwen_Image_Edit-Q2_K.gguf":
             clip_name = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
             clip_type = "qwen_image"

@@ -82,10 +82,14 @@ def main():
     mgr._mouth_blend_mask = np.ones((4, 4), np.float32)
     mgr._mouth_blend_factor = 0.8
     frame = np.zeros((8, 8, 3), np.uint8)
+    accumulated = frame.copy()
+    accumulated[1:4, 1:4] = 73
     returned = mgr._process_face_swap_v21(
-        SimpleNamespace(), SimpleNamespace(bbox=[0, 0, 4, 4]), frame, frame,
+        SimpleNamespace(), SimpleNamespace(bbox=[0, 0, 4, 4]), accumulated, frame,
     )
-    assert returned is frame
+    np.testing.assert_array_equal(returned, accumulated)
+    assert not np.shares_memory(returned, accumulated)
+    assert not frame.any(), 'failed swap changed the original reference'
     assert mgr._mouth_blend_mask is None
     assert mgr._mouth_blend_factor == 0.0
 

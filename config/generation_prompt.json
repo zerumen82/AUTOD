@@ -11,10 +11,9 @@
     "route_attribute": 0.25
   },
   "route_editor": {
-    "default_engine": "longcat",
+    "default_engine": "kontext",
     "engines": {
-      "longcat": "longcat",
-      "longcat_full": "longcat_full",
+      "kontext": "kontext",
       "klein_base": "klein"
     }
   },
@@ -22,6 +21,9 @@
     "default_engine": "flux_dev_q4",
     "nsfw_content_default": false,
     "default_route": "img2img"
+  },
+  "editor_ui": {
+    "default_engine": "kontext"
   },
   "style_gate": {
     "concepts": [

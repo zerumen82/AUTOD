@@ -2,6 +2,7 @@ import re
 import os
 import json
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -171,7 +172,8 @@ def _offline_translate(prompt: str):
         return None
 
 def clean_text(text: str) -> str:
-    if not text: return ""
+    if not text:
+        return ""
     text = re.sub(r'[<>]', '', text)
     text = " ".join(text.split())
     return text
@@ -473,11 +475,33 @@ def _translation_lost_conditions(raw: str, translated: str) -> bool:
     return raw_n >= 2 and tr_n < raw_n
 
 
+@lru_cache(maxsize=1)
+def _local_translation_target_tokenizer():
+    """Load only the installed English tokenizer, without translation weights.
+
+    Complete target-language pieces provide positive lexical evidence for a
+    cognate. Missing resources keep the existing conservative residue check.
+    """
+    path = os.path.join(_offline_model_dir(), "target.spm")
+    if not os.path.isfile(path):
+        return None
+    try:
+        from sentencepiece import SentencePieceProcessor
+        return SentencePieceProcessor(model_file=path)
+    except (ImportError, OSError, RuntimeError):
+        return None
+
+
+def _is_complete_translation_target_word(word: str) -> bool:
+    tokenizer = _local_translation_target_tokenizer()
+    return tokenizer is not None and tokenizer.encode(word, out_type=str) == ["▁" + word]
+
+
 def translation_suspect_tokens(raw: str, out: str):
     """Tokens que parecen residuos no traducidos en una salida inglesa.
 
-    La detección es 100% estructural: longitud, capitalización y similitud de
-    caracteres; no contiene vocabulario de instrucciones. Además de un token
+    La detección usa longitud, capitalización, similitud y el vocabulario del
+    tokenizador inglés local; no contiene vocabulario de instrucciones. Además de un token
     idéntico, cubre un typo que el traductor translitera dentro de una frase por
     lo demás correcta.
     - TODO MAYÚSCULAS 3-8 letras ('LZA', 'PENE', 'CHICA') → no traducido:
@@ -530,6 +554,12 @@ def translation_suspect_tokens(raw: str, out: str):
                 if out_low == raw_low or len(out_low) < 4:
                     continue
                 if SequenceMatcher(None, raw_low, out_low).ratio() >= 0.68:
+                    # Cognates share spelling by definition. A complete word
+                    # in the installed English tokenizer is not evidence of
+                    # transliterated residue. Preserve the exact passthrough
+                    # checks above, including short Spanish function words.
+                    if _is_complete_translation_target_word(out_low):
+                        continue
                     sus.extend((raw_form, out_low))
         return sorted(dict.fromkeys(sus))
     except Exception:

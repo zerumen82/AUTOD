@@ -1,0 +1,4 @@
+{
+  "signal_threshold": 0.12,
+  "shared_candidate_fraction": 0.5
+}

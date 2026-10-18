@@ -39,13 +39,17 @@ def get_lora_catalog() -> List[Dict[str, Any]]:
 def get_route_editor_config() -> Dict[str, Any]:
     raw = get_generation_prompt_config().get("route_editor") or {}
     return {
-        "default_engine": str(raw.get("default_engine") or "longcat"),
+        "default_engine": str(raw.get("default_engine") or "kontext"),
         "engines": dict(raw.get("engines") or {}),
     }
 
 
 def get_generate_ui_config() -> Dict[str, Any]:
     return dict(get_generation_prompt_config().get("generate_ui") or {})
+
+
+def get_editor_ui_config() -> Dict[str, Any]:
+    return dict(get_generation_prompt_config().get("editor_ui") or {})
 
 
 def get_rewriter_config() -> Dict[str, Any]:

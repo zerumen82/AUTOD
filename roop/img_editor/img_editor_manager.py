@@ -284,6 +284,34 @@ class ImgEditorManager:
         except Exception:
             return None
 
+    @staticmethod
+    def _preserves_face_layout(facts: dict) -> bool:
+        """Only measured appearance/recolor edits imply the same face layout."""
+        return bool(
+            (facts.get("local_appearance") or facts.get("surface_recolor"))
+            and not any(facts.get(key) for key in (
+                "pose", "scenario", "body", "structural_remove",
+            ))
+        )
+
+    def _instruction_preserves_face_layout(self, instruction: str) -> bool:
+        clauses = self._split_compound_instruction(instruction) or [instruction]
+        return all(
+            self._preserves_face_layout(self._prompt_authority_facts(clause, clause))
+            for clause in clauses
+        )
+
+    @staticmethod
+    def _same_people_retry_prompt(instruction: str) -> str:
+        return (
+            "The previous edit painted a new face or person that is not in the "
+            "input photo. The result must contain exactly the same people as "
+            "the input: no face may be added, copied or duplicated. "
+            f"Do this visible edit now: {instruction}. "
+            "Keep the pose and the framing, and leave every original person "
+            "exactly where they are."
+        )
+
     def _get_semantic_analyzer(self, full_ai: bool = False):
         if self.semantic_analyzer is None:
             from roop.img_editor.nlp.semantic_analyzer import get_semantic_analyzer
@@ -308,7 +336,7 @@ class ImgEditorManager:
         """
         Calcula parámetros dinámicos basados puramente en el análisis semántico (embeddings).
         Cero hardcode de palabras clave de usuario.
-        Optimizado para 8GB VRAM (LongCat Turbo etc).
+        Optimizado para 8GB VRAM (Kontext Q4_K_M).
         """
         magnitude = analysis.get("magnitude", 0.5)
         quality_only = bool(analysis.get("quality_only", False))
@@ -340,7 +368,8 @@ class ImgEditorManager:
         # Guidance: 3.0 a 7.0
         guidance = 3.0 + (magnitude * 4.0)
 
-        if engine in ("longcat", "imagine"):
+        if engine in ("longcat", "imagine", "longcat_full", "kontext"):
+            # Alias legacy longcat/imagine/longcat_full → Kontext (motor del Editor).
             if body_transform:
                 # Grok Imagine versátil: denoise alto para cambios corporales/ropa completos
                 # intensity controla con qué fuerza el cuerpo cambia (0.0-1.0)
@@ -383,8 +412,9 @@ class ImgEditorManager:
                 # (cap 3.5: rango oficial, más alto degrada el following)
                 guidance = min(3.5, 2.5 + (magnitude * 2.0))  # 2.5-3.5
         elif engine == "longcat_full":
-            steps = int(20 + (magnitude * 10))
-            guidance = 2.5  # CFG bajo evita sobresaturación (4.5 quema colores)
+            # Alias legacy → receta Kontext (LongCat retirado).
+            steps = 20
+            guidance = min(3.5, 2.5 + (magnitude * 2.0))
         elif engine == "flux_schnell":
             steps = 4 # Limitación técnica del modelo Schnell
         elif "qwen" in engine:
@@ -520,15 +550,15 @@ class ImgEditorManager:
         engine: str,
         body_transform: bool = False,
     ) -> Optional[str]:
-        if engine not in ("longcat", "imagine", "longcat_full", "kontext"):
+        if engine not in ("longcat", "imagine", "longcat_full", "kontext", "klein", "klein_base", "klein_9b"):
             return None
         structural_bias = str(analysis.get("structural_bias", "neutral"))
         if structural_inpaint and structural_bias == "remove":
             return "index"
-        # El workflow distribuido de LongCat Image Edit usa `index`: conserva
-        # la imagen con menos rigidez que offset, sin depender del contenido del
-        # encargo del usuario.
-        if engine in ("longcat", "imagine", "longcat_full"):
+        # Alias legacy longcat/imagine/longcat_full → método Kontext.
+        # El workflow de Kontext usa `offset`/`uxo-uno` según el cuerpo;
+        # en ediciones legacy sin cuerpo se usa `index`.
+        if engine in ("longcat", "imagine", "longcat_full") and not body_transform:
             return "index"
         # Para body con Kontext (EDIT nativo v5.1099 + método v5.1101/1102/1103):
         # el ReferenceLatent aporta la foto y el nodo FluxKontextMultiRef-
@@ -567,56 +597,32 @@ class ImgEditorManager:
         """
         # v5.1102: Q4_K_M — el Q2_K era una "copy machine" (copia con offset,
         # gris con uxo). Q4 + offload en 8GB, adherencia real.
+        # LongCat retirado del Editor (sustituido por Kontext): los alias
+        # longcat/longcat_full/imagine se normalizan a kontext por
+        # compatibilidad con UIs/APKs antiguas.
         _KONTEXT_VERSION = "flux1-kontext-dev-Q4_K_M.gguf"
-        _LONGCAT_FULL_VERSION = "LongCat-Image-Edit-Q4_K_S.gguf"
-        _LONGCAT_TURBO_VERSION = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
-        _LONGCAT_MIN_VRAM = 11.0
 
-        # LongCat Full ya es el régimen fuerte elegido por el usuario. Kontext
-        # normalmente se respeta, salvo POV/postura: en esos casos su ancla
-        # contradice la instrucción y debe dejar paso al router fuerte.
-        if preferred_engine == "longcat_full" or (
-            preferred_engine == "kontext" and not (angle_change or pose_change)
-        ):
+        # Kontext es el régimen fuerte. Se respeta salvo POV/postura: en esos
+        # casos su ancla contradice la instrucción y debe dejar paso al router
+        # fuerte (bypass sin ancla). Los alias legacy longcat/longcat_full/
+        # imagine equivalen a kontext.
+        if preferred_engine in ("kontext", "longcat", "longcat_full", "imagine") and not (angle_change or pose_change):
             return None, None, ""
 
-        # Seleccionar engine目标 según dirección del cambio
+        # Seleccionar engine según dirección del cambio
         if body_direction == "uncover":
             # Desnudo: bypass no_kontext (Qwen-VL ve la foto, sin ancla de
-            # latentes): junio lo probó en desnudo ("ha seguido las instrucciones").
+            # latentes) con Kontext Q4 (adherencia real medida).
             # v5.1120 — FULL también en 8GB (mismo veredicto del change:
             # Turbo 12 pasos/CFG 1.0 no ejecuta cambios complejos; Full 35 NFE
             # sí; el "cuelga" de v5.1090 era sin --disable-async-offload).
-            target_e, target_v = "longcat_full", _LONGCAT_FULL_VERSION
+            target_e, target_v = "kontext", _KONTEXT_VERSION
         elif body_direction == "cover":
-            # Vestir: LongCat Full preserva estructura y añade ropa bien.
-            # Kontext en 8GB (único viable sin offload thrashing).
-            if vram_gb >= _LONGCAT_MIN_VRAM:
-                target_e, target_v = "longcat_full", _LONGCAT_FULL_VERSION
-            else:
-                target_e, target_v = "kontext", _KONTEXT_VERSION
+            # Vestir: Kontext preserva estructura y añade ropa bien.
+            target_e, target_v = "kontext", _KONTEXT_VERSION
         else:
             # change: flexible. Kontext rápido + buen following de instrucciones.
-            # LongCat Full si VRAM permite y mag alta.
-            if vram_gb >= _LONGCAT_MIN_VRAM and mag >= 0.80:
-                target_e, target_v = "longcat_full", _LONGCAT_FULL_VERSION
-            elif mag >= 0.75:
-                # v5.1116 — change FUERTE en 8GB: el contenido destino NO existe
-                # en la fuente → régimen bypass (sin ancla, mismo que uncover/POV/pose).
-                # Kontext EDIT+offset es la copy machine documentada 3 veces
-                # (v5.1101-1103: Q4+offset=copia) — el ancla de latentes preserva
-                # la escena original contra mag 0.90. Solo magnitud, cero vocabulario.
-                # v5.1120 — TURBO→FULL en 8GB: el bypass ya funciona (ref=none,
-                # Qwen-VL ve) pero Turbo es distilled 12 pasos/CFG 1.0 → following
-                # limitado (log 08:10: cambia ligeramente, no ejecuta la pose).
-                # Full (mismo peso 3.82GB, 35 NFE, CFG 2.5, ~29 steps) es el que
-                # ejecutó cambios de verdad en junio ("LongCat sí ejecutó el cambio").
-                # El veredicto "Full cuelga en 8GB" (v5.1090) era SIN
-                # --disable-async-offload: hoy el offload legacy corre estable
-                # (log: TE 5.3GB offloaded + UNet 3.7GB, 3.1s/it sin stall).
-                target_e, target_v = "longcat_full", _LONGCAT_FULL_VERSION
-            else:
-                target_e, target_v = "kontext", _KONTEXT_VERSION
+            target_e, target_v = "kontext", _KONTEXT_VERSION
 
         if preferred_engine == target_e:
             return None, None, ""
@@ -651,10 +657,10 @@ class ImgEditorManager:
                  (None, None, "") si el engine preferido ya es correcto.
         """
         # v5.1102: Q4_K_M — el Q2_K era una "copy machine".
+        # LongCat retirado (sustituido por Kontext): los alias legacy se
+        # normalizan a kontext; las versiones se conservan para no romper
+        # logs ni UIs/APKs que aún los envíen.
         _KONTEXT_VERSION = "flux1-kontext-dev-Q4_K_M.gguf"
-        _LONGCAT_FULL_VERSION = "LongCat-Image-Edit-Q4_K_S.gguf"
-        _LONGCAT_TURBO_VERSION = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
-        _LONGCAT_MIN_VRAM = 11.0
 
         body_transform = bool(analysis.get("body_transform", False))
         body_direction = str(analysis.get("body_direction", "change")).lower()
@@ -669,12 +675,11 @@ class ImgEditorManager:
         # Engines que NO funcionan bien para edits fuertes / body / structural
         _WEAK_FOR_STRONG = ("hart", "boogu", "flux_dev_abliterated", "flux_q2")
 
-        # LongCat Full ya es el régimen fuerte elegido por el usuario. Kontext
-        # normalmente se respeta, salvo POV/postura: en esos casos su ancla
-        # contradice la instrucción y debe dejar paso al router fuerte.
-        if preferred_engine == "longcat_full" or (
-            preferred_engine == "kontext" and not (angle_change or pose_change)
-        ):
+        # Kontext es el régimen fuerte. Se respeta salvo POV/postura: en esos
+        # casos su ancla contradice la instrucción y debe dejar paso al router
+        # fuerte (bypass sin ancla). Los alias legacy longcat/longcat_full/
+        # imagine equivalen a kontext.
+        if preferred_engine in ("kontext", "longcat", "longcat_full", "imagine") and not (angle_change or pose_change):
             return None, None, ""
 
         # --- 1. BODY TRANSFORMS: router dedicado ---
@@ -696,64 +701,47 @@ class ImgEditorManager:
                 or (high_structural and structural_bias == "add")
             )
             if needs_strong:
-                if vram_gb >= _LONGCAT_MIN_VRAM:
-                    return (
-                        "longcat_full", _LONGCAT_FULL_VERSION,
-                        f"edit fuerte (mag={mag:.2f}, struct={high_structural}, "
-                        f"pov={angle_change}): {preferred_engine} -> longcat_full"
-                    )
-                # v5.1118 — en 8GB, mag>=0.75 → LongCat (régimen bypass).
-                # El ancla de latentes de kontext EDIT pierde contra CUALQUIER
-                # cambio fuerte (evidencia v5.1101-1104; log real 07:22: mag=0.80
-                # no-body → kontext+offset → std=52, no obedeció). Kontext queda
-                # para edits moderados (0.65-0.75), donde el ancla SÍ ayuda.
-                # v5.1120 — FULL en vez de Turbo (mismo bypass, following superior).
-                elif mag >= 0.75:
-                    return (
-                        "longcat_full", _LONGCAT_FULL_VERSION,
-                        f"edit fuerte mag={mag:.2f} (8GB): {preferred_engine} -> longcat_full (bypass sin ancla)"
-                    )
-                else:
-                    return (
-                        "kontext", _KONTEXT_VERSION,
-                        f"edit fuerte (mag={mag:.2f}, struct={high_structural}, "
-                        f"pov={angle_change}): {preferred_engine} -> kontext (8GB)"
-                    )
+                # Régimen fuerte = Kontext (LongCat retirado).
+                return (
+                    "kontext", _KONTEXT_VERSION,
+                    f"edit fuerte (mag={mag:.2f}, struct={high_structural}, "
+                    f"pov={angle_change}): {preferred_engine} -> kontext"
+                )
 
-        # --- 3. LongCat Turbo es el motor elegido (spec/00-PRINCIPIOS). No hay
-        # upgrade automatico a Full: el usuario pidio volver a Turbo.
-        # mag>=0.75 se queda en Turbo con regimen fuerte (bypass sin ancla),
+        # --- 3. Kontext es el motor del Editor. No hay upgrade automático:
+        # el bypass sin ancla se activa más abajo con pose_change.
+        # mag>=0.75 se queda en Kontext con régimen fuerte (bypass sin ancla),
         # sin cambiar de pesos.
 
-        # --- 3b. Klein pedido a mano: vuelve a Turbo (motor elegido).
-        # Klein ignora la mascara por diseno (ReferenceLatent) y no
-        # conserva cuerpos; Turbo con inpaint si la respeta.
+        # --- 3b. Klein pedido a mano: vuelve a Kontext (motor del Editor).
+        # Klein ignora la máscara por diseño (ReferenceLatent) y no
+        # conserva cuerpos; Kontext con su workflow sí.
         # Solo magnitud, cero vocabulario.
         if preferred_engine in ("klein", "klein_base", "klein_9b"):
             return (
-                "longcat", _LONGCAT_TURBO_VERSION,
-                "klein -> longcat turbo (mascara + cuerpos)"
+                "kontext", _KONTEXT_VERSION,
+                "klein -> kontext (motor del Editor)"
             )
 
         # --- 4. Quality improvements: classical pipeline, sin override ---
         if quality_only:
             return None, None, ""
 
-        # --- 5. Background: Turbo con mascara (motor elegido). No hay
-        # override a Full/Kontext: la mascara focal ya manda a LongCat
-        # con inpaint mas abajo.
+        # --- 5. Background: Kontext con máscara (motor del Editor). No hay
+        # override a otro motor: la máscara focal ya manda a Kontext
+        # con su workflow más abajo.
 
         # --- 6. Default: mantener engine preferido ---
         return None, None, ""
 
     @staticmethod
     def _select_longcat_version(client, magnitude: float, body_transform: bool) -> str:
-        """Turbo es el motor elegido (spec/00-PRINCIPIOS): siempre Turbo.
+        """Compatibilidad legacy: LongCat retirado, siempre Kontext Q4_K_M.
 
-        Sin alternancia Full<->Turbo: el cambio de pesos descargaba el
+        Sin alternancia de pesos: el cambio de pesos descargaba el
         modelo residente y provocaba recargas de varios minutos.
         """
-        return "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+        return "flux1-kontext-dev-Q4_K_M.gguf"
 
     def _apply_prompt_rewriter(
         self,
@@ -865,6 +853,7 @@ class ImgEditorManager:
         img_context = (img_context or "").strip()
 
         is_longcat = engine in ("longcat", "longcat_full", "imagine", "kontext") or "longcat" in engine.lower()
+        # Alias legacy: longcat/imagine/longcat_full → Kontext (motor del Editor).
         is_hart = engine == "hart"
         mask_target = (mask_target or "subject").lower()
         if is_longcat:
@@ -1031,7 +1020,7 @@ class ImgEditorManager:
             # cabelludo gris = «gorrito».
             if is_longcat:
                 base += self._bald_recipe_tail(raw)
-            print(f"[ImgEditor] Imagine/LongCat Prompt: {base}")
+            print(f"[ImgEditor] Kontext Prompt: {base}")
             age_hint = ""
             # Solo si claramente madura (InsightFace se equivoca ±10) y NUNCA en
             # body_transform (el hint de arrugas + edición corporal = envejecido).
@@ -3866,7 +3855,9 @@ class ImgEditorManager:
 
             root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             with open(os.path.join(root, "config", "model_configs.json"), encoding="utf-8") as stream:
-                config = json.load(stream)["longcat"]["region_proposal"]
+                _region_cfg = json.load(stream)
+                # LongCat retirado → bloque kontext; fallback legacy longcat.
+                config = (_region_cfg.get("kontext") or _region_cfg.get("longcat") or {})["region_proposal"]
             translation = config["ambiguous_translation"]
             if translation["enabled"] is not True:
                 return instruction
@@ -3897,7 +3888,9 @@ class ImgEditorManager:
 
             root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             with open(os.path.join(root, "config", "model_configs.json"), encoding="utf-8") as stream:
-                config = json.load(stream)["longcat"]["region_proposal"]
+                _region_cfg = json.load(stream)
+                # LongCat retirado → bloque kontext; fallback legacy longcat.
+                config = (_region_cfg.get("kontext") or _region_cfg.get("longcat") or {})["region_proposal"]
             if config["enabled"] is not True:
                 return []
             max_coverage = float(config["max_coverage"])
@@ -4584,12 +4577,22 @@ class ImgEditorManager:
                 )
             elif updated.size != current.size:
                 updated = updated.resize(current.size, Image.Resampling.LANCZOS)
+            # Compare full-photo coordinates only, against the current input to
+            # this pass. An earlier subject may already have been edited.
+            face_guard = bool(
+                pass_mask is not None and faces
+                and self._instruction_preserves_face_layout(item["text"])
+            )
+            reference_faces = (self._detect_edit_faces(before) or faces) if face_guard else []
+            added_face = self._added_face_mask(before, updated, reference_faces) if face_guard else None
             scope_missing = body_pass and body_zone is None
-            if ((self._edit_is_nearly_unchanged(before, updated) or scope_missing)
+            if ((self._edit_is_nearly_unchanged(before, updated) or scope_missing
+                 or added_face is not None)
                     and not (cancel_check and cancel_check())):
                 print(
-                    "[ImgEditor] Cambio casi nulo en la zona; segundo intento "
-                    "Turbo con la instrucción de refuerzo",
+                    "[ImgEditor] Cara añadida por el modelo; segundo intento con las mismas personas"
+                    if added_face is not None else
+                    "[ImgEditor] Cambio casi nulo en la zona; segundo intento Turbo con la instrucción de refuerzo",
                     flush=True,
                 )
                 retry_prompt = (
@@ -4598,6 +4601,8 @@ class ImgEditorManager:
                     "Do not keep the previous state of what was asked to change. "
                     "Leave every other person as they are."
                 )
+                if added_face is not None:
+                    retry_prompt = self._same_people_retry_prompt(item["text"])
                 if negative_prompt:
                     retry_prompt += f" Avoid: {negative_prompt}."
                 retry_prompt += self._bald_recipe_tail(item["text"])
@@ -4649,6 +4654,14 @@ class ImgEditorManager:
                 else:
                     print(f"[ImgEditor] Segundo intento falló: {retry_msg}", flush=True)
                     messages.append(f"segundo intento falló: {retry_msg}")
+            if cancel_check and cancel_check():
+                return None, "Cancelado", False
+            if face_guard:
+                leftover = self._added_face_mask(before, updated, reference_faces)
+                if leftover is not None:
+                    updated = Image.composite(before, updated, leftover)
+                    messages.append("cara añadida restaurada de la entrada de este pase")
+                    print("[ImgEditor] Cara añadida persistente; esa región se restaura de la entrada de este pase", flush=True)
             if body_pass and pass_mask is not None:
                 if body_zone is None:
                     messages.append(
@@ -6004,7 +6017,7 @@ class ImgEditorManager:
         # FaceAnalysis reserves GPU memory before Qwen loads on 8 GB cards.
         skip_face_preflight = bool(
             _compound_depth == 0 and mask_image is None
-            and engine in ("longcat", "imagine", "qwen_camera")
+            and engine in ("longcat", "imagine", "qwen_camera", "kontext")
             and self._explicit_viewpoint_request(prompt, prompt)
         )
         if skip_face_preflight:
@@ -6130,7 +6143,7 @@ class ImgEditorManager:
         if (explicit_viewpoint_request and prompt and _compound_depth == 0
                 and mask_image is None and quality_style != "solo_mejora"
                 and not (quality_hybrid and quality_use_generative is True)
-                and engine in ("longcat", "imagine", "qwen_camera")
+                and engine in ("longcat", "imagine", "qwen_camera", "kontext")
                 and get_vram_gb() > 0):
             camera_message = "Qwen Camera no terminó"
             try:
@@ -6254,11 +6267,15 @@ class ImgEditorManager:
                 compound_scenario = False
                 compound_direction = "change"
                 compound_intensity = 0.0
+                compound_face_guard = True
                 for clause, source in zip(clauses, sources):
                     if cancel_check and cancel_check():
                         return None, "Cancelado", None
                     clause_facts = self._prompt_authority_facts(
                         source or clause, clause,
+                    )
+                    compound_face_guard = (
+                        compound_face_guard and self._preserves_face_layout(clause_facts)
                     )
                     if clause_facts.get("pose"):
                         compound_pose = True
@@ -6438,6 +6455,50 @@ class ImgEditorManager:
                         )
                     if output.size != img.size:
                         output = output.resize(img.size, Image.Resampling.LANCZOS)
+                    if (compound_face_guard and union is not None
+                            and not unmeasured and not compound_unanchored
+                            and (detected_faces or source_faces)):
+                        reference_faces = detected_faces or source_faces
+                        added_face = self._added_face_mask(img, output, reference_faces)
+                        if added_face is not None:
+                            if cancel_check and cancel_check():
+                                return None, "Cancelado", None
+                            print("[ImgEditor] Cara añadida por el modelo; segundo intento compuesto con las mismas personas", flush=True)
+                            retry_prompt = self._same_people_retry_prompt(self._compound_change_list(prompt))
+                            if negative_prompt:
+                                retry_prompt += f" Avoid: {negative_prompt}."
+                            retry_prompt += self._bald_recipe_tail(prompt)
+                            try:
+                                retry, retry_msg = fast_client.generate(
+                                    image=generation_image, prompt=retry_prompt,
+                                    negative_prompt=negative_prompt,
+                                    guidance_scale=1.0, seed=seed,
+                                    prompt_authority=compound_authority,
+                                    preserve_frame=compound_preserve,
+                                    mask_image=generation_mask,
+                                    keep_source_pixels=generation_mask is not None,
+                                    lora_name=lora_name, lora_strength=lora_strength,
+                                    progress_callback=progress_callback,
+                                    cancel_check=cancel_check,
+                                    num_inference_steps=12, denoise=1.0,
+                                    no_kontext=compound_unanchored,
+                                )
+                            except Exception as retry_error:
+                                retry, retry_msg = None, str(retry_error)
+                            if cancel_check and cancel_check():
+                                return None, "Cancelado", None
+                            if retry is not None:
+                                output = self._integrate_local_generation(
+                                    img, retry.image.convert("RGB"), union,
+                                    local_box or (0, 0, img.width, img.height),
+                                    keep_measured_mask=True,
+                                )
+                                added_face = self._added_face_mask(img, output, reference_faces)
+                            fast_msg = f"{fast_msg}; segundo intento: {retry_msg}"
+                            if added_face is not None:
+                                output = Image.composite(img, output, added_face)
+                                fast_msg += "; cara añadida restaurada de la foto original"
+                                print("[ImgEditor] Cara añadida persistente; esa región se restaura de la foto original", flush=True)
                     if unmeasured:
                         note += " | sin zona medida: " + ", ".join(unmeasured)
                     if quality_hybrid:
@@ -7795,7 +7856,11 @@ class ImgEditorManager:
                     is_global = True
                     background_focus = False
                     print("[ImgEditor] Rewriter semántico: recomposición de escena requerida → Full sin ancla", flush=True)
-                if _compound_depth == 0 and mask_image is None:
+                # Kontext edits the whole reference from the complete prompt.
+                # Splitting its instruction into grounded subedits can omit a
+                # clause whose requested state is not present in the source.
+                if (_compound_depth == 0 and mask_image is None
+                        and engine != "kontext"):
                     # Una única muestra global de LongCat sobre varios destinos
                     # cambió toda la foto sin obedecer ninguno (run 23:18 del 22-sep).
                     # Separar cláusulas independientes cuando se puedan asignar
