@@ -10,6 +10,28 @@
 
 ## Módulos clave
 
+Selector visual aprobado 2026-10-18: `element_selection.py` propone regiones
+medidas mediante detectores/segmentación locales, con parámetros en
+`config/editor_selection.json`. Cada análisis contiene huella RGB, tamaño y
+regiones (id, etiqueta, máscara, caja, procedencia). `gr.State` de sesión mantiene
+análisis/selección; la imagen marcada es solo visualización. Un callback separado
+envía al manager la imagen limpia y la selección validada. Los endpoints antiguos
+conservan su firma y su flujo sin selección explícita.
+
+La selección múltiple se une en una sola máscara y una pasada Kontext.
+`selected_region_edit.py` se invoca antes de preflight/NLP/cámara/calidad en
+`generate_intelligent`: valida huella RGB completa, tamaño, IDs y máscaras;
+un rechazo conserva la foto, sin pasar a edición global. Recorta la fuente
+limpia y limita el pegado al soporte medido, incluso tras acabado clásico.
+La referencia de objetos recibe contexto configurable más amplio por su
+procedencia medida; las cabezas conservan contexto local. `reference_canvas.py`
+escala sin deformar y añade padding a bloques latentes, que el cliente retira
+antes de restituir el tamaño del recorte. Esto no amplía la máscara de escritura
+ni cambia la preparación legacy sin selección explícita.
+`selection_events.py` mantiene revisión de análisis en `SelectionSession`
+deepcopyable y descarta resultados tardíos tras cambiar/reutilizar la foto.
+El backbone CLIP local se inyecta por parámetro; no se modifica `clip.load`.
+
 ### 🚀 Generate (`ui/tabs/gen/` + `roop/img_editor/flux_gen_comfy_client.py`)
 - `ui.py` → formulario (prompt, estilo/luz/encuadre/piel, orientación, motor, ESRGAN, rewriter).
 - `events.py` → `on_generate_image` → `get_flux_gen_client().generate_ai(...)`.
@@ -30,6 +52,11 @@
 
 ### Config
 - `config/model_configs.json` → steps/cfg/sampler por motor (leído en `flux_gen_comfy_client.py:224-240`).
+- `kontext.model_file/steps/cfg` es la fuente de modelo y receta del Editor.
+  Los identificadores LongCat legacy se normalizan antes del caché/loaders.
+  Para apariencia focal, la región visual selecciona una cabeza, Kontext edita
+  su recorte sin inpaint y el pegado/restauración protegen el exterior y todas
+  las otras cabezas detectadas, incluso las de confianza insuficiente para elegir.
 - `config/generation_prompt.json` → prefijos, `lora_catalog`.
 - `config/generation_prompt.json/editor_ui` → default del Editor independiente
   de Generate y de los defaults compatibles de la API antigua.

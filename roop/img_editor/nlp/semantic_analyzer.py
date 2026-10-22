@@ -37,13 +37,19 @@ CONCEPTS: Dict[str, list] = {
         # palabra de usuario (mismo precedente que «paint over/repaint»
         # en attribute_recolor).
         "dance dancing groove sway twirl spin rhythm",
+        # v5.1239 — el ángulo de cámara es pose (el cuerpo se ve de otra
+        # dirección); medido 2026-10-22, «CAMBIA EL ANGULO, IMAGEN DE
+        # LATERAL» medía pose=False y caía en la ruta ordinaria (copy
+        # machine) en vez del motor con visión que reinterpreta el marco.
+        "camera angle side view profile shot turn sideways angled three-quarter",
+        "ángulo de cámara vista lateral perfil de lado perfilado tres cuartos",
     ],
     "structural": [
         "add insert put new people objects props elements into scene",
-        "remove delete erase eliminate people objects from photo",
+        "remove delete erase eliminate people objects",
         "change replace background environment scenery landscape",
         "añadir insertar poner gente objetos accesorios en la escena",
-        "quitar eliminar borrar personas objetos de la foto",
+        "quitar eliminar borrar personas objetos",
         "cambiar reemplazar fondo entorno escenario paisaje playa",
     ],
     "attribute": [
@@ -57,8 +63,11 @@ CONCEPTS: Dict[str, list] = {
         "añadir insertar poner agregar objeto accesorio sombrero gafas bolso en escena",
     ],
     "structural_remove": [
-        "remove delete erase eliminate kill kills killing killed elimination quitar eliminar borrar people objects animals from image",
-        "quitar eliminar borrar remover matar personas objetos animales de la imagen",
+        # v5.1239 — «from image»/«de la imagen» quitado: el sustantivo del
+        # medio no describe una eliminación (medido: «IMAGEN DE LATERAL»
+        # medía structural_remove 0,2505 solo por esa palabra).
+        "remove delete erase eliminate kill kills killing killed elimination quitar eliminar borrar people objects animals",
+        "quitar eliminar borrar remover matar personas objetos animales",
     ],
     "structural_background": [
         "change replace background environment scenery landscape location beach sky",
@@ -132,7 +141,12 @@ CONCEPTS: Dict[str, list] = {
         "haircut hairstyle long hair short hair curly straight hair beard mustache shaved",
         "corte de pelo peinado pelo largo pelo corto rizado liso barba bigote afeitado",
         "facial features change new look different appearance makeover",
-        "cambiar rasgos faciales nuevo look apariencia diferente cambio de imagen",
+        # v5.1239 — «cambio de imagen» (idématizado) contenía el sustantivo
+        # del MEDIO: «imagen»/«image» no describe un cambio de look, solo el
+        # soporte, y daba +0,25 a cualquier petición que mencionara la foto
+        # (medido: «IMAGEN DE LATERAL» activaba structural_remove 0,2505 y
+        # attribute_appearance, y la postura quedaba siempre por debajo).
+        "cambiar rasgos faciales nuevo look apariencia diferente cambio de look",
     ],
     "attribute_skin": [
         "skin texture rough smooth flawless blemish freckle mole scar tattoo",
@@ -180,6 +194,13 @@ _AXIS_KEYS = {
 CAMERA_POSES: Dict[str, Dict[str, list]] = {
     "azimuth": {
         "front view": [
+            # Contrato documentado (probe_editor_camera_pose_pov_20261018,
+            # MEMORY 2026-10-18/21): el LoRA de ángulos NO tiene pose de
+            # primera persona entre sus 96 entrenadas, así que una petición
+            # POV se aproxima a la pose entrenada más cercana («front view
+            # eye-level»). Medido 2026-10-22: sin esta descripción «cambia
+            # el pov» medía 0,000 en todos los azimuths y salía el default
+            # «front-right quarter view elevated» (probe 3 FAIL en rojo).
             "pov first person over the shoulder primera persona mirando "
             "por los ojos de alguien sobre el hombro",
             "frente frontal enfrente cara a cara mirando a la persona",

@@ -2,6 +2,8 @@ import os
 import queue
 import threading
 import time
+from types import SimpleNamespace
+
 import gradio as gr
 
 from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client
@@ -20,6 +22,9 @@ from ui.job_cancel import (
 )
 from . import state
 
+state.is_generating = False
+state.worker_error = None
+
 
 def on_cancel_generation():
     request_cancel(SCOPE_GENERATION, interrupt_comfy=True)
@@ -34,8 +39,10 @@ def open_generation_folder():
     try:
         if sys.platform == "win32":
             os.startfile(path)
+        elif sys.platform == "linux":
+            subprocess.Popen(["xdg-open", path])
         else:
-            subprocess.Popen(["explorer", path])
+            subprocess.Popen(["open", path])
     except Exception:
         pass
 
@@ -132,6 +139,19 @@ def _route_is_editor(route_val, prompt, ref_image) -> bool:
         print(f"[Gen] Detección de edición no disponible ({e}); ruta img2img")
         return False
 
+
+GENERATE_ARG_NAMES = (
+    "prompt", "width", "height", "engine_val", "image_style", "shot_framing",
+    "lighting", "skin_finish", "enhance_quality", "use_rewriter", "color_grade",
+    "seed", "steps", "cfg_scale", "negative_prompt", "ref_image", "route",
+    "enhance_tier", "samples", "nsfw_content", "lora_choice",
+)
+
+# Contrato legacy de la APK: mismos 10 primeros argumentos posicionales.
+GENERATE_LEGACY_ARG_NAMES = GENERATE_ARG_NAMES[:10]
+
+# Límite de resultados guardados en memoria para el puente al Editor.
+GENERATE_RECENT_RESULTS_LIMIT = 5
 
 def on_generate_image(
     prompt, width, height, engine_val, image_style, shot_framing, lighting,

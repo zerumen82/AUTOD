@@ -9,12 +9,10 @@ cambio no puede perder tres invariantes ya medidos:
    img_editor_manager, engine in (..., "kontext")).
 2. Cuerpo ⇒ el router lo respeta en Kontext (decisión del usuario
    2026-10-18: se queda en Kontext; se bloquea con contrato).
-3. Focal sin máscara manual ⇒ se queda en Kontext como edición GLOBAL por
-   prompt (decisión 2026-10-18: Kontext global con prompt compuesto es el
-   camino fuerte medido; no se fuerza LongCat). Kontext no conecta
-   mask_image, así que nunca la recibe. LongCat solo interviene cuando el
-   pipeline construye un final_mask real (guard de final_mask), que ya tiene
-   su propia cobertura.
+3. Focal sin máscara manual ⇒ Kontext sobre el recorte medido, sin máscara
+   de inpaint en el cliente. Protección automática de las otras personas
+   aprobada por el usuario el 18/10 tras el fallo de referente. Las peticiones
+   compuestas globales conservan todas sus cláusulas en una sola generación.
 
 Ejercita las rutas REALES (generate_intelligent y on_generate) con
 clientes simulados; solo la inferencia GPU está stubbeada.
@@ -34,7 +32,6 @@ from roop.img_editor.img_editor_manager import ImgEditorManager  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 UI_SOURCE = ROOT / "ui/tabs/img_editor/ui.py"
-SOURCE = ROOT / "ui/tob/ComfyUI/input/fast_1790331799.png"
 
 
 class FakeFluxClient:
@@ -165,54 +162,13 @@ def _check_pov_goes_to_qwen():
 
 
 def _check_mask_never_kontext():
-    """Petición focal con motor kontext entrega máscara y genera con LongCat Turbo."""
-    from ui.tabs.img_editor.events import on_generate
-
-    assert SOURCE.is_file(), SOURCE
-    source = Image.open(SOURCE).convert("RGB").resize((800, 533), Image.Resampling.LANCZOS)
-    client = FakeFluxClient()
-    verifier = SimpleNamespace(
-        verify=lambda *_args, **_kw: {"compliant": True, "source": "probe_stub"}
-    )
-    with (
-        patch("ui.tabs.comfy_launcher.is_comfyui_running", return_value=True),
-        patch("roop.img_editor.prompt_translator.translate_prompt",
-              return_value="Man must be bald"),
-        patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client",
-              return_value=client),
-        patch("roop.img_editor.instruction_verifier.get_instruction_verifier",
-              return_value=verifier),
-        patch("roop.img_editor.img_editor_manager.get_vram_gb", return_value=8.0),
-    ):
-        output, status, _mask = on_generate(
-            source, "EL HOMBRE DEBE SER CALVO", "kontext", 0,
-            False, 1, False, "hd",
-        )
-    assert output is not None, f"la peticion focal no genero: {status}"
-    assert "Guardado" in status, status
-
-    loads = [kwargs for name, kwargs in client.calls if name == "load"]
-    assert loads, f"sin cargas de modelo: {client.calls}"
-    # Con default kontext la petición focal se queda en Kontext (no se fuerza
-    # LongCat): la carga debe ser del modelo Kontext Q4_K_M.
-    versions = [str(kwargs.get("flux_version", "")) for kwargs in loads]
-    assert any("kontext" in v.lower() for v in versions), (
-        f"la petición focal con default kontext no cargó Kontext: {versions}"
+    """Kontext focal usa el recorte medido y protege al otro sujeto."""
+    from diagnostics.probe_editor_kontext_people_protection_20261018 import (
+        _assert_protected, _execute,
     )
 
-    generations = [kwargs for name, kwargs in client.calls if name == "generate"]
-    assert generations, f"sin generaciones: {client.calls}"
-    # Decisión 2026-10-18: una petición focal sin máscara manual se queda en
-    # Kontext como edición GLOBAL por prompt (ram EDIT de más abajo). Kontext
-    # no conecta mask_image, así que no debe recibir máscara; el router solo
-    # manda a LongCat cuando existe un final_mask real (guard de final_mask).
-    for kwargs in generations:
-        assert kwargs.get("mask_image") is None, (
-            "Kontext recibió mask_image: su workflow la descarta por diseño "
-            "(medido 2026-10-18); una petición focal va global por prompt"
-        )
-    print(f"OK: peticion focal con default kontext se queda en Kontext "
-          f"({len(generations)} pasada(s), sin máscara, global por prompt)")
+    _assert_protected(_execute())
+    print("OK: Kontext focal sin inpaint, recorte medido y otra persona intacta")
 
 
 def _check_compound_kontext_stays_global():

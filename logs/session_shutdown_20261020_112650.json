@@ -1,0 +1,72 @@
+{
+  "reason": "atexit",
+  "started": "2026-10-20 11:26:39",
+  "pid": 26308,
+  "ok": true,
+  "warm_imports": {
+    "loaded": [
+      "ui.tabs.comfy_launcher",
+      "roop.comfy_workflows",
+      "roop.img_editor.vision_guard",
+      "ui.tabs.faceswap.state"
+    ],
+    "failed": []
+  },
+  "settings": {
+    "stop_comfyui_on_close": true,
+    "release_local_gpu_on_close": true,
+    "abort_local_batch_on_close": true,
+    "queue_grace_seconds": 15,
+    "poll_seconds": 1
+  },
+  "before": {
+    "wall": "2026-10-20 11:26:39",
+    "vram_used_mb": 996,
+    "vram_total_mb": 8192,
+    "comfyui_running": true,
+    "comfyui_queue_running": 0,
+    "comfyui_queue_pending": 0,
+    "local_batch_busy": false
+  },
+  "grace": {
+    "seconds": 15.0,
+    "waited_seconds": 0.08,
+    "idle": true,
+    "state": {
+      "wall": "2026-10-20 11:26:39",
+      "vram_used_mb": 996,
+      "vram_total_mb": 8192,
+      "comfyui_running": true,
+      "comfyui_queue_running": 0,
+      "comfyui_queue_pending": 0,
+      "local_batch_busy": false
+    }
+  },
+  "local_batch_cancelled": false,
+  "comfyui": {
+    "attempted": true,
+    "stopped": true,
+    "message": "ComfyUI detenido: port 8188 freed"
+  },
+  "local_gpu": {
+    "attempted": true,
+    "steps": [
+      "img_editor_manager_ausente",
+      "face_util_no_cargado",
+      "torch_cache_emptied",
+      "gc_collected"
+    ],
+    "errors": []
+  },
+  "after": {
+    "wall": "2026-10-20 11:26:50",
+    "vram_used_mb": 996,
+    "vram_total_mb": 8192,
+    "comfyui_running": false,
+    "comfyui_queue_running": 0,
+    "comfyui_queue_pending": 0,
+    "local_batch_busy": false
+  },
+  "vram_delta_mb": 0,
+  "seconds": 11.72
+}

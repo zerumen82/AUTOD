@@ -11,6 +11,10 @@ import gradio as gr
 from roop.img_editor.img_editor_manager import get_img_editor_manager
 from roop.output_paths import get_img_editor_output_dir
 from . import state
+from .selection_events import (
+    on_analyze, on_new_image, on_point_select, on_select,
+    use_result_as_input as _use_result_as_input,
+)
 
 RETRY_ATTEMPTS = 2
 
@@ -122,7 +126,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                 quality_preserve_faces=True,
                 quality_deposter=True, quality_upscale=True,
                 quality_color=True, quality_realism=True,
-                progress=gr.Progress(), source="?"):
+                progress=gr.Progress(), source="?", selection_state=None):
     with state._generation_lock:
         if state.is_generating:
             _txt = "Ya hay una transformacion en proceso"
@@ -134,8 +138,9 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         state.generation_started_at = time.time()
 
     def _end_generation():
-        state.is_generating = False
-        state.generation_started_at = None
+        with state._generation_lock:
+            state.is_generating = False
+            state.generation_started_at = None
 
     # Las validaciones tempranas también viven dentro de try: una excepción
     # aquí (p.ej. Image.open de una ruta temporal borrada) dejaba
@@ -180,6 +185,28 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         # preflight, aunque la selección manual fuese válida.
         if img.mode != "RGB":
             img = img.convert("RGB")
+        img = img.copy()
+
+        # Selección visual explícita (H-EDIT-SELECT): gana a la inferencia
+        # textual. Sin selección, el flujo automático se conserva intacto.
+        selection_analysis = None
+        selected_region_ids = None
+        print(f"[ImgEditor] DEBUG selection_state type={type(selection_state)}", flush=True)
+        if isinstance(selection_state, state.SelectionSession):
+            selection_analysis, selected_region_ids = selection_state.snapshot()
+            print(f"[ImgEditor] DEBUG snapshot: analysis={selection_analysis is not None}, ids={selected_region_ids}", flush=True)
+        else:
+            print(f"[ImgEditor] DEBUG selection_state is NOT SelectionSession: {selection_state}", flush=True)
+        selection_kwargs = {}
+        if selected_region_ids:
+            from roop.img_editor.element_selection import validate_selection
+            valid, reason = validate_selection(img, selection_analysis, selected_region_ids)
+            print(f"[ImgEditor] DEBUG validate_selection: valid={valid}, reason={reason}", flush=True)
+            if not valid:
+                _end_generation()
+                return None, f"Selección inválida: {reason}", None
+            selection_kwargs = {"selection_analysis": selection_analysis,
+                                "selected_region_ids": selected_region_ids}
     except Exception as e:
         traceback.print_exc()
         _end_generation()
@@ -214,6 +241,8 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             iterations = max(1, min(int(auto_iterations), 20)) if autoregressive else 1
         except (ValueError, TypeError):
             iterations = 1
+        if selected_region_ids:
+            iterations = 1
         current_img = img
         final_mask = None
         last_msg = ""
@@ -225,7 +254,8 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             print(f"[ImgEditor] Iteracion autoregresiva {i+1}/{iterations}")
 
             best_hair_candidate = None
-            for attempt in range(RETRY_ATTEMPTS):
+            attempts = 1 if selected_region_ids else RETRY_ATTEMPTS
+            for attempt in range(attempts):
                 res_img, msg, mask_img = manager.generate_intelligent(
                     image=current_img, prompt=p_text,
                     engine=engine_val,
@@ -253,6 +283,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                     auto_upscale=False,
                     cancel_check=cancel_check,
                     progress_callback=_ui_progress,
+                    **selection_kwargs,
                 )
                 compliance = getattr(manager, "_last_instruction_compliance", None) or {}
                 hair_unmet = (res_img is not None
@@ -262,7 +293,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                     score = float(compliance.get("hair_after", 1.0))
                     if best_hair_candidate is None or score < best_hair_candidate[4]:
                         best_hair_candidate = (res_img, msg, mask_img, compliance, score)
-                    if attempt + 1 < RETRY_ATTEMPTS:
+                    if attempt + 1 < attempts:
                         # La receta anclada conserva el pelo que el modelo
                         # todavía ve, así que remuestrear la misma foto solo
                         # afeita otro parche. La siguiente muestra parte del
@@ -364,7 +395,17 @@ def _show_quality_options(enabled):
 
 def _on_generate_desktop(*args, **kwargs):
     """Botón ✨ TRANSFORMAR del escritorio; el origen va al log."""
+    print(f"[ImgEditor] DEBUG _on_generate_desktop: len(args)={len(args)}, kwargs={list(kwargs.keys())}", flush=True)
+    if len(args) == 14:
+        kwargs["selection_state"] = args[-1]
+        args = args[:-1]
     kwargs.setdefault("source", "desktop")
+    return on_generate(*args, **kwargs)
+
+
+def _on_generate_api_select(*args, **kwargs):
+    """Endpoint /edit_select conservado para clientes de 13 controles."""
+    kwargs.setdefault("source", "api/edit_select")
     return on_generate(*args, **kwargs)
 
 
@@ -412,19 +453,29 @@ def wire_events(ui_comp):
             # única protección.
             return btn.click(fn, inputs, outputs, api_name=api_name)
 
-    _bind_generate(
-        ui_comp["gen_btn"], desktop_inputs, _on_generate_desktop, "edit_select",
-    )
+    if "selection_state" in ui_comp:
+        _bind_generate(
+            ui_comp["gen_btn"], desktop_inputs + [ui_comp["selection_state"]],
+            _on_generate_desktop, "edit_region",
+        )
+        _bind_generate(
+            ui_comp["legacy_select_btn"], desktop_inputs,
+            _on_generate_api_select, "edit_select",
+        )
+    else:
+        _bind_generate(
+            ui_comp["gen_btn"], desktop_inputs, _on_generate_desktop, "edit_select",
+        )
     # Nine arguments, ending in Restaurar caras. The phone app posts this list.
     # The four step checkboxes stay off this endpoint so that call still works;
     # missing steps mean every finish step stays on.
     _bind_generate(
-        ui_comp["legacy_options_btn"], desktop_inputs[:-4],
+        ui_comp["legacy_options_btn"], desktop_inputs[:9],
         _on_generate_api_options, "edit_options",
     )
     # Eight arguments, without Restaurar caras. Older installed apps use this.
     _bind_generate(
-        ui_comp["legacy_api_btn"], desktop_inputs[:-5],
+        ui_comp["legacy_api_btn"], desktop_inputs[:8],
         _on_generate_api_legacy, "edit",
     )
     ui_comp["quality_mode"].change(
@@ -433,11 +484,61 @@ def wire_events(ui_comp):
         outputs=[ui_comp["quality_options"]],
     )
 
-    ui_comp["bt_use_as_input"].click(
-        fn=lambda x: x,
-        inputs=[ui_comp["output_img"]],
-        outputs=[ui_comp["input_img"]],
-    )
+    _use_outputs = [ui_comp["input_img"]]
+    if "overlay_img" in ui_comp:
+        _use_outputs += [
+            ui_comp["overlay_img"], ui_comp["region_choices"],
+            ui_comp["selection_state"], ui_comp["status"],
+        ]
+        ui_comp["bt_use_as_input"].click(
+            fn=_use_result_as_input,
+            inputs=[ui_comp["output_img"], ui_comp["selection_state"]],
+            outputs=_use_outputs,
+            queue=False, api_name="reuse_editor_result",
+        )
+    else:
+        ui_comp["bt_use_as_input"].click(
+            fn=lambda x: x,
+            inputs=[ui_comp["output_img"]],
+            outputs=_use_outputs,
+        )
+
+    # --- Selector visual (H-EDIT-SELECT) ---------------------------------
+    # Analizar corre en CPU (no toca la GPU); la selección es múltiple y se
+    # aplica como una sola región focal en la generación. Se cablea solo si la
+    # UI incluye los componentes nuevos (las pruebas antiguas no los pasan).
+    if "analyze_btn" in ui_comp and "overlay_img" in ui_comp and "region_choices" in ui_comp:
+        ui_comp["analyze_btn"].click(
+            fn=on_analyze,
+            inputs=[ui_comp["input_img"], ui_comp["selection_state"]],
+            outputs=[
+                ui_comp["overlay_img"], ui_comp["region_choices"],
+                ui_comp["selection_state"], ui_comp["status"],
+            ],
+            concurrency_limit=None, api_name="analyze_regions",
+        )
+        ui_comp["region_choices"].input(
+            fn=on_select,
+            inputs=[ui_comp["region_choices"], ui_comp["input_img"], ui_comp["selection_state"]],
+            outputs=[ui_comp["overlay_img"], ui_comp["selection_state"], ui_comp["status"]],
+            queue=False, api_name="select_regions",
+        )
+        ui_comp["overlay_img"].select(
+            fn=on_point_select,
+            inputs=[ui_comp["input_img"], ui_comp["selection_state"]],
+            outputs=[ui_comp["overlay_img"], ui_comp["region_choices"],
+                     ui_comp["selection_state"], ui_comp["status"]],
+            queue=False, api_name=False,
+        )
+        ui_comp["input_img"].change(
+            fn=on_new_image,
+            inputs=[ui_comp["input_img"], ui_comp["selection_state"]],
+            outputs=[
+                ui_comp["overlay_img"], ui_comp["region_choices"],
+                ui_comp["selection_state"], ui_comp["status"],
+            ],
+            queue=False, api_name="reset_regions",
+        )
 
     ui_comp["bt_open_folder"].click(
         fn=open_output_folder,

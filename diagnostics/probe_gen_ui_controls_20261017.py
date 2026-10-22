@@ -44,7 +44,8 @@ class GenUI(unittest.TestCase):
     def test_guidance_description_changes_with_engine(self):
         fn = self.callbacks["_on_guidance_change"]
         self.assertIn("CFG=1", fn("flux_dev_q4", 0)[1]["info"])
-        self.assertIn("se aplica", fn("longcat_full", 0)[1]["info"])
+        # El alias retirado LongCat Full ya carga Kontext (CFG distilled=1).
+        self.assertIn("no influye", fn("longcat_full", 0)[1]["info"])
 
     def test_editor_route_rejects_manual_lora_without_render_or_unload(self):
         from PIL import Image

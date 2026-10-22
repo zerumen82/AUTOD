@@ -3,6 +3,7 @@
 """Carga configuración de prompts GENERAR (sin strings hardcodeados en código)."""
 
 import json
+import math
 import os
 from typing import Any, Dict, List
 
@@ -42,6 +43,23 @@ def get_route_editor_config() -> Dict[str, Any]:
         "default_engine": str(raw.get("default_engine") or "kontext"),
         "engines": dict(raw.get("engines") or {}),
     }
+
+
+def get_kontext_model_config() -> Dict[str, Any]:
+    """Read the Editor's configured Kontext model and native sampling recipe."""
+    path = os.path.join(_project_root(), "config", "model_configs.json")
+    with open(path, encoding="utf-8") as stream:
+        model = json.load(stream)["kontext"]
+    model_file = model["model_file"]
+    steps = int(model["steps"])
+    cfg = float(model["cfg"])
+    if (
+        not isinstance(model_file, str) or not model_file.strip()
+        or "kontext" not in model_file.casefold()
+        or steps < 1 or not math.isfinite(cfg) or cfg <= 0
+    ):
+        raise ValueError("Invalid Kontext model configuration")
+    return {**model, "steps": steps, "cfg": cfg}
 
 
 def get_generate_ui_config() -> Dict[str, Any]:

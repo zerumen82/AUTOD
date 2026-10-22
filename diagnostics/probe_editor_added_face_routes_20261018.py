@@ -96,7 +96,8 @@ def patches(manager):
         ("_integrate_local_generation", integrate),
     ):
         if name == "_prompt_authority_facts":
-            value = lambda raw, translated: facts(translated or raw)
+            def value(raw, translated, _facts=facts):
+                return _facts(translated or raw)
         stack.enter_context(patch.object(manager, name, side_effect=value))
     return stack
 
@@ -129,6 +130,16 @@ def assert_restored(source, output):
     assert np.array_equal(src[28:52, 178:202], dst[28:52, 178:202]), "extra face not restored"
     assert np.any(src[100:130, 140:165] != dst[100:130, 140:165]), "legitimate edit lost"
     assert np.array_equal(src[:, :100], dst[:, :100]), "unrequested region changed"
+
+
+def assert_restored_global(source, output):
+    # El compuesto de kontext es una pasada global: el marco entero se
+    # regenera: lo que la compuerta garantiza es que la cara añadida vuelve
+    # de la foto original y que la edición pedida sobrevive al reintento.
+    src, dst = np.asarray(source), np.asarray(output)
+    assert np.array_equal(src[28:52, 178:202], dst[28:52, 178:202]), "extra face not restored"
+    assert np.any(src[100:130, 140:165] != dst[100:130, 140:165]), "legitimate edit lost"
+    assert np.any(dst[:, :100, 2] == 220), "global pass did not regenerate the frame"
 
 
 def subjects(client, text="The walls are blue", two=False, cancelled=None, no_op=False):
@@ -173,11 +184,12 @@ def main():
         assert len(client.calls) == 2, f"{runner.__name__}: extra face did not trigger retry ({len(client.calls)})"
         assert "no face may be added" in client.calls[1]["prompt"]
         assert len(detected(output)) == 1
+        restored = assert_restored_global if runner is compound else assert_restored
         for failed in (False, True):
             client = Client(persist=True, fail_retry=failed)
             source, output, message = runner(client)
             assert len(client.calls) == 2, (runner.__name__, len(client.calls), message)
-            assert_restored(source, output)
+            restored(source, output)
         print(f"PASS {runner.__name__}: retry, persistent restoration and failed retry cleanup")
 
     for prompt in (

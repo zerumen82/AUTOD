@@ -311,9 +311,22 @@ def run():
             height=900
         )
         threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
+        # Al cerrar la ventana con la X la sesión debe liberar la GPU y cerrar
+        # ComfyUI SIEMPRE, aunque esta ventana haya reutilizado una sesión ya
+        # abierta (decisión del usuario 2026-10-20: «siempre, sin excepciones»).
+        # atexit cubre las salidas que no pasan por la X (Ctrl+C, excepción).
+        from roop.session_shutdown import register_shutdown_hook, shutdown_session
+        register_shutdown_hook()
         webview.start(debug=False, func=None)
         
-        print("[EXIT] Ventana cerrada; ComfyUI permanece disponible para otras sesiones")
+        report = shutdown_session("ventana-cerrada")
+        _comfyui_report = report.get("comfyui") or {}
+        print(
+            f"[EXIT] Ventana cerrada; cierre ejecutado en {report.get('seconds', '?')}s — "
+            f"ComfyUI detenido={_comfyui_report.get('stopped')} "
+            f"({str(_comfyui_report.get('message', 'no configurado'))[:80]}), "
+            f"VRAM {report.get('vram_delta_mb')}MB, ok={report.get('ok')}"
+        )
         return existing_server_url is not None
         
     except ImportError as e:

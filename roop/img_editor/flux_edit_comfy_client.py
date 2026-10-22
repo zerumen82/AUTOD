@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os
-import json
 import time
 import requests
 import io
@@ -12,6 +11,7 @@ from dataclasses import dataclass
 
 from roop.comfy_workflows import get_comfyui_url
 from roop.img_editor.comfy_progress import new_client_id, wait_for_comfy_image
+from roop.img_editor.gen_prompt_config import get_kontext_model_config
 
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,11 +28,7 @@ SURFACE_CONTINUATION_DENOISE = 0.60
 
 
 def _appearance_sampling_config(recipe_key="appearance_edit"):
-    path = os.path.join(get_project_root(), "config", "model_configs.json")
-    with open(path, encoding="utf-8") as stream:
-        _cfg = json.load(stream)
-        # LongCat retirado → bloque kontext; fallback legacy longcat.
-        model = _cfg.get("kontext") or _cfg.get("longcat")
+    model = get_kontext_model_config()
     appearance = model[recipe_key]
     steps = int(model["steps"])
     denoise = float(appearance["denoise"])
@@ -200,13 +196,24 @@ class FluxEditComfyClient:
             print(f"[FluxClient] FALTA MODELO: {path}")
         return exists
 
-    def load(self, flux_version="flux1-kontext-dev-Q4_K_M.gguf") -> Tuple[bool, str]:
-        # LongCat retirado (sustituido por Kontext): normalizar alias legacy.
-        _LONGCAT_TO_KONTEXT = {
-            "LongCat-Image-Edit-Turbo-Q4_K_S.gguf": "flux1-kontext-dev-Q4_K_M.gguf",
-            "LongCat-Image-Edit-Q4_K_S.gguf": "flux1-kontext-dev-Q4_K_M.gguf",
-        }
-        flux_version = _LONGCAT_TO_KONTEXT.get(flux_version, flux_version)
+    def load(self, flux_version=None, allow_vision_engine: bool = False) -> Tuple[bool, str]:
+        # LongCat is retired. Normalize stale saved identifiers before cache,
+        # VRAM and loader selection so no focal or legacy call can reactivate it.
+        # v5.1229 — EXCEPCIÓN MEDIDA, explícita y estrecha: un cambio corporal
+        # medido necesita el motor CON VISIÓN (Qwen-VL ve la foto y el texto
+        # manda). Medido en FLUX.1/Kontext: el negative es inerte (CFG=1) y el
+        # texto positivo no basta (participación de piel en la zona de prenda
+        # medida: original 0,2675 → 0,0676 con el texto medido: el modelo viste
+        # más). Solo la ruta de selección lo pide, y su exterior sigue siendo
+        # píxel a píxel, así que las otras personas de la foto no se tocan.
+        if allow_vision_engine and flux_version:
+            _vision = str(flux_version)
+            if "longcat" in _vision.casefold() or "qwen" in _vision.casefold():
+                flux_version = _vision
+            else:
+                flux_version = get_kontext_model_config()["model_file"]
+        elif flux_version is None or flux_version.casefold() in ("kontext", "imagine") or "longcat" in flux_version.casefold():
+            flux_version = get_kontext_model_config()["model_file"]
         comfy_url = get_comfyui_url()
         if not self.is_available():
             return False, f"ComfyUI no responde en {comfy_url}. ¿Está iniciado?"
@@ -485,6 +492,23 @@ class FluxEditComfyClient:
 
         t0 = time.time()
         image = image.convert("RGB")
+        canvas_mapping = None
+        canvas_config = kwargs.get("reference_canvas")
+        self._last_reference_canvas = None
+        if canvas_config is not None:
+            if not is_kontext:
+                return None, "El lienzo de referencia regional requiere Kontext"
+            from roop.img_editor.reference_canvas import prepare_reference_canvas
+            try:
+                image, canvas_mapping = prepare_reference_canvas(image, **canvas_config)
+            except (TypeError, ValueError) as error:
+                return None, f"Lienzo de referencia inválido: {error}"
+            self._last_reference_canvas = canvas_mapping
+            print(
+                f"[FluxClient] Referencia regional {canvas_mapping.source_size} → "
+                f"contenido {canvas_mapping.content_size}, lienzo {canvas_mapping.canvas_size}; "
+                "escala isotrópica y padding reversible", flush=True,
+            )
         w, h = image.size
 
         if is_longcat:
@@ -510,6 +534,8 @@ class FluxEditComfyClient:
             image = image.resize((new_w, new_h), Image.LANCZOS)
         else:
             new_w, new_h = (w // 64) * 64, (h // 64) * 64
+            if canvas_mapping is not None and (new_w, new_h) != canvas_mapping.canvas_size:
+                return None, "El lienzo regional no respeta la alineación nativa de Kontext"
             if new_w != w or new_h != h:
                 image = image.resize((new_w, new_h), Image.LANCZOS)
             # Kontext hasta 1024px; Klein 4B/9B hasta 1024px; Qwen-Image-Edit 640px; otros 768px
@@ -523,6 +549,8 @@ class FluxEditComfyClient:
                 image.thumbnail((max_dim, max_dim), Image.LANCZOS)
                 new_w, new_h = image.size
                 new_w, new_h = (new_w // 64) * 64, (new_h // 64) * 64
+                if canvas_mapping is not None and (new_w, new_h) != canvas_mapping.canvas_size:
+                    return None, "El lienzo regional supera el presupuesto de resolución de Kontext"
                 image = image.resize((new_w, new_h), Image.LANCZOS)
 
         iname = f"fast_{int(t0)}.png"
@@ -550,17 +578,31 @@ class FluxEditComfyClient:
             # El EDIT real (ReferenceLatent) usa la imagen COMPLETA como referencia
             # y arranca de latente vacío — una máscara de inpaint no puede aplicar
             # aquí (rompería el conditioning). Ignorada siempre en klein/kontext.
-            if mask_image is not None:
-                print(
-                    "[FluxClient] Máscara recibida pero no compatible con el workflow "
-                    f"{'Kontext' if is_kontext else 'Klein'}; se omite",
-                    flush=True,
-                )
-            mask_image = None
+            # v5.1228: el modo «foto» (ruido solo dentro de la zona medida) sí
+            # puede aplicar aquí, porque conserva el conditioning intacto y
+            # regenera únicamente la zona medida: es lo que permite que un
+            # cambio corporal medido se ejecute sin perder la foto de fondo.
+            if not keep_source_pixels:
+                if mask_image is not None:
+                    print(
+                        "[FluxClient] Máscara recibida pero no compatible con el workflow "
+                        f"{'Kontext' if is_kontext else 'Klein'}; se omite",
+                        flush=True,
+                    )
+                mask_image = None
         if mask_image:
             mname = f"mask_{int(t0)}.png"
             mbuf = io.BytesIO()
-            mask_image.convert("L").resize((new_w, new_h)).save(mbuf, "PNG")
+            _mask = mask_image.convert("L")
+            if canvas_mapping is not None:
+                # The mask arrives in the CROP geometry; the sampled image is the
+                # canvas (scaled content + padding). Mapping the mask into the
+                # content box keeps the measured zone on the measured pixels.
+                _mask = _mask.resize(canvas_mapping.content_size, Image.Resampling.LANCZOS)
+                _placed = Image.new("L", canvas_mapping.canvas_size, 0)
+                _placed.paste(_mask, canvas_mapping.content_box[:2])
+                _mask = _placed
+            _mask.resize((new_w, new_h)).save(mbuf, "PNG")
             mbuf.seek(0)
             requests.post(f"{comfy_url}/upload/image", files={"image": (mname, mbuf, "image/png")})
 
@@ -726,7 +768,12 @@ class FluxEditComfyClient:
                 _ctx_method = ref_method if ref_method in ("offset", "index", "uxo/uno", "index_timestep_zero") else "offset"
                 wf["6m"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["6r", 0], "reference_latents_method": _ctx_method}}
                 positive_input = ["6m", 0]
-                klein_empty_latent = ["5e", 0]
+                # v5.1228: con máscara medida y «foto» (fuera de la zona la foto
+                # se conserva), el EDIT arranca del latente de la foto en vez del
+                # latente vacío: el modelo edita la zona medida en su sitio y la
+                # foto de alrededor queda intacta. Sin esto el ancla copia la
+                # foto entera y el cambio nunca se ejecuta.
+                klein_empty_latent = None if (mname and keep_source_pixels) else ["5e", 0]
             else:
                 # no_kontext: sin ancla de imagen (el texto manda en todo)
                 positive_input = ["6g", 0]
@@ -932,11 +979,15 @@ class FluxEditComfyClient:
                     negative_input = ["12", 0]
                     print("[FluxClient] LongCat Full: negativo textual; referencia visual codificada una vez", flush=True)
         elif is_qwen:
-            wf["16"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
+            # v5.1230 — el nodo de escala no puede usar el id "16": con una
+            # máscara medida el cliente crea "16" = SetLatentNoiseMask y el
+            # ReferenceLatent del conditioning recibiría un latente en vez de
+            # una imagen (workflow roto). Id propio.
+            wf["16s"] = {"class_type": "FluxKontextImageScale", "inputs": {"image": ["1", 0]}}
             model_input = last_model
             wf["6"] = {
                 "class_type": "TextEncodeQwenImageEditPlus",
-                "inputs": {"clip": last_clip, "prompt": prompt, "vae": ["4", 0], "image1": ["16", 0], "image2": None, "image3": None}
+                "inputs": {"clip": last_clip, "prompt": prompt, "vae": ["4", 0], "image1": ["16s", 0], "image2": None, "image3": None}
             }
             wf["7"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt, "clip": last_clip}}
             positive_input = ["6", 0]
@@ -1185,6 +1236,11 @@ class FluxEditComfyClient:
         if self._is_probable_gray_failure(pil_img):
             print(f"[FluxClient] Imagen gris detectada (std={std:.1f}, mean={mean:.1f}).")
             return None, "ComfyUI devolvió una imagen casi gris/uniforme. Revisa VRAM, VAE y workflow del motor seleccionado."
+        if canvas_mapping is not None:
+            try:
+                pil_img = canvas_mapping.restore(pil_img)
+            except ValueError as error:
+                return None, f"No se pudo recuperar la geometría de la región: {error}"
         return GenResult(image=pil_img, time_taken=elapsed), f"OK ({elapsed:.0f}s)"
 
 _client = None

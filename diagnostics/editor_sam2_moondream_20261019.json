@@ -1,0 +1,13 @@
+{
+  "candidates": [12, 14, 38, 62, 66, 67],
+  "context_size": 1024,
+  "threads": 4,
+  "gpu_layers": 0,
+  "projector_load_verbose": true,
+  "temperature": 0.0,
+  "max_tokens": 128,
+  "max_image_side": 768,
+  "neutral_rgb": [127, 127, 127],
+  "prompt": "Describe only the isolated visible element on the gray background, including its visible parts.",
+  "stop": ["\n\nQuestion:"]
+}

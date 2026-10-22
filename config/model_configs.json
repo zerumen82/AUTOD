@@ -118,9 +118,11 @@
   },
   "kontext": {
     "name": "FLUX.1 Kontext Q4_K_M (motor del Editor)",
+    "model_file": "flux1-kontext-dev-Q4_K_M.gguf",
     "explicit": false,
     "steps": 20,
     "cfg": 3.5,
+    "reference_latents_method": "offset",
     "sampler": "euler",
     "scheduler": "simple",
     "negative_prompt": "blurry, low quality, deformed",

@@ -1,0 +1,65 @@
+{
+  "reason": "atexit",
+  "started": "2026-10-20 11:09:00",
+  "pid": 21020,
+  "ok": false,
+  "settings": {
+    "stop_comfyui_on_close": true,
+    "release_local_gpu_on_close": true,
+    "abort_local_batch_on_close": true,
+    "queue_grace_seconds": 15,
+    "poll_seconds": 1
+  },
+  "before": {
+    "wall": "2026-10-20 11:09:01",
+    "vram_used_mb": null,
+    "vram_total_mb": null,
+    "comfyui_running": false,
+    "comfyui_queue_running": null,
+    "comfyui_queue_pending": null,
+    "local_batch_busy": false
+  },
+  "grace": {
+    "seconds": 15.0,
+    "waited_seconds": 0.03,
+    "idle": true,
+    "state": {
+      "wall": "2026-10-20 11:09:01",
+      "vram_used_mb": null,
+      "vram_total_mb": null,
+      "comfyui_running": false,
+      "comfyui_queue_running": null,
+      "comfyui_queue_pending": null,
+      "local_batch_busy": false
+    }
+  },
+  "local_batch_cancelled": false,
+  "comfyui": {
+    "attempted": true,
+    "stopped": false,
+    "message": "RuntimeError: can't register atexit after shutdown"
+  },
+  "local_gpu": {
+    "attempted": true,
+    "steps": [
+      "gc_collected"
+    ],
+    "errors": [
+      "img_editor: RuntimeError: can't register atexit after shutdown",
+      "face_analyser: RuntimeError: can't register atexit after shutdown",
+      "torch: RuntimeError: can't register atexit after shutdown"
+    ]
+  },
+  "after": {
+    "wall": "2026-10-20 11:09:01",
+    "vram_used_mb": null,
+    "vram_total_mb": null,
+    "comfyui_running": false,
+    "comfyui_queue_running": null,
+    "comfyui_queue_pending": null,
+    "local_batch_busy": false
+  },
+  "vram_delta_mb": null,
+  "seconds": 1.17,
+  "error": "UnicodeEncodeError: 'charmap' codec can't encode character '\\u2192' in position 67: character maps to <undefined>"
+}

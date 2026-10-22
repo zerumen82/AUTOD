@@ -1,0 +1,4004 @@
+{
+  "scope": "exact production method bodies executed on declared cache fixtures; no face models, images or video inference",
+  "variants": {
+    "baseline": {
+      "path": "diagnostics\\out\\tracking_reset_fix_20261006\\ProcessMgr_before.txt",
+      "sha256": "abfdbc728af81cc95ec0ae4e136c46281a85853e1d90be9fee2c2276b4c13255",
+      "pass": 399,
+      "fail": 54,
+      "checks": [
+        {
+          "check": "closeup=False/soft=False/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no hold frame=100",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no hold frame=101",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no hold frame=114",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no cached previous swap",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no hold frame=100",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no hold frame=101",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no hold frame=114",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no cached previous swap",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_state_history/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_state_history/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_hold_count/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_hold_count/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_occ_frame_ema",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_prev_frame_result",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_last_swap_bbox",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_last_swap_mask",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/profile",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/suppression",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/hard marker",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/reacquire",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/plan smooth",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/diagnostic tag",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/no hold frame=100",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/no hold frame=101",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/no hold frame=114",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=False/no cached previous swap",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=True/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/zoom retains available hold",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_state_history/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_state_history/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_hold_count/video_a.mp4_p0",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_hold_count/video_a.mp4_p2",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_occ_frame_ema",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_prev_frame_result",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_last_swap_bbox",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_last_swap_mask",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/profile",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/suppression",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/hard marker",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/reacquire",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/plan smooth",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/diagnostic tag",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/no hold frame=100",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/no hold frame=101",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/no hold frame=114",
+          "pass": false
+        },
+        {
+          "check": "closeup=True/soft=default/no cached previous swap",
+          "pass": false
+        },
+        {
+          "check": "empty video ignored",
+          "pass": true
+        },
+        {
+          "check": "cold hard reset succeeds",
+          "pass": true
+        },
+        {
+          "check": "zoom then hard cut drops cached frame",
+          "pass": false
+        },
+        {
+          "check": "zoom then hard cut drops oral history",
+          "pass": false
+        }
+      ]
+    },
+    "current": {
+      "path": "D:\\PROJECTS\\AUTOAUTO\\roop\\ProcessMgr.py",
+      "sha256": "0391a668ee86228621c2c707a902541c15218b46dc159b8a578f596501801645",
+      "pass": 453,
+      "fail": 0,
+      "checks": [
+        {
+          "check": "closeup=False/soft=False/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no hold frame=100",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no hold frame=101",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no hold frame=114",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=False/no cached previous swap",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=True/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no hold frame=100",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no hold frame=101",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no hold frame=114",
+          "pass": true
+        },
+        {
+          "check": "closeup=False/soft=default/no cached previous swap",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/no hold frame=100",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/no hold frame=101",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/no hold frame=114",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=False/no cached previous swap",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=True/zoom retains available hold",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/reset assignment",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_tracking_lost_count_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_consecutive_tracking_success_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_strict_recovery_tick_",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/position reset",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_blend_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_blend_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_blend_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_force_paste_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_force_paste_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_force_paste_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_force_paste_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_paste_ema_by_person/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_paste_ema_by_person/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_paste_ema_by_person/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_state_history/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_state_history/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_state_history/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_state_history/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_ratio_smooth/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_ratio_smooth/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_ratio_smooth/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_ratio_smooth/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_hold_count/video_a.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_mouth_hold_count/video_a.mp4_p2",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_hold_count/video_b.mp4_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/isolation/_mouth_hold_count/video_a.mp4.part_p0",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_occ_frame_ema",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_prev_frame_result",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_last_swap_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_last_swap_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_prev_face_bbox",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_prev_face_kps",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_last_known_bbox_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/_last_known_kps_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/profile",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_source_face_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_profile_source_c693cf45307b127e",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_target_face_assigned_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_tracking_lost_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_position_history_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_consecutive_tracking_success_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_strict_recovery_tick_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_known_bbox_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_known_kps_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_frame_count_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_reference_face_selected_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_tracking_embedding_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_profile_hysteresis_video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_source_face_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_video_locked_profile_source_26453f36fd33f229",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_closeup_active_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_occ_frame_ema/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_prev_frame_result/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_prev_face_bbox/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_prev_face_kps/video_b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_swap_bbox/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/_last_swap_mask/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/untouched/selected_face_references/b.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/_reference_face_selected_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/_tracking_embedding_a.mp4",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/selected_face_references",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/source_face",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/identity_or_instance/_mouth_blend_mask",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/scene bookkeeping",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/suppression",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/hard marker",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/reacquire",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/plan smooth",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/diagnostic tag",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/no hold frame=100",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/no hold frame=101",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/no hold frame=114",
+          "pass": true
+        },
+        {
+          "check": "closeup=True/soft=default/no cached previous swap",
+          "pass": true
+        },
+        {
+          "check": "empty video ignored",
+          "pass": true
+        },
+        {
+          "check": "cold hard reset succeeds",
+          "pass": true
+        },
+        {
+          "check": "zoom then hard cut drops cached frame",
+          "pass": true
+        },
+        {
+          "check": "zoom then hard cut drops oral history",
+          "pass": true
+        }
+      ]
+    }
+  },
+  "baseline_regression_reproduced": true,
+  "integration": {
+    "scope": "real process_frame, visual scene detector and hold composition; detector explicitly returns empty as regression fixture; images are generated pixel patterns without faces",
+    "checks": [
+      {
+        "check": "closeup=False/cut=False/one detector call",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=False/clock advances once",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=False/continuity pixels identical to baseline",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=False/continues existing hold",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=False/history retained",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=False/no hard cut",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=True/one detector call",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=True/clock advances once",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=True/baseline visibly holds prior pixels",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=True/current returns original frame",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=True/hard cut reported",
+        "pass": true
+      },
+      {
+        "check": "closeup=False/cut=True/drops prior frame and oral history",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=False/one detector call",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=False/clock advances once",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=False/continuity pixels identical to baseline",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=False/continues existing hold",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=False/history retained",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=False/no hard cut",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=True/one detector call",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=True/clock advances once",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=True/baseline visibly holds prior pixels",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=True/current returns original frame",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=True/hard cut reported",
+        "pass": true
+      },
+      {
+        "check": "closeup=True/cut=True/drops prior frame and oral history",
+        "pass": true
+      },
+      {
+        "check": "photo/no detections returns original both versions",
+        "pass": true
+      },
+      {
+        "check": "photo/does not advance video clock",
+        "pass": true
+      },
+      {
+        "check": "photo/no video reset",
+        "pass": true
+      }
+    ],
+    "cases": {
+      "closeup=False/cut=False": {
+        "baseline": {
+          "changed_pixels": 5120,
+          "clock": 101,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": ""
+        },
+        "current": {
+          "changed_pixels": 5120,
+          "clock": 101,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": ""
+        }
+      },
+      "closeup=False/cut=True": {
+        "baseline": {
+          "changed_pixels": 5120,
+          "clock": 101,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": ""
+        },
+        "current": {
+          "changed_pixels": 0,
+          "clock": 101,
+          "hard_cut": 101,
+          "previous_frame_cached": false,
+          "oral_history_cached": false,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": "[SCENE_CUT] Frame 101: cambio visual sin cara (diff=204.2) — reset tracking, sin hold\n"
+        }
+      },
+      "closeup=True/cut=False": {
+        "baseline": {
+          "changed_pixels": 5120,
+          "clock": 101,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": ""
+        },
+        "current": {
+          "changed_pixels": 5120,
+          "clock": 101,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": ""
+        }
+      },
+      "closeup=True/cut=True": {
+        "baseline": {
+          "changed_pixels": 5120,
+          "clock": 101,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": ""
+        },
+        "current": {
+          "changed_pixels": 0,
+          "clock": 101,
+          "hard_cut": 101,
+          "previous_frame_cached": false,
+          "oral_history_cached": false,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": true,
+                "include_180": false
+              }
+            }
+          ],
+          "logs": "[SCENE_CUT] Frame 101: cambio visual sin cara (diff=204.2) — reset tracking, sin hold\n"
+        }
+      },
+      "photo": {
+        "baseline": {
+          "changed_pixels": 0,
+          "clock": 100,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": false,
+                "include_180": true
+              }
+            }
+          ],
+          "logs": "[FOTO] SKIP control.jpg: 0 caras detectadas (ni crudo ni preproceso) — foto original sin swap\n"
+        },
+        "current": {
+          "changed_pixels": 0,
+          "clock": 100,
+          "hard_cut": null,
+          "previous_frame_cached": true,
+          "oral_history_cached": true,
+          "detector_calls": [
+            {
+              "shape": [
+                96,
+                128,
+                3
+              ],
+              "arguments": {
+                "min_score": null,
+                "for_target": true,
+                "prefer_fast": false,
+                "include_180": true
+              }
+            }
+          ],
+          "logs": "[FOTO] SKIP control.jpg: 0 caras detectadas (ni crudo ni preproceso) — foto original sin swap\n"
+        }
+      }
+    },
+    "pass": 27,
+    "fail": 0
+  },
+  "status": "PASS"
+}

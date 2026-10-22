@@ -1,0 +1,10 @@
+{
+  "model_path": "~/.cache/clip/ViT-B-16.pt",
+  "threads": 4,
+  "batch_size": 16,
+  "views": ["tight_crop", "masked_crop"],
+  "neutral_rgb": [127, 127, 127],
+  "text_templates": ["{label}", "a photo of {label}"],
+  "crop_context_fraction": 0.0,
+  "save_views": true
+}

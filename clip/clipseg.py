@@ -3,7 +3,6 @@ from os.path import basename, dirname, join, isfile
 import torch
 from torch import nn
 from torch.nn import functional as nnf
-from torch.nn.modules.activation import ReLU
 
 
 def get_prompt_list(prompt):
@@ -77,13 +76,13 @@ def forward_multihead_attention(x, b, with_aff=False, attn_mask=None):
 
 class CLIPDenseBase(nn.Module):
 
-    def __init__(self, version, reduce_cond, reduce_dim, prompt, n_tokens):
+    def __init__(self, version, reduce_cond, reduce_dim, prompt, n_tokens, backbone_path=None):
         super().__init__()
 
         import clip
 
         # prec = torch.FloatTensor
-        self.clip_model, _ = clip.load(version, device='cpu', jit=False)
+        self.clip_model, _ = clip.load(backbone_path or version, device='cpu', jit=False)
         self.model = self.clip_model.visual
 
         # if not None, scale conv weights such that we obtain n_tokens.
@@ -127,7 +126,6 @@ class CLIPDenseBase(nn.Module):
 
         with torch.no_grad():
 
-            inp_size = x_inp.shape[2:]
 
             if self.n_tokens is not None:
                 stride2 = x_inp.shape[2] // self.n_tokens
@@ -201,21 +199,21 @@ class CLIPDenseBase(nn.Module):
 
     def get_cond_vec(self, conditional, batch_size):
         # compute conditional from a single string
-        if conditional is not None and type(conditional) == str:
+        if conditional is not None and type(conditional) is str:
             cond = self.compute_conditional(conditional)
             cond = cond.repeat(batch_size, 1)
 
         # compute conditional from string list/tuple
-        elif conditional is not None and type(conditional) in {list, tuple} and type(conditional[0]) == str:
+        elif conditional is not None and type(conditional) in {list, tuple} and type(conditional[0]) is str:
             assert len(conditional) == batch_size
             cond = self.compute_conditional(conditional)
 
         # use conditional directly
-        elif conditional is not None and type(conditional) == torch.Tensor and conditional.ndim == 2:
+        elif conditional is not None and type(conditional) is torch.Tensor and conditional.ndim == 2:
             cond = conditional
 
         # compute conditional from image
-        elif conditional is not None and type(conditional) == torch.Tensor:
+        elif conditional is not None and type(conditional) is torch.Tensor:
             with torch.no_grad():
                 cond, _, _ = self.visual_forward(conditional)
         else:
@@ -260,7 +258,7 @@ def clip_load_untrained(version):
     vocab_size = state_dict["token_embedding.weight"].shape[0]
     transformer_width = state_dict["ln_final.weight"].shape[0]
     transformer_heads = transformer_width // 64
-    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
+    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith("transformer.resblocks")))
 
     return CLIP(embed_dim, image_resolution, vision_layers, vision_width, vision_patch_size, 
         context_length, vocab_size, transformer_width, transformer_heads, transformer_layers)    
@@ -271,9 +269,10 @@ class CLIPDensePredT(CLIPDenseBase):
     def __init__(self, version='ViT-B/32', extract_layers=(3, 6, 9), cond_layer=0, reduce_dim=128, n_heads=4, prompt='fixed', 
                  extra_blocks=0, reduce_cond=None, fix_shift=False,
                  learn_trans_conv_only=False,  limit_to_clip_only=False, upsample=False, 
-                 add_calibration=False, rev_activations=False, trans_conv=None, n_tokens=None, complex_trans_conv=False):
+                 add_calibration=False, rev_activations=False, trans_conv=None, n_tokens=None, complex_trans_conv=False,
+                 backbone_path=None):
         
-        super().__init__(version, reduce_cond, reduce_dim, prompt, n_tokens)
+        super().__init__(version, reduce_cond, reduce_dim, prompt, n_tokens, backbone_path=backbone_path)
         # device = 'cpu'
 
         self.extract_layers = extract_layers
@@ -345,7 +344,7 @@ class CLIPDensePredT(CLIPDenseBase):
 
     def forward(self, inp_image, conditional=None, return_features=False, mask=None):
 
-        assert type(return_features) == bool
+        assert type(return_features) is bool
 
         inp_image = inp_image.to(self.model.positional_embedding.device)
 
@@ -355,7 +354,7 @@ class CLIPDensePredT(CLIPDenseBase):
         # x_inp = normalize(inp_image)
         x_inp = inp_image
 
-        bs, dev = inp_image.shape[0], x_inp.device
+        bs = inp_image.shape[0]
 
         cond = self.get_cond_vec(conditional, bs)
 
@@ -443,7 +442,6 @@ class CLIPDenseBaseline(CLIPDenseBase):
                  reduce_cond=None, limit_to_clip_only=False, n_tokens=None):
         
         super().__init__(version, reduce_cond, reduce_dim, prompt, n_tokens)
-        device = 'cpu'
 
         # self.cond_layer = cond_layer
         self.extract_layer = extract_layer
@@ -471,7 +469,7 @@ class CLIPDenseBaseline(CLIPDenseBase):
         # x_inp = normalize(inp_image)
         x_inp = inp_image
 
-        bs, dev = inp_image.shape[0], x_inp.device
+        bs = inp_image.shape[0]
 
         cond = self.get_cond_vec(conditional, bs)
 
@@ -504,11 +502,10 @@ class CLIPSegMultiLabel(nn.Module):
     def __init__(self, model) -> None:
         super().__init__()
 
-        from third_party.JoEm.data_loader import get_seen_idx, get_unseen_idx, VOC
+        from third_party.JoEm.data_loader import VOC
 
         self.pascal_classes = VOC
 
-        from clip.clipseg import CLIPDensePredT
         from general_utils import load_model
         # self.clipseg = load_model('rd64-vit16-neg0.2-phrasecut', strict=False)
         self.clipseg = load_model(model, strict=False)

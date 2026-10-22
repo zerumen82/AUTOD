@@ -48,7 +48,17 @@ class InstructionVerifier:
             from llama_cpp import Llama
             from llama_cpp.llama_chat_format import MoondreamChatHandler
 
-            # CPU deliberately avoids competing with ComfyUI on an 8 GB GPU.
+            # The projector has no device selector: the ggml backend decides.
+            # On the CPU backend it aborts the process natively, so the vision
+            # path is refused before any model is loaded.
+            from roop.img_editor.vision_guard import check_vision_preflight
+
+            preflight = check_vision_preflight()
+            print(f"[InstructionVerifier] {preflight.as_message()}", flush=True)
+            if not preflight.ok:
+                self._unavailable_reason = preflight.as_message()
+                return False
+
             self._handler = MoondreamChatHandler(clip_model_path=vision_projector, verbose=False)
             self._llm = Llama(
                 model_path=text_model,

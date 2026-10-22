@@ -1,4 +1,11 @@
-"""Exercise ordinary LongCat dispatch without running an image generator."""
+"""Exercise ordinary LongCat dispatch without running an image generator.
+
+Los motores legacy (longcat/longcat_full/imagine) se aliasan a kontext al
+entrar a generate_intelligent, y la ruta Turbo (pases locales medidos) solo
+sigue viva tras el fallback de qwen_camera cuando la petición no pide un
+cambio de vista. Las secciones de despacho usan ese engine para ejercitar la
+ruta viva con el mismo contrato de siempre.
+"""
 import re
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -20,8 +27,10 @@ class FakeClient:
     def __init__(self):
         self.calls = []
 
-    def load(self, version):
-        self.calls.append(("load", version))
+    def load(self, version=None, **params):
+        # The manager loads by keyword (flux_version=… / qwen_version=…).
+        self.calls.append(("load", version or params.get("flux_version")
+                           or params.get("qwen_version")))
         return True, "OK"
 
     def generate(self, **kwargs):
@@ -136,8 +145,9 @@ def main():
             super().__init__()
             self.fail_on = fail_on
 
-        def load(self, version):
-            self.calls.append(("load", version))
+        def load(self, version=None, **params):
+            self.calls.append(("load", version or params.get("flux_version")
+                               or params.get("qwen_version")))
             if self.fail_on == "load":
                 return False, "Turbo load error"
             return True, "OK"
@@ -158,7 +168,7 @@ def main():
               patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client",
                     return_value=failing)):
             failed_output, failed_message, failed_mask = manager.generate_intelligent(
-                image=source, prompt="Change the lighting in the room", engine="longcat",
+                image=source, prompt="Change the lighting in the room", engine="qwen_camera",
             )
         assert failed_output is None and failed_mask is None, failed_message
         assert "Turbo no pudo aplicar la edición" in failed_message, failed_message
@@ -220,7 +230,7 @@ def main():
                   patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=client),
                   patch.object(manager, "_get_clipseg_masker", return_value=None)):
                 output, message, mask = manager.generate_intelligent(
-                    image=source, prompt=prompt, engine="longcat", use_rewriter=True,
+                    image=source, prompt=prompt, engine="qwen_camera", use_rewriter=True,
                     use_semantic=True,
                 )
             assert output is not None and output.size == source.size and mask is None
@@ -348,7 +358,7 @@ def main():
               patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=client),
               patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish)):
             output, message, mask = manager.generate_intelligent(
-                image=source, prompt="Pon la pared azul", engine="longcat",
+                image=source, prompt="Pon la pared azul", engine="qwen_camera",
                 quality_mode=True, enhance_tier="4k", quality_preserve_faces=False,
             )
         assert output is not None and output.size == (64, 42) and mask is None
@@ -371,7 +381,7 @@ def main():
               patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish),
               contextlib.redirect_stdout(retry_log)):
             retried, retry_message, _ = manager.generate_intelligent(
-                image=source, prompt="Pon la pared azul", engine="longcat",
+                image=source, prompt="Pon la pared azul", engine="qwen_camera",
                 quality_mode=True, quality_preserve_faces=False,
             )
         assert retried is not None
@@ -392,7 +402,7 @@ def main():
               patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=unchanged_client),
               patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish)):
             unchanged, warning, _ = manager.generate_intelligent(
-                image=source, prompt="Pon la pared azul", engine="longcat",
+                image=source, prompt="Pon la pared azul", engine="qwen_camera",
                 quality_mode=True, quality_preserve_faces=False,
             )
         assert unchanged is not None
@@ -478,7 +488,7 @@ def main():
         restored_output, restored_message, _ = manager.generate_intelligent(
             image=photo,
             prompt="la mujer debe ir descalza, el hombre debe ser calvo",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert restored_output is not None and restored_output.size == photo.size
     restored_generations = [args for name, args in restored_client.calls if name == "generate"]
@@ -519,7 +529,7 @@ def main():
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client",
                 return_value=body_client)):
         body_output, body_message, _ = manager.generate_intelligent(
-            image=photo, prompt="el hombre debe ir sin medias", engine="longcat",
+            image=photo, prompt="el hombre debe ir sin medias", engine="qwen_camera",
         )
     assert body_output is not None and body_output.size == photo.size, body_message
     body_generations = [args for name, args in body_client.calls if name == "generate"]
@@ -579,7 +589,7 @@ def main():
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client",
                 return_value=woman_client)):
         woman_output, woman_message, _ = manager.generate_intelligent(
-            image=photo, prompt="la mujer debe ir sin medias", engine="longcat",
+            image=photo, prompt="la mujer debe ir sin medias", engine="qwen_camera",
         )
     assert woman_output is not None and woman_output.size == photo.size, woman_message
     woman_generations = [args for name, args in woman_client.calls if name == "generate"]
@@ -627,7 +637,7 @@ def main():
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client",
                 return_value=part_client)):
         part_output, part_message, _ = manager.generate_intelligent(
-            image=photo, prompt="la mujer debe ir sin medias", engine="longcat",
+            image=photo, prompt="la mujer debe ir sin medias", engine="qwen_camera",
         )
     assert part_output is not None and part_output.size == photo.size, part_message
     part_generations = [args for name, args in part_client.calls if name == "generate"]
@@ -703,7 +713,7 @@ def main():
         skin_output, skin_message, _ = manager.generate_intelligent(
             image=skin_photo,
             prompt="la mujer debe ir sin zapatos",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert skin_output is not None and skin_output.size == skin_photo.size, skin_message
     skin_calls = [args for name, args in skin_client.calls if name == "generate"]
@@ -754,7 +764,7 @@ def main():
         shoe_output, shoe_message, _ = manager.generate_intelligent(
             image=shoe_photo,
             prompt="la mujer debe ir sin zapatos",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert shoe_output is not None and shoe_output.size == shoe_photo.size, shoe_message
     shoe_src = np.asarray(shoe_photo.convert("RGB"))
@@ -799,7 +809,7 @@ def main():
         stocking_output, stocking_message, _ = manager.generate_intelligent(
             image=stocking_image,
             prompt="la mujer debe ir sin medias",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert stocking_output is not None and stocking_output.size == stocking_image.size, stocking_message
     stocking_generations = [args for name, args in stocking_client.calls if name == "generate"]
@@ -843,7 +853,7 @@ def main():
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client",
                 return_value=chain_client)):
         chain_output, chain_message, _ = manager.generate_intelligent(
-            image=photo, prompt=chain_raw, engine="longcat",
+            image=photo, prompt=chain_raw, engine="qwen_camera",
         )
     assert chain_output is not None, chain_message
     assert "no se sustituye" not in chain_message, chain_message
@@ -986,7 +996,7 @@ def main():
           patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Man must be bald"),
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=portrait_client)):
         portrait_output, portrait_message, _ = manager.generate_intelligent(
-            image=portrait, prompt="el hombre debe ser calvo", engine="longcat",
+            image=portrait, prompt="el hombre debe ser calvo", engine="qwen_camera",
         )
     assert portrait_output is not None and portrait_output.size == portrait.size
     # El refino focal añade una segunda llamada generate (máscara de zoom);
@@ -1018,7 +1028,7 @@ def main():
           patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Man must be bald"),
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=head_client)):
         output, message, _ = manager.generate_intelligent(
-            image=photo, prompt="el hombre debe ser calvo", engine="longcat",
+            image=photo, prompt="el hombre debe ser calvo", engine="qwen_camera",
         )
     assert output is not None and output.size == photo.size
     assert "solo la zona medida" in message, message
@@ -1087,7 +1097,7 @@ def main():
           patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Man must be bald"),
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=request_client)):
         request_output, request_message, _ = manager.generate_intelligent(
-            image=photo, prompt="el hombre debe ser calvo", engine="longcat",
+            image=photo, prompt="el hombre debe ser calvo", engine="qwen_camera",
         )
     assert request_output is not None
     request_generations = [c[1] for c in request_client.calls if c[0] == "generate"]
@@ -1153,7 +1163,7 @@ def main():
           patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Man must be bald"),
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=weak_client)):
         output, message, _ = manager.generate_intelligent(
-            image=wide, prompt="el hombre debe ser calvo", engine="longcat",
+            image=wide, prompt="el hombre debe ser calvo", engine="qwen_camera",
         )
     assert output is not None and output.size == wide.size
     assert "solo la zona medida" in message, message
@@ -1191,7 +1201,7 @@ def main():
           patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Add a lamp to the table"),
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=lamp_client)):
         lamp_output, lamp_message, _ = manager.generate_intelligent(
-            image=lamp, prompt="añade una lámpara a la mesa", engine="longcat",
+            image=lamp, prompt="añade una lámpara a la mesa", engine="qwen_camera",
         )
     assert lamp_output is not None and lamp_output.size == lamp.size
     assert "región medida" in lamp_message, lamp_message
@@ -1269,7 +1279,7 @@ def main():
         ordered, order_message, _ = manager.generate_intelligent(
             image=photo,
             prompt="EL HOMBRE DEBE SER CALVO, LAS PAREDES DEBEN SER GRISES",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert ordered is not None and ordered.size == photo.size
     assert "un solo pase Turbo" in order_message, order_message
@@ -1397,7 +1407,7 @@ def main():
         small_output, small_message, _ = manager.generate_intelligent(
             image=group,
             prompt="el hombre de raza blanca es calvo",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert small_output is not None and small_output.size == group.size
     assert "no se sustituye" not in small_message, small_message
@@ -1445,7 +1455,7 @@ def main():
         head_output, head_message, _ = manager.generate_intelligent(
             image=group,
             prompt="el hombre de raza blanca es calvo",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert head_output is not None and head_output.size == group.size
     assert "no se sustituye" not in head_message, head_message
@@ -1774,7 +1784,7 @@ def main():
         wired_output, wired_message, _ = manager.generate_intelligent(
             image=group,
             prompt="el hombre de raza blanca es calvo",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert wired_output is not None, wired_message
     wired_sent = [call for name, call in wired.calls if name == "generate"]
@@ -1815,7 +1825,7 @@ def main():
         empty_output, empty_message, _ = manager.generate_intelligent(
             image=empty_image,
             prompt="el hombre debe ser calvo",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert empty_output is not None and empty_output.size == empty_image.size, empty_message
     assert "no se sustituye" not in empty_message, empty_message
@@ -1881,7 +1891,7 @@ def main():
         tattoo_output, tattoo_message, _ = manager.generate_intelligent(
             image=tattoo_image,
             prompt="elimina tatoo de la mujer, las paredes son grises",
-            engine="longcat",
+            engine="qwen_camera",
         )
     assert tattoo_output is not None and tattoo_output.size == tattoo_image.size, tattoo_message
     tattoo_generations = [call for name, call in tattoo_client.calls if name == "generate"]

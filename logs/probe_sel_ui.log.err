@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tabs\img_editor\selection_events.py", line 75, in on_analyze
+    analysis = es.analyze_elements(image)
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\unittest\mock.py", line 1104, in __call__
+    return self._mock_call(*args, **kwargs)
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\unittest\mock.py", line 1108, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\unittest\mock.py", line 1163, in _execute_mock_call
+    raise effect
+RuntimeError: CPU injected analysis failure

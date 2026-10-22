@@ -1,0 +1,47 @@
+[
+  {
+    "module": "diagnostics.probe_editor_api_contract_20261018",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_editor_api_contract_20261018.log"
+  },
+  {
+    "module": "diagnostics.probe_editor_camera_pose_regressions_20261018",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_editor_camera_pose_regressions_20261018.log"
+  },
+  {
+    "module": "diagnostics.probe_editor_camera_pose_pov_20261018",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_editor_camera_pose_pov_20261018.log"
+  },
+  {
+    "module": "diagnostics.probe_editor_camera_scale_20261017",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_editor_camera_scale_20261017.log"
+  },
+  {
+    "module": "diagnostics.probe_editor_translation_cognates_20261018",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_editor_translation_cognates_20261018.log"
+  },
+  {
+    "module": "diagnostics.probe_gen_chroma_workflow_20261018",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_gen_chroma_workflow_20261018.log"
+  },
+  {
+    "module": "diagnostics.probe_gen_controls_20261017",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_gen_controls_20261017.log"
+  },
+  {
+    "module": "diagnostics.probe_gen_lora_availability_20261017",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_gen_lora_availability_20261017.log"
+  },
+  {
+    "module": "diagnostics.probe_gen_ui_controls_20261017",
+    "exit_code": 0,
+    "log": "logs\\code_completion_final_probe_gen_ui_controls_20261017.log"
+  }
+]

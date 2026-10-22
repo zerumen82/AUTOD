@@ -1,0 +1,7 @@
+{
+  "stop_comfyui_on_close": true,
+  "release_local_gpu_on_close": true,
+  "abort_local_batch_on_close": true,
+  "queue_grace_seconds": 15,
+  "poll_seconds": 1
+}

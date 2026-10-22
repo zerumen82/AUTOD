@@ -1,0 +1,5 @@
+ggml_cuda_init: GGML_CUDA_FORCE_MMQ:    yes
+ggml_cuda_init: GGML_CUDA_FORCE_CUBLAS: no
+ggml_cuda_init: found 1 CUDA devices:
+  Device 0: NVIDIA GeForce RTX 3060 Ti, compute capability 8.6, VMM: yes
+llama_new_context_with_model: n_ctx_per_seq (1024) < n_ctx_train (2048) -- the full capacity of the model will not be utilized

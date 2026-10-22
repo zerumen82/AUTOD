@@ -1,0 +1,2 @@
+llama_new_context_with_model: n_ctx_per_seq (1024) < n_ctx_train (2048) -- the full capacity of the model will not be utilized
+llama_new_context_with_model: n_ctx_per_seq (1024) < n_ctx_train (2048) -- the full capacity of the model will not be utilized

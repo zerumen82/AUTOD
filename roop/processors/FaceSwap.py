@@ -267,6 +267,9 @@ class FaceSwap:
         try:
             if self.model is None:
                 self.Initialize({"devicename": getattr(self, 'devicename', 'cpu')})
+                if self.model is None:
+                    print("[FaceSwap] Inicializaci\u00f3n sin modelo cargado; Run aborta.")
+                    return None
             
             # v5.22: Forzar conversión a numpy arrays para evitar errores de shape (list -> array)
             for face in [source_face, target_face]:
@@ -521,8 +524,11 @@ def mouth_region_to_frame_points(mouth_data: Any, frame_shape,
                                  crop_origin=(0, 0), crop_size=None) -> Optional[np.ndarray]:
     """Return lip contour in full-frame pixels for MediaPipe or 106 landmarks."""
     if isinstance(mouth_data, np.ndarray):
-        points = np.asarray(mouth_data, dtype=np.float32).reshape(-1, 2)
-        return points if len(points) >= 3 and np.isfinite(points).all() else None
+        try:
+            points = np.asarray(mouth_data, dtype=np.float32).reshape(-1, 2)
+            return points if len(points) >= 3 and np.isfinite(points).all() else None
+        except (ValueError, TypeError):
+            return None
     if not isinstance(mouth_data, dict) or 'landmarks_468' not in mouth_data:
         return None
     height, width = frame_shape[:2]

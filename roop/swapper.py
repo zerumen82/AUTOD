@@ -32,7 +32,7 @@ def get_face_swapper():
             if use_cuda:
                 providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             else:
-                providers = roop.globals.providers
+                providers = list(roop.globals.execution_providers)
             
             try:
                 loaded_model = insightface.model_zoo.get_model(model_path, providers=providers)
@@ -46,7 +46,7 @@ def get_face_swapper():
                 print(f"[Swapper] Error loading model: {e}")
                 try:
                     from insightface.model_zoo.inswapper import INSwapper
-                    FACE_SWAPPER = INSwapper(model_file=model_path)
+                    FACE_SWAPPER = INSwapper(model_file=model_path, providers=providers)
                     print(f"[Swapper] Manual fallback successful")
                 except Exception as e2:
                     print(f"[Swapper] Manual fallback failed: {e2}")

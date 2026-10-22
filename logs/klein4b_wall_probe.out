@@ -1,0 +1,151 @@
+[CONFIG] CONFIGURACION DESDE ARCHIVO CARGADA:
+   [OK] Blend ratio: 1.0 (100% cara origen, 0% cara target)
+   [OK] Distance threshold: 0.2 (similitud mínima para match facial)
+   [OK] Face swap mode: selected_faces
+   [OK] Execution providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[ComfyLauncher] Usando venv de ComfyUI (RECOMENDADO): D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188 (fijo nuestro)...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8188: no hay LISTENING, saltando
+[DEBUG] No se encontró NUESTRO ComfyUI en puerto 8188
+[CLIPSeg] Pesos cargados: D:\PROJECTS\AUTOAUTO\models\CLIP\rd64-uni-refined.pth
+[CLIPSeg] Máscara OK para 'person': cobertura=26.7%
+[PROBE] personas cubren 26.8% de la foto
+[CLIPSeg] Modelo descargado de VRAM (se recarga solo si otra edición necesita máscara)
+[DEBUG] detect_comfyui_port() llamado
+[DEBUG] Verificando puerto 8188 (fijo nuestro)...
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: no hay proceso escuchando - retornar False
+[DEBUG] Puerto 8188: no hay LISTENING, saltando
+[DEBUG] No se encontró NUESTRO ComfyUI en puerto 8188
+[DEBUG] Checking port 8188...
+[DEBUG] Puerto 8188: no hay proceso escuchando - retornar False
+
+[ComfyLauncher] ========================================
+[ComfyLauncher] INICIANDO ComfyUI en puerto 8188
+[ComfyLauncher] ========================================
+
+[ComfyLauncher] Puerto establecido: 8188
+[ComfyLauncher] VRAM detectada: 8GB → usando --normalvram
+[ComfyLauncher] Ejecutando: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe -u D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py --port 8188 --normalvram --temp-directory D:\PROJECTS\AUTOAUTO\.autodeep_temp\comfyui_runtime --disable-async-offload
+[ComfyLauncher] Directorio: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI
+[ComfyLauncher] Python: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\Scripts\python.exe
+[ComfyLauncher] ---------------------------------------
+[ComfyLauncher] Proceso creado (PID: 11652)
+
+[ComfyLauncher] Esperando respuesta de ComfyUI...
+[ComfyUI] Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+[ComfyUI] Adding extra search path unet D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+[ComfyUI] Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+[ComfyUI] Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+[ComfyUI] 
+[ComfyUI] Prestartup times for custom nodes:
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+[ComfyUI] 
+[ComfyUI] WARNING: You need pytorch with cu130 or higher to use optimized CUDA operations.
+[ComfyUI] Found comfy_kitchen backend triton: {'available': False, 'disabled': True, 'unavailable_reason': "ImportError: No module named 'triton'", 'capabilities': []}
+[ComfyUI] Found comfy_kitchen backend eager: {'available': True, 'disabled': False, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_mxfp8', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8', 'scaled_mm_mxfp8', 'scaled_mm_nvfp4']}
+[ComfyUI] Found comfy_kitchen backend cuda: {'available': True, 'disabled': True, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8']}
+[ComfyUI] Checkpoint files will always be loaded safely.
+[ComfyUI] Total VRAM 8192 MB, total RAM 32713 MB
+[ComfyUI] pytorch version: 2.8.0+cu128
+[ComfyUI] Set vram state to: NORMAL_VRAM
+[ComfyUI] Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+[ComfyUI] Enabled pinned memory 13085.0
+[ComfyUI] Using pytorch attention
+[ComfyUI] aimdo: src-win/cuda-detour.c:77:INFO:aimdo_setup_hooks: found driver at 00007FFB74D80000, installing 4 hooks
+[ComfyUI] aimdo: src-win/cuda-detour.c:61:DEBUG:install_hook_entrys: hooks successfully installed
+[ComfyUI] aimdo: src/control.c:69:INFO:comfy-aimdo inited for GPU: NVIDIA GeForce RTX 3060 Ti (VRAM: 8191 MB)
+[ComfyUI] DynamicVRAM support detected and enabled
+[ComfyUI] Python version: 3.10.6 (tags/v3.10.6:9c7b4bd, Aug  1 2022, 21:53:49) [MSC v.1932 64 bit (AMD64)]
+[ComfyUI] ComfyUI version: 0.19.0
+[ComfyUI] comfy-aimdo version: 0.2.12
+[ComfyUI] comfy-kitchen version: 0.2.8
+[ComfyUI] Setting temp directory to: D:\PROJECTS\AUTOAUTO\.autodeep_temp\comfyui_runtime\temp
+[ComfyUI] ComfyUI frontend version: 1.42.10
+[ComfyUI] [Prompt Server] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\comfyui_frontend_package\static
+[ComfyUI] Asset seeder disabled
+[ComfyUI] W1009 23:48:06.984474 4420 D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
+[ComfyUI] ComfyUI-GGUF: Allowing full torch compile
+[ComfyUI] Warning: Could not load sageattention: No module named 'triton'
+[ComfyUI] sageattention package is not installed, sageattention will not be available
+[ComfyUI] 
+[ComfyUI] Import times for custom nodes:
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-Boogu
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\autoauto_unload.py
+[ComfyUI]    0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+[ComfyUI]    0.1 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+[ComfyUI]    0.2 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-FramePackWrapper
+[ComfyUI]    2.9 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+[ComfyUI]   19.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio
+[ComfyUI]   40.4 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+[ComfyUI] 
+[ComfyUI] Failed to initialize database. Please ensure you have installed the latest requirements. If the error persists, please report this as in future the database will be required: (sqlite3.OperationalError) unable to open database file
+[ComfyUI] (Background on this error at: https://sqlalche.me/e/20/e3q8)
+[ComfyUI] Starting server
+[ComfyUI] 
+[ComfyUI] To see the GUI go to: http://127.0.0.1:8188
+
+[ComfyLauncher] OK ComfyUI INICIADO (tiempo: 152.7s)
+[ComfyLauncher] URL: http://127.0.0.1:8188
+[ComfyLauncher] ========================================
+
+[FluxClient] Máscara recibida pero no compatible con el workflow Klein; se omite
+[FluxClient] FLUX.2 Klein 4B EDIT workflow (ReferenceLatent + EmptyFlux2Latent): cfg=1.0, denoise=1.0, steps=4, sampler=er_sde, nodes=['1', '2', '3', '4', '5d', '5e', '5', '6', '6r', '7', '7r', '8', '9', '10', '17']
+[ComfyUI] got prompt
+[FluxClient] En cola ComfyUI (0s)
+[ComfyUI] En cola ComfyUI | 0% | paso 0/4 | transcurrido 0:00
+[ComfyUI] Using pytorch attention in VAE
+[ComfyUI] Using pytorch attention in VAE
+[ComfyUI] VAE load device: cuda:0, offload device: cpu, dtype: torch.bfloat16
+[ComfyUI] Requested to load AutoencoderKL
+[ComfyUI] Model AutoencoderKL prepared for dynamic VRAM loading. 160MB Staged. 0 patches attached.
+[ComfyUI] Cargando modelo | 0% | paso 0/4 | transcurrido 0:08
+[FluxClient] Cargando modelo (15s)
+[ComfyUI] gguf qtypes: F32 (145), Q6_K (1), Q4_0 (252)
+[ComfyUI] Dequantizing token_embd.weight to prevent runtime OOM.
+[ComfyUI] CLIP/text encoder model load device: cuda:0, offload device: cpu, current: cpu, dtype: torch.float16
+[ComfyUI] Requested to load Flux2TEModel_
+[FluxClient] Cargando modelo (30s)
+[FluxClient] Cargando modelo (45s)
+[FluxClient] Cargando modelo (60s)
+[FluxClient] Cargando modelo (75s)
+[FluxClient] Preparando generación (90s)
+[ComfyUI] Preparando generación | 0% | paso 0/4 | transcurrido 1:30
+[FluxClient] Preparando generación (105s)
+[ComfyUI] loaded completely; 5518.80 MB usable, 2691.69 MB loaded, full load: True
+[ComfyUI] gguf qtypes: F32 (60), Q5_K (24), Q4_K (56), BF16 (9)
+[ComfyUI] model weight dtype torch.bfloat16, manual cast: None
+[ComfyUI] model_type FLUX
+[ComfyUI] Requested to load Flux2
+[ComfyUI] Unloaded partially: 2691.69 MB freed, 0.00 MB remains loaded, 2225.62 MB buffer reserved, lowvram patches: 0
+[FluxClient] Preparando generación (135s)
+[FluxClient] Preparando generación (150s)
+[ComfyUI] loaded completely; 4981.91 MB usable, 2571.40 MB loaded, full load: True
+[ComfyUI] [34m[ComfyUI-Easy-Use] server: [0mv1.3.7 [92mLoaded[0m
+[ComfyUI] [34m[ComfyUI-Easy-Use] web root: [0mD:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\web_version/v2 [92mLoaded[0m
+[ComfyUI] 
+[ComfyUI]   0%|          | 0/4 [00:00<?, ?it/s]
+[ComfyUI]   0%|          | 0/4 [00:00<?, ?it/s,   Model Initializing ...  ]
+[ComfyUI]   0%|          | 0/4 [00:03<?, ?it/s,  Model Initialization complete!  ]
+[ComfyUI]  25%|##5       | 1/4 [00:03<00:11,  3.71s/it,  Model Initialization complete!  ]
+[ComfyUI]  25%|##5       | 1/4 [00:03<00:11,  3.71s/it]
+[FluxClient] Preparando generación (165s)
+[ComfyUI]  50%|#####     | 2/4 [00:03<00:03,  1.85s/it]
+[ComfyUI]  75%|#######5  | 3/4 [00:05<00:01,  1.78s/it]
+[ComfyUI] 100%|##########| 4/4 [00:07<00:00,  1.77s/it]
+[ComfyUI] 100%|##########| 4/4 [00:07<00:00,  1.81s/it]
+[ComfyUI] Requested to load AutoencoderKL
+[ComfyUI] Model AutoencoderKL prepared for dynamic VRAM loading. 160MB Staged. 0 patches attached.
+[ComfyUI] Prompt executed in 169.78 seconds
+[FluxClient] Completado (0s)
+[ComfyUI] Completado | 100% | paso 0/4 | transcurrido 2:50
+[FluxClient] Modelo residente para reutilización (VRAM libre: 4456MB de 8192MB)
+[FluxClient] Generación completa. std=69.75, mean=135.49
+[PROBE] status=OK (171s) tiempo=171s
+[PROBE] output=D:\PROJECTS\AUTOAUTO\diagnostics\klein4b_wall_masked.png size=(1024, 640)

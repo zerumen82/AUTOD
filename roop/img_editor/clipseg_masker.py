@@ -4,7 +4,7 @@ import os
 import torch
 import numpy as np
 from PIL import Image
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple
 import cv2
 
 
@@ -25,8 +25,9 @@ class CLIPSegMasker:
         ("models/CLIP/clipseg_weights/rd64-uni-refined.pth", "uni"),
     ]
 
-    def __init__(self):
+    def __init__(self, backbone_path=None):
         self.model = None
+        self.backbone_path = backbone_path
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self._initialized = False
 
@@ -38,7 +39,10 @@ class CLIPSegMasker:
             from clip.clipseg import CLIPDensePredT
 
             # Intentar cargar el modelo (ViT-B/16 es el estándar para CLIPSeg)
-            self.model = CLIPDensePredT(version='ViT-B/16', reduce_dim=64, complex_trans_conv=True)
+            self.model = CLIPDensePredT(
+                version='ViT-B/16', reduce_dim=64, complex_trans_conv=True,
+                backbone_path=self.backbone_path,
+            )
 
             # v5.1158 — CRÍTICO: cargar los PESOS del modelo.
             # Antes solo se creaba la arquitectura (CLIPDensePredT sin load_state_dict)

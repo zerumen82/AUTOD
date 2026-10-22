@@ -1,5 +1,104 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## Cierre de sesión (webview → X) — límites medidos 2026-10-20
+
+- Las tres rutas de cierre están probadas con ComfyUI real (propietario,
+  secundario y `atexit`), pero **no se ha cerrado una ventana de webview
+  pulsando la X en una UI real**: la verificación de esa ruta es el cableado
+  estático de `roop/core.py` más la ejecución real de la misma función. Falta
+  una prueba de clic en ventana servida por el usuario.
+- La VRAM liberada por ComfyUI en los escenarios del probe es pequeña (−2 a
+  −117 MB) porque ComfyUI arranca frío, sin workflows ejecutados. Con un
+  ComfyUI con modelos cargados la liberación observada durante el desarrollo
+  fue de **4638 → 754 MB**, pero esa medición no está en un informe del probe.
+  El cierre del proceso garantiza la reclaim del SO; lo acreditado es puerto
+  cerrado, PIDs fuera de `nvidia-smi` e informe con `vram_delta_mb`.
+- El tenedor local sí está probado con memoria real: `_release_local_gpu()`
+  con FaceAnalysis residente devuelve 594 MB.
+- Si el cierre ocurre con la cola ocupada, la política espera
+  `queue_grace_seconds` (15 s) y luego corta igual; si sigue un batch local de
+  FaceSwap se le pide cancelación con `roop.globals.processing = False`. Ese
+  caso de interrupción forzada **no se ha reproducido** en una prueba real.
+- La UI de Gradio y el servidor HTTP no se detienen al cerrar la ventana: la
+  consola de `run.py` sigue abierta por diseño y el proceso sigue vivo. Solo se
+  liberan GPU y ComfyUI.
+
+## Selección regional — límites medidos 2026-10-20
+
+- La protección del vecino queda ACREDITADA en las dos direcciones sobre foto
+  real (`head-2` y `head-0`): 0 px cambiados en las cabezas no seleccionadas,
+  0 px de fuga gris, 0 px fuera de la máscara efectiva. No certifica que TODA
+  foto con caras solapadas quede protegida: el cegado depende de las elipses
+  medidas por el detector.
+- La ADHERENCIA de Kontext sigue siendo PARCIAL: al pedir «short black hair and
+  a short beard» la cabeza editada conserva algo de pelo rubio en la parte
+  alta. La protección y la obediencia son cosas distintas; este trabajo
+  acredita la primera, no la segunda.
+- El contexto de cabeza ceñido (0,15) reduce la ambigüedad pero no la elimina
+  cuando dos caras se solapan de verdad: de ahí el cegado, no del recorte.
+- Sin validación en navegador por el usuario de la selección con el nuevo
+  cegado: la prueba fue por contrato y por render real, no por clic en la UI.
+
+## Selector visual — límites medidos 2026-10-19
+
+- SAM2 local autorizado expresamente por «SI»; evaluación aislada en tres
+  fotos y grilla más densa. No promovido: scores altos admiten cuchara bajo
+  etiqueta plato y depósito parcial bajo etiqueta moto. CLIP semántico local
+  tampoco distingue todas las propuestas. Una alternativa de cuchara revisada
+  manualmente sirve solo para diagnóstico de render, no como regla automática.
+  GT coffee_v1 tiene núcleo spoon_neck disputado: consultar ERRATA, conservar
+  anotaciones/hashes y no usarlo para admisión. GrabCut sigue excluido.
+
+- Backend, selección múltiple, UI/sesiones/carreras y API implementados con
+  reviewer APPROVE y contratos verdes. No equivalen a PASS visual general.
+- Café real `1792420385485144000`: máscara «coffee cup» bbox169,17,422,227
+  omite cuerpo/asa; máscara «saucer» mide una parte de cuchara. El render crudo
+  vuelve azules también el plato y el asa; el pegado protege el plato/resto
+  pero solo cambia la franja superior de taza. Resultado parcial, sin tocar
+  umbrales por foto. Fuente/máscaras/raw/final/informe tester bajo
+  `diagnostics/out/editor_selection_20261019/`. La segmentación sigue pudiendo
+  omitir parte del objeto o etiquetar mal una región; comprobar el resaltado.
+- Cabeza real inicial `1792420763483413500`: referente y pelo rojo correctos, exterior
+  0 px cambiados y otra persona protegida; flequillo más largo de lo pedido
+  y leve cambio de expresión. Con geometría corregida `1792441547925018000`
+  el pelo rojo tiene laterales más cortos; la expresión exacta sigue sin
+  certificarse. No certifica todas las cláusulas ni identidad.
+- Cuchara real inicial `1792421243545046400`: máscaras guardadas del análisis real
+  del café, huella comprobada y una generación Kontext; conserva exterior,
+  pero permanece plateada pese a pedir oro. No repetir igual receta/prompt
+  esperando certificar cumplimiento sin una hipótesis nueva contrastada.
+- Corrección comprobada de contexto de objetos: `1792441271736905200`
+  (A/B contexto) y `1792441449254040300` (wrapper nativo) muestran cazoleta
+  dorada con el soporte original/exterior intactos. El raw del A/B dora también
+  el mango trasero; el pegado lo conserva plateado porque CLIPSeg lo omite.
+  Contexto2,0 no arregla cobertura. Geometría7/7, backend15/15 y contexto4/4
+  PASS; reviewer APPROVE del código, tester PASS técnico y visual PARCIAL.
+  Guía5, T5FP8, variantes multiescala/alias no solucionaron el fallo completo.
+- UI HTTP real y aislamiento/reutilización comprobados tras corregir ndarray
+  de salida; servidor de diagnóstico cerrado. Falta validación en navegador
+  por el usuario; no se instaló un navegador ni Playwright para esta tarea.
+- No instalar ni recuperar segmentadores rechazados para ocultar estas deudas;
+  una ampliación de diseño/modelos requiere la decisión explícita del usuario.
+  Se mantiene pendiente su validación visual. No cerrar H-EDIT-SELECT por
+  métricas de exterior o un resultado de inferencia sin comprobar contenido.
+
+## Kontext — revisión real y protección focal, 2026-10-18
+
+- Retirada activa de LongCat, receta configurada y protección automática focal
+  comprobadas por contratos CPU, lint/compilación y reviewer APPROVE del código.
+- La revisión original confirma referente equivocado: mujer convertida en hombre
+  calvo y hombre original con pelo. No inferir personas reales de detecciones.
+- Prueba real no explícita: ruta global previa cambió ambas personas; tras los
+  fixes, CLIPSeg no identifica con seguridad el sujeto en cuatro variantes y se
+  conserva la entrada (0 píxeles cambiados). La protección funciona, pero no es
+  una edición cumplida. Detalle `diagnostics/out/kontext_review_20261018/REVIEW.md`.
+- Localización visual más capaz con un modelo local ya instalado: diseño
+  consultado al usuario; no añadir listas por palabras, excepciones por foto,
+  modelos nuevos ni recuperar SAM2/GrabCut rechazados sin decisión explícita.
+- Se mantiene abierta la calidad general y la validación del usuario. El
+  detector de postura ligero también conserva falsos positivos incidentales;
+  los contratos de protección no certifican ese clasificador.
+
 ## Estado vigente — completar código, 2026-10-18
 
 - Cámara: corregidas las regresiones de altura/distancia/orientación; 13/13
@@ -122,7 +221,35 @@
 - **`probe_editor_appearance_head_hole_20261015` pasó a SKIP legítimo**: su fixture `img_editor/edit_1792085759.png` fue borrado del disco y los PNG de `img_editor/` no se trackean en git (mismo patrón de skip que `bald_outside_detail`). Si se quiere volver a ejercitar esa ruta hay que regenerar la foto-fixture.
 - **UI relanzada 03:1x** (la sesión 02:21 terminó sola a las 02:54, 19 min idle): PID 10844 en 7861, consola visible, ComfyUI 8188 intacto, carga v5.1218+v5.1219. **Validación del usuario pendiente**: (a) calvo en foto con pelo → sin cáscara fantasma y con «Resto fantasma…»/«Segundo intento aplicado» si hubo retry; (b) foto grande con «Refino focal:» en consola. Commit/push del lote pendiendo orden explícita.
 
+## Última actualización 2026-10-20 (guard de visión Moondream, GPU libre)
+
+- **Guard de visión implementado** (`roop/img_editor/vision_guard.py`): el
+  preflight exige backend ggml con descarga a GPU y VRAM libre suficiente para
+  el proyector, y aborta con mensaje antes de cargar modelos. Aplicado a
+  `element_selection._moondream_description` y a
+  `instruction_verifier.InstructionVerifier._load`. Parámetros en
+  `config/editor_selection.json` → `vision_guard`.
+- **Deuda declarada — el mensaje de rechazo no se ha visto en pantalla**: el
+  callback de producción que la UI invoca (`selection_events.on_analyze`) sí
+  está verificado — devuelve el mensaje de rechazo sin excepción, con la
+  sesión intacta y salida limpia (`diagnostics/out/vision_guard_20261020/
+  ui_busy_gpu.json`). Falta relanzar la UI para confirmar cómo se ve en
+  pantalla. Pendiente de una sesión con la UI activa.
+- **Deuda declarada — margen de VRAM sin calibrar contra ComfyUI**: el margen
+  configurado es 1024 MiB. No se ha medido el pico de VRAM cuando ComfyUI
+  mantiene un modelo cargado mientras corre el análisis, que es el caso real
+  de uso. Ajustar con medición, no por suposición.
+- **Deuda declarada — `nvidia-smi` como dependencia**: el guard depende de que
+  `nvidia-smi` esté en el PATH. Si no está, cae a `torch.cuda.mem_get_info`,
+  que **no** ve la VRAM de otros procesos y por tanto es más permisivo. Se
+  prefiere un rechazo explícito antes que permitir una ejecución que no cabe.
+- **Hallazgo reutilizable**: `torch.cuda.mem_get_info` subestima la VRAM de
+  otros procesos (6400 MiB externos visibles como 3738 MiB). Cualquier
+  preflight de VRAM del proyecto debe usar `nvidia-smi`.
+  Evidencia: `diagnostics/out/vision_guard_busy_gpu_20261020/vram_probe_6.0.json`.
+
 ## Última actualización 2026-10-17 (Generate: gate adulto + coma pegada; UI relanzada 01:16)
+
 
 - **Generate — dos fixes medidos** (log 00:22-00:42): (1) gate adulto a 0,121 vs 0,13 por cero cobertura de «orgy»/«explicit» → concepto añadido en `adult_gate` (config/generation_prompt.json), con cuidado medido del falso positivo «photo»⊂«photorealistic»; (2) coma pegada sin espacio → token sin traducir en la salida EN → `_normalize_glued_list_punctuation` en `prompt_translator.py`. Contrato fail→pass `probe_gen_adult_gate_20261017.py` (4 rojos→verde); regresiones verdes: `probe_gen_prompt_adherence` 108/0, `wall_instructions` PASS, suite Editor 19/19, ruff+py_compile+JSON OK.
 - **Deuda declarada — traducción de género Marian**: «jovencitos» → «young girls» (género invertido por el modelo NMT); corregirlo exigiría vocabulario hardcodeado o post-edición frágil — NO hecho, queda como límite medido del opus-mt local.
@@ -240,3 +367,9 @@
 - Defecto medido: con foto de 27 MP (6390x4263) el sampler capa a ~1 MP y el pegado sube x3.34-x5.12; las zonas medidas salen suaves ("las ediciones pierden foto", log ui_start_20261017_011634). El refino focal existente no disparaba: ruta cuerpo lo descartaba en silencio, retry y compuesto no lo tenian cableado.
 - v5.1218: prints en toda salida silenciosa del refino, refino tras el segundo intento y refino en el pase compuesto (vision_reference=None heredado del compuesto). Suite editor 20/20, adult_gate PASS, prompt_adherence 108/0, ruff limpio.
 - Pendiente: validacion visual del usuario con foto grande (zonas medidas con textura fotografica, sin aspecto pintado). Lote completo sin commitear hasta orden explicita.
+
+# Image Editor - ángulo/postura obedecidos (v5.1238/v5.1239), 2026-10-22
+
+- Resuelto medido: «CAMBIA EL ANGULO, IMAGEN DE LATERAL» (y perfil/lado/de pie) miden POSE=True y salen por la rama `pose_change` (motor con visión, foto completa, sin ancla, marco reinterpretado, caras ajenas protegidas); contrato `pose_change_uses_the_vision_engine` → suite selección 9/9. Causa raíz: el sustantivo del medio («imagen/foto/image») en los conceptos `structural`/`structural_remove`/`attribute_appearance` daba +0,25 a toda petición que mencionara la foto y hacía imposible ganar la competición de pose. Ancla POV borrada por la sesión del 19/10 restaurada → probe cámara 10/10.
+- Pendiente: render real del ángulo sobre la foto del usuario + inspección visual; requiere reinicio de la app (Generate v5.1237 + pose + conceptos + ancla POV en proceso).
+- **Deuda preexistente (commit `9b5b6d0`) — RESUELTA 2026-10-22 (v5.1240)**: el alias `longcat→kontext` (línea 6104) normaliza antes de `engine in ("longcat","imagine")` (6391) → ruta Turbo 6388-7634 inalcanzable para kontext. La compuerta de caras añadidas **v5.1220 quedó sin efecto para kontext** (todos sus call sites en la ruta muerta; la integridad visual ordinary solo avisa, no restaura). Arreglo: compuerta portada a la ruta ordinary de kontext (tras `result = result_obj.image`, generación a foto completa, `_instruction_preserves_face_layout` como exención, reintento único con `_same_people_retry_prompt` y restauración por `Image.composite` si persiste o falla). Los 2 contratos viejos actualizados al contrato vivo sin perder aserciones de protección: `probe_editor_added_face_routes_20261018` (compound = pasada global) PASS y `probe_editor_compound_fast_dispatch` ( despacho vía `engine="qwen_camera"`, la única entrada viva a la ruta Turbo: fallback 6288→6294→6391) rc=0 con 63 OK.

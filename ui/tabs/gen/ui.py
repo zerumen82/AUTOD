@@ -17,7 +17,7 @@ def _lora_dropdown_choices(engine_model=None):
     ]
     client = FluxGenComfyClient()
     loaded, _ = client.load(engine_model or get_default_generation_engine())
-    entries = get_available_lora_catalog(client._alias, client._is_sdxl) if loaded else []
+    entries = get_available_lora_catalog(client.get_alias(), client.is_sdxl()) if loaded else []
     for entry in entries:
         tags = []
         if entry.get("nsfw"):
@@ -37,8 +37,8 @@ def _generation_control_info(engine_model, cfg_scale=0):
     from roop.img_editor.flux_gen_comfy_client import FluxGenComfyClient
     client = FluxGenComfyClient()
     client.load(engine_model or get_default_generation_engine())
-    cfg = float(cfg_scale or client._get_model_conf().get("cfg", 1.0))
-    distilled = client._clip_type == "flux" and not client._is_longcat
+    cfg = float(cfg_scale or client.get_model_conf().get("cfg", 1.0))
+    distilled = client.get_clip_type() == "flux" and not client.is_longcat()
     negative_active = cfg != 1.0 and not (distilled and cfg > 1.0)
     cfg_info = "Guía propia de FLUX; el muestreo usa CFG=1." if distilled and cfg > 1 else "CFG real del muestreo; 0 usa la configuración del modelo."
     negative_info = "En txt2img/img2img se aplica al muestreo; vacío usa el negativo del modelo." if negative_active else "En txt2img/img2img no influye con esta guía: el muestreo usa CFG=1."
@@ -97,8 +97,8 @@ def build_gen_ui():
         ):
             gr.Markdown(
                 "_Sube una foto y el generador arrancará de ella (fuerza desde "
-                "`config/model_configs.json` → `img2img_denoise`). Con LongCat la usa "
-                "como referencia de edición._"
+                "`config/model_configs.json` → `img2img_denoise`). Los modelos de edición "
+                "la usan como referencia._"
             )
             # Ruta por defecto en config/generation_prompt.json →
             # generate_ui.default_route. Decisión del usuario 2026-10-16:

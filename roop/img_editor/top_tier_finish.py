@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Acabado TOP para modo Solo mejorar y reutilizable en otros edits.
-Híbrido: prep clásico → LongCat (realismo) → Lanczos 8K (sin tiles ONNX / sin rejilla).
+Híbrido: prep clásico → Kontext (realismo) → Lanczos 8K (sin tiles ONNX / sin rejilla).
 """
 
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -134,7 +134,7 @@ def _generative_polish_pass(
         return None, ""
 
     # v5.1135 — liberar los caches ONNX del proceso principal (CodeFormer de
-    # _preserve_faces + ESRGAN/LSDIR del finisher) ANTES de cargar LongCat en
+    # _preserve_faces + ESRGAN/LSDIR del finisher) ANTES de cargar Kontext en
     # ComfyUI. Estos caches viven entre pasadas del pipeline y compiten por la
     # VRAM durante la carga → 75s+ de 'Cargando modelo' intra-preparación
     # (offload dance). Se recrean bajo demanda en ~1-2s.
@@ -152,10 +152,9 @@ def _generative_polish_pass(
     except Exception:
         pass
 
-    version = "LongCat-Image-Edit-Q4_K_S.gguf"
-    ok, load_msg = client.load(version)
+    ok, load_msg = client.load()
     if not ok:
-        print(f"[TopTier] LongCat Full no cargado: {load_msg}")
+        print(f"[TopTier] Kontext no cargado: {load_msg}")
         return None, ""
 
     ow, oh = image.size
@@ -178,7 +177,7 @@ def _generative_polish_pass(
     negative = "low quality, blurry, cartoon, plastic skin, posterization, grid, seams, artifacts"
 
     print(
-        f"[TopTier] LongCat Full {label} — denoise={denoise:.2f}, steps={steps}, "
+        f"[TopTier] Kontext {label} — denoise={denoise:.2f}, steps={steps}, "
         f"poster={poster:.2f}, mag={mag:.2f}",
         flush=True,
     )
@@ -186,7 +185,7 @@ def _generative_polish_pass(
         progress_callback({
             "phase": "Realismo generativo" if mode == "quality" else "Pulido TOP post-edit",
             "progress": 0.88 if mode == "edit" else 0.22,
-            "detail": f"LongCat d={denoise:.2f}",
+            "detail": f"Kontext d={denoise:.2f}",
         })
     if cancel_check and cancel_check():
         return None, "cancelado"
@@ -217,7 +216,7 @@ def _generative_polish_pass(
     else:
         out = Image.blend(image.convert("RGB"), gen.convert("RGB"), blend)
         blend_note = f"{blend:.0%}"
-    note = f"LongCat {label} ({blend_note}, d={denoise:.2f})"
+    note = f"Kontext {label} ({blend_note}, d={denoise:.2f})"
     print(f"[TopTier] {note}", flush=True)
     return out, note
 
@@ -466,7 +465,7 @@ def run_top_tier_quality(
         if gen_img is not None:
             out = gen_img
             notes.append(gen_note)
-            # v5.1129 — el paso LongCat a veces re-introduce posterización
+            # v5.1129 — el paso generativo a veces re-introduce posterización
             # (denoise+blend generan planos de color). Medición del RESULTADO:
             # si el poster medido subió >0.25, segunda pasada generativa corta
             # (denoise bajo, solo realismo) en vez de dejarlo así.
@@ -645,7 +644,7 @@ def run_quality_enhance_after_edit(
 ) -> Tuple[Image.Image, str, Dict[str, Any]]:
     """
     Mejora tras un edit con Modo Calidad: desposterizar, ampliar si falta
-    tamaño, color, luz y detalle. LongCat solo si el llamador lo pide.
+    tamaño, color, luz y detalle. Kontext solo si el llamador lo pide.
     Cada paso se puede apagar con quality_steps.
     """
     from roop.img_editor.image_quality_pipeline import get_quality_finisher

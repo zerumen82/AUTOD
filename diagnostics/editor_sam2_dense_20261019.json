@@ -1,0 +1,14 @@
+{
+  "model_path": "models/sam2/sam2.1-hiera-tiny",
+  "threads": 4,
+  "distributed_points": 3,
+  "context_fraction": 2.0,
+  "grid_side": 32,
+  "grid_batch": 16,
+  "grid_min_iou": 0.7,
+  "grid_min_stability": 0.9,
+  "stability_offset": 1.0,
+  "duplicate_iou": 0.95,
+  "min_coverage": 0.0005,
+  "max_coverage": 0.9
+}

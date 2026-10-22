@@ -274,6 +274,25 @@ class FluxGenComfyClient:
         self._is_hart = False
         self._model_configs = self._load_model_configs()
 
+    # -- Public helpers para UI/APK (sustituyen el acceso a atributos privados) --
+    def get_alias(self) -> str:
+        return self._alias
+
+    def is_sdxl(self) -> bool:
+        return self._is_sdxl
+
+    def get_clip_type(self) -> str:
+        return self._clip_type
+
+    def is_longcat(self) -> bool:
+        return self._is_longcat
+
+    def get_model_conf(self) -> Dict:
+        return self._get_model_conf()
+
+    def is_hart(self) -> bool:
+        return self._is_hart
+
     def _load_model_configs(self):
         path = os.path.join(get_project_root(), "config", "model_configs.json")
         if os.path.exists(path):
@@ -556,6 +575,12 @@ class FluxGenComfyClient:
             base_translated = translate_prompt(user_text).strip()
             if base_translated.lower().startswith("instruction:"):
                 base_translated = base_translated[12:].strip()
+            # v5.1237 — el «EN »/«ES » inicial es DIRECTIVA de traducción del
+            # usuario (el traductor la conserva si él la escribe), no
+            # contenido: el modelo no debe recibir ese token. Medido: el
+            # traductor no lo añade por sí solo, solo lo conserva.
+            base_translated = re.sub(
+                r"^(EN|ES)\s+", "", base_translated, count=1)
             translated = base_translated
             adult_intent = False
 
@@ -731,7 +756,8 @@ class FluxGenComfyClient:
             path_type = "IMG2IMG con imagen de referencia"
         else:
             path_type = "PURE T2I (recomendado para GENERAR sin foto)" if not self._is_longcat else "EDIT (Kontext - mejor con foto de referencia)"
-        _adult = " (NSFW: solo por elección del usuario)" if self._get_model_conf().get("explicit") else ""
+        conf = self._get_model_conf()
+        _adult = " (NSFW: solo por elección del usuario)" if conf.get("explicit") else ""
         print(f"[GenFlux] Usando path: {path_type} para {self._flux_version}{', cfg=' + str(conf.get('cfg')) if conf else ''}{_adult}")
 
         start = time.time()
@@ -753,8 +779,6 @@ class FluxGenComfyClient:
                     "eta": 0,
                     "elapsed": time.time() - start,
                 })
-
-        conf = self._get_model_conf()
 
         # 0. Imagen de referencia (img2img): se sube a la entrada de ComfyUI
         # y sustituye al EmptyLatent por VAEEncode de la foto.

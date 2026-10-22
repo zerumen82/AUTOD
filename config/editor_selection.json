@@ -1,0 +1,73 @@
+{
+  "device": "cpu",
+  "max_analysis_side": 1024,
+  "runtime": {
+    "dll_directories": [
+      "%CUDA_PATH%/bin",
+      "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/bin",
+      "venv/Lib/site-packages/llama_cpp/lib"
+    ]
+  },
+  "vision_guard": {
+    "enabled": true,
+    "vram_margin_mb": 1024
+  },
+  "detector": {
+    "model_path": "models/buffalo_l/det_10g.onnx",
+    "input_size": 1024,
+    "threshold": 0.5,
+    "label": "Cabeza/rostro {index}"
+  },
+  "inventory": {
+    "model_path": "models/moondream/moondream2-text-model-f16.gguf",
+    "projector_path": "models/moondream/moondream2-mmproj-f16.gguf",
+    "context_size": 1024,
+    "threads": 4,
+    "max_tokens": 128,
+    "max_image_side": 768,
+    "max_items": 12,
+    "max_label_words": 10,
+    "temperature": 0.0,
+    "describe_prompt": "Describe the visible objects, people and things in this image in one short sentence."
+  },
+  "extractor": {
+    "model_path": "models/llm/qwen2.5-3b-instruct-q4_k_m.gguf",
+    "context_size": 2048,
+    "threads": 4,
+    "max_tokens": 128,
+    "max_items": 12,
+    "max_label_words": 4,
+    "system_prompt": "You extract the visible elements from an image description. Reply with a JSON object that has an \"objects\" array of short concrete noun phrases (2 to 4 words), each naming one clearly visible element. Do not include actions, relationships, locations or hidden items. Only elements the description mentions."
+  },
+  "segmenter": {
+    "weights_path": "models/CLIP/rd64-uni-refined.pth",
+    "backbone_path": "~/.cache/clip/ViT-B-16.pt",
+    "probability_threshold": 0.4,
+    "min_coverage": 0.005,
+    "max_coverage": 0.9,
+    "min_component_coverage": 0.002,
+    "duplicate_iou": 0.85,
+    "face_coverage": 0.5
+  },
+  "preview": {
+    "outline_color": [0, 190, 255],
+    "selected_color": [255, 170, 0],
+    "outline_width_fraction": 0.003,
+    "min_outline_width": 1,
+    "selected_alpha": 0.22
+  },
+  "edit": {
+    "crop_max_area": 1.0,
+    "crop_context_fraction": 0.35,
+    "head_crop_context_fraction": 0.15,
+    "object_context_fraction": 2.0,
+    "blind_fill": [127, 127, 127],
+    "blind_dilate_radius": 6,
+    "minimum_reference_side": 64,
+    "maximum_reference_side": 768,
+    "reference_canvas_multiple": 64,
+    "feather_radius": 6,
+    "head_inclusion_coverage": 0.5,
+    "prompt_template": "Edit this exact image region: {instruction}. Apply the complete requested change to the selected element. Preserve the surrounding context."
+  }
+}

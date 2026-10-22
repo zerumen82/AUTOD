@@ -588,6 +588,11 @@ def _translate_prompt_impl(prompt: str) -> str:
     if len(prompt.strip()) < 4:
         return clean_text(prompt)
 
+    # Spanish substring mappings can corrupt valid English words (unchanged
+    # became achanged). Detect the original language before applying mappings.
+    if _is_english(prompt):
+        return clean_text(prompt)
+
     local_result, typo_fixed = _local_translate(prompt)
 
     # La ruta principal para español es local: conserva todas las condiciones y

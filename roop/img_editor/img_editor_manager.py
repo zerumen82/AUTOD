@@ -8,6 +8,7 @@ from typing import Optional, Tuple, Dict
 from PIL import Image, ImageFilter
 import numpy as np
 from roop.utils import get_vram_gb
+from roop.img_editor.gen_prompt_config import get_kontext_model_config
 
 from roop.utilities import resolve_relative_path
 
@@ -340,8 +341,6 @@ class ImgEditorManager:
         """
         magnitude = analysis.get("magnitude", 0.5)
         quality_only = bool(analysis.get("quality_only", False))
-        body_transform = bool(analysis.get("body_transform", False))
-
         if quality_only:
             tier = str(analysis.get("enhance_tier", "hd")).lower()
             print(
@@ -369,52 +368,12 @@ class ImgEditorManager:
         guidance = 3.0 + (magnitude * 4.0)
 
         if engine in ("longcat", "imagine", "longcat_full", "kontext"):
-            # Alias legacy longcat/imagine/longcat_full → Kontext (motor del Editor).
-            if body_transform:
-                # Grok Imagine versátil: denoise alto para cambios corporales/ropa completos
-                # intensity controla con qué fuerza el cuerpo cambia (0.0-1.0)
-                intensity = float(analysis.get("body_transform_intensity", 0.5))
-                denoise = 0.84 + (intensity * 0.08) + (magnitude * 0.04)  # 0.84-0.96
-                denoise = min(denoise, 0.96)
-                guidance = 2.5  # CFG bajo para colores naturales (4.5 sobresatura piel/ropa)
-                steps = int(20 + (magnitude * 8))  # 20-28 pasos para calidad en body
-            else:
-                denoise = 0.60 + (magnitude * 0.20)
-                # v5.1111 — POV (sin body): la vista destino NO existe en la fuente,
-                # hay que alucinarla → necesita denoise de regeneración casi total.
-                # mag 0.85 (siempre en POV por el boost) → 0.77 es insuficiente.
-                # La postura nueva tampoco existe → mismo floor.
-                if analysis.get("angle_change", False) or analysis.get("pose_change", False):
-                    denoise = max(denoise, 0.85)
-                guidance = 2.5
-        elif engine == "kontext":
-            # FLUX.1 Kontext dev: 20-28 steps (EDIT nativo: ReferenceLatent + FluxGuidance).
-            steps = 20
-            guidance = 3.0
-            if body_transform:
-                _bdir = str(analysis.get("body_direction", "change")).lower()
-                if _bdir == "uncover":
-                    # v5.1101: guidance 4.8 NO movía la aguja (log 08:41: ropa
-                    # intacta con 4.8). Kontext dev entrena con guidance 2.5 y
-                    # la receta oficial USO usa 3.5 — fuera de ese rango el
-                    # modelo se sale de distribución y se agarra a la referencia.
-                    # La adherencia real la da el método uxo/uno, no más guidance.
-                    guidance = 3.5
-                else:
-                    guidance = 3.5
-                # v5.1105: 24→20 steps en Q4 (offload en 8GB: cada step tardío
-                # cuesta 10-17s por tráfico de offload; los últimos steps son
-                # los más lentos). A 20 steps la adherencia es la misma y se
-                # ahorra ~1min por run.
-                steps = 20
-            else:
-                # mag baja → guidance suave (preserva), mag alta → adherencia fuerte
-                # (cap 3.5: rango oficial, más alto degrada el following)
-                guidance = min(3.5, 2.5 + (magnitude * 2.0))  # 2.5-3.5
-        elif engine == "longcat_full":
-            # Alias legacy → receta Kontext (LongCat retirado).
-            steps = 20
-            guidance = min(3.5, 2.5 + (magnitude * 2.0))
+            recipe = get_kontext_model_config()
+            steps = int(recipe["steps"])
+            guidance = float(recipe["cfg"])
+            # El EDIT nativo arranca de latente vacío y usa la foto como
+            # referencia, no la receta img2img heredada de otro modelo.
+            denoise = 1.0
         elif engine == "flux_schnell":
             steps = 4 # Limitación técnica del modelo Schnell
         elif "qwen" in engine:
@@ -600,7 +559,7 @@ class ImgEditorManager:
         # LongCat retirado del Editor (sustituido por Kontext): los alias
         # longcat/longcat_full/imagine se normalizan a kontext por
         # compatibilidad con UIs/APKs antiguas.
-        _KONTEXT_VERSION = "flux1-kontext-dev-Q4_K_M.gguf"
+        _KONTEXT_VERSION = get_kontext_model_config()["model_file"]
 
         # Kontext es el régimen fuerte. Se respeta salvo POV/postura: en esos
         # casos su ancla contradice la instrucción y debe dejar paso al router
@@ -660,7 +619,7 @@ class ImgEditorManager:
         # LongCat retirado (sustituido por Kontext): los alias legacy se
         # normalizan a kontext; las versiones se conservan para no romper
         # logs ni UIs/APKs que aún los envíen.
-        _KONTEXT_VERSION = "flux1-kontext-dev-Q4_K_M.gguf"
+        _KONTEXT_VERSION = get_kontext_model_config()["model_file"]
 
         body_transform = bool(analysis.get("body_transform", False))
         body_direction = str(analysis.get("body_direction", "change")).lower()
@@ -741,7 +700,7 @@ class ImgEditorManager:
         Sin alternancia de pesos: el cambio de pesos descargaba el
         modelo residente y provocaba recargas de varios minutos.
         """
-        return "flux1-kontext-dev-Q4_K_M.gguf"
+        return get_kontext_model_config()["model_file"]
 
     def _apply_prompt_rewriter(
         self,
@@ -779,11 +738,24 @@ class ImgEditorManager:
             # escoger una cara. No contiene reglas de nombres, géneros o lados.
             subject_query = str(rw.get("subject_query", "") or "").strip().lower()
             if subject_query and len(affected_regions) == 1:
-                print(
-                    f"[ImgEditor] Grounding de sujeto: {affected_regions[0]} → {subject_query}",
-                    flush=True,
-                )
-                affected_regions = [subject_query]
+                region_tokens = set(re.findall(r"\w+", affected_regions[0]))
+                subject_tokens = set(re.findall(r"\w+", subject_query))
+                # Una consulta genérica no puede borrar los descriptores que
+                # ya distinguen al sujeto en el plan (p. ej. su prenda visible).
+                if not subject_tokens.issubset(region_tokens):
+                    print(
+                        f"[ImgEditor] Grounding de sujeto: {affected_regions[0]} → {subject_query}",
+                        flush=True,
+                    )
+                    affected_regions = [subject_query]
+            if len(affected_regions) == 1:
+                explicit_subject = self._visual_subject_description(prompt).lower()
+                explicit_tokens = set(re.findall(r"\w+", explicit_subject))
+                region_tokens = set(re.findall(r"\w+", affected_regions[0]))
+                if explicit_subject and region_tokens.issubset(explicit_tokens):
+                    # También el plan puede haber perdido el descriptor; la
+                    # frase del sujeto en la instrucción intacta es autoridad.
+                    affected_regions = [explicit_subject]
             if body_transform:
                 new_mag = max(new_mag, magnitude)
                 mask_target = "subject"
@@ -791,7 +763,7 @@ class ImgEditorManager:
             # SAFETY semántico (sin hardcode): si el LLM dice fondo pero la magnitud
             # semántica es moderada-alta (>=0.60), es contradicción — los edits de fondo
             # reales son de mag baja. Se confía en la magnitud, no en el target LLM.
-            if mask_target == "background" and new_mag >= 0.80 and magnitude >= 0.60:
+            if mask_target == "background" and new_mag >= 0.60 and magnitude >= 0.60:
                 print(f"[ImgEditor] Rewriter target=background IGNORADO (mag sem={magnitude:.2f}, rw={new_mag:.2f}) → subject + global", flush=True)
                 mask_target = "subject"
                 is_global = True
@@ -826,6 +798,219 @@ class ImgEditorManager:
         except Exception:
             pass
         return prompt_enhanced
+
+    def _change_enforce_clause(self) -> str:
+        """Enforcement clause: the requested change must be visible.
+
+        Generic, without vocabulary of the user: the requested change must
+        not be resolved in favour of the previous state of the photo. The
+        global route and the explicit-selection route share this sentence,
+        so a measured instruction is enforced the same way in both.
+        """
+        return (
+            " The requested change must be clearly visible in the result; "
+            "do not preserve the previous state of what was asked to change. "
+            "Leave every other person in the photo exactly as they are."
+        )
+
+    def _body_negative_prompt(self, body_direction: str) -> str:
+        """Negative for a measured body direction (semantic, no user words).
+
+        uncover (quitar) negates the garments that cover; cover/change
+        (dress, change outfit...) get a neutral negative that does not fight
+        the request.
+        """
+        if str(body_direction).lower() == "uncover":
+            return (
+                "fully clothed, dress, one-piece swimsuit, covered torso, "
+                "leftover garment, censored, covered skin"
+            )
+        return (
+            "blurry, low quality, distorted, leftover garment, "
+            "incomplete clothing change, mismatched outfit"
+        )
+
+    def _kontext_body_regime(self, body_transform: bool, body_direction: str,
+                             denoise: float) -> Dict:
+        """Engine regime for a measured body change on Kontext.
+
+        Measured with clean tokens, the anchored edit copies the photo
+        (Q4+offset=copia, Q4+uxo=solo color): the anchor wins over the
+        instruction even with a capable model. A body change therefore runs
+        img2img puro, without the reference latent. Cover/change keep the
+        anchored recipe, which is the measured one for them.
+        """
+        if not body_transform or str(body_direction).lower() != "uncover":
+            return {}
+        return {"kontext_img2img_denoise": float(denoise)}
+
+    def measured_body_regime(self, raw_prompt: str, translated_prompt: str,
+                              *, engine: str = "kontext") -> Dict:
+        """Measured regime for one instruction, shared by both edit routes.
+
+        The explicit-selection route used to ignore the instruction and
+        always run the same engine recipe, so a request to remove the
+        clothing was answered with a copy of the photo. Both routes now
+        read ONE measurement: the concept analyzer decides the direction
+        and the intensity, and the measured direction chooses the engine
+        regime, the negative and the end-state sentence. No user word list
+        is involved.
+        """
+        facts = self._prompt_authority_facts(raw_prompt, translated_prompt)
+        direction = str(facts.get("body_direction", "change")).lower()
+        body = bool(facts.get("body"))
+        intensity = float(facts.get("body_intensity", 0.0))
+        regime = {
+            "body": body,
+            "direction": direction,
+            "intensity": intensity,
+            "magnitude": 0.0,
+            "state_suffix": "",
+            "negative_prompt": "",
+            "enforce_clause": "",
+            "engine": {},
+        }
+        if not body:
+            return regime
+        scorer = self._get_semantic_analyzer(full_ai=False)
+        try:
+            magnitude = float(scorer.get_magnitude(translated_prompt))
+        except Exception:
+            magnitude = 0.5
+        regime["magnitude"] = magnitude
+        regime["state_suffix"] = self._body_state_clause(
+            translated_prompt, direction, intensity)
+        regime["negative_prompt"] = self._body_negative_prompt(direction)
+        # The global route enforces a measured change with this sentence
+        # (magnitude, uncover or a multi-region edit). The selected region is
+        # edited with the same measured regime, so it is enforced the same way.
+        if magnitude >= 0.70 or direction == "uncover":
+            regime["enforce_clause"] = self._change_enforce_clause()
+        regime["engine"]["reference_latents_method"] = (
+            self._resolve_reference_latents_method(
+                {"body_direction": direction, "structural_bias": "neutral"},
+                background_focus=False,
+                structural_inpaint=False,
+                engine=engine,
+                body_transform=True,
+            )
+        )
+        if engine == "kontext":
+            # v5.1228 — el motor lo decide la arquitectura de cada ruta. La
+            # ruta global regenera el marco entero (img2img puro). La ruta de
+            # selección no puede: su exterior es píxel a píxel. Medido sobre
+            # la foto real, el img2img puro en un recorte genera OTRA escena
+            # (registro 0,625 y desplazamiento 24 px) y el resultado no encaja
+            # con la foto; con la zona medida como máscara, el muestreador
+            # conserva la foto de alrededor y el modelo solo repinta lo medido.
+            regime["engine"]["measured_zone_mask"] = True
+            regime["engine"]["img2img_denoise"] = float(
+                self.auto_detect_params(
+                    {"magnitude": magnitude, "quality_only": False}, engine
+                ).get("denoise", 1.0))
+        return regime
+
+    def _body_state_clause(self, raw: str, body_direction: str,
+                           body_intensity: float) -> str:
+        """Measured final-state sentence for a body change.
+
+        img2img models obey a state description ("is fully nude") better
+        than an action ("must undress"): the Klein 4B with ReferenceLatent
+        kept the same dress without it (log 11:27, 2 runs still dressed).
+
+        The scope is measured per clause with the installed analyzer: only a
+        clause whose full exposure dominates the local one gets the strong
+        sentence. A compound names the subject of the strongest body clause,
+        never the first subject of the text (v5.1216: "the sofa must be
+        grey, the walls grey, the woman naked" wrote "The sofa is fully
+        nude" — the sofa was never painted and the area came out damaged).
+
+        Shared by the global route and the explicit-selection route so both
+        obey the same measured decision.
+        """
+        if body_direction == "uncover" and float(body_intensity) >= 0.30:
+            try:
+                scorer = self._get_semantic_analyzer(full_ai=False)
+                full_exposure = any(
+                    (scores := scorer.score_concepts(
+                        self._requested_change_scope(clause) or clause
+                    )).get("body_exposure_full", 0.0) >= 0.50
+                    and scores.get("body_exposure_full", 0.0)
+                    >= scores.get("body_exposure_local", 0.0) * 1.15
+                    for clause in re.split(r"\s*[,;]\s*", raw) if clause.strip()
+                )
+            except Exception:
+                full_exposure = False
+            if full_exposure:
+                _suffix_clause = raw
+                _suffix_clauses = self._split_compound_instruction(raw) or [raw]
+                if len(_suffix_clauses) > 1:
+                    try:
+                        def _body_signal(_clause):
+                            _scores = scorer.score_concepts(
+                                self._requested_change_scope(_clause)
+                                or _clause,
+                            )
+                            return max(
+                                float(_scores.get("attribute_body", 0.0)),
+                                float(_scores.get("attribute_uncover", 0.0)),
+                            )
+                        _best_clause = max(_suffix_clauses, key=_body_signal)
+                        # Si la cláusula corporal no nombra sujeto
+                        # («…calvo e ir desnudo») se conserva el sujeto
+                        # del texto entero, como hasta hoy.
+                        _best_subject = (
+                            self._visual_subject_description(_best_clause)
+                            or ""
+                        ).strip(" ,.;")
+                        if _best_subject:
+                            _suffix_clause = _best_clause
+                    except Exception:
+                        _suffix_clause = raw
+                _subject = (
+                    self._visual_subject_description(_suffix_clause) or ""
+                ).strip(" ,.;")
+                if _subject:
+                    # Name the person: "The person" with two people in
+                    # the frame is read as any of them.
+                    return (
+                        f" {_subject[0].upper()}{_subject[1:]} is fully nude, "
+                        "bare skin, no clothing at all."
+                    )
+                return " The person is fully nude, bare skin, no clothing at all."
+            print("[ImgEditor] Sufijo de desnudez total omitido: el alcance medido no es corporal completo", flush=True)
+            return ""
+        if body_direction == "cover" and float(body_intensity) >= 0.30:
+            return " The person is fully dressed, body covered with warm clothing."
+        print(f"[ImgEditor] Sufijo de estado omitido (dirección={body_direction}, intensity={float(body_intensity):.2f} — sin estado medido que describir; el texto del usuario manda)", flush=True)
+        return ""
+
+    def _measured_body_state_facts(self, raw_prompt: str, translated_prompt: str,
+                                   fallback_direction: str,
+                                   fallback_intensity: float):
+        """Body direction and intensity measured PER CLAUSE.
+
+        The whole sentence dilutes one clause: «la mujer esta desnuda, sin
+        zapatos» measures 0.20 flat and 0.745 per clause. With the flat
+        value the final-state sentence is not written (its threshold is
+        0.30) and the model answers with swimwear instead of the measured
+        state (measured in the global route: skin 0.2101 against 0.5299 in
+        the selection route, which measures per clause).
+
+        The enroute keeps its own measured guards: this only decides the
+        end-state sentence and the engine of a measured body change.
+        """
+        try:
+            facts = self._prompt_authority_facts(raw_prompt, translated_prompt)
+        except Exception:
+            facts = {}
+        if not facts.get("body"):
+            return fallback_direction, fallback_intensity
+        return (
+            str(facts.get("body_direction", fallback_direction)),
+            max(float(fallback_intensity),
+                float(facts.get("body_intensity", 0.0))),
+        )
 
     def _compose_generation_prompt(
         self,
@@ -903,71 +1088,10 @@ class ImgEditorManager:
                 # Una señal corporal fuerte también puede describir una región
                 # local (p. ej. pies). Solo reforzar la desnudez total cuando el
                 # concepto de exposición completa domina al local en una cláusula.
-                if body_direction == "uncover" and float(body_intensity) >= 0.30:
-                    try:
-                        scorer = self._get_semantic_analyzer(full_ai=False)
-                        full_exposure = any(
-                            (scores := scorer.score_concepts(
-                                self._requested_change_scope(clause) or clause
-                            )).get("body_exposure_full", 0.0) >= 0.50
-                            and scores.get("body_exposure_full", 0.0)
-                            >= scores.get("body_exposure_local", 0.0) * 1.15
-                            for clause in re.split(r"\s*[,;]\s*", raw) if clause.strip()
-                        )
-                    except Exception:
-                        full_exposure = False
-                    if full_exposure:
-                        # v5.1216: en un compuesto el sujeto del sufijo debe
-                        # ser el de la cláusula CORPORAL, no el primer sujeto
-                        # del texto (log real 19:49: «el sofá debe ser gris,
-                        # las paredes deben ser grises, la mujer debe ir
-                        # desnuda» escribió «The sofa is fully nude» — el
-                        # sofá nunca se pinto de gris y la zona salió dañada).
-                        # Selección medida: la cláusula con mayor señal
-                        # corporal del mismo analizador (sin listas nuevas).
-                        _suffix_clause = raw
-                        _suffix_clauses = self._split_compound_instruction(raw) or [raw]
-                        if len(_suffix_clauses) > 1:
-                            try:
-                                def _body_signal(_clause):
-                                    _scores = scorer.score_concepts(
-                                        self._requested_change_scope(_clause)
-                                        or _clause,
-                                    )
-                                    return max(
-                                        float(_scores.get("attribute_body", 0.0)),
-                                        float(_scores.get("attribute_uncover", 0.0)),
-                                    )
-                                _best_clause = max(_suffix_clauses, key=_body_signal)
-                                # Si la cláusula corporal no nombra sujeto
-                                # («…calvo e ir desnudo») se conserva el sujeto
-                                # del texto entero, como hasta hoy.
-                                _best_subject = (
-                                    self._visual_subject_description(_best_clause)
-                                    or ""
-                                ).strip(" ,.;")
-                                if _best_subject:
-                                    _suffix_clause = _best_clause
-                            except Exception:
-                                _suffix_clause = raw
-                        _subject = (
-                            self._visual_subject_description(_suffix_clause) or ""
-                        ).strip(" ,.;")
-                        if _subject:
-                            # Name the person: "The person" with two people in
-                            # the frame is read as any of them.
-                            base += (
-                                f" {_subject[0].upper()}{_subject[1:]} is fully nude, "
-                                "bare skin, no clothing at all."
-                            )
-                        else:
-                            base += " The person is fully nude, bare skin, no clothing at all."
-                    else:
-                        print("[ImgEditor] Sufijo de desnudez total omitido: el alcance medido no es corporal completo", flush=True)
-                elif body_direction == "cover" and float(body_intensity) >= 0.30:
-                    base += " The person is fully dressed, body covered with warm clothing."
-                elif body_transform:
-                    print(f"[ImgEditor] Sufijo de estado omitido (dirección={body_direction}, intensity={float(body_intensity):.2f} — sin estado medido que describir; el texto del usuario manda)", flush=True)
+                # v5.1227 — el mismo texto medido lo reutiliza ahora la ruta de
+                # selección regional: antes esa ruta usaba un régimen fijo y por
+                # eso un cambio corporal fuerte no se ejecutaba.
+                base += self._body_state_clause(raw, body_direction, body_intensity)
             # v5.1131 — CADENA DE WRAPPERS: el body-branch de arriba es la AUTORIDAD
             # para body_transform (incluye el sufijo por dirección uncover/cover).
             # Antes esta cadena corría SIEMPRE después y SOBREESCRIBÍA el wrapper
@@ -1014,11 +1138,11 @@ class ImgEditorManager:
                 or multi_region_edit
             )
             if _bypass_enforce and is_longcat and not quality_only:
-                base += " The requested change must be clearly visible in the result; do not preserve the previous state of what was asked to change. Leave every other person in the photo exactly as they are."
+                base += self._change_enforce_clause()
             # Receta «calvo» medida (log real 21:51, edit_1792180391): ver
             # _bald_recipe_tail — pelo fuera, diadema conservada y cuero
             # cabelludo gris = «gorrito».
-            if is_longcat:
+            if is_longcat and engine != "kontext":
                 base += self._bald_recipe_tail(raw)
             print(f"[ImgEditor] Kontext Prompt: {base}")
             age_hint = ""
@@ -1195,16 +1319,19 @@ class ImgEditorManager:
     def _head_mask_from_region_plan(
         self, image: Image.Image, faces, region_mask: Image.Image,
         continue_region: bool = True,
-    ) -> Optional[Image.Image]:
+        return_protection: bool = False,
+        protection_faces=None,
+    ):
         """Reduce una región visual de persona a la cabeza que le corresponde.
 
         El rewriter identifica una región textual y CLIPSeg la mide en la foto;
         este paso usa solo la superposición medida con las caras detectadas para
         seleccionar UNA cabeza. No interpreta palabras, sexo ni posiciones.
         """
+        no_selection = (None, None) if return_protection else None
         try:
             if not faces or region_mask is None:
-                return None
+                return no_selection
             region = np.asarray(region_mask.convert("L"))
             h, w = region.shape[:2]
             best_face, best_score, second_score = None, 0.0, 0.0
@@ -1223,7 +1350,7 @@ class ImgEditorManager:
                     second_score = score
             if best_face is None or best_score < 0.08:
                 print(f"[ImgEditor] Región focal sin cabeza asociable (score={best_score:.2f})", flush=True)
-                return None
+                return no_selection
             # Con varias caras, seleccionar la mejor sin una separación medible
             # cambia personas al azar cuando la consulta no quedó bien grounded.
             # La decisión usa solo la diferencia de cobertura visual.
@@ -1232,20 +1359,30 @@ class ImgEditorManager:
                     f"[ImgEditor] Región focal ambigua entre caras (mejor={best_score:.2f}, segunda={second_score:.2f})",
                     flush=True,
                 )
-                return None
+                return no_selection
             print(f"[ImgEditor] Región focal por solape medido (score={best_score:.2f})", flush=True)
 
             focus = self._head_mask_from_faces(image, [best_face])
-            if focus is None or not continue_region:
-                return focus
+            if focus is None:
+                return no_selection
             # A close portrait makes half the focus span cover the body and
             # the person beside it. That mask no longer fits the local window,
             # and sampling it replaces the photo. Keep the widest continuation
             # that still fits; otherwise edit only the focus already measured.
-            return self._fit_measured_focus(image, focus, region)
+            if continue_region:
+                focus = self._fit_measured_focus(image, focus, region)
+            if return_protection:
+                # Una cara poco fiable no puede decidir a quién editar, pero
+                # sí exige proteger su zona si ya fue detectada en la entrada.
+                protected_candidates = faces if protection_faces is None else protection_faces
+                others = [face for face in protected_candidates
+                          if face is not best_face and not np.array_equal(face.bbox, best_face.bbox)]
+                protection = self._head_mask_from_faces(image, others) if others else None
+                return focus, protection
+            return focus
         except Exception as exc:
             print(f"[ImgEditor] Máscara de cabeza focal omitida: {exc}", flush=True)
-            return None
+            return no_selection
 
     @staticmethod
     def _complete_localized_region_mask(
@@ -5959,9 +6096,14 @@ class ImgEditorManager:
         _compound_depth: int = 0,
         _compound_region_hint: str = "",
         _source_clause: str = "",
+        selection_analysis=None,
+        selected_region_ids=None,
     ) -> Tuple[Optional[Image.Image], str, Optional[Image.Image]]:
 
         self._last_instruction_compliance = None
+        if engine in ("longcat", "longcat_full", "imagine"):
+            print(f"[ImgEditor] Alias legacy {engine} → kontext", flush=True)
+            engine = "kontext"
         if cancel_check and cancel_check():
             return None, "Cancelado", None
 
@@ -5969,6 +6111,22 @@ class ImgEditorManager:
             img = image.copy().convert("RGB")
         else:
             img = Image.open(image.name).copy().convert("RGB")
+
+        # Explicit visual intent precedes quality, face/NLP preflight, camera,
+        # body routing and rewriter recursion. Invalid selection must abstain.
+        print(f"[ImgEditor] DEBUG generate_intelligent: selection_analysis={selection_analysis is not None}, selected_region_ids={selected_region_ids}", flush=True)
+        if selection_analysis is not None or selected_region_ids:
+            print("[ImgEditor] DEBUG: Taking selected_region_edit path", flush=True)
+            from roop.img_editor.selected_region_edit import edit_selected_region
+            return edit_selected_region(
+                self, img, prompt, selection_analysis, selected_region_ids,
+                engine=engine, negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps, guidance_scale=guidance_scale,
+                seed=seed, progress_callback=progress_callback,
+                quality_mode=quality_mode, auto_upscale=auto_upscale,
+                enhance_tier=enhance_tier, quality_preserve_faces=quality_preserve_faces,
+                quality_steps=quality_steps, cancel_check=cancel_check,
+            )
 
         # Calidad sin prompt usa restauración/upscale local y no necesita ComfyUI.
         pure_quality_request = bool(quality_mode and not (prompt or "").strip())
@@ -7508,22 +7666,34 @@ class ImgEditorManager:
                 mag_suggested = nlp.get_magnitude(prompt)
                 mask_target = nlp.detect_target(prompt)
                 axis_scores = nlp.get_axis_scores(prompt) if hasattr(nlp, "get_axis_scores") else {}
+                # La descripción del referente identifica a quién editar; no
+                # pide cambiar su prenda, postura ni estructura. Medir ese eje
+                # sobre el predicado solicitado, igual que el gate de cámara.
+                _semantic_change_scope = self._requested_change_scope(prompt)
+                _structural_axes = (nlp.get_axis_scores(_semantic_change_scope)
+                                    if hasattr(nlp, "get_axis_scores") else {})
                 try:
                     appearance_score = float(nlp.score_concepts(prompt).get("attribute_appearance", 0.0))
                 except Exception:
                     appearance_score = 0.0
-                structural_score = float(axis_scores.get("structural", 0.0))
+                structural_score = float(_structural_axes.get("structural", 0.0))
                 if hasattr(nlp, "get_body_transform_intensity"):
                     body_transform_intensity = float(nlp.get_body_transform_intensity(prompt))
                 if hasattr(nlp, "get_body_direction"):
                     body_direction = str(nlp.get_body_direction(prompt))
                 if hasattr(nlp, "is_structural_dominant"):
-                    high_structural = nlp.is_structural_dominant(prompt)
+                    high_structural = nlp.is_structural_dominant(_semantic_change_scope)
                 else:
                     struct_thresh = getattr(nlp, "STRUCTURAL_SIGNAL_THRESHOLD", 0.06)
                     high_structural = structural_score > struct_thresh
                 if hasattr(nlp, "get_structural_bias"):
-                    structural_bias = nlp.get_structural_bias(prompt)
+                    structural_bias = nlp.get_structural_bias(_semantic_change_scope)
+                if (mask_target in ("face", "hair") and structural_bias == "neutral"
+                        and float(_structural_axes.get("attribute", 0.0)) > structural_score):
+                    # Señal estructural incidental en un cambio de apariencia:
+                    # manda el eje medido dominante. Una mención a las otras
+                    # personas no autoriza regenerarlas para editar el pelo.
+                    high_structural = False
                 background_focus = (
                     mask_target == "background" and structural_bias == "neutral"
                 )
@@ -7967,15 +8137,16 @@ class ImgEditorManager:
             # que ya es inglés completo. Ver método.
             # El idioma se mira en prompt_raw: el texto ya traducido-local
             # (mezclado) puede colar como "inglés" aunque la API fallara.
-            if rewrote and self._discard_rewrite_text(prompt_raw, body_direction, engine):
-                if self._rewriter_repairs_short_translation(prompt_pre_rewrite, prompt, prompt_raw):
+            if rewrote and (engine == "kontext" or self._discard_rewrite_text(prompt_raw, body_direction, engine)):
+                if (engine != "kontext"
+                        and self._rewriter_repairs_short_translation(prompt_pre_rewrite, prompt, prompt_raw)):
                     print(
                         "[ImgEditor] Rewrite-text aceptado: reparó token dañado en una instrucción breve "
                         "sin perder contenido",
                         flush=True,
                     )
                 else:
-                    print("[ImgEditor] Rewrite-text descartado (entrada no-EN): traducción completa intacta", flush=True)
+                    print("[ImgEditor] Texto del rewriter descartado: instrucción traducida completa intacta", flush=True)
                     prompt = prompt_pre_rewrite
             if rewrote and _compound_depth > 0:
                 # El plan de regiones sí es útil, pero el 0.5B amplificó una
@@ -8104,16 +8275,8 @@ class ImgEditorManager:
             # v5.1093: negative consciente de la DIRECCIÓN (semántica, no palabras).
             # uncover (quitar) → negar prendas que tapen. cover/change (vestir de
             # nieve, cambiar outfit...) → negative neutro para no pelear con el pedido.
-            if str(analysis.get("body_direction", "change")) == "uncover":
-                negative_prompt = (
-                    "fully clothed, dress, one-piece swimsuit, covered torso, "
-                    "leftover garment, censored, covered skin"
-                )
-            else:
-                negative_prompt = (
-                    "blurry, low quality, distorted, leftover garment, "
-                    "incomplete clothing change, mismatched outfit"
-                )
+            negative_prompt = self._body_negative_prompt(
+                str(analysis.get("body_direction", "change")))
 
         has_quality_request = bool(analysis.get("has_quality_request", False))
         high_structural = bool(analysis.get("high_structural", False))
@@ -8126,16 +8289,33 @@ class ImgEditorManager:
         # Para el prompt, usar longcat_full si body_transform para que se aplique
         # el wrapper de preservación (is_longcat check).
         effective_engine = "longcat_full" if (body_transform and engine in ("klein", "klein_base", "klein_9b")) else engine
+        # v5.1232 — la dirección y la intensidad CORPORALES para la frase de
+        # estado y el motor se miden POR CLÁUSULA (la misma medición que la
+        # ruta de selección): en plano la cláusula corporal se diluye y el
+        # estado final no llega al modelo.
+        _state_direction, _state_intensity = self._measured_body_state_facts(
+            prompt_raw, prompt,
+            str(analysis.get("body_direction", "change")),
+            float(analysis.get("body_transform_intensity", 0.0)),
+        )
+        _state_magnitude = float(mag_suggested)
+        if body_transform and str(_state_direction).lower() == "uncover":
+            # El cambio corporal medido se ejecuta SIN ancla (el texto manda
+            # sobre el marco). El wrapper anclado («mantén el fondo y la
+            # composición») contradice esa receta: medido, con él la persona
+            # salía con ropa de playa (piel 0,2101) en lugar del estado
+            # pedido. El régimen de bypass es el medido para esta dirección.
+            _state_magnitude = max(0.75, float(mag_suggested))
         prompt_enhanced = self._compose_generation_prompt(
-            prompt, img_context=img_description, engine=effective_engine, magnitude=mag_suggested,
+            prompt, img_context=img_description, engine=effective_engine, magnitude=_state_magnitude,
             quality_only=quality_only, has_quality_request=has_quality_request,
             enhance_tier=enhance_tier, high_structural=high_structural,
             structural_bias=structural_bias, body_transform=body_transform,
             multi_region_edit=bool(analysis.get("multi_region_edit", False)),
             mask_target=mask_target, quality_hybrid=quality_hybrid,
             detected_age=detected_age, shot_type=shot_type,
-            body_direction=str(analysis.get("body_direction", "change")),
-            body_intensity=float(analysis.get("body_transform_intensity", 0.0)),
+            body_direction=_state_direction,
+            body_intensity=_state_intensity,
             angle_change=bool(analysis.get("angle_change", False)),
             pose_change=bool(analysis.get("pose_change", False)),
         )
@@ -8171,6 +8351,8 @@ class ImgEditorManager:
         # The semantic + preservation text is enough to guide the model.
 
         final_mask = mask_image
+        _focal_protected_heads = None
+        _focal_write_mask = None
         _compound_scene_background = False
         _scene_head_preserve_mask = None
         _compound_foreground_mask = None
@@ -8308,7 +8490,7 @@ class ImgEditorManager:
             # zona. En engines EDIT no tiene sentido máscara focal: es global
             # por construcción. Decisión por capacidad del motor, sin palabras.
             _edit_engine = engine in ("kontext", "klein", "klein_base", "klein_9b")
-            if _edit_engine:
+            if _edit_engine and not _head_only_plan:
                 print(f"[ImgEditor] Motor EDIT ({engine}): máscara focal sin sentido (workflow sin máscara) → global")
             else:
                 try:
@@ -8367,12 +8549,21 @@ class ImgEditorManager:
                         if candidate is None:
                             continue
                         if _focal_head_plan:
-                            candidate_head = self._head_mask_from_region_plan(
-                                img, source_faces, candidate,
-                            )
+                            if engine == "kontext":
+                                candidate_head, candidate_protection = self._head_mask_from_region_plan(
+                                    img, source_faces, candidate,
+                                    continue_region=False, return_protection=True,
+                                    protection_faces=detected_faces,
+                                )
+                            else:
+                                candidate_head = self._head_mask_from_region_plan(
+                                    img, source_faces, candidate,
+                                )
+                                candidate_protection = None
                             if candidate_head is None:
                                 continue
                             _preselected_head_mask = candidate_head
+                            _focal_protected_heads = candidate_protection
                         elif _visual_subject_mask is not None:
                             # Validate the edited object against the person
                             # described in the photo. A whole-person mask is
@@ -8410,7 +8601,7 @@ class ImgEditorManager:
                                     final_mask,
                                     self._union_grayscale_masks(head_region, hair_region),
                                 )
-                                if self._is_bald_request(prompt_pre_rewrite):
+                                if engine != "kontext" and self._is_bald_request(prompt_pre_rewrite):
                                     hair_mask = hair_region
                                     head = np.asarray(final_mask.convert("L")) >= 128
                                     hair = (np.asarray(hair_mask.convert("L")) >= 96
@@ -8577,6 +8768,7 @@ class ImgEditorManager:
                     final_mask is None
                     and locals().get("_focal_head_plan", False)
                     and len(source_faces) == 1
+                    and len(detected_faces) == 1
                 ):
                     final_mask = self._head_mask_from_faces(img, source_faces)
                     if final_mask is not None:
@@ -8619,20 +8811,22 @@ class ImgEditorManager:
         # instrucción; las máscaras manuales y los inpaints estructurales siguen
         # conservando su ruta explícita.
         _longcat_focal_reference = bool(
-            final_mask is not None
-            and not manual_focal_mask
-            and not body_transform
-            and not cloth_mask_rejected
-            and locals().get("_focal_head_plan", False)
-            and not structural_inpaint
-            and engine in ("longcat", "longcat_full", "imagine")
+            (
+                final_mask is not None
+                and not manual_focal_mask
+                and not body_transform
+                and not cloth_mask_rejected
+                and locals().get("_focal_head_plan", False)
+                and not structural_inpaint
+                and engine in ("longcat", "longcat_full", "imagine", "kontext")
+            )
         )
         if _longcat_focal_reference:
             _longcat_focal_mask = final_mask
             final_mask = None
             print(
-                "[ImgEditor] Región facial localizada; LongCat usará referencia visual index sin inpaint "
-                "(evita relleno gris)",
+                f"[ImgEditor] Región facial localizada; {engine} usará referencia visual "
+                "sin inpaint; integración limitada a la región medida",
                 flush=True,
             )
 
@@ -8706,16 +8900,15 @@ class ImgEditorManager:
                     )
                     version = os.path.basename(fill_path) if os.path.isfile(fill_path) else "flux1-dev-Q2_K.gguf"
                     if not os.path.isfile(fill_path):
-                        # Sin Fill en disco: no forzar flujo Flux Fill; cae al
-                        # inpaint LongCat con la máscara (denoise alto) en vez
-                        # de cargar un dev genérico que no hace inpaint.
-                        print(f"[ImgEditor] Flux Fill ausente ({fill_path}) → inpaint LongCat (sin Flux Fill)")
+                        # Sin Fill en disco, conservar la edición con Kontext
+                        # y su composición localizada, sin recuperar LongCat.
+                        print(f"[ImgEditor] Flux Fill ausente ({fill_path}) → Kontext (sin Flux Fill)")
                         flux_structural_override = False
                         from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client as _lc_cli
                         if self.flux_klein_client is None:
                             self.flux_klein_client = _lc_cli()
                         client = self.flux_klein_client
-                        version = "LongCat-Image-Edit-Q4_K_S.gguf"
+                        version = get_kontext_model_config()["model_file"]
                     else:
                         flux_structural_override = True
                 elif engine in ("longcat", "imagine"):
@@ -8740,7 +8933,7 @@ class ImgEditorManager:
                     # — la quant de 2-bit destruyó el instruction-following pero
                     # no la vía de copia. Q4 + T5 GGUF ≈ 9.4GB → offload en 8GB
                     # (más lento, ~4-6min) pero adherencia real.
-                    version = "flux1-kontext-dev-Q4_K_M.gguf"
+                    version = get_kontext_model_config()["model_file"]
                 elif engine == "longcat_full":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
@@ -8820,7 +9013,7 @@ class ImgEditorManager:
                      if self.flux_klein_client is None:
                          self.flux_klein_client = get_flux_edit_comfy_client()
                      client = self.flux_klein_client
-                     version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                     version = get_kontext_model_config()["model_file"]
 
                 # --- EDIT ENGINE ROUTER ---
                 # Router general: para CUALQUIER tipo de edición, seleccionar
@@ -8833,8 +9026,8 @@ class ImgEditorManager:
                     # manual, debe ir a LongCat, cuyo workflow la conecta al
                     # inpaint.
                     if engine not in ("longcat", "imagine", "longcat_full"):
-                        engine = "longcat"
-                        version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                        engine = "kontext"
+                        version = get_kontext_model_config()["model_file"]
                         from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                         if self.flux_klein_client is None:
                             self.flux_klein_client = get_flux_edit_comfy_client()
@@ -8891,7 +9084,15 @@ class ImgEditorManager:
                             flush=True,
                         )
 
-                if (
+                if engine == "kontext" and _longcat_focal_reference:
+                    _local_focal_crop = self._crop_focal_context(img, _longcat_focal_mask)
+                    if _local_focal_crop is None:
+                        return img, (
+                            "Omitida: la región solicitada no admite un recorte fiable; "
+                            "se conserva la imagen y las otras personas"
+                        ), None
+                    print("[ImgEditor] Kontext focal: recorte medido, otras personas protegidas", flush=True)
+                elif (
                     engine == "longcat"
                     and _longcat_focal_reference
                     and locals().get("_longcat_focal_mask") is not None
@@ -9051,7 +9252,27 @@ class ImgEditorManager:
                         )
                     else:
                         self._release_local_gpu_before_comfy()
-                        load_params = {"qwen_version": version} if "qwen" in engine else {"flux_version": version}
+                        # v5.1232 — el cambio corporal medido («quitar») se
+                        # ejecuta en el motor CON VISIÓN también en la ruta
+                        # global. Medido: en Kontext el negative es inerte
+                        # (CFG=1) y la instrucción no se cumple (piel 0,0676;
+                        # la generación salía como un personaje anime, 100 % de
+                        # píxeles cambiados); con el motor con visión se
+                        # cumple (0,5299). Esta ruta global ya reinterpreta el
+                        # marco entero, así que la receta del motor con
+                        # visión encaja sin collage.
+                        from roop.img_editor.selected_region_edit import VISION_BODY_MODEL
+                        _vision_body = bool(
+                            body_transform
+                            and str(_state_direction).lower() == "uncover"
+                            and engine == "kontext")
+                        if _vision_body:
+                            load_params = {
+                                "flux_version": VISION_BODY_MODEL,
+                                "allow_vision_engine": True,
+                            }
+                        else:
+                            load_params = {"qwen_version": version} if "qwen" in engine else {"flux_version": version}
                         success, msg = client.load(**load_params)
                         if not success:
                             # Turbo es el motor elegido (spec/00): si no carga
@@ -9068,7 +9289,7 @@ class ImgEditorManager:
                         if (
                             _longcat_focal_reference
                             and locals().get("_longcat_focal_mask") is not None
-                            and engine in ("longcat", "longcat_full", "imagine", "klein")
+                            and engine in ("longcat", "longcat_full", "imagine", "klein", "kontext")
                         ):
                             if _local_focal_crop is None:
                                 _local_focal_crop = self._crop_focal_context(
@@ -9173,8 +9394,10 @@ class ImgEditorManager:
                         # foto (Q2+offset=copia, Q4+offset=copia, Q4+uxo=solo
                         # color). Cover/change/no-body siguen en modo EDIT.
                         _bdir_img = str(analysis.get("body_direction", "change")).lower()
-                        if engine == "kontext" and body_transform and _bdir_img == "uncover":
-                            gen_params["kontext_img2img_denoise"] = float(params.get("denoise", 0.83))
+                        _body_regime = self._kontext_body_regime(
+                            body_transform, _bdir_img, float(params.get("denoise", 0.83)))
+                        if engine == "kontext" and _body_regime:
+                            gen_params.update(_body_regime)
                             print(f"[ImgEditor] Kontext uncover: img2img PURO denoise={gen_params['kontext_img2img_denoise']:.2f} (sin ReferenceLatent)", flush=True)
                         # v5.1106 — uncover en LongCat: bypass no_kontext CON visión
                         # (Qwen-VL ve género/pose/proporciones, SIN ancla estructural
@@ -9299,9 +9522,28 @@ class ImgEditorManager:
                         # preservación de identidad/rostro y alejaban el resultado
                         # de la imagen original. Cualquier ajuste fino se hace en
                         # auto_detect_params(), no por condiciones sueltas.
+                        if _vision_body:
+                            # Receta medida del motor con visión: el texto es la
+                            # única autoridad (sin ancla de latentes), sin
+                            # agujero —el marco se reinterpreta entero— y con el
+                            # negative medido dentro del texto (con CFG=1 el
+                            # negative no tiene efecto propio).
+                            gen_params["no_kontext"] = True
+                            gen_params["drop_edit_image_ref"] = False
+                            gen_params["prompt_authority"] = True
+                            gen_params["guidance_scale"] = 1.0
+                            gen_params["num_inference_steps"] = 12
+                            gen_params["denoise"] = 1.0
+                            gen_params.pop("mask_image", None)
+                            gen_params.pop("kontext_img2img_denoise", None)
+                            if negative_prompt:
+                                gen_params["prompt"] = (
+                                    f"{gen_params['prompt']} Avoid: {negative_prompt}.")
+                            print("[ImgEditor] Cambio corporal: motor con visión "
+                                  "(el texto manda; el marco se reinterpreta)", flush=True)
                         if "qwen" not in engine and not flux_structural_override:
                             gen_params["mask_image"] = (
-                                final_mask if mask_mode in ["manual", "global"]
+                                final_mask if engine != "kontext" and mask_mode in ["manual", "global"]
                                 and not _compound_scene_background else None
                             )
                             if gen_params["mask_image"] is not None:
@@ -9324,6 +9566,76 @@ class ImgEditorManager:
                             return None, "Cancelado", final_mask
                     if result_obj:
                         result = result_obj.image
+                        if _vision_body and result.size != img.size:
+                            # El motor con visión entrega a 1 MP (832×1248 para
+                            # una foto 400×600). La salida se devuelve con la
+                            # geometría de la foto de entrada, como el resto de
+                            # las rutas.
+                            result = result.resize(img.size, Image.Resampling.LANCZOS)
+                            print("[ImgEditor] Geometría de la foto conservada "
+                                  f"({result.size[0]}×{result.size[1]})", flush=True)
+                        # v5.1220 (puerto a la ruta viva) — una instrucción de
+                        # apariencia no autoriza personas nuevas. La ruta Turbo
+                        # que contenía esta compuerta quedó inalcanzable tras el
+                        # alias longcat→kontext (9b5b6d0): el modelo pintó una
+                        # cara sobre la coronilla del calvo y el pegado la
+                        # conservó porque textura nueva mide como cambio real.
+                        # Un solo reintento con las mismas personas; si el
+                        # modelo vuelve a pintarla o el retry falla, esa
+                        # región se restaura de la foto original. Pose,
+                        # add-person y structural quedan exentos: ahí la gente
+                        # nueva ES la petición.
+                        if (
+                            _local_focal_crop is None
+                            and self._instruction_preserves_face_layout(prompt)
+                            and not (cancel_check and cancel_check())
+                            and self._added_face_mask(
+                                img, result, detected_faces or source_faces,
+                            ) is not None
+                        ):
+                            print(
+                                "[ImgEditor] Cara añadida por el modelo sin "
+                                "contrapartida en la foto; segundo intento "
+                                "con las mismas personas",
+                                flush=True,
+                            )
+                            retry_params = dict(gen_params)
+                            retry_params["prompt"] = self._same_people_retry_prompt(
+                                gen_params.get("prompt") or prompt_enhanced or prompt
+                            )
+                            try:
+                                retry_obj, retry_msg = client.generate(**retry_params)
+                            except Exception as retry_error:
+                                retry_obj, retry_msg = None, str(retry_error)
+                            if cancel_check and cancel_check():
+                                return None, "Cancelado", final_mask
+                            if retry_obj is not None:
+                                retry_image = retry_obj.image.convert("RGB")
+                                if _vision_body and retry_image.size != img.size:
+                                    retry_image = retry_image.resize(
+                                        img.size, Image.Resampling.LANCZOS,
+                                    )
+                                if retry_image.size == result.size:
+                                    result = retry_image
+                            leftover_face = self._added_face_mask(
+                                img, result, detected_faces or source_faces,
+                            )
+                            if (leftover_face is not None
+                                    and result.size == img.size):
+                                result = Image.composite(
+                                    img, result.convert("RGB"), leftover_face,
+                                )
+                                msg = (
+                                    f"{msg}; cara añadida restaurada de la "
+                                    "foto original"
+                                )
+                                print(
+                                    "[ImgEditor] El segundo intento conserva "
+                                    "una cara añadida; esa región se "
+                                    "restaura de la foto original",
+                                    flush=True,
+                                )
+                            msg = f"{msg}; segundo intento: {retry_msg}"
                         if _compound_scene_background:
                             scene_masker = self._get_clipseg_masker()
                             try:
@@ -9351,6 +9663,20 @@ class ImgEditorManager:
                                 _crop_soft_mask = self._feather_mask(
                                     _composite_mask.crop(_crop_box), amount=6
                                 )
+                                if engine == "kontext":
+                                    # El suavizado no puede abrir soporte fuera
+                                    # de la región ni invadir cabezas ajenas.
+                                    alpha = np.asarray(_crop_soft_mask).copy()
+                                    alpha[np.asarray(_composite_mask.crop(_crop_box)) == 0] = 0
+                                    if _focal_protected_heads is not None:
+                                        protected = np.asarray(_focal_protected_heads.crop(_crop_box)) > 0
+                                        alpha[protected] = 0
+                                    _crop_soft_mask = Image.fromarray(alpha, "L")
+                                    _focal_write_mask = Image.new("L", img.size, 0)
+                                    _focal_write_mask.paste(
+                                        Image.fromarray(np.where(alpha > 0, 255, 0).astype(np.uint8), "L"),
+                                        _crop_box,
+                                    )
                                 _crop_result = Image.composite(result, _crop_source, _crop_soft_mask)
                                 _full_result = img.copy()
                                 _full_result.paste(_crop_result, _crop_box)
@@ -9364,6 +9690,11 @@ class ImgEditorManager:
                                     flush=True,
                                 )
                             except Exception as _crop_integrate_error:
+                                if engine == "kontext":
+                                    return img, (
+                                        f"Omitida: no se pudo integrar la región medida ({_crop_integrate_error}); "
+                                        "se conserva la imagen y las otras personas"
+                                    ), None
                                 note = (
                                     f"Error al integrar el recorte focal: {_crop_integrate_error}. "
                                     "Se entrega el recorte generado sin modificar la foto completa."
@@ -9935,13 +10266,23 @@ class ImgEditorManager:
                     _preserve_mask = final_mask.convert("L")
                     if _preserve_mask.size != result.size:
                         _preserve_mask = _preserve_mask.resize(result.size, Image.Resampling.BILINEAR)
-                    _preserve_mask = self._feather_mask(
-                        _preserve_mask, amount=6 if locals().get("_local_focal_generated", False) else (8 if _compound_scene_background else 16)
-                    )
+                    if _focal_write_mask is not None:
+                        # El crop ya se integró con su alfa. Restaurar solo el
+                        # exterior tras acabados globales sin volver a difuminar.
+                        _preserve_mask = _focal_write_mask.resize(result.size, Image.Resampling.NEAREST)
+                    else:
+                        _preserve_mask = self._feather_mask(
+                            _preserve_mask, amount=6 if locals().get("_local_focal_generated", False) else (8 if _compound_scene_background else 16)
+                        )
                     result = Image.composite(result.convert("RGB"), _preserve_source, _preserve_mask)
                     print("[ImgEditor] Exterior de la región restaurado tras el acabado", flush=True)
                 except Exception as _preserve_error:
                     print(f"[ImgEditor] Restauración exterior omitida: {_preserve_error}", flush=True)
+                    if _focal_write_mask is not None:
+                        return img, (
+                            f"Omitida: no se pudo proteger el exterior ({_preserve_error}); "
+                            "se conserva la imagen y las otras personas"
+                        ), None
 
             if (result is not None and final_mask is not None
                     and _compound_depth > 0 and _compound_region_hint.strip()
@@ -10007,7 +10348,7 @@ class ImgEditorManager:
             elif result is not None and locals().get("_head_hole_plan", False):
                 _hair_plan_zone = locals().get("_head_hole_zone")
             if (_hair_plan_zone is not None
-                    and self._is_bald_request(prompt_pre_rewrite)):
+                    and engine != "kontext" and self._is_bald_request(prompt_pre_rewrite)):
                 _hair_masker = None
                 try:
                     _hair_masker = self._get_clipseg_masker()

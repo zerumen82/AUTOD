@@ -1,6 +1,7 @@
 import gradio as gr
 
 from roop.img_editor.gen_prompt_config import get_editor_ui_config
+from .state import SelectionSession
 
 
 CSS_STYLE = """
@@ -41,6 +42,10 @@ CSS_STYLE = """
 def build_img_editor_ui():
     gr.HTML(f"<style>{CSS_STYLE}</style>")
 
+    # Estado de sesión del selector visual: análisis medido + regiones marcadas.
+    # Mutable por sesión para que un análisis en curso vea una invalidación.
+    selection_state = gr.State(SelectionSession())
+
     with gr.Column(elem_classes=["img-editor-container"]):
         with gr.Group(elem_classes=["img-editor-header"]):
             gr.Markdown("## ✨ IMAGE EDITOR AI")
@@ -65,6 +70,24 @@ def build_img_editor_ui():
                     lines=3,
                     elem_classes=["prompt-box-img"]
                 )
+
+                with gr.Accordion("🎯 Seleccionar zonas (opcional)", open=False):
+                    gr.Markdown(
+                        "_Analiza la foto, marca una o varias zonas detectadas y edita solo "
+                        "esas. También puedes pulsar una zona de la vista previa. "
+                        "Las propuestas pueden ser parciales o incorrectas: comprueba el resaltado, "
+                        "que delimita la zona que se editará. La edición genera una sola pasada. "
+                        "El exterior conserva sus píxeles y el tamaño de entrada, también con Modo Calidad._"
+                    )
+                    analyze_btn = gr.Button("🔍 ANALIZAR ZONAS", variant="secondary")
+                    overlay_img = gr.Image(
+                        label="Zonas detectadas: pulsa para marcar o desmarcar", height=380,
+                        type="pil", interactive=False,
+                    )
+                    region_choices = gr.CheckboxGroup(
+                        choices=[], label="Elementos detectados (marca uno o varios)",
+                        visible=False,
+                    )
 
                 with gr.Row():
                     gen_btn = gr.Button("✨ TRANSFORMAR", variant="primary", elem_classes=["btn-transform-main"], scale=3)
@@ -114,10 +137,11 @@ def build_img_editor_ui():
                     )
                 legacy_api_btn = gr.Button(visible=False)
                 legacy_options_btn = gr.Button(visible=False)
+                legacy_select_btn = gr.Button(visible=False)
 
                 with gr.Accordion("⚙️ Opciones", open=False):
                     engine_choices = [
-                        ("🎨 Auto: motor según la instrucción (POV→Qwen, cuerpo fuerte→Kontext)", "kontext"),
+                        ("🎨 Auto: motor según la instrucción (POV→Qwen, cuerpo fuerte→motor con visión)", "kontext"),
                         ("📷 Qwen Cámara (POV/ángulos, ~1152px en 8 GB)", "qwen_camera"),
                         ("Compatibilidad app antigua (Kontext)", "imagine"),
                         ("✨ FLUX.2 Klein 4B (img2img rápido, 4 pasos, entra en 8GB)", "klein"),
@@ -161,7 +185,7 @@ def build_img_editor_ui():
             with gr.Column(scale=1):
                 with gr.Tabs():
                     with gr.TabItem("🖼️ RESULTADO"):
-                        output_img = gr.Image(label="Resultado", height=500)
+                        output_img = gr.Image(label="Resultado", height=500, type="pil", format="png")
                     with gr.TabItem("🎭 MÁSCARA"):
                         mask_preview = gr.Image(label="Máscara generada", height=400)
 
@@ -190,6 +214,11 @@ def build_img_editor_ui():
         "quality_preserve_faces": quality_preserve_faces,
         "legacy_api_btn": legacy_api_btn,
         "legacy_options_btn": legacy_options_btn,
+        "legacy_select_btn": legacy_select_btn,
         "bt_use_as_input": bt_use_as_input,
         "bt_open_folder": bt_open_folder,
+        "selection_state": selection_state,
+        "analyze_btn": analyze_btn,
+        "overlay_img": overlay_img,
+        "region_choices": region_choices,
     }
