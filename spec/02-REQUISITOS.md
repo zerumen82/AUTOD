@@ -53,6 +53,33 @@ de referencia. Contexto de objeto configurado por procedencia medida, sin
 palabras de enrutado; selección de cabeza conserva su recorte localizado.
 Mostrar más contexto al modelo no autoriza escribir fuera de la máscara.
 
+Corrección 2026-10-23, petición «no edita, devuelve la misma imagen»:
+una persona propuesta como `object` que contiene una única cabeza medida debe
+usar la misma referencia focal que una selección de cabeza cuando los conceptos
+midan apariencia. La cabeza se asocia por el solape configurado, sin etiquetas
+ni palabras nuevas. El recorte focal de Kontext, también sin selección, se
+amplía con el presupuesto de resolución existente; no cambiar modelos ni
+reescribir el exterior. Exigir regresión antes/después y render no explícito;
+el cambio de píxeles por sí solo no demuestra cumplimiento visual.
+Prueba real neutra 24/10: el modelo elimina pelo, pero las propuestas originales
+de cabeza/persona lo recortan y la composición restaura dos arcos laterales.
+Completar esas propuestas ANTES del selector con el margen de cobertura local
+ya existente; asociar persona/cabeza por solape original inequívoco, actualizar
+contorno/bbox/cobertura y mantener el exterior de la selección elegida exacto.
+No ampliar una selección ya aceptada ni asociar objetos sin cabeza o ambiguos.
+El borde de una cabeza generada se armoniza con la foto (método en config),
+con exterior restaurado y sin aceptar una armonización que anule la edición.
+Probar el óvalo luminoso observado en el render neutro y conservar cambios de
+color/textura dentro de la cabeza, sin una nueva inferencia adicional por ese ajuste.
+Evidencia acotada 24/10: tercer render neutro
+`diagnostics/out/appearance_reference_20261023/1792855675823830800/`:
+tester PASS visual (rapada sin arcos/óvalo), una pasada20pasos, exterior0;
+10/10 CPU, Ruff/compileall verdes y reviewer APPROVE del código final.
+No cierra la historia general: faltan más fotos y validación del usuario.
+Actualización24/10: global astronaut también tiene PASS visual acotado;
+Grace quedó interrumpida, sin resultado validado. `weak_target` fue corregido
+en v5.1250 (20/20 CPU y reviewer APPROVE); no sigue como defecto abierto.
+
 Ampliación SAM2 autorizada 2026-10-19 («SI»): evaluar el modelo local instalado
 sin descargas con semillas medidas y propuestas automáticas de la foto. Guardar
 alternativas, procedencia y tiempos. La confianza del modelo no demuestra
@@ -63,6 +90,32 @@ vecinos; preservar selección múltiple, huella, protección y endpoints antiguo
 GrabCut sigue excluido y la calidad general requiere más de una foto.
 
 ## Kontext — proteger a las otras personas y retirar LongCat, 2026-10-18
+
+Continuación autorizada 24/10 («arréglalo»): cerrar `weak_target` sin recuperar
+la guarda antigua de una sola detección total. Si una región medida solo
+responde a una detección descartada, el fallback no puede elegir otra cara.
+Sin evidencia de referente descartado, una única cara creíble sigue siendo
+editable aunque haya falsos positivos. Probar ambos casos y protección de
+cabezas débiles. Validar la ruta global real en más de una foto neutra con
+evidencia visual, conservando el exterior y los motores actuales.
+Los primeros renders globales reproducen otros dos fallos: instrucción focal
+mezclada con edad inferida (pelo blanco en vez de calvicie) y retrato con una
+cabeza que excede el límite local35% (omisión sin generar). Usar la plantilla
+regional configurada con la instrucción completa, el ajuste de borde ya
+verificado y el límite de recorte configurado del selector para una única cara
+creíble. Con varias caras creíbles, conservar la guarda local anterior.
+El verificador visual debe cerrar texto y proyector al terminar (incluido error
+de cierre del texto), para no dejar VRAM residente entre dos ediciones.
+
+Estado24/10 al preparar publicación: cierre nativo comprobado en dos ciclos,
+1224MB liberados por ciclo; astronaut global PASS acotado y Grace sin veredicto.
+El usuario realizará la próxima validación visual. No cerrar calidad general.
+
+Corrección documental24/10 sobre cambios corporales posteriores: el número
+de cláusulas no acredita exposición completa. Una petición local compuesta
+debe conservar su alcance y sujeto; no añadir desnudez total por conteo ni
+atribuirla al primer sujeto del texto. Reviewer CHANGES_REQUESTED del código
+actual por falsos positivos reproducidos; deuda y ejemplos en spec/03.
 
 Petición: revisar la edición «el hombre es calvo» y que no quede LongCat.
 Comparación entrada/salida: Kontext convirtió a la mujer en un hombre calvo y

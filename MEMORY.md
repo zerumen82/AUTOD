@@ -1,5 +1,108 @@
 # MEMORY.md — AutoAuto
 
+## Estado documental vigente — 24/10/2026, commit/push y prueba por el usuario
+
+- Petición actual: «ACTUALIZA DOCUMENTACION Y COMMIT Y PUSH Y PRUEBO YO».
+  La validación visual queda a cargo del usuario; en este turno no se ejecutan
+  renders, no se reinicia la UI y se conserva Ollama activo.
+- Apariencia v5.1249/v5.1250: astronaut PASS visual con selección y global;
+  Grace INTERRUMPIDA, sin salida final validada. El cierre nativo del
+  verificador liberó 1224MB por ciclo en dos ciclos. Estos resultados son
+  históricos documentados, no nuevas pruebas GPU de este turno.
+- Reviewer independiente de este turno: CHANGES_REQUESTED para el lote de
+  código completo. Las aprobaciones anteriores de apariencia/cierre no cubren
+  los fallbacks corporales añadidos después. Reproducción CPU con código real:
+  `measured_full_body_exposure('The walls must be gray, the sofa must be blue')`
+  devuelve True; `_body_state_clause('The sofa must be gray, the woman must go barefoot',
+  'uncover', 0.8)` añade «The sofa is fully nude». El conteo de cláusulas no
+  comprueba remoción ni exposición completa y puede ampliar el alcance o
+  atribuir el cambio al primer sujeto. Pendiente de corrección; no resuelto.
+- Reviewer ejecutó apariencia10/10, régimen corporal10/10 y cleanup2/2 PASS
+  en CPU. Los contratos corporales actuales no detectan esos falsos positivos.
+- Modo Calidad: la comparación de identidad toma el máximo entre caras;
+  una cara conservada no demuestra que todas las personas conserven identidad.
+- La entrada final titulada antes «COMPLETO» queda rectificada como cambio
+  pendiente de corrección y validación. Sus umbrales 0.30 y fallback de dos
+  cláusulas son literales en código; no acreditan «config, no hardcode».
+- Verificación de este turno: compilación `compileall -q roop/img_editor
+  ui/tabs/img_editor` y lectura UTF-8 de los cuatro documentos PASS. Ruff del
+  lote de Python pendiente FALLA con F841 (`scores` sin usar) en
+  `image_quality_pipeline.py:1520`; no se presenta como lint verde ni se cambia
+  código durante esta actualización documental.
+- Publicación documental: MEMORY.md, spec/02, spec/03 y el relevo. Conservar
+  todo código local; imágenes generadas y logs de sesión quedan fuera.
+  Usuario confirmó «Solo documentación (recomendado; conservar código local)».
+  No declarar calidad cerrada. El commit no trasladará ese código al remoto;
+  la prueba del usuario sobre este workspace sí utilizará sus cambios locales.
+- Revisión documental independiente final: APPROVE para los cuatro documentos;
+  `git diff --cached --check` PASS con la política CRLF del proyecto. El código
+  completo conserva CHANGES_REQUESTED. Commit/push autorizados en la rama
+  `experiment/klein-9b`; el resultado se comprobará con Git antes de comunicarlo.
+
+## LEER AL RETOMAR — 24/10/2026, «anótalo todo»
+
+- Relevo completo: `plans/HANDOFF_editor_global_20261024.md`. Contiene cambios,
+  todos los intentos GPU (incluidos FAIL/interrumpido), pruebas, aprobaciones,
+  cierre nativo de VRAM, comandos y próximo paso exacto.
+- **Usuario: «Sí, consérvalo activo» respecto a Ollama. NO descargar su modelo,
+  detener servidor ni matar procesos.** Se observó modelo Qwen2B1,7GB en GPU y
+  ≈5,3GB libres. Su carga es ajena a la prueba.
+- Estado: código reviewer APPROVE, protección20/20, apariencia10/10,
+  cleanup2/2, selección15/15, corporal10/10, API/Ruff/compilación verdes.
+  Global astronaut1792858682799844700 PASS visual final. Grace NO validada.
+- Grace1792858908810863000 INTERRUMPIDA intencionalmente por coordinador en18/20
+  tras lentitud/parada; cola comprobada SOLO nuestro prompt y pending0. Registro
+  INTERRUPTED.json. No atribuir a OOM. UI reintentó; se detuvo solo nuestro
+  diagnóstico con Ctrl+C y terminó su ComfyUI propio. No hay imagen final PASS.
+- Cierre GPU real corregido y medido en1792859771980905000: dos cargas/cierres
+  liberan1224MB cada una (5341→3991→5215 y5215→4011→5235MB libres), sin
+  acumulación. No equivale a demostrar rapidez de render con Ollama activo.
+- Pendiente exacto: repetir SOLO Grace desde proceso limpio, coexistiendo con
+  Ollama, inspeccionar resultado y tester. No certificar DOS fotos ni cerrar
+  calidad general. No se ha modificado la reserva VRAM del launcher; ComfyUI
+  tiene opción --reserve-vram que solo se consultó. No hubo instalaciones,
+  commits ni reinicios de UI ajena.
+
+## 2026-10-24 — Continuación «arréglalo»: referente débil y ruta global (v5.1250)
+
+- Alcance autorizado: cerrar la deuda weak_target y comprobar la ruta global en dos fotos neutras, sin instalaciones ni tocar UI/render ajenos. Se preserva el fallback ante detecciones espurias cuando no hay región localizada.
+- Reproducción CPU: protección global15/16; añadido fallback con vecino débil da15/17. La región del referente descartado se perdía y se editaba la cara creíble restante; además el fallback no protegía otras detecciones. Se conserva evidencia de referente descartado y las otras máscaras. Reviewer encontró caso cercano: región débil también solapa cara creíble y ya producía candidate_head. Fix definitivo: `_head_mask_from_region_plan(... eligible_faces=...)` compara TODAS las detecciones y comprueba elegibilidad DESPUÉS del ganador, con scores/margen existentes. DefaultNone conserva otros callers. La evidencia de región sobre descartadas veta fallback; sin región medida se permite única cara creíble y protege las demás. Lejos/cerca/falso positivo/vecino verifican18/18.
+- Baseline GPU real global: astronaut1792858216525529500 FAIL visual, pelo blanco en vez de calvicie; prompt incorporaba edad63 inferida y sufijos de preservación. Grace1792858417311810800 FAIL sin generación: la cabeza de retrato excedía límite35%. Log preservado `logs/appearance_global_real_20261024_baseline.log`.
+- Ruta global focal: plantilla regional existente con instrucción traducida completa (sin edad/framing inferidos ni recetas por palabras); recorte de única cara creíble usa `edit.crop_max_area` configurado y varias mantienen guarda local previa; composición reutiliza `_blend_head_boundary`, misma config/guard no-op/exterior restaurado. Contratos nuevos retrato+edad reproducen18/20→20/20. La inyección de fallo de restauración se hace tras finisher, para no confundirla con el composite del blend que admite fallback.
+- Reviewer independiente APPROVE del código final; protección20/20 y apariencia10/10 independientes, Ruff y compilación verdes. Evidencias `logs/global_focal_reviewer_20261024.log` y `global_appearance_reference_reviewer_20261024.log`. Regresión selección15/15. El probe real admite solo muestras neutras astronaut/Grace instaladas y batch secuencial, conservando cleanup limitado a Popen propio idle.
+- Segundo batch global REAL en curso: primera muestra1792858682799844700 y log `logs/appearance_global_real_20261024.log`. Pendiente inspección de ambas salidas/tester antes de declarar cumplimiento visual; diferencias de píxel no bastan. No confundir baselines fallidos con el batch corregido.
+- Primer resultado global corregido1792858682799844700: tester independiente PASS acotado visual final (rapada, sin arcos ni óvalo),1llamada20steps,127s modelo/225,968s callback,39789px cambiados y0fuera soporte>0 de máscara suave. No afirmar0fuera núcleo>=128: hay7647px cambiados en borde1..127. Segundo retrato1792858908810863000 sigue generando; ya supera el recorte que antes omitía, pero pasos4–83s y más de7min, sin afirmar rapidez.
+- Defecto adicional reproducido de recursos: verifier.unload no cerraba Llama ni ExitStack del handler instalado (sin método close; clip_ctx se libera por callback _exit_stack). Antes del segundo render quedaron≈978MB menos libres (7046→6068). Fix cierra texto y proyector explícitamente, estadoNone primero, intentos independientes e idempotentes; mismo patrón ya usado por selector. Nuevo probe cleanup antesFAIL released=[] y después2/2PASS normal+fallo de texto; reviewer independiente APPROVE y Ruff/compile verdes. No se cambia proceso del render en marcha; medición real de dos cargas/cierres nativos preparada en `probe_instruction_verifier_vram_20261024.py` para ejecutar al terminar, sin Comfy ni otros renders. No atribuir todavía mejora de rendimiento sin medirla.
+
+## 2026-10-23/24 — Apariencia sin cambio: persona seleccionada y resolución focal (v5.1249)
+
+- Petición: log `ui_start_20261023_223708.log`, «no edita, devuelve la misma imagen». Inspección de `edit_1792788275.png` y `edit_1792788604.png`: conservan pelo. No se generó una edición de esa foto explícita; las pruebas GPU usan el retrato neutro astronaut de skimage ya instalado.
+- Causas de despacho reproducidas: selección `object-0` de persona no entraba en `appearance_head` porque solo aceptaba `kind=head`; enviaba foto completa602×600 al lienzo regional. La ruta global sí recortaba263×365, pero el cliente reducía256×320 sin ampliar a su presupuesto. No equivale a demostrar que cada no-op proceda solo de la resolución.
+- Cambios: `selected_region_edit.py` asocia una única cabeza medida contenida en una sola selección por `head_inclusion_coverage` existente, localiza el recorte y escribe únicamente núcleo>=128∩selección. Con cero/dos cabezas o selección múltiple conserva receta anterior. `_scale_kontext_focal_reference` en manager reutiliza `maximum_reference_side` existente768 para selección de cabeza y crop global, sin motor/pesos nuevos. Reviewer detectó inicialmente halo suave convertido en soporte por >0: corregido a>=128 y regresión GaussianBlur6 añadida. Además se quitó llamada `generate` duplicada en `vision_body`: resultado interno sobrescrito por llamada común; suite8/10→10/10.
+- CPU: probe nuevo `probe_editor_appearance_reference_20261023.py` antes1/4 y después6/6 (incluye halo y0/2cabezas); selección15/15; UI14/14; API13/9/8 PASS; régimen corporal10/10; global corporal PASS; restauración cabeza/cuerpo OK; Generate UI5/5 (`PYTHONPATH` requerido). Ruff completo de módulos/probes tocados y py_compile/compileall editor/UI verdes. Logs `logs/appearance_*20261023*.log` y `appearance_generate_contract_20261024.log`.
+- Reviewer independiente: APPROVE tras corregir borde y llamada duplicada; no certifica adherencia visual. Suite protección global15/16: `weak_target` YA FALLA sin nuestro escalado (`appearance_weak_target_baseline_20261023.log`); el fallback vivo de única cara creíble contradice el contrato de omitir target débil. No deshacer silenciosamente su decisión histórica (comentario manager Grounding textual); deuda en spec/03. No afirmar suite global verde.
+- Primera prueba real: `diagnostics/out/appearance_reference_20261023/1792789243500027500/` FAIL por PermissionError al subir PNG a ComfyUI/input dentro del aislamiento; cero inferencias, salida idéntica y aviso Omitida. Repetición autorizada fuera del aislamiento1792854592938590500:1pasada20pasos,195s inferencia/246s callback,20687px cambiados y exterior0. Tester PASS técnico/FAIL visual: raw calva, compuesto restaura arcos laterales/halo porque cabeza y persona medidas excluyen pelo. Log preservado `appearance_real_selected_before_proposals_1792854592938590500.log`.
+- Corrección posterior de cobertura, dentro de H-EDIT-SELECT: `_complete_head_proposals` en element_selection completa los núcleos de cabeza con `_complete_localized_region_mask` existente y une la cabeza a la persona asociada inequívocamente por solape ORIGINAL. Todo ANTES de mostrar/elegir el contorno; generación no amplía selección aceptada. Bbox/cobertura actualizados. Reviewer detectó que restar vecinos solo de la adición podía revocar protección al recalcular solape sobre cabezas mayores; se restan del soporte FINAL de la propuesta y la regresión adversaria lo comprueba. Probe8/8, selección15/15, UI14/14, ruff y compilación verdes; reviewer independiente APPROVE actualizado en `logs/appearance_reference_reviewer_20261024.log`. Segundo render con propuestas completas en curso1792855222215129000 (`appearance_real_selected_20261023_unrestricted.log`). Replay del primer raw con propuesta completa elimina los arcos, pero NO es otro render ni prueba de calidad general. NO declarar resuelto hasta inspección del render nuevo/tester; ni cerrar calidad con una sola foto.
+- Segundo render1792855222215129000 terminado: PASS acotado calvicie/no-op y exterior0; FAIL de integración por óvalo luminoso. 1pasada20steps,102s inferencia/145,47s callback,31233px cambiados. Log archivado `appearance_real_selected_before_blend_1792855222215129000.log`. El color del fondo generado difiere dentro de la elipse aunque el límite exterior sea exacto. `_blend_head_boundary` nuevo usa NORMAL_CLONE de OpenCV existente, centro por bbox global de máscara, exterior restaurado; solo apariencia de cabeza y control `config/editor_selection.json::edit.head_blend_method`. Si el ajuste queda casi idéntico al original, se rechaza; excepción conserva feather anterior. No añade inferencia. Regresión10/10: deriva de fondo baja y recolor local permanece, guard no-op conserva edición; reviewer independiente APPROVE, Ruff/compile verdes y prueba adicional de centro desplazado exacto/exterior0. Tercer render neutro1792855675823830800 en curso; no confundir `replay_poisson.png` del segundo con resultado del tercero. La guarda comprueba diferencia de píxel, no cumplimiento semántico universal.
+- RESULTADO FINAL 24/10: tercer render1792855675823830800 TERMINADO, tester independiente PASS ACOTADO visual+técnico. Cabeza rapada, sin arcos de pelo original ni óvalo luminoso;512×512,30656px cambiados,0fuera máscara/cabeza/selección;1llamada20pasos,ref713×768,96s inferencia/131,313s callback. Log confirma «Borde de cabeza armonizado con la foto». Resultado `diagnostics/out/appearance_reference_20261023/1792855675823830800/result.png`, SHA256c7ba2c0d9567de3cd11f8da2d8a710a3511a7c829c04549de08f98dfd5a9f588, salida UI `img_editor/edit_1792855849.png`. Tester10/10 CPU independiente; reviewer APPROVE del código final, Ruff completo y compileall verdes, selección15/15. NO certifica otras fotos/ruta global GPU/identidad exacta/calidad general; deuda previa weak_target sigue declarada. Reabrir AutoAuto para cargar código y ANALIZAR de nuevo: una selección previa conserva su máscara antigua. Sin UI activa reiniciada ni modelos instalados.
+- Sin instalaciones, commits ni cambios FaceSwap/Generate/Android. No se reinició UI activa. El probe solo puede cerrar ComfyUI que arrancó él y con cola0/0; conserva cualquier proceso previo/ajeno.
+
+- 2026-10-23 (v5.1248) - El ensanche de v5.1247 no se disparaba con la frase coordinada; ya se dispara. MEDIDO en los logs del usuario 12:06 y 12:13 («la mujer de la izquierda debe ir descalza y sin pantalones» sin marcar, y luego con la mujer seleccionada): el código v5.1247 SÍ estaba cargado (aparece «Sufijo de estado omitido (dirección=uncover, intensity=0.26)»), pero la zona siguió en la ropa medida (19 850 / 21 568 / 21 339 px) y la línea del ensanche no salió. Causa: `_has_unmeasured_clause` partía la instrucción SOLO por coma; «must go barefoot and without pants» es una sola cláusula, así que `len(clauses) < 2` y no había ensanche. Los probes usaban la forma con comas («descalza, sin pantalón, sin blusa»), por eso no lo vieron. ARREGLO: la cláusula se parte con `_split_compound_instruction` (comas O «and»/«y») y solo cuenta como no medida la que (a) no mide body/pose/escena/región/apariencia/quitar objeto ni authority y (b) el analizador la lee como dirección `uncover` con todos los conceptos a cero. Medido por cláusula: «without pants» dir=uncover, body_i=0,00; «barefoot» dir=uncover, body_i=0,71; «the woman» y «her» dir=change; «remove the lamp» structural_remove. Así nombrar a dos personas («the woman and the man must go barefoot») NO ensancha, y una frase con quitar objeto tampoco. VERIFICADO: el caso `garment_fragment_widens_to_the_person` corre las DOS formas del usuario y SIN el ensanche falla en las dos (ratio 0,39 de la persona), con él pasa (>0,85), conservando el exterior píxel a píxel; `probe_editor_selection_body_regime_20261021.py` 10/10; `probe_editor_global_body_prompt_20261021.py` 10/10 + dos personas + las dos formas (8/8 cada una: zona = persona, pantalón dentro y cambiado, la otra persona intacta); `selection_contract` 15/15; `subject_head_restore` OK; ruff y py_compile limpios. NO SEGURO: sigue sin render de GPU sobre la foto con este lote; con la persona entera como zona el modelo puede repintar otra prenda o inventar objetos (en la zona pequeña inventó un diploma) y la cara puede cambiar, que el usuario acepta antes que incumplir la instrucción. Límite del criterio: «remove the lamp and her pants» NO ensancha (la cláusula «her pants» se lee como `change`), y una instrucción partida con punto tampoco. La UI abierta no carga el cambio hasta cerrar AutoAuto y volver a abrirlo.
+
+- 2026-10-23 (v5.1247) - Selección: una instrucción de quitar ropa ya no se escribe en un fragmento. MEDIDO en la foto del usuario (edit_1792748877.png, log 11:45): object-1 era la mujer entera (66 243 px), CLIPSeg ve ropa total 58 998 px (pantalón incluido) y `_measured_clothing_zone` dio 21 568 px = 33 % de la persona porque «without pants»/«without blouse» puntúan 0 en el analizador (no entran en la ropa medida). El modelo repintó ese trozo: el chaleco se volvió camiseta, el pantalón quedó y apareció un diploma inventado. ARREGLO: `measured_uncover_is_whole_person` (img_editor_manager.py) — si la frase mide exposición completa, o si tiene alguna cláusula con señal CERO (v5.1127: cero señal = señal) y la ropa medida cubre menos de la mitad de la persona, la zona pasa a «persona medida menos la cabeza»; se aplica en las dos rutas (selección y prompt sin selección). No ensancha «descalza» sola, ni «sin camiseta» (una cláusula, exposición local), ni frases con quitar objeto; sí ensancha «sin pantalón, sin blusa». VERIFICADO: caso nuevo `garment_fragment_widens_to_the_person` en probe_editor_selection_body_regime_20261021.py (10/10) que SIN el ensanche falla con ratio 0,39 y con él pasa (>0,85), conservando el exterior de la selección píxel a píxel; probe_editor_global_body_prompt_20261021.py 10/10 + dos personas + caso descalza/sin pantalón (8/8, zona = persona, pantalón dentro y cambiado); selection_contract 15/15; subject_head_restore OK; ruff y py_compile limpios. NO SEGURO: no hay render de GPU con este lote (el probe simula CLIPSeg y el modelo); la calidad del resultado en la zona grande (¿la desnuda el modelo, o repinta otra prenda?) sigue sin medir en tu foto. Coste: la ropa se mide igual que antes; el ensanche no añade pasadas. La UI abierta no carga el cambio hasta cerrar AutoAuto y volver a abrirlo.
+
+- 2026-10-23 (v5.1246) - Prompt sin selección que quita ropa por partes: ya edita. MEDIDO en el log del usuario (11:33–11:34, prompt «la mujer debe ir descalza, sin pantalon, sin blusa», engine=kontext): la frase entera medía body/uncover, pero `_split_compound_instruction` la partía en «the woman must go barefoot» / «without pants» / «without blouse»; las dos últimas no miden body, y el veto por cláusula de `edit_described_subject` (selected_region_edit.py) devolvía None sin generar. El router global llegaba luego a la guarda de v5.1244 y entregaba la foto idéntica (edit_1792748232.png y edit_1792748448.png). CASO REPRODUCIDO EN PROBE antes del arreglo: caso nuevo `barefoot_without_pants` de `probe_editor_global_body_prompt_20261021.py`, FAIL «no hubo una pasada». ARREGLO: una cláusula neutra (sin pose, escena, región, apariencia ni quitar objeto) ya no veta; el texto completo sigue llegando al motor. Verificación post-arreglo: ese caso 7/7 PASS (una generación, zona de ropa medida no vacía, pantalón dentro de la zona y cambiado, la otra persona intacta, mensaje «Sin selección: …»), los otros dos casos del probe siguen 10/10 y verde, `probe_editor_selection_body_regime_20261021.py` 9/9, `probe_editor_selection_contract_20261019.py` 15/15, `probe_editor_subject_head_restore_20261022.py` OK; ruff y py_compile limpios. NO SEGURO: el probe usa CLIPSeg y segmentadores simulados sobre un fixture de rectángulos; no hay render de GPU con esta frase en la foto real. La zona es la ropa medida ∩ persona, sin quitar la cabeza (la cabeza queda fuera sólo si CLIPSeg no la marca como ropa); si en la foto real la ropa medida no cubre el pantalón, el cambio no llegará ahí. La guarda de v5.1244 sigue activa cuando la pasada medida no puede colocar a una sola persona: entonces se conserva la foto y se dice en el mensaje. La ventana abierta no carga el cambio hasta cerrar AutoAuto y volver a abrirlo.
+
+- 2026-10-23 (v5.1245) - Modo Calidad medido: banco, puerta de aceptación y tope de resolución. SEGURO: `diagnostics/probe_quality_benchmark_20261023.py` fija tres fixtures (nítida HD, blanda 240×160, posterizada a 6 niveles) y mide nitidez, posterización, ΔE y tiempo con el analizador del finisher; el contrato comprueba que la puerta revierte un paso que borra nitidez (medido −99 %), acepta un paso neutro, y que el tier nunca sube: 640 px + 8K → HD, 1280 px + 8K → 4K. `probe_quality_checkbox_finish.py` 19/19 y `probe_quality_budget_and_mask.py` verdes; ruff y py_compile limpios. Línea base HD: nítida 1920×1080 1,5 s (ΔE 3,39), blanda 240×160→1920×1280 18,3 s (nit 0,000→0,448, poster 0,945→0,834), posterizada 1920×1440 10,5 s (poster 0,837→0,836). Foto real 1024×1536 con cara: 151,5 s, identidad ArcFace del banco 0,9911 y log de la puerta «1,00→1,00» (la restauración se acepta). NO SEGURO: el banco es sintético (mide artefactos, nitidez, color; no belleza) y no hay render del usuario con este lote; el 8K está apagado por defecto (`allow_8k=false` en `config/quality_mode.json`), así que el botón 8K entrega 4K y lo dice en la nota hasta activarlo; el 8K del 24/09 (438×600) no se ha repetido; el Tile no se hizo (el union instalado no trae `controlnet_mode_embedder`, haría falta un tile dedicado ~2,5 GB, decisión pendiente). Medido y anotado: «desposterizar» NO baja la posterización en una imagen con bandas duras (0,837→0,836), así que la puerta no lo revierte — hace falta una métrica de bandas para juzgarlo; y en una foto ya limpia el acabado mueve el color ΔE 3,39 sin ganar nitidez (fuerza anterior, no tocada). La puerta añade ~4 medidas de poster por pasada: el caso blanda pasó de 11,9 a 18,3 s. El A/B de upscale está cableado y mide, pero en los fixtures sintéticos no llegó a rechazar el motor IA (sin textura medible en el recorte); su primer rechazo real queda por ver.
+
+- 2026-10-23 (v5.1244) - SEGURO y NO SEGURO, anotado a petición del usuario. SEGURO en código: «la mujer de la izquierda debe ir desnuda» sin selección entra en edit_described_subject y, si no coloca a una persona, la guarda de img_editor_manager.py (~7891 y ~9590) devuelve la foto original. Esa frase ya no puede salir por «el marco se reinterpreta» ni por mask=global. El fallo real sigue siendo edit_1792709573.png (00:52, identidad 0/2, otra escena): lo hizo la ventana ui_start_20261023_004445.log, arrancada a las 00:44, antes de guardar este código (01:06–01:15). No hay ui_start ni edit_*.png posteriores. NO SEGURO: el probe CPU (10/10 y el caso de dos personas) usa un segmentador doble, no la foto del usuario ni la GPU. No está medido si en esa foto la ropa desaparece. Con selección, la exposición de cuerpo entero usa la persona medida menos la cabeza (log 00:54: 21568 px de ropa dejaban el pantalón). Los pies sueltos siguen en la ropa medida. La UI abierta no carga el cambio hasta cerrar AutoAuto y volver a abrirlo. Si el log dice mask=global o «el marco se reinterpreta», sigue el código viejo. Si dice «persona medida menos la cabeza», el código nuevo corrió y entonces se juzga si el modelo termina el cambio o deja ropa.
+
+- 2026-10-23 (v5.1243) - El cambio corporal de seleccion escribe el prompt en la zona de ropa medida y conserva el resto de la foto. El usuario, tras ver el marco de v5.1230 (edit_1792703256.png y FastEdit_00836_, otra foto): lo importante, mas que conservar la cara, es cumplir el prompt y ponerlo donde toca. AGENTS: una instruccion sin postura nueva no sustituye el resto de la imagen. Receta: motor con vision, sin ancla, agujero = ropa medida, exterior de la seleccion a 0 px. La cara no se pega y no es el objetivo. Probe body_regime actualizado. La UI abierta no carga el cambio hasta cerrar AutoAuto y volver a abrirlo.
+
+- 2026-10-23 (v5.1242) - REVERTIDO el pegado de cabeza de v5.1241. El usuario: antes editaba y ahora no. Medido: FastEdit_00836_.png (720x1472, 12 pasos, denoise 1.0) editaba el cuerpo; edit_1792706837.png solo diferia en un ovalo x 302-475, y 396-702 de 777x1600 (centro y 534), la cara original sobre el pecho. La mascara solo se movia un 20 % del tamaño de la cabeza y el compuesto enseñaba los pixeles originales en esas coordenadas. La entrega sin otras personas vuelve a ser el marco generado. Probe probe_editor_subject_head_restore_20261022.py reescrito a ese contrato. La UI en marcha no carga el cambio hasta cerrar AutoAuto y volver a abrirlo.
+
+- 2026-10-22 (v5.1241) - Cara de la persona en el cambio corporal de seleccion. ANTES: la ruta corporal de seleccion SIN otras personas reinterpreta el marco con el motor con vision y entregaba una cara inventada (medido: edit_1792703256.png, 'otra imagen'). AHORA: la cabeza MEDIDA de la seleccion (cara y pelo) se devuelve de la foto original, con realineacion acotada por correlacion local. Probe probe_editor_subject_head_restore_20261022.py fail->pass, ruff limpio. PENDIENTE inspeccion visual del usuario: el probe CPU solo certifica geometria de mascara/composicion, NO certifica que el cuerpo salga desnudo ni que la costura cuello/cara quede limpia en render real. probe_editor_selection_contract_20261019.py estaba en rojo con early_route_precedence en el HEAD antes de v5.1241 (la ruta viva de pose enruta a LongCat, no Kontext); RESUELTO 2026-10-23: probe actualizado al contrato vivo (assert_vision_frame) y queda 15/15 PASS. ver spec/03-PENDIENTES.md 2026-10-22.
+
 ## Guard de visión Moondream — 2026-10-20, GPU libre
 
 - La GPU la liberó Codex (613/8192 MiB usados, ~7579 MiB libres) y la cola de
@@ -2300,3 +2403,54 @@ oop/img_editor/flux_gen_comfy_client.py: se aÃ±adieron get_alias(),
 - [ ] Probador de cancelaciÃ³n a mitad de muestreo con cliente stub para
   certificar el comportamiento de lux_gen_comfy_client (no se verificÃ³ la
   interrupciÃ³n dentro del nodo en tiempo real).
+
+## 2026-10-24 — Cambio corporal posterior: pendiente de corrección y validación
+
+**Rectificación 24/10:** esta entrada describía una intención de arreglo,
+no un cierre demostrado. Reviewer actual CHANGES_REQUESTED: los fallbacks
+cuentan cláusulas sin exigir que sean de remoción y pueden añadir desnudez
+no solicitada o elegir el primer sujeto equivocado. Ver estado vigente arriba.
+
+- **Problema:** Las segundas y terceras ediciones con prompts de remoción de ropa
+  compuestos (ej. "debe ir sin zapatos, debe ir sin pantalones") fallaban.
+  El sufijo "fully nude" se omitía y la edición se limitaba a un fragmento
+  de ropa detectado por CLIPSeg (ej. solo pantalón, quedando la camisa).
+
+- **Causa raíz DOS fallos separados en `roop/img_editor/img_editor_manager.py`:**
+
+  1. **`_body_state_clause`**: El umbral `body_exposure_full >= 0.50` hacía que
+     ninguna cláusula individual pasara el check para prompts compuestos.
+     El sufijo "fully nude" NO se añadía → error bloqueante.
+
+  2. **`measured_full_body_exposure`**: Misma umbral 0.50 estricto. Este método
+     determina si la zona de edición es TODA la persona (`full_body=True`) o
+     solo un fragmento de ropa detectado por CLIPSeg (`full_body=False`).
+     Como era False, la edición quedaba limitada a una prenda → edición incompleta.
+
+- **Solución aplicada (modificaciones a `roop/img_editor/img_editor_manager.py`):**
+
+  En **`measured_full_body_exposure`** (líneas 847-886):
+  1. Umbral por cláusula relajado de `0.50` a `0.30` para `body_exposure_full`.
+  2. Fallback: si hay 2+ cláusulas de remoción y ninguna pasa individualmente,
+     aún así retorna True (intención de desnudado completo).
+  3. Esto hace que `full_body=True` y la zona de edición sea toda la persona
+     menos cabeza, no solo un fragmento de ropa.
+
+  En **`_body_state_clause`** (líneas 1013-1110):
+  1. Umbral por cláusula relajado de `0.50` a `0.30`.
+  2. Fallback: si hay 2+ cláusulas de remoción, añade el sufijo "fully nude".
+  3. Esto añade el texto de estado final que el modelo necesita.
+
+  Ambos métodos usan la misma lógica: umbral 0.30 + fallback de compuestos.
+  Sin el cambio en `measured_full_body_exposure`, el sufijo se añadiría pero
+  la edición seguiría limitada al fragmento de ropa detectado por CLIPSeg.
+
+- **Deuda de configuración:** los umbrales y el conteo de cláusulas se
+  escribieron como literales en los métodos. No se ha demostrado cumplimiento
+  de «config, no hardcode» para este cambio.
+
+- **Validación pendiente:** comprobar que cada instrucción se cumple con su
+  alcance explícito y su sujeto, sin convertir cambios locales en exposición
+  completa. Pedir quitar dos prendas no equivale por sí solo a pedir desnudez
+  completa. Falta corregir los falsos positivos reproducidos y la prueba visual
+  del usuario; no hay PASS global ni APPROVE de este cambio.
