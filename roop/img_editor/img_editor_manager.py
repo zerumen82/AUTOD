@@ -8,7 +8,7 @@ from typing import Optional, Tuple, Dict
 from PIL import Image, ImageFilter
 import numpy as np
 from roop.utils import get_vram_gb
-from roop.img_editor.gen_prompt_config import get_kontext_model_config
+from roop.img_editor.gen_prompt_config import get_kontext_model_config, SubjectPromptConfigError
 
 from roop.utilities import resolve_relative_path
 
@@ -844,6 +844,258 @@ class ImgEditorManager:
             return {}
         return {"kontext_img2img_denoise": float(denoise)}
 
+    @staticmethod
+    def _body_scope_policy() -> Dict:
+        """Read the existing scope limits; invalid configuration cannot widen an edit."""
+        from roop.img_editor.element_selection import load_settings
+
+        policy = load_settings()["instruction_scope"]
+        keys = ("full_exposure_min_score", "full_exposure_local_ratio",
+                "body_state_min_intensity")
+        if any(isinstance(policy[key], bool) or not isinstance(policy[key], (int, float))
+               for key in keys):
+            raise ValueError("instruction_scope requiere valores numéricos")
+        values = {key: float(policy[key]) for key in keys}
+        if (not all(np.isfinite(value) for value in values.values())
+                or not 0 < values["full_exposure_min_score"] <= 1
+                or values["full_exposure_local_ratio"] < 1
+                or not 0 < values["body_state_min_intensity"] <= 1):
+            raise ValueError("instruction_scope contiene límites inválidos")
+        return values
+
+    def _full_body_exposure_clauses(self, text: str) -> list:
+        """Keep only clauses supported by a finite semantic measurement.
+
+        Clause count is never evidence of scope. The same measured clauses
+        serve the region decision and the state suffix, so an unrelated first
+        subject cannot acquire another clause's requested state.
+        """
+        try:
+            policy = self._body_scope_policy()
+            scorer = self._get_semantic_analyzer(full_ai=False)
+            measured = []
+            for clause in self._instruction_clauses(text):
+                scores = scorer.score_concepts(self._requested_change_scope(clause) or clause)
+                full = float(scores.get("body_exposure_full", 0.0))
+                local = float(scores.get("body_exposure_local", 0.0))
+                if not np.isfinite(full) or not np.isfinite(local):
+                    raise ValueError("medición de alcance no finita")
+                if (full >= policy["full_exposure_min_score"]
+                        and full >= local * policy["full_exposure_local_ratio"]):
+                    measured.append((clause, full))
+            return measured
+        except Exception as error:
+            print(f"[ImgEditor] Alcance corporal no confirmado: {error}", flush=True)
+            return []
+
+    def measured_full_body_exposure(self, text: str) -> bool:
+        """A compound instruction only has full scope if a clause measures it,
+        or several uncover clauses together ask for full-body exposure."""
+        if self._full_body_exposure_clauses(text):
+            return True
+        return self._multi_clause_uncover_is_full_body(text)
+
+    def is_true_full_body_exposure(self, text: str) -> bool:
+        """True when the instruction directly asks for full-body exposure
+        (e.g., 'naked', 'sin ropa', 'desnuda') via vocabulary match,
+        not via multi-clause heuristic."""
+        return bool(self._full_body_exposure_clauses(text))
+
+    def measured_uncover_is_whole_person(self, instruction: str,
+                                         person_pixels: int,
+                                         garment_pixels: int) -> bool:
+        """Whether an uncover must be written on the person, not a garment bit.
+
+        ``measured_full_body_exposure`` reads the vocabulary: «naked» is the
+        whole body, «topless» a part. A request the vocabulary does not cover
+        («sin pantalón, sin blusa» scores 0 on both) is decided by the photo:
+        a garment zone covering less than half the measured person cannot
+        remove the clothing (medido 2026-10-23: 21568 px de ropa, el chaleco
+        se volvió camiseta y el pantalón quedó). Also the reason this is
+        limited to the body/uncover regime: «quitar la chaqueta» no entra
+        ahí (structural_remove), así que su zona de prenda sigue local.
+        """
+        if self.measured_full_body_exposure(instruction):
+            return True
+        if not self._has_unmeasured_clause(instruction):
+            return False          # everything the sentence asks is measured
+        return 0 < int(garment_pixels) < 0.5 * max(1, int(person_pixels))
+
+    def _has_unmeasured_clause(self, text: str) -> bool:
+        """True when one clause asks for a removal the analyzer cannot name.
+
+        v5.1127 already treats zero signal as signal: the concept analyzer is
+        a token↔concept overlapper, so an empty score means the request is
+        outside its vocabulary, not that the request is weak. «without
+        pants» measures direction «uncover» with every concept at zero, while
+        «barefoot» measures local exposure; the sentence as a whole is a body
+        uncover, so the change goes beyond the fragment the analyzer could
+        measure.
+
+        v5.1248 — the clause is split exactly as the rest of the editor
+        splits an instruction (commas OR «and»/«y»). The user's live phrasing
+        («debe ir descalza y sin pantalones», log 12:06 y 12:13) is a
+        conjunction without a comma, so the comma-only split never saw
+        «without pants» and the zone stayed on the garment fragment (21 568
+        px, the trousers outside).
+
+        A clause only counts when it reads as a REMOVAL with nothing
+        measured: a subject fragment («the woman», «her») measures direction
+        «change», so naming two people does not widen a local request, and
+        «remove the lamp» is structural_remove, already measured by other
+        means.
+        """
+        clauses = self._split_compound_instruction(text or "")
+        if len(clauses) < 2:
+            clauses = [c.strip() for c in re.split(r"\s*[,;]\s*", text or "")
+                       if c.strip()]
+        if len(clauses) < 2:
+            return False
+        try:
+            scorer = self._get_semantic_analyzer(full_ai=False)
+        except Exception:
+            return False
+        for clause in clauses:
+            try:
+                facts = self._prompt_authority_facts(clause, clause)
+            except Exception:
+                continue
+            if (
+                facts.get("body") or facts.get("pose") or facts.get("scenario")
+                or facts.get("local_region") or facts.get("local_appearance")
+                or facts.get("structural_remove") or facts.get("authority")
+            ):
+                continue
+            scope = self._requested_change_scope(clause) or clause
+            try:
+                direction = str(scorer.get_body_direction(scope)).lower()
+            except Exception:
+                continue
+            if direction == "uncover":
+                return True
+        return False
+
+    @staticmethod
+    def _load_instruction_scope() -> Dict:
+        """Read instruction_scope limits from config (no hardcode defaults)."""
+        from roop.img_editor.element_selection import load_settings
+        return load_settings().get("instruction_scope", {})
+
+    def _clothing_zone_min_ratio(self) -> float:
+        """Minimum fraction of the measured person that clothing must cover
+        for the generation zone to be the clothing instead of the whole body.
+
+        Read from config; falls back to 0.5 (same threshold used by
+        ``measured_uncover_is_whole_person``).
+        """
+        try:
+            scope = self._load_instruction_scope()
+            value = float(scope.get("clothing_zone_min_ratio", 0.5))
+            if 0.0 < value <= 1.0:
+                return value
+        except Exception:
+            pass
+        return 0.5
+
+    def _multi_clause_uncover_is_full_body(self, text: str) -> bool:
+        """True when several uncover clauses together ask full-body exposure.
+
+        A single clause like «without pants» scores 0 on body_exposure_full,
+        so _full_body_exposure_clauses returns [] and no end-state sentence is
+        written. But two or more uncover clauses («without shoes», «without
+        trousers») are a compound request to undress: the model needs the
+        strong state sentence to obey. Guarded by config so a single local
+        request is never promoted to full exposure.
+        """
+        try:
+            policy = self._body_scope_policy()
+            scope_cfg = self._load_instruction_scope()
+            if not scope_cfg.get("multi_clause_uncover_enabled", False):
+                return False
+            min_clauses = int(scope_cfg.get("multi_clause_uncover_min_clauses", 2))
+            if min_clauses < 2:
+                return False
+        except Exception:
+            return False
+        clauses = self._split_compound_instruction(text or "")
+        if len(clauses) < 2:
+            clauses = [c.strip() for c in re.split(r"\s*[,;]\s*", text or "") if c.strip()]
+        if len(clauses) < min_clauses:
+            return False
+        try:
+            scorer = self._get_semantic_analyzer(full_ai=False)
+        except Exception:
+            return False
+        relevant_count = 0
+        uncover_count = 0
+        for clause in clauses:
+            try:
+                facts = self._prompt_authority_facts(clause, clause)
+            except Exception:
+                continue
+            if (
+                facts.get("pose") or facts.get("scenario")
+                or facts.get("local_region") or facts.get("local_appearance")
+                or facts.get("structural_remove")
+            ):
+                continue
+            relevant_count += 1
+            scope = self._requested_change_scope(clause) or clause
+            try:
+                direction = str(scorer.get_body_direction(scope)).lower()
+                intensity = float(scorer.get_body_transform_intensity(scope))
+            except Exception:
+                continue
+            if (
+                direction == "uncover"
+                and np.isfinite(intensity)
+                and intensity >= policy["body_state_min_intensity"]
+            ):
+                uncover_count += 1
+        return relevant_count >= min_clauses and uncover_count >= 1
+
+    def _first_uncover_subject(self, text: str) -> str:
+        """Visual subject of the first uncover clause, if any.
+
+        Used to name the person in the end-state sentence of a multi-clause
+        uncover request. Never borrows the first subject of a compound
+        instruction about something else (v5.1216 sofa/woman lesson).
+        """
+        clauses = self._split_compound_instruction(text or "")
+        if len(clauses) < 2:
+            clauses = [c.strip() for c in re.split(r"\s*[,;]\s*", text or "") if c.strip()]
+        try:
+            scorer = self._get_semantic_analyzer(full_ai=False)
+            minimum_intensity = self._body_scope_policy()["body_state_min_intensity"]
+        except Exception:
+            return ""
+        for clause in clauses:
+            try:
+                facts = self._prompt_authority_facts(clause, clause)
+            except Exception:
+                continue
+            if (
+                facts.get("pose") or facts.get("scenario")
+                or facts.get("local_region") or facts.get("local_appearance")
+                or facts.get("structural_remove")
+            ):
+                continue
+            scope = self._requested_change_scope(clause) or clause
+            try:
+                direction = str(scorer.get_body_direction(scope)).lower()
+                intensity = float(scorer.get_body_transform_intensity(scope))
+            except Exception:
+                continue
+            if (
+                direction == "uncover"
+                and np.isfinite(intensity)
+                and intensity >= minimum_intensity
+            ):
+                subject = self._visual_subject_description(clause) or ""
+                if subject:
+                    return subject.strip(" ,.;")
+        return ""
+
     def measured_body_regime(self, raw_prompt: str, translated_prompt: str,
                               *, engine: str = "kontext") -> Dict:
         """Measured regime for one instruction, shared by both edit routes.
@@ -904,10 +1156,12 @@ class ImgEditorManager:
             # con la foto; con la zona medida como máscara, el muestreador
             # conserva la foto de alrededor y el modelo solo repinta lo medido.
             regime["engine"]["measured_zone_mask"] = True
-            regime["engine"]["img2img_denoise"] = float(
+            # El cliente acota el img2img puro a 0,80-0,90; acotarlo aquí deja
+            # el régimen medido con el valor que se ejecuta de verdad.
+            regime["engine"]["img2img_denoise"] = max(0.80, min(0.90, float(
                 self.auto_detect_params(
                     {"magnitude": magnitude, "quality_only": False}, engine
-                ).get("denoise", 1.0))
+                ).get("denoise", 1.0))))
         return regime
 
     def _body_state_clause(self, raw: str, body_direction: str,
@@ -928,45 +1182,18 @@ class ImgEditorManager:
         Shared by the global route and the explicit-selection route so both
         obey the same measured decision.
         """
-        if body_direction == "uncover" and float(body_intensity) >= 0.30:
-            try:
-                scorer = self._get_semantic_analyzer(full_ai=False)
-                full_exposure = any(
-                    (scores := scorer.score_concepts(
-                        self._requested_change_scope(clause) or clause
-                    )).get("body_exposure_full", 0.0) >= 0.50
-                    and scores.get("body_exposure_full", 0.0)
-                    >= scores.get("body_exposure_local", 0.0) * 1.15
-                    for clause in re.split(r"\s*[,;]\s*", raw) if clause.strip()
-                )
-            except Exception:
-                full_exposure = False
-            if full_exposure:
-                _suffix_clause = raw
-                _suffix_clauses = self._split_compound_instruction(raw) or [raw]
-                if len(_suffix_clauses) > 1:
-                    try:
-                        def _body_signal(_clause):
-                            _scores = scorer.score_concepts(
-                                self._requested_change_scope(_clause)
-                                or _clause,
-                            )
-                            return max(
-                                float(_scores.get("attribute_body", 0.0)),
-                                float(_scores.get("attribute_uncover", 0.0)),
-                            )
-                        _best_clause = max(_suffix_clauses, key=_body_signal)
-                        # Si la cláusula corporal no nombra sujeto
-                        # («…calvo e ir desnudo») se conserva el sujeto
-                        # del texto entero, como hasta hoy.
-                        _best_subject = (
-                            self._visual_subject_description(_best_clause)
-                            or ""
-                        ).strip(" ,.;")
-                        if _best_subject:
-                            _suffix_clause = _best_clause
-                    except Exception:
-                        _suffix_clause = raw
+        try:
+            minimum_intensity = self._body_scope_policy()["body_state_min_intensity"]
+            intensity = float(body_intensity)
+            if not np.isfinite(intensity):
+                raise ValueError("intensidad de alcance no finita")
+        except Exception as error:
+            print(f"[ImgEditor] Estado corporal no confirmado: {error}", flush=True)
+            return ""
+        if body_direction == "uncover" and intensity >= minimum_intensity:
+            measured_clauses = self._full_body_exposure_clauses(raw)
+            if measured_clauses:
+                _suffix_clause = max(measured_clauses, key=lambda item: item[1])[0]
                 _subject = (
                     self._visual_subject_description(_suffix_clause) or ""
                 ).strip(" ,.;")
@@ -977,10 +1204,20 @@ class ImgEditorManager:
                         f" {_subject[0].upper()}{_subject[1:]} is fully nude, "
                         "bare skin, no clothing at all."
                     )
-                return " The person is fully nude, bare skin, no clothing at all."
+                # No subject in the measured clause: do not borrow an unrelated
+                # subject from the rest of a compound instruction.
+                return ""
+            if self._multi_clause_uncover_is_full_body(raw):
+                # Multi-clause uncover (e.g. «without shoes, without pants»):
+                # write the strong end-state sentence so the model obeys.
+                _subject = self._first_uncover_subject(raw) or "The person"
+                return (
+                    f" {_subject[0].upper()}{_subject[1:]} is fully nude, "
+                    "bare skin, no clothing at all."
+                )
             print("[ImgEditor] Sufijo de desnudez total omitido: el alcance medido no es corporal completo", flush=True)
             return ""
-        if body_direction == "cover" and float(body_intensity) >= 0.30:
+        if body_direction == "cover" and intensity >= minimum_intensity:
             return " The person is fully dressed, body covered with warm clothing."
         print(f"[ImgEditor] Sufijo de estado omitido (dirección={body_direction}, intensity={float(body_intensity):.2f} — sin estado medido que describir; el texto del usuario manda)", flush=True)
         return ""
@@ -1321,6 +1558,7 @@ class ImgEditorManager:
         continue_region: bool = True,
         return_protection: bool = False,
         protection_faces=None,
+        eligible_faces=None,
     ):
         """Reduce una región visual de persona a la cabeza que le corresponde.
 
@@ -1335,6 +1573,7 @@ class ImgEditorManager:
             region = np.asarray(region_mask.convert("L"))
             h, w = region.shape[:2]
             best_face, best_score, second_score = None, 0.0, 0.0
+            measured_candidates = []
             for face_obj in faces:
                 x1, y1, x2, y2 = [int(round(float(v))) for v in face_obj.bbox]
                 fw, fh = max(1, x2 - x1), max(1, y2 - y1)
@@ -1343,11 +1582,13 @@ class ImgEditorManager:
                 ax2, ay2 = min(w, x2 + px), min(h, y2 + int(fh * 0.15))
                 patch = region[ay1:ay2, ax1:ax2]
                 score = float((patch > 128).mean()) if patch.size else 0.0
+                measured_candidates.append(f"bbox=({x1},{y1},{x2},{y2}) solape={score:.3f}")
                 if score > best_score:
                     second_score = best_score
                     best_face, best_score = face_obj, score
                 elif score > second_score:
                     second_score = score
+            print("[ImgEditor] Candidatos de cabeza: " + "; ".join(measured_candidates), flush=True)
             if best_face is None or best_score < 0.08:
                 print(f"[ImgEditor] Región focal sin cabeza asociable (score={best_score:.2f})", flush=True)
                 return no_selection
@@ -1359,6 +1600,10 @@ class ImgEditorManager:
                     f"[ImgEditor] Región focal ambigua entre caras (mejor={best_score:.2f}, segunda={second_score:.2f})",
                     flush=True,
                 )
+                return no_selection
+            if eligible_faces is not None and not any(
+                    self._same_face(best_face, face) for face in eligible_faces):
+                print("[ImgEditor] El referente medido es una detección descartada; no se sustituye por otra cara", flush=True)
                 return no_selection
             print(f"[ImgEditor] Región focal por solape medido (score={best_score:.2f})", flush=True)
 
@@ -2393,6 +2638,23 @@ class ImgEditorManager:
         except Exception:
             return None
 
+    @staticmethod
+    def _scale_kontext_focal_reference(image: Image.Image) -> Image.Image:
+        """Give a small measured crop the configured focal sampling budget."""
+        from roop.img_editor.element_selection import load_settings
+        maximum = int(load_settings()["edit"]["maximum_reference_side"])
+        if maximum < 1:
+            raise ValueError("La resolución focal de Kontext debe ser positiva")
+        longest = max(image.size)
+        if longest >= maximum:
+            return image
+        scale = maximum / longest
+        return image.resize(
+            (max(1, int(round(image.width * scale))),
+             max(1, int(round(image.height * scale)))),
+            Image.Resampling.LANCZOS,
+        )
+
     def _appearance_work_region(
         self, image: Image.Image, mask: Optional[Image.Image],
         person: Optional[Image.Image] = None,
@@ -2404,7 +2666,7 @@ class ImgEditorManager:
         crop, and the model left the disk (edit_1790788517.png, mean 126).
         The window keeps the photo around the mask. Its area follows the same
         1MP canvas LongCat already normalizes to, and the mask stays within the
-        same 0.35 local cap _crop_focal_context uses. The paste still writes
+        configured crop_max_area cap _crop_focal_context uses. The paste still writes
         only the measured mask.
 
         2026-10-03: cuando se pasa la persona, la ventana no puede recortarla.
@@ -2417,7 +2679,9 @@ class ImgEditorManager:
         """
         if mask is None:
             return image, mask, None
-        focal = self._crop_focal_context(image, mask)
+        from roop.img_editor.element_selection import load_settings
+        max_area = float(load_settings()["edit"].get("crop_max_area", 0.35))
+        focal = self._crop_focal_context(image, mask, max_area=max_area)
         if focal is None:
             return image, mask, None
         arr = np.asarray(mask.convert("L"))
@@ -2428,11 +2692,12 @@ class ImgEditorManager:
         iw, ih = image.size
         photo_area = max(1, iw * ih)
         core_area = int(opaque.sum())
-        area_cap = 0.35
+        area_cap = max_area
         # 2026-10-01: el suelo de 1 MP hacia que TODA foto por debajo de
         # 1048576 px abriera la foto entera y el pegado compusiera una escena
         # regenerada sobre el original (edit_1790845755). El suelo sigue
         # valiendo: da pixeles al sampler pero como mucho la mitad de la foto.
+        # El límite de área usa crop_max_area de la configuración (default 0.35).
         sampler_area = min(1024 * 1024, int(photo_area * 0.5))
         person_box = None
         if person is not None:
@@ -3060,7 +3325,7 @@ class ImgEditorManager:
         # Splitting it there would turn one requested edit into two subjects.
         text = prompt or ""
         if re.search(r"[,;]", text):
-            parts = re.split(r"\s*[,;]\s*", text)
+            parts = ImgEditorManager._instruction_clauses(text)
         else:
             parts = re.split(r"\s+(?:and|y)\s+", text, flags=re.IGNORECASE)
         clauses = [re.sub(r"^(?:and|y)\s+", "", part.strip(" .,!?"), flags=re.I)
@@ -3438,6 +3703,42 @@ class ImgEditorManager:
         )
 
     @staticmethod
+    def _instruction_clauses(instruction: str) -> list:
+        """Keep a subject's relative clause attached to its main predicate.
+
+        A comma in "the person who is standing, must have blue hair" is a
+        pause inside one instruction, not an independent request to stand.
+        Independent subjects and semicolon-separated edits remain separate.
+        Only grammatical relative markers and the existing predicate parser
+        are used; this does not interpret a posture or an object category.
+        """
+        relative = re.compile(r"\b(?:who|that|which|que)\b", re.I)
+        pieces = re.split(r"([,;])", (instruction or "").strip())
+        clauses = []
+        separator = ""
+        for piece in pieces:
+            if piece in (",", ";"):
+                separator = piece
+                continue
+            part = piece.strip()
+            if not part:
+                continue
+            if clauses and separator == ",":
+                previous = clauses[-1]
+                predicates = list(ImgEditorManager._PREDICATE_RE.finditer(previous))
+                appositive = relative.match(part) and not predicates
+                continuation = (
+                    len(predicates) == 1
+                    and relative.search(previous[:predicates[0].start()])
+                    and ImgEditorManager._PREDICATE_RE.match(part)
+                )
+                if appositive or continuation:
+                    clauses[-1] = f"{previous} {part}"
+                    continue
+            clauses.append(part)
+        return clauses
+
+    @staticmethod
     def _requested_change_scope(instruction: str) -> str:
         """Separate a subject description from a requested predicate.
 
@@ -3446,7 +3747,7 @@ class ImgEditorManager:
         have no such boundary and retain their full text.
         """
         predicates = []
-        for clause in re.split(r"\s*[,;]\s*", (instruction or "").strip()):
+        for clause in ImgEditorManager._instruction_clauses(instruction):
             matches = list(ImgEditorManager._PREDICATE_RE.finditer(clause))
             match = matches[0] if matches else None
             # A relative clause describes which subject is in the photo:
@@ -3526,7 +3827,7 @@ class ImgEditorManager:
         # had already measured (2026-10-08: "elimina tatoo de la mujer").
         judged = []
         for text in texts:
-            clauses = [part.strip() for part in re.split(r"\s*[,;]\s*", text) if part.strip()]
+            clauses = self._instruction_clauses(text)
             clauses.append(text.strip())
             for clause in clauses:
                 scope = self._requested_change_scope(clause) or clause
@@ -3711,7 +4012,7 @@ class ImgEditorManager:
         """Visual subject phrases of one instruction, deduped by spelling."""
         if not text or not text.strip():
             return []
-        pieces = [part.strip() for part in re.split(r"\s*[,;]\s*", text) if part.strip()]
+        pieces = self._instruction_clauses(text)
         pieces.append(text.strip())
         out, seen = [], set()
         for piece in pieces:
@@ -6380,6 +6681,26 @@ class ImgEditorManager:
                 "Se conserva el ángulo original."
             ), None
 
+        # v5.1244 — un cambio corporal sin postura ni cámara nombra a alguien.
+        # El router global reinterpretaba el marco entero (log 00:48:
+        # mask=global, identidad 0/2, edit_1792709573.png). Una sola pasada
+        # escribe el prompt en la persona medida y deja el resto de la foto.
+        if (prompt and mask_image is None and _compound_depth == 0
+                and not quality_only and quality_style != "solo_mejora"
+                and not (quality_hybrid and quality_use_generative is True)
+                and engine == "kontext" and not explicit_viewpoint_request):
+            from roop.img_editor.selected_region_edit import edit_described_subject
+            described = edit_described_subject(
+                self, img, prompt_raw, prompt, detected_faces,
+                engine=engine, negative_prompt=negative_prompt, seed=seed,
+                progress_callback=progress_callback, quality_mode=quality_mode,
+                auto_upscale=auto_upscale, enhance_tier=enhance_tier,
+                quality_preserve_faces=quality_preserve_faces,
+                quality_steps=quality_steps, cancel_check=cancel_check,
+            )
+            if described is not None:
+                return described
+
         # For ordinary LongCat edits on this GPU, send the full instruction
         # and image to one strong visual pass. The small text planner
         # can otherwise invent regions or interpret subject descriptions as
@@ -7750,8 +8071,6 @@ class ImgEditorManager:
                     if angle_change:
                         print(f"[ImgEditor] Cambio de ángulo/POV detectado ({_angle_hits} señales) → regeneración + FacePreserver", flush=True)
                     _pose_hits = len(_pa._pose_pattern.findall(_change_scope.lower())) if hasattr(_pa, '_pose_pattern') else 0
-                    # Umbral 0.17 calibrado: pose real ES 0.19-0.41, ruido de
-                    # fondo ('...por una playa') 0.158.
                     # Subconjunto sobre el CRUDO: tolera typos que rompen la
                     # frase ('DD RODILLAS' no casa el regex pero 'rodillas'
                     # está). Solo listas existentes, sin palabras nuevas.
@@ -7761,9 +8080,28 @@ class ImgEditorManager:
                             _subset = _pa.subset_hits(_raw_change_scope, _pa.POSE_KEYWORDS)
                     except Exception:
                         _subset = 0
-                    pose_change = (_pose_hits > 0) or (_raw_pose > 0.17) or (_subset > 0)
+                    # v5.1254 — el eje de postura COMPITE con el resto, como
+                    # ya hace `_prompt_authority_facts` (≥0,20 y ×1,25 sobre
+                    # los demás ejes). El umbral suelto 0,17 no es una medida
+                    # de postura: el verbo de cambio comparte textura con las
+                    # tres descripciones de eje, así que puntuaba en todas.
+                    # Medido 2026-10-27 (foto real, «cambia la camisa a rojo»):
+                    # pose 0,30 / structural 0,30 / attribute 0,29 → esta
+                    # puerta forzaba «POSE: mag≥0.85 + global» y el render
+                    # repintó el 79,72 % del lienzo para un cambio de color.
+                    # Con la competición mide 0,30 contra 0,30 y 0,29: no hay
+                    # postura que medir. Una postura real («ponla de pie»,
+                    # «de rodillas», «muévete a la izquierda») sigue dominando
+                    # su cláusula y conserva el régimen sin ancla.
+                    _raw_structural = float((_raw_axes or {}).get("structural", 0.0))
+                    _raw_attribute = float((_raw_axes or {}).get("attribute", 0.0))
+                    _pose_leads = bool(
+                        _raw_pose >= 0.20
+                        and _raw_pose >= 1.25 * max(_raw_structural, _raw_attribute)
+                    )
+                    pose_change = (_pose_hits > 0) or _pose_leads or (_subset > 0)
                     if pose_change:
-                        print(f"[ImgEditor] Cambio de postura detectado (patrón={_pose_hits}, eje_crudo={_raw_pose:.2f}, tokens={_subset}) → regeneración sin ancla", flush=True)
+                        print(f"[ImgEditor] Cambio de postura detectado (patrón={_pose_hits}, eje_crudo={_raw_pose:.2f} vs structural={_raw_structural:.2f}/attribute={_raw_attribute:.2f}, tokens={_subset}) → regeneración sin ancla", flush=True)
                 except Exception:
                     angle_change = False
                     pose_change = False
@@ -7838,6 +8176,25 @@ class ImgEditorManager:
             print("[ImgEditor] Señal semántica CERO (fuera de conceptos): régimen fuerte para el sujeto (mag=0.90, global, sin ancla)", flush=True)
         if body_transform:
             mag_suggested = max(mag_suggested, 0.68 + body_transform_intensity * 0.12)
+            # v5.1244 — sin selección, un uncover sin postura ni cámara ya
+            # tuvo su pasada (la persona que nombra el prompt). Llegar aquí
+            # es el fallo de las 00:52: mask=global y otra foto. No se carga
+            # el rewriter ni se muestrea un marco nuevo.
+            if (
+                str(body_direction).lower() == "uncover"
+                and not pose_change and not angle_change
+                and mask_image is None
+                and _compound_depth == 0
+            ):
+                print(
+                    "[ImgEditor] Cambio corporal sin selección: el marco no "
+                    "se reinterpreta; se conserva la foto",
+                    flush=True,
+                )
+                return img, (
+                    "Sin selección: el cambio corporal no se colocó en una "
+                    "persona; se conserva la foto"
+                ), None
             is_global = True
             background_focus = False
         # POV/ángulo: forzar regeneración global (la vista no existe, debe alucinarse)
@@ -8352,6 +8709,7 @@ class ImgEditorManager:
 
         final_mask = mask_image
         _focal_protected_heads = None
+        _focal_rejected_target = False
         _focal_write_mask = None
         _compound_scene_background = False
         _scene_head_preserve_mask = None
@@ -8508,6 +8866,22 @@ class ImgEditorManager:
                             print(f"[ImgEditor] Auto-máscara focal desde plan de región: {mask_query}")
                     print(f"[ImgEditor] Intentando auto-máscara para: {mask_query}")
                     masker = self._get_clipseg_masker()
+                    subject_measure = getattr(masker, "generate_subject_mask", None)
+                    subject_template = None
+                    if _focal_head_plan and engine == "kontext" and callable(subject_measure):
+                        from roop.img_editor.element_selection import load_settings
+                        try:
+                            subject_template = load_settings()["segmenter"].get("subject_prompt_template")
+                        except (OSError, ValueError, KeyError, TypeError, AttributeError) as config_error:
+                            raise SubjectPromptConfigError(
+                                "No se puede leer segmenter.subject_prompt_template"
+                            ) from config_error
+
+                    def measure_query(query):
+                        if _focal_head_plan and engine == "kontext" and callable(subject_measure):
+                            return subject_measure(img, query, subject_template)
+                        return masker.generate_mask(img, query)
+
                     _scene_location_request = (
                         _compound_depth > 0 and self._is_scene_location_clause(prompt)
                     )
@@ -8520,7 +8894,7 @@ class ImgEditorManager:
                     if not _scene_location_request and _compound_depth > 0:
                         _visual_subject_query = self._visual_subject_description(prompt)
                         if _visual_subject_query:
-                            _visual_subject_mask = masker.generate_mask(img, _visual_subject_query)
+                            _visual_subject_mask = measure_query(_visual_subject_query)
                             if _visual_subject_mask is not None:
                                 print(
                                     f"[ImgEditor] Sujeto descrito localizado en la imagen: "
@@ -8545,15 +8919,16 @@ class ImgEditorManager:
                     _preselected_head_mask = None
                     for query in dict.fromkeys(mask_queries):
                         candidate = (_visual_subject_mask if query == _visual_subject_query
-                                     and _visual_subject_mask is not None else masker.generate_mask(img, query))
+                                     and _visual_subject_mask is not None else measure_query(query))
                         if candidate is None:
                             continue
                         if _focal_head_plan:
                             if engine == "kontext":
                                 candidate_head, candidate_protection = self._head_mask_from_region_plan(
-                                    img, source_faces, candidate,
+                                    img, detected_faces, candidate,
                                     continue_region=False, return_protection=True,
                                     protection_faces=detected_faces,
+                                    eligible_faces=source_faces,
                                 )
                             else:
                                 candidate_head = self._head_mask_from_region_plan(
@@ -8561,6 +8936,19 @@ class ImgEditorManager:
                                 )
                                 candidate_protection = None
                             if candidate_head is None:
+                                if engine == "kontext" and len(source_faces) == 1:
+                                    rejected = [
+                                        face for face in detected_faces
+                                        if not self._same_face(face, source_faces[0])
+                                    ]
+                                    # A weak face cannot authorize an edit, but
+                                    # a region measured on it cannot authorize
+                                    # editing a different, more credible face.
+                                    if any(self._head_mask_from_region_plan(
+                                            img, [face], candidate,
+                                            continue_region=False) is not None
+                                           for face in rejected):
+                                        _focal_rejected_target = True
                                 continue
                             _preselected_head_mask = candidate_head
                             _focal_protected_heads = candidate_protection
@@ -8727,6 +9115,8 @@ class ImgEditorManager:
                                             pixels = np.asarray(final_mask.convert("L")).copy()
                                             pixels[foreground] = 0
                                             final_mask = Image.fromarray(pixels, "L")
+                except SubjectPromptConfigError as error:
+                    return None, f"Error de configuración del referente: {error}", None
                 except Exception as e:
                     print(f"[ImgEditor] Error en máscara: {e}")
 
@@ -8764,13 +9154,27 @@ class ImgEditorManager:
                 # como zona editable el conjunto de cabezas detectadas y el modelo
                 # de edición resuelve el referente desde la foto + el prompt.
                 # Esto mantiene el flujo automático y preserva el resto de imagen.
+                # El suelo de credibilidad (0,5×mejor) ya excluye las detecciones
+                # de ruido: en fast_1792015141 la "cara" de los DEDOS (0,30 vs
+                # 0,69 del hombre, medido en H-EDIT-003) queda fuera de
+                # source_faces. Exigir además `detected_faces == 1` (a4e1bfd)
+                # hacía que cualquier falso positivo bloqueara esta apertura y la
+                # petición SALIERA OMITIDA ("no se pudo localizar") en vez de
+                # anclarse a la única persona creíble — regresión medida en
+                # probe_editor_ui_skip y probe_editor_bald_backhair_20261016.
+                # Una segunda persona creíble ya bloquea `len(source_faces) == 1`.
+                # Si la región sí respondió a otra detección descartada,
+                # abstenerse: la única cara creíble no es el referente medido.
                 if (
                     final_mask is None
                     and locals().get("_focal_head_plan", False)
                     and len(source_faces) == 1
-                    and len(detected_faces) == 1
+                    and not _focal_rejected_target
                 ):
                     final_mask = self._head_mask_from_faces(img, source_faces)
+                    others = [face for face in detected_faces
+                              if not self._same_face(face, source_faces[0])]
+                    _focal_protected_heads = self._head_mask_from_faces(img, others) if others else None
                     if final_mask is not None:
                         print(
                             "[ImgEditor] Grounding textual no concluyente → "
@@ -9085,7 +9489,13 @@ class ImgEditorManager:
                         )
 
                 if engine == "kontext" and _longcat_focal_reference:
-                    _local_focal_crop = self._crop_focal_context(img, _longcat_focal_mask)
+                    from roop.img_editor.element_selection import load_settings
+                    _kontext_focal_settings = load_settings()["edit"]
+                    _portrait_crop_options = (
+                        {"max_area": float(_kontext_focal_settings["crop_max_area"])}
+                        if len(source_faces) == 1 else {})
+                    _local_focal_crop = self._crop_focal_context(
+                        img, _longcat_focal_mask, **_portrait_crop_options)
                     if _local_focal_crop is None:
                         return img, (
                             "Omitida: la región solicitada no admite un recorte fiable; "
@@ -9123,8 +9533,11 @@ class ImgEditorManager:
                             flush=True,
                         )
                     else:
+                        from roop.img_editor.element_selection import load_settings
+                        _kontext_focal_settings = load_settings()["edit"]
                         _local_focal_crop = self._crop_focal_context(
                             img, _longcat_focal_mask,
+                            max_area=float(_kontext_focal_settings.get("crop_max_area", 0.35))
                         )
                     if _local_focal_crop is not None:
                         _crop_image = _local_focal_crop[0]
@@ -9292,8 +9705,11 @@ class ImgEditorManager:
                             and engine in ("longcat", "longcat_full", "imagine", "klein", "kontext")
                         ):
                             if _local_focal_crop is None:
+                                from roop.img_editor.element_selection import load_settings
+                                _kontext_focal_settings = load_settings()["edit"]
                                 _local_focal_crop = self._crop_focal_context(
-                                    img, locals().get("_longcat_focal_mask")
+                                    img, locals().get("_longcat_focal_mask"),
+                                    max_area=float(_kontext_focal_settings.get("crop_max_area", 0.35))
                                 )
                             if _local_focal_crop is None:
                                 _longcat_focal_reference = False
@@ -9305,6 +9721,9 @@ class ImgEditorManager:
                                 )
                             else:
                                 _generation_image = _local_focal_crop[0]
+                                if engine == "kontext":
+                                    _generation_image = self._scale_kontext_focal_reference(
+                                        _generation_image)
                                 _cw, _ch = _generation_image.size
                                 if engine == "klein" and min(_cw, _ch) < 256:
                                     _scale = 256.0 / min(_cw, _ch)
@@ -9347,6 +9766,14 @@ class ImgEditorManager:
                             "lora_strength": lora_strength,
                             "progress_callback": progress_callback,
                         }
+                        if (engine == "kontext" and _local_focal_crop is not None
+                                and locals().get("_focal_head_plan", False)):
+                            # The crop already identifies the person and its
+                            # write mask protects the rest. Inferred age/frame
+                            # suffixes can override the requested appearance.
+                            gen_params["prompt"] = _kontext_focal_settings["prompt_template"].format(
+                                instruction=prompt_pre_rewrite)
+                            print("[ImgEditor] Kontext focal: instrucción completa en plantilla regional", flush=True)
                         # ControlNet Pose: si hay cambio estructural/postura, generar pose map
                         # para garantizar coherencia anatómica (sin miembros extra/deformes).
                         # Pero NO en pose_change: el esqueleto FUENTE congelaría la pose
@@ -9522,6 +9949,20 @@ class ImgEditorManager:
                         # preservación de identidad/rostro y alejaban el resultado
                         # de la imagen original. Cualquier ajuste fino se hace en
                         # auto_detect_params(), no por condiciones sueltas.
+                        if _vision_body and (
+                            not angle_change and not pose_change
+                            and final_mask is None and mask_image is None
+                            and _compound_depth == 0
+                        ):
+                            print(
+                                "[ImgEditor] Cambio corporal: el marco no se "
+                                "reinterpreta; se conserva la foto",
+                                flush=True,
+                            )
+                            return img, (
+                                "Sin selección: el cambio corporal no se "
+                                "colocó en una persona; se conserva la foto"
+                            ), None
                         if _vision_body:
                             # Receta medida del motor con visión: el texto es la
                             # única autoridad (sin ancla de latentes), sin
@@ -9680,6 +10121,18 @@ class ImgEditorManager:
                                 _crop_result = Image.composite(result, _crop_source, _crop_soft_mask)
                                 _full_result = img.copy()
                                 _full_result.paste(_crop_result, _crop_box)
+                                if (engine == "kontext"
+                                        and _kontext_focal_settings.get("head_blend_method") == "normal_clone"):
+                                    try:
+                                        from roop.img_editor.selected_region_edit import _blend_head_boundary
+                                        _matched = _blend_head_boundary(
+                                            img, result, _focal_write_mask, _crop_box)
+                                        if not self._edit_is_nearly_unchanged(
+                                                _crop_source, _matched.crop(_crop_box)):
+                                            _full_result = _matched
+                                            print("[ImgEditor] Borde de cabeza focal armonizado con la foto", flush=True)
+                                    except Exception as _focal_blend_error:
+                                        print(f"[ImgEditor] Ajuste de borde focal omitido: {_focal_blend_error}", flush=True)
                                 result = _full_result
                                 final_mask = _composite_mask
                                 _local_focal_generated = True
