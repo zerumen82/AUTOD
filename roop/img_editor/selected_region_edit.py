@@ -148,6 +148,8 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
     Returns the composed photo; the caller keeps the measured zone as its
     support, so nothing outside it is written.
     """
+    if recipe is None:
+        recipe = {"steps": 12, "guidance": 1.0, "denoise": 1.0, "no_kontext": True}
     region = support if support is not None else zone
     # The garment border is part of the garment, and the first real render of
     # this recipe left a pale band of the sleeve outside the measured zone
@@ -1431,9 +1433,16 @@ def edit_described_subject(
         # marco completo le niega (ver `_vision_zone_pass`). La escritura
         # sigue siendo solo la zona medida: el exterior no se toca.
         settings = selection.load_settings()["edit"]
+        vision_recipe = {
+            "steps": 12,
+            "guidance": 1.0,
+            "denoise": 1.0,
+            "no_kontext": True,
+        }
         result, note = _vision_zone_pass(
             manager, client, image, zone, subject, body_prompt,
             measured_negative, seed, settings, progress_callback, cancel_check,
+            recipe=vision_recipe, label="motor con visión (LongCat)",
         )
         if result is None:
             return kept(note)
