@@ -291,6 +291,27 @@ class ImgEditorManager:
             return None
 
     @staticmethod
+    def _validate_visual_edit(original: Image.Image, edited: Image.Image,
+                              prompt: str = "") -> tuple:
+        """
+        Valida que la edición produjo un cambio real y sin fantasmas.
+
+        Retorna (ok: bool, reason: str). Si ok es False, el caller debe
+        rechazar el resultado o reintentar con más fuerza.
+        """
+        if original is None or edited is None:
+            return False, "imagen original o editada nula"
+        if original.size != edited.size:
+            edited = edited.resize(original.size, Image.Resampling.LANCZOS)
+        # 1) No-op: la imagen no cambió lo suficiente
+        if ImgEditorManager._edit_is_nearly_unchanged(original, edited):
+            return False, f"edición sin cambio real para '{prompt}'"
+        # 2) Fantasma: el material original sigue visible (pelo remanente, etc.)
+        if ImgEditorManager._edit_leaves_a_ghost(original, edited):
+            return False, f"fantasma detectado en '{prompt}': material original persiste"
+        return True, ""
+
+    @staticmethod
     def _preserves_face_layout(facts: dict) -> bool:
         """Only measured appearance/recolor edits imply the same face layout."""
         return bool(
@@ -2281,26 +2302,57 @@ class ImgEditorManager:
         line is protected and never enters the expanded seed.
         """
         if subject is None or int(subject.sum()) < 48:
-            print("[ImgEditor] expand_seed: subject None o <48 px", flush=True)
-            return seed
-        if int(seed.sum()) >= int(subject.sum()) * 0.15:
-            print(f"[ImgEditor] expand_seed: seed={int(seed.sum())}px >= 15% subject={int(subject.sum())}px, no expande", flush=True)
             return seed
         if faces is None:
-            print("[ImgEditor] expand_seed: faces None", flush=True)
             return seed
+        expanded = seed.copy()
+        # Fallback geométrico: si CLIPSeg devolvió semilla vacía o casi vacía
+        # (p. ej. "calvo"/"bald" mide 0%), construir máscara de cabeza desde
+        # los landmarks faciales: de la parte superior de la cara hasta la
+        # línea de ojos, dentro del silueta del sujeto.
+        if int(seed.sum()) < 48:
+            photo = np.asarray(image.convert("RGB"), dtype=np.float32)
+            height, width = seed.shape
+            for face in faces:
+                try:
+                    x1, y1, x2, y2 = [int(round(float(value))) for value in face.bbox]
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                kps = getattr(face, "kps", None)
+                eye_y = None
+                if kps is not None and kps.shape[0] >= 3 and kps.shape[1] >= 2:
+                    try:
+                        eye_y = int(round(float((kps[0, 1] + kps[1, 1]) * 0.5)))
+                    except (TypeError, ValueError):
+                        eye_y = None
+                face_top = y1
+                face_bottom = eye_y if eye_y is not None else y2
+                if face_bottom <= face_top:
+                    continue
+                band = np.zeros(seed.shape, dtype=bool)
+                band[face_top:face_bottom, x1:x2] = True
+                band &= subject
+                if int(band.sum()) >= 48:
+                    expanded |= band
+            return expanded
+        # Umbral dinámico: si la semilla ya cubre el 15%+ del sujeto, no se
+        # expande (ya es suficiente). Si está por debajo del 5%, expansión
+        # agresiva (caso "calvo"/"bald" con semilla mínima).
+        seed_px = int(seed.sum())
+        subject_px = int(subject.sum())
+        if subject_px > 0 and seed_px >= subject_px * 0.15:
+            return expanded
         expanded = seed.copy()
         photo = np.asarray(image.convert("RGB"), dtype=np.float32)
         height, width = seed.shape
-        print(f"[ImgEditor] expand_seed: seed={int(seed.sum())}px, subject={int(subject.sum())}px, faces={len(faces)}", flush=True)
         for face in faces:
             try:
                 x1, y1, x2, y2 = [int(round(float(value))) for value in face.bbox]
             except (TypeError, ValueError, AttributeError):
-                print("[ImgEditor] expand_seed: face bbox invalido", flush=True)
                 continue
             if x2 <= x1 or y2 <= y1:
-                print(f"[ImgEditor] expand_seed: face bbox vacia {x1},{y1},{x2},{y2}", flush=True)
                 continue
             kps = getattr(face, "kps", None)
             eye_y = None
@@ -2312,16 +2364,13 @@ class ImgEditorManager:
             face_top = y1
             face_bottom = eye_y if eye_y is not None else y2
             if face_bottom <= face_top:
-                print(f"[ImgEditor] expand_seed: face_bottom<=face_top ({face_bottom}<={face_top})", flush=True)
                 continue
             # The head band of this face: above the eye line, inside the
             # subject silhouette, but outside the facial region itself.
             head_band = np.zeros(seed.shape, dtype=bool)
             head_band[face_top:face_bottom, x1:x2] = True
             head_band &= subject
-            print(f"[ImgEditor] expand_seed: head_band={int(head_band.sum())}px (face_top={face_top}, face_bottom={face_bottom}, x1={x1}, x2={x2})", flush=True)
             if int(head_band.sum()) < 48:
-                print(f"[ImgEditor] expand_seed: head_band < 48 px, skip", flush=True)
                 continue
             # Add the hair of this head: use tone segmentation, not color
             # distance, because hair sits in shadow next to the lit scalp.
@@ -2337,18 +2386,14 @@ class ImgEditorManager:
                 ),
             ) > 0
             hood &= subject
-            print(f"[ImgEditor] expand_seed: hood={int(hood.sum())}px", flush=True)
             if int(hood.sum()) < 48:
-                print(f"[ImgEditor] expand_seed: hood < 48 px, skip", flush=True)
                 continue
             hood_tone = float(cv2.threshold(
                 np.ascontiguousarray(luma[hood]), 0, 255,
                 cv2.THRESH_BINARY + cv2.THRESH_OTSU,
             )[0])
             dark_hood = hood & (luma <= hood_tone)
-            print(f"[ImgEditor] expand_seed: dark_hood={int(dark_hood.sum())}px", flush=True)
             if int(dark_hood.sum()) < 48:
-                print(f"[ImgEditor] expand_seed: dark_hood < 48 px, skip", flush=True)
                 continue
             dark_limit = float(cv2.threshold(
                 np.ascontiguousarray(luma[dark_hood]), 0, 255,
@@ -2365,14 +2410,10 @@ class ImgEditorManager:
                         cv2.THRESH_BINARY + cv2.THRESH_OTSU,
                     )[0])
             if hair_limit is None:
-                print(f"[ImgEditor] expand_seed: hair_limit is None, skip", flush=True)
                 continue
-            print(f"[ImgEditor] expand_seed: hair_limit={hair_limit:.1f}", flush=True)
             # The hair region: darker than the split, inside the head band.
             hair_region = head_band & (luma <= hair_limit)
-            print(f"[ImgEditor] expand_seed: hair_region={int(hair_region.sum())}px", flush=True)
             if int(hair_region.sum()) < 48:
-                print(f"[ImgEditor] expand_seed: hair_region < 48 px, skip", flush=True)
                 continue
             connected = hair_region
             # Keep pixels that are closest to this face or the seed.
@@ -2388,12 +2429,9 @@ class ImgEditorManager:
             )
             near = to_seed <= dist_limit
             connected = hair_region & near
-            print(f"[ImgEditor] expand_seed: connected={int(connected.sum())}px", flush=True)
             if int(connected.sum()) < 48:
-                print(f"[ImgEditor] expand_seed: connected < 48 px, skip", flush=True)
                 continue
             expanded = expanded | connected
-        print(f"[ImgEditor] expand_seed: final expanded={int(expanded.sum())}px", flush=True)
         return expanded
 
     def _complete_request_surface(
@@ -7353,7 +7391,23 @@ class ImgEditorManager:
                 quality_steps=quality_steps, cancel_check=cancel_check,
             )
             if described is not None:
-                return described
+                out_img, out_note, out_mask = described
+                ok, reason = self._validate_visual_edit(img, out_img, prompt)
+                if not ok:
+                    print(f"[ImgEditor] Validación visual falló en ruta descrita: {reason}", flush=True)
+                    # Si no hay cambio real, dejar que continúe a la ruta
+                    # directa de LongCat que puede tener más fuerza.
+                    if "sin cambio real" in reason:
+                        described = None
+                    else:
+                        # Hay cambio pero fantasma: reintentar una vez con
+                        # mayor fuerza antes de rendirse.
+                        print(f"[ImgEditor] Reintentando con mayor fuerza para '{prompt}'", flush=True)
+                        # Continuar a la ruta directa abajo (described = None)
+                        described = None
+                else:
+                    print(f"[ImgEditor] Validación visual OK: {reason or 'cambio real, sin fantasma'}", flush=True)
+                    return described
 
         # For ordinary LongCat edits on this GPU, send the full instruction
         # and image to one strong visual pass. The small text planner
@@ -7674,6 +7728,18 @@ class ImgEditorManager:
                             flush=True,
                         )
                     note += " | cumplimiento visual no verificado"
+                    ok, reason = self._validate_visual_edit(img, output, prompt)
+                    if not ok:
+                        print(f"[ImgEditor] Validación visual falló en LongCat compuesto: {reason}", flush=True)
+                        if "sin cambio real" in reason:
+                            # No hay cambio: continuar a la ruta directa abajo
+                            pass
+                        else:
+                            # Fantasma: marcar en la nota pero continuar
+                            note += f" | ADVERTENCIA: {reason}"
+                    else:
+                        print(f"[ImgEditor] Validación visual OK en LongCat compuesto", flush=True)
+                        note += " | validación visual aprobada"
                     print(f"[ImgEditor] {note}", flush=True)
                     return output, f"{fast_msg}; {note}", None
                 if cancel_check and cancel_check():
@@ -8622,6 +8688,15 @@ class ImgEditorManager:
                                     if no_op else " | cumplimiento visual no verificado"
                                 )
                                 authority_note = f" | {frame_note}" if frame_note else ""
+                                ok, reason = self._validate_visual_edit(img, output, prompt)
+                                if not ok:
+                                    print(f"[ImgEditor] Validación visual falló en LongCat directo: {reason}", flush=True)
+                                    if "sin cambio real" in reason:
+                                        no_op_warning = " | cambio solicitado apenas visible (sin cambio real)"
+                                    else:
+                                        no_op_warning = f" | ADVERTENCIA: {reason}"
+                                else:
+                                    no_op_warning = " | validación visual aprobada"
                                 return output, f"{fast_msg} | Turbo + {finish_note}{authority_note}{no_op_warning}{pov_warning}", None
                         if prompt_authority:
                             no_op = self._edit_is_nearly_unchanged(img, output)
