@@ -113,7 +113,7 @@ def build_img_editor_ui():
                         "añade un sombrero · vestido rojo · cambia el fondo por una playa · "
                         "más saturado y nítido…"
                     ),
-                    lines=8,
+                    lines=4,
                     elem_classes=["prompt-box-img"]
                 )
 
