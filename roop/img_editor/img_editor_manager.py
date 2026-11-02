@@ -2371,7 +2371,15 @@ class ImgEditorManager:
             head_band[face_top:face_bottom, x1:x2] = True
             head_band &= subject
             if int(head_band.sum()) < 48:
-                continue
+                # Si head_band quedó vacío después de intersectar con el sujeto,
+                # intenta con el band full-face (todo el rectángulo de la cara) para
+                # no dejar fuera caras donde el masker sujeto no cubre exactamente.
+                raw_band = np.zeros(seed.shape, dtype=bool)
+                raw_band[face_top:face_bottom, x1:x2] = True
+                if int(raw_band.sum()) >= 20:
+                    head_band = raw_band
+                else:
+                    continue
             # Add the hair of this head: use tone segmentation, not color
             # distance, because hair sits in shadow next to the lit scalp.
             luma = np.clip(
