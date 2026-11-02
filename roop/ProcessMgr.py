@@ -175,9 +175,11 @@ class ProcessMgr:
 
         self.selected_assignment_ttl = getattr(roop.globals, 'selected_assignment_ttl', 60)
         self.selected_top_k = getattr(roop.globals, 'selected_top_k', 3)
+        # Umbral de similitud destino configurable desde globals/config (default 0.28)
+        self.sim_threshold = float(getattr(roop.globals, 'face_distance_threshold', 0.28))
         self._auto_source_face_cache = {}
         
-        # NUEVO: Suavizado temporal para boca - evita flickering en preservación de boca
+        # NUEVO: Suavizado temporal para boca - solo en video (no en fotos estáticas)
         self._mouth_open_history = {}  # Historial de apertura de boca por video
         self._mouth_blend_smooth = {}   # Blend ratio suavizado por video
         # v5.1022: EMA único occ_frame_ema (eliminado doble EMA que causaba ghosting)
@@ -555,6 +557,26 @@ class ProcessMgr:
                 if _ui_faces:
                     valid_faces = _ui_faces
                     print(f"[FOTO] Detección de proceso vacía; reutilizadas {len(valid_faces)} cara(s) seleccionadas en esta misma foto", flush=True)
+
+            if not valid_faces and not is_real_video:
+                # Último intento: detector crudo con umbral muy bajo (0.08) para
+                # caras de baja calidad, perfil extremo o iluminación difícil.
+                try:
+                    from roop.face_util import detect_faces_robust
+                    from roop.face_util_rotation import get_face_analyser as _gfa, convert_faces_to_face_objects
+                    _analyser = _gfa()
+                    if _analyser is not None and frame is not None:
+                        _rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        _last = detect_faces_robust(_rgb, _analyser, 0.08)
+                        if _last:
+                            valid_faces = convert_faces_to_face_objects(_last)
+                            print(
+                                f"[FOTO] Fallback detección umbral 0.08: "
+                                f"{len(valid_faces)} cara(s) recuperada(s)",
+                                flush=True,
+                            )
+                except Exception as e:
+                    print(f"[FOTO] Fallback detección 0.08 falló: {e}")
 
             if not valid_faces and not is_real_video:
                 print(f"[FOTO] SKIP {os.path.basename(file_path or '')}: 0 caras detectadas (ni crudo ni preproceso) — foto original sin swap")
@@ -1409,6 +1431,9 @@ class ProcessMgr:
         if not np.isfinite(value):
             value = default
         value = float(np.clip(value, 0.0, 1.0))
+        # Si el base es 0.28 (umbral principal), usar el configurable desde globals
+        if base_threshold == 0.28:
+            base_threshold = self.sim_threshold
         if value == default:
             return base_threshold
         return float(np.clip(base_threshold + default - value, 0.0, 1.0))
@@ -4384,7 +4409,7 @@ class ProcessMgr:
             return None, None
 
     @staticmethod
-    def _localize_mouth_occlusion(mask, points):
+    def _localize_mouth_occlusion(mask, points, fraction_measure=None):
         """Rescata un único objeto oral medido; no recorta una máscara ambigua."""
         if mask is None or points is None:
             return None
@@ -4397,10 +4422,13 @@ class ProcessMgr:
         areas = np.bincount(labels.ravel(), minlength=count)
         selected = None
         for label in range(1, count):
-            fraction = float(areas[label]) / occ.size
+            candidate = np.where(labels == label, occ, 0.0)
+            fraction = (
+                fraction_measure(candidate) if fraction_measure is not None
+                else float(areas[label]) / occ.size
+            )
             if not settings["occlusion_min_fraction"] <= fraction <= settings["occlusion_max_fraction"]:
                 continue
-            candidate = np.where(labels == label, occ, 0.0)
             oral, ring = ProcessMgr._mouth_occlusion_evidence(candidate, points)
             if (oral <= settings["mouth_occlusion_min_evidence"]
                     or ring <= settings["mouth_occlusion_min_ring_evidence"]):
@@ -5860,13 +5888,53 @@ class ProcessMgr:
                 occ_support = float(occ_settings["occlusion_support_threshold"])
                 occ_min = float(occ_settings["occlusion_min_fraction"])
                 occ_max = float(occ_settings["occlusion_max_fraction"])
+
+                def _occlusion_fraction(mask):
+                    """Measure support in the same domain that limited detection.
+
+                    Crop padding is not evidence that an occlusion is local.
+                    An invalid measured domain cannot authorize an occlusion.
+                    """
+                    if mask is None:
+                        return 0.0
+                    try:
+                        values = np.asarray(mask, dtype=np.float32)
+                        if values.size <= 1:
+                            return 0.0
+                        if values.ndim != 2 or not np.isfinite(values).all():
+                            return float("inf")
+                        support = values > occ_support
+                        if _occ_interior is None:
+                            return float(np.mean(support))
+                        interior = np.asarray(_occ_interior, dtype=np.float32)
+                        if (
+                            interior.ndim != 2 or not interior.size
+                            or not np.isfinite(interior).all()
+                            or np.any(interior < 0) or np.any(interior > 1)
+                        ):
+                            return float("inf")
+                        if interior.shape != values.shape:
+                            interior = cv2.resize(
+                                interior, (values.shape[1], values.shape[0]),
+                                interpolation=cv2.INTER_NEAREST,
+                            )
+                        domain = interior > 0
+                        area = int(np.count_nonzero(domain))
+                        if not area:
+                            return float("inf")
+                        return float(np.count_nonzero(support & domain)) / area
+                    except (TypeError, ValueError, cv2.error):
+                        return float("inf")
+
                 # La primera detección ya usa guías. Repetirla no localiza nada:
                 # rescatar solo un componente oral inequívoco de la máscara medida.
                 if (not is_profile and not occ_low_quality
                         and (mouth_open or mouth_geometry_preserve)
                         and occ_mask_aligned is not None
-                        and float(np.mean(occ_mask_aligned > occ_support)) > occ_max):
-                    localized = self._localize_mouth_occlusion(occ_mask_aligned, _occ_pts)
+                        and _occlusion_fraction(occ_mask_aligned) > occ_max):
+                    localized = self._localize_mouth_occlusion(
+                        occ_mask_aligned, _occ_pts, fraction_measure=_occlusion_fraction,
+                    )
                     if localized is not None:
                         occ_mask_aligned = localized
                         if call_num % 50 == 1:
@@ -5879,7 +5947,7 @@ class ProcessMgr:
                     occ_h, occ_w = occ_mask_aligned.shape[:2]
                     if occ_h != ref_h or occ_w != ref_w:
                         occ_mask_aligned = cv2.resize(occ_mask_aligned, (ref_w, ref_h), interpolation=cv2.INTER_LINEAR)
-                occ_frac = float(np.mean(occ_mask_aligned > occ_support)) if occ_mask_aligned is not None and occ_mask_aligned.size > 1 else 0.0
+                occ_frac = _occlusion_fraction(occ_mask_aligned)
                 occ_strength = (0.65 if is_small_face else (0.65 if is_profile else 0.80))  # v5.1100: small 0.50→0.65 — con 0.50 una mano deja 50% de swap visible a través (oclusión fallida)
                 occ_applied = False  # v5.1052: el refuerzo de máscara no debe pisar una oclusión real
 
