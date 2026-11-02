@@ -49,6 +49,7 @@ CSS_STYLE = """
         background: #0f172a !important;
         border: 2px solid #22d3ee !important;
         border-radius: 12px !important;
+        font-size: 16px !important;
     }
 """
 
