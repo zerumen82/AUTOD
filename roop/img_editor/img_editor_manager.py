@@ -8,7 +8,12 @@ from typing import Optional, Tuple, Dict
 from PIL import Image, ImageFilter
 import numpy as np
 from roop.utils import get_vram_gb
-from roop.img_editor.gen_prompt_config import get_kontext_model_config, SubjectPromptConfigError
+from roop.img_editor.gen_prompt_config import (
+    get_kontext_model_config,
+    get_longcat_model_config,
+    get_longcat_full_model_config,
+    SubjectPromptConfigError,
+)
 
 from roop.utilities import resolve_relative_path
 
@@ -367,7 +372,12 @@ class ImgEditorManager:
         # Guidance: 3.0 a 7.0
         guidance = 3.0 + (magnitude * 4.0)
 
-        if engine in ("longcat", "imagine", "longcat_full", "kontext"):
+        if engine == "longcat":
+            recipe = get_longcat_model_config()
+            steps = int(recipe["steps"])
+            guidance = float(recipe["cfg"])
+            denoise = 1.0
+        elif engine in ("imagine", "longcat_full", "kontext"):
             recipe = get_kontext_model_config()
             steps = int(recipe["steps"])
             guidance = float(recipe["cfg"])
@@ -1039,13 +1049,35 @@ class ImgEditorManager:
                 or facts.get("structural_remove")
             ):
                 continue
-            relevant_count += 1
             scope = self._requested_change_scope(clause) or clause
             try:
+                scores = scorer.score_concepts(scope)
+                cover_score = float(scores.get("attribute_cover", 0.0))
                 direction = str(scorer.get_body_direction(scope)).lower()
                 intensity = float(scorer.get_body_transform_intensity(scope))
             except Exception:
+                return False
+            if not np.isfinite(cover_score):
+                return False
+            # A clause can measure as "uncover" because it names a minimal
+            # garment, while also explicitly retaining coverage (e.g. "only
+            # in a thong"). Do not infer total exposure from that mixture.
+            if cover_score > 0.03:
+                return False
+            # v5.1256 (2026-10-30, log 12:19): la cláusula que solo DESCRIBE
+            # al sujeto (scope igual a la cláusula entera, dirección medida
+            # «change») no es un segundo «quitar»: «the woman with red shoes,
+            # she must go without shoes» contaba 2 cláusulas y se promovía a
+            # exposición completa, con el sufijo «fully nude» y la zona local
+            # del objetivo inalcanzable. Medido en
+            # diagnostics/measure_clause_facts_20261030.py: el guard solo
+            # excluye dirección «change», así que «sin pantalones» (scope igual
+            # a la cláusula pero dirección «uncover») sigue contando, y
+            # «debe ir descalza» además separa el predicado (scope
+            # «ir descalza»).
+            if scope.strip() == clause.strip() and direction == "change":
                 continue
+            relevant_count += 1
             if (
                 direction == "uncover"
                 and np.isfinite(intensity)
@@ -1422,6 +1454,51 @@ class ImgEditorManager:
             pass
 
         return base
+
+    def _compose_local_target_prompt(
+        self, instruction: str, target: str, lower_body: bool = False,
+    ) -> str:
+        """Measured text for a LOCAL removal, written in its own crop.
+
+        v5.1255 — the crop of a local removal teaches the zone only, so the
+        sentence cannot name the subject: «the woman» inside a crop that
+        showed the feet made the engine invent a whole person in the frame
+        (log 2026-10-29 23:41). The text describes the RESULT measured in
+        that zone instead — the object leaves, and the state of the measured
+        area once it has left.
+
+        ``target`` is the object ``_requested_removal_target`` extracted by
+        grammar and ``lower_body`` is the measured position of that zone
+        inside the person, so no list of garments decides this wording
+        (AGENTS.md: no hand-written vocabulary routes an edit).
+        """
+        object_name = (target or "").strip()
+        instruction = (instruction or "").strip()
+        if not object_name:
+            # Without a named object there is nothing local to describe: the
+            # caller keeps the global wording rather than an empty prompt.
+            return self._compose_generation_prompt(
+                instruction, engine="kontext", magnitude=0.75,
+                body_transform=True, body_direction="uncover",
+                body_intensity=0.0,
+            )
+        parts = [
+            f"Remove the {object_name} completely.",
+            f"No part of the {object_name} may remain visible.",
+            "Naturally reconstruct the area it occupied; do not leave a "
+            "translucent, faded, or darkened remnant.",
+        ]
+        if lower_body:
+            # The measured zone sits at the bottom of the person, so the state
+            # after the removal is what the sampler has to paint there.
+            parts.append(
+                "The bare feet are visible, bare feet with nothing covering them."
+            )
+        # This prompt replaces the generic wrapper, so keep its enforcement.
+        parts.append(self._change_enforce_clause().strip())
+        text = " ".join(parts)
+        print(f"[ImgEditor] Prompt local del objetivo: {text}", flush=True)
+        return text
 
     def _apply_skin_tone_match(self, original: Image.Image, generated: Image.Image, mask: Image.Image) -> Image.Image:
         """Ajusta el tono de la piel generada para que coincida con la original"""
@@ -2037,7 +2114,8 @@ class ImgEditorManager:
         )[0])
         hair_seed = seed & (luma <= seed_tone)
         lit_seed = seed & ~hair_seed
-        if int(hair_seed.sum()) < max(48, int(seed.sum()) * 0.15) or int(lit_seed.sum()) < 48:
+        # v5.1266: umbral pelo 0.08 (vs 0.15) + tolerancia +4 para restos.
+        if int(hair_seed.sum()) < max(48, int(seed.sum()) * 0.08) or int(lit_seed.sum()) < 48:
             return empty
         # The head around the peak is split by tone measured on the hood
         # itself: first the lit surface of the hood, then the dark half of
@@ -2069,7 +2147,7 @@ class ImgEditorManager:
             # there would open the flood to whatever the dark buries.
             if dark_limit <= 0.0:
                 hair_limit = dark_limit
-            elif hair_tone <= dark_limit + 2.0:
+            elif hair_tone <= dark_limit + 4.0:
                 hair_limit = dark_limit
             else:
                 light_hood = hood & (luma > dark_limit)
@@ -2191,6 +2269,132 @@ class ImgEditorManager:
         if int(keep.sum()) < 48:
             return empty
         return keep
+    @staticmethod
+    def _expand_seed_to_head(image: Image.Image, seed: np.ndarray,
+                              subject: np.ndarray, faces) -> np.ndarray:
+        """Expand a thin seed into the full head of the subject.
+
+        CLIPSeg reports only the lit scalp for 'bald'/'calvo', so the seed
+        is a small bright patch. This helper grows the seed to cover the
+        whole head region: the subject silhouette above the eye line, with
+        the measured hair of the same head attached. The face below the eye
+        line is protected and never enters the expanded seed.
+        """
+        if subject is None or int(subject.sum()) < 48:
+            print("[ImgEditor] expand_seed: subject None o <48 px", flush=True)
+            return seed
+        if int(seed.sum()) >= int(subject.sum()) * 0.15:
+            print(f"[ImgEditor] expand_seed: seed={int(seed.sum())}px >= 15% subject={int(subject.sum())}px, no expande", flush=True)
+            return seed
+        if faces is None:
+            print("[ImgEditor] expand_seed: faces None", flush=True)
+            return seed
+        expanded = seed.copy()
+        photo = np.asarray(image.convert("RGB"), dtype=np.float32)
+        height, width = seed.shape
+        print(f"[ImgEditor] expand_seed: seed={int(seed.sum())}px, subject={int(subject.sum())}px, faces={len(faces)}", flush=True)
+        for face in faces:
+            try:
+                x1, y1, x2, y2 = [int(round(float(value))) for value in face.bbox]
+            except (TypeError, ValueError, AttributeError):
+                print("[ImgEditor] expand_seed: face bbox invalido", flush=True)
+                continue
+            if x2 <= x1 or y2 <= y1:
+                print(f"[ImgEditor] expand_seed: face bbox vacia {x1},{y1},{x2},{y2}", flush=True)
+                continue
+            kps = getattr(face, "kps", None)
+            eye_y = None
+            if kps is not None and kps.shape[0] >= 3 and kps.shape[1] >= 2:
+                try:
+                    eye_y = int(round(float((kps[0, 1] + kps[1, 1]) * 0.5)))
+                except (TypeError, ValueError):
+                    eye_y = None
+            face_top = y1
+            face_bottom = eye_y if eye_y is not None else y2
+            if face_bottom <= face_top:
+                print(f"[ImgEditor] expand_seed: face_bottom<=face_top ({face_bottom}<={face_top})", flush=True)
+                continue
+            # The head band of this face: above the eye line, inside the
+            # subject silhouette, but outside the facial region itself.
+            head_band = np.zeros(seed.shape, dtype=bool)
+            head_band[face_top:face_bottom, x1:x2] = True
+            head_band &= subject
+            print(f"[ImgEditor] expand_seed: head_band={int(head_band.sum())}px (face_top={face_top}, face_bottom={face_bottom}, x1={x1}, x2={x2})", flush=True)
+            if int(head_band.sum()) < 48:
+                print(f"[ImgEditor] expand_seed: head_band < 48 px, skip", flush=True)
+                continue
+            # Add the hair of this head: use tone segmentation, not color
+            # distance, because hair sits in shadow next to the lit scalp.
+            luma = np.clip(
+                photo @ np.array([0.299, 0.584, 0.114], dtype=np.float32), 0, 255
+            ).astype(np.uint8)
+            hood = cv2.dilate(
+                head_band.astype(np.uint8),
+                cv2.getStructuringElement(
+                    cv2.MORPH_ELLIPSE,
+                    (int(round(max(4, (face_bottom - face_top) * 0.3))) * 2 + 1,
+                     int(round(max(4, (face_bottom - face_top) * 0.3))) * 2 + 1),
+                ),
+            ) > 0
+            hood &= subject
+            print(f"[ImgEditor] expand_seed: hood={int(hood.sum())}px", flush=True)
+            if int(hood.sum()) < 48:
+                print(f"[ImgEditor] expand_seed: hood < 48 px, skip", flush=True)
+                continue
+            hood_tone = float(cv2.threshold(
+                np.ascontiguousarray(luma[hood]), 0, 255,
+                cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+            )[0])
+            dark_hood = hood & (luma <= hood_tone)
+            print(f"[ImgEditor] expand_seed: dark_hood={int(dark_hood.sum())}px", flush=True)
+            if int(dark_hood.sum()) < 48:
+                print(f"[ImgEditor] expand_seed: dark_hood < 48 px, skip", flush=True)
+                continue
+            dark_limit = float(cv2.threshold(
+                np.ascontiguousarray(luma[dark_hood]), 0, 255,
+                cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+            )[0])
+            hair_tone = float(np.median(luma[head_band & (luma <= hood_tone)]))
+            if hair_tone <= dark_limit + 4.0:
+                hair_limit = dark_limit
+            else:
+                light_hood = hood & (luma > dark_limit)
+                if int(light_hood.sum()) >= 48:
+                    hair_limit = float(cv2.threshold(
+                        np.ascontiguousarray(luma[light_hood]), 0, 255,
+                        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+                    )[0])
+            if hair_limit is None:
+                print(f"[ImgEditor] expand_seed: hair_limit is None, skip", flush=True)
+                continue
+            print(f"[ImgEditor] expand_seed: hair_limit={hair_limit:.1f}", flush=True)
+            # The hair region: darker than the split, inside the head band.
+            hair_region = head_band & (luma <= hair_limit)
+            print(f"[ImgEditor] expand_seed: hair_region={int(hair_region.sum())}px", flush=True)
+            if int(hair_region.sum()) < 48:
+                print(f"[ImgEditor] expand_seed: hair_region < 48 px, skip", flush=True)
+                continue
+            connected = hair_region
+            # Keep pixels that are closest to this face or the seed.
+            to_seed = cv2.distanceTransform(
+                (seed.astype(np.uint8) == 0).astype(np.uint8), cv2.DIST_L2, 5
+            )
+            to_face = cv2.distanceTransform(
+                ((head_band == 0) & ~seed).astype(np.uint8), cv2.DIST_L2, 5
+            )
+            # Pixels on the hair side of the head, not outside it.
+            dist_limit = max(
+                4, int(round(max(4, (face_bottom - face_top) * 0.15)))
+            )
+            near = to_seed <= dist_limit
+            connected = hair_region & near
+            print(f"[ImgEditor] expand_seed: connected={int(connected.sum())}px", flush=True)
+            if int(connected.sum()) < 48:
+                print(f"[ImgEditor] expand_seed: connected < 48 px, skip", flush=True)
+                continue
+            expanded = expanded | connected
+        print(f"[ImgEditor] expand_seed: final expanded={int(expanded.sum())}px", flush=True)
+        return expanded
 
     def _complete_request_surface(
         self,
@@ -2253,28 +2457,37 @@ class ImgEditorManager:
         if int(seed.sum()) < 48 or int(subject.sum()) < 48:
             return None
 
-        def finish(base):
+        # CLIPSeg reports only the lit scalp for 'bald'/'calvo', so the
+        # seed is a small bright patch. Expand it to cover the full head of
+        # the subject: the subject silhouette above the eye line, with the
+        # hair of the same head attached. The face below the eye line is
+        # protected and never enters the expanded seed.
+        seed = ImgEditorManager._expand_seed_to_head(
+            image, seed, subject, faces,
+        )
+
+        def finish(base, peak):
             """The measured continuation plus the hair of the same head."""
             hair = (
-                ImgEditorManager._complete_hair_surface(image, seed, subject, faces)
-                if complete_hair else np.zeros(seed.shape, dtype=bool)
+                ImgEditorManager._complete_hair_surface(image, peak, subject, faces)
+                if complete_hair else np.zeros(peak.shape, dtype=bool)
             )
             zone = base | hair
-            if int(zone.sum()) <= int(seed.sum()):
+            if int(zone.sum()) <= int(peak.sum()):
                 print(
                     "[ImgEditor] El segmentador no midió color ni pelo que "
                     "añadir a la zona; se queda como midió",
                     flush=True,
                 )
                 return None
-            grown_color = int((base & ~seed).sum())
+            grown_color = int((base & ~peak).sum())
             if grown_color:
                 print(
                     f"[ImgEditor] La zona pedida sigue por la misma superficie (+{grown_color} px); "
                     "donde el color cambia queda fuera",
                     flush=True,
                 )
-            grown_hair = int((hair & ~seed).sum())
+            grown_hair = int((hair & ~peak).sum())
             if grown_hair:
                 print(
                     f"[ImgEditor] El pelo de la misma cabeza entra en la zona (+{grown_hair} px); "
@@ -2294,21 +2507,24 @@ class ImgEditorManager:
                 "sin crecimiento por color, solo entra el pelo medido",
                 flush=True,
             )
-            return finish(seed.copy())
+            # v5.1268: el pico expandido ya cubre la cabeza; se queda como pico.
+            return finish(seed.copy(), seed)
         photo = np.asarray(image.convert("RGB"), dtype=np.float32)
         # The bright rim of a peak is the edge, or something lying on the
         # surface. The surface itself is the core tone. Extending the rim
         # paints over that occluder.
         ys, xs = np.where(seed)
         span = max(int(ys.max() - ys.min() + 1), int(xs.max() - xs.min() + 1))
-        erode_r = max(2, int(round(span * 0.06)))
+        # v5.1266: menos erosión (0.03 vs 0.06) para conservar el contorno
+        erode_r = max(2, int(round(span * 0.03)))
         erode_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (erode_r * 2 + 1, erode_r * 2 + 1))
         core = cv2.erode(seed.astype(np.uint8), erode_k) > 0
         if int(core.sum()) < 48:
             core = seed
         median_color = np.median(photo[core], axis=0)
         color_distance = np.linalg.norm(photo - median_color, axis=2)
-        color_limit = max(float(np.percentile(color_distance[core], 70)), 28.0)
+        # v5.1266: percentil 60 para incluir más borde en la máscara (contorno).
+        color_limit = max(float(np.percentile(color_distance[core], 60)), 28.0)
         surface = seed & (color_distance <= color_limit)
         if int(surface.sum()) < max(48, int(seed.sum()) * 0.40):
             surface = seed
@@ -2319,7 +2535,7 @@ class ImgEditorManager:
         limit = _same_color_limit(color_distance, surface, subject)
         if limit is None:
             # One color over the subject: only this head's hair may join.
-            return finish(seed.copy())
+            return finish(seed.copy(), seed)
         # The locator can be smaller than the surface. On edit_1790893724 the
         # head ellipse stopped at the front hair and the same dark hair
         # continued behind it. The zone follows that color, connected to the
@@ -2348,13 +2564,14 @@ class ImgEditorManager:
         )
         touch = surface & same
         if int(touch.sum()) < 48:
-            return finish(seed.copy())
+            return finish(seed.copy(), seed)
         _count, labels = cv2.connectedComponents(same.astype(np.uint8), connectivity=8)
         keep = np.zeros(seed.shape, dtype=bool)
         for label in set(int(value) for value in labels[touch] if value):
             keep |= labels == label
         if int(keep.sum()) < int(surface.sum()) * 1.08:
-            return finish(seed.copy())
+            # v5.1268: el pico expandido ya cubre la cabeza; se queda como pico.
+            return finish(seed.copy(), seed)
         keep = ImgEditorManager._drop_other_person_contact(photo, keep, subject, faces)
         keep = ImgEditorManager._drop_measured_object(
             photo, keep, subject, faces, masker, negative_query, positive_query,
@@ -2406,7 +2623,8 @@ class ImgEditorManager:
             # The measured peak stands; only the hair of its own head may
             # still join it.
             keep = seed.copy()
-        return finish(keep)
+        # v5.1268: el pico expandido ya cubre la cabeza; se queda como pico.
+        return finish(keep, seed)
 
     @staticmethod
     def _drop_other_person_contact(photo, keep, subject, faces):
@@ -3087,7 +3305,24 @@ class ImgEditorManager:
         # del parche durisimo (nitidez 15 pegada contra foto 402) y se ve el
         # rectangulo translucido alrededor de la cabeza. El feather escala con
         # el recorte para que la transicion sea suave en fotos grandes.
-        feather_px = max(6, int(min(crop_w, crop_h) * 0.02))
+        # v5.1263: el feather se basa en el AREA REAL DEL CAMBIO, no en el
+        # tamano del recorte. Un recorte grande con un cambio pequeno (cabeza
+        # calva, una prenda local) dejaba un halo de 6px alrededor de la zona
+        # pegada: el feather mezclaba el borde de la mascara con el fondo
+        # original y el resultado tenia un contorno visible. Para cambios
+        # pequenos el feather se reduce a 1-2px; para cambios estructurales
+        # (cuerpo completo, ropa nueva, fondo) se mantiene la transicion suave.
+        local_mask_arr = np.asarray(local_mask.convert("L"))
+        change_area = int((local_mask_arr > 0).sum())
+        change_ratio = (
+            change_area / float(crop_w * crop_h) if crop_w * crop_h > 0 else 0.0
+        )
+        if change_ratio < 0.25:
+            # v5.1264: para ediciones simples (calvo, ropa local, superficie) el
+            # feather deja un halo visible incluso con 1-2px. Se elimina por completo.
+            feather_px = 0
+        else:
+            feather_px = max(6, int(min(crop_w, crop_h) * 0.02))
         soft = self._feather_mask(local_mask, amount=feather_px)
         print(
             f"[ImgEditor] Feather paste: {feather_px}px sobre recorte "
@@ -3324,8 +3559,20 @@ class ImgEditorManager:
         # attributes of the same subject ("barefoot and without stockings").
         # Splitting it there would turn one requested edit into two subjects.
         text = prompt or ""
-        if re.search(r"[,;]", text):
-            parts = ImgEditorManager._instruction_clauses(text)
+        if not re.search(r"[,;]|\s+(?:and|y)\s+", text, flags=re.IGNORECASE):
+            return []
+        from roop.img_editor.nlp.semantic_analyzer import LightLocalIntentAnalyzer
+
+        addition_request = LightLocalIntentAnalyzer().get_structural_bias(text) == "add"
+        if addition_request and not re.search(r"[,;]", text):
+            parts = [text]
+        elif re.search(r"[,;]", text):
+            clauses = ImgEditorManager._instruction_clauses(text)
+            has_predicate = any(
+                ImgEditorManager._PREDICATE_RE.search(clause)
+                for clause in clauses
+            )
+            parts = [text] if addition_request and not has_predicate else clauses
         else:
             parts = re.split(r"\s+(?:and|y)\s+", text, flags=re.IGNORECASE)
         clauses = [re.sub(r"^(?:and|y)\s+", "", part.strip(" .,!?"), flags=re.I)
@@ -3762,26 +4009,17 @@ class ImgEditorManager:
 
     @classmethod
     def _explicit_viewpoint_request(cls, raw_prompt: str, translated_prompt: str) -> bool:
-        """Detect a requested camera change before the Turbo early return."""
-        strong = re.compile(
-            r"\b(?:pov|viewpoint|camera angle|camera view|angle|[aá]ngulo|"
-            r"perspective|perspectiva|overhead|cenital|picado|contrapicado|"
-            r"top view|bottom view|back view|side view|from behind|"
-            r"from the side|from the right|from the left|desde arriba|"
-            r"desde abajo|desde atr[aá]s|desde la derecha|desde la izquierda|"
-            r"vista de espaldas|vista de lado|vista de perfil|"
-            r"vista lateral|opposite view)\b",
-            re.I,
-        )
-        move_view = re.compile(
-            r"\b(?:cambia|cambiar|cambie|mueve|mover|muestra|mostrar|"
-            r"change|move|show|switch|rotate)\b.{0,35}\b(?:vista|view|plano|shot)\b",
-            re.I,
-        )
+        """Detect a requested camera change by measured camera concepts."""
+        from roop.img_editor.nlp.semantic_analyzer import is_camera_view_request
+
         return any(
-            strong.search(scope) or move_view.search(scope)
-            for scope in (cls._requested_change_scope(text) for text in
-                          (raw_prompt, translated_prompt) if text)
+            is_camera_view_request(scope)
+            for text in (raw_prompt, translated_prompt) if text
+            for clause in re.split(
+                r"\s*(?:[,;]|\band\b|\by\b|\bwhile\b|\bmientras\b)\s*",
+                text, flags=re.I,
+            )
+            for scope in (cls._requested_change_scope(clause),)
         )
 
     def _prompt_authority_facts(self, raw_prompt: str, translated_prompt: str) -> dict:
@@ -3800,6 +4038,7 @@ class ImgEditorManager:
             "body_intensity": 0.0,
             "local_appearance": False,
             "local_region": False,
+            "structural_add": False,
             # v5.1215: el usuario prima que la escena quede BIEN aunque la
             # cara original cambie («mientras me repintes la escenario al 95 %
             # me vale»). Un pedido de escenario NO es una región local: manda
@@ -3812,11 +4051,6 @@ class ImgEditorManager:
         texts = [text for text in (raw_prompt, translated_prompt) if text and text.strip()]
         if not texts:
             return facts
-        try:
-            from roop.img_editor.prompt_analyzer import PromptAnalyzer
-            analyzer = PromptAnalyzer()
-        except Exception:
-            analyzer = None
         try:
             scorer = self._get_semantic_analyzer(full_ai=False)
         except Exception:
@@ -3831,14 +4065,7 @@ class ImgEditorManager:
             clauses.append(text.strip())
             for clause in clauses:
                 scope = self._requested_change_scope(clause) or clause
-                pose_hit = bool(
-                    analyzer is not None and (
-                        analyzer._pose_pattern.findall(scope.lower())
-                        or analyzer.subset_hits(scope, analyzer.POSE_KEYWORDS) > 0
-                    )
-                )
-                if pose_hit:
-                    facts["pose"] = True
+                pose_hit = False
                 if scorer is None:
                     continue
                 try:
@@ -3851,16 +4078,17 @@ class ImgEditorManager:
                     float(scores.get("attribute_body", 0.0)),
                     float(scores.get("attribute_uncover", 0.0)),
                 )
-                structural_score = max(
-                    float(scores.get("structural_remove", 0.0)),
-                    float(scores.get("structural_add", 0.0)),
-                    float(scores.get("structural_background", 0.0)),
-                )
-                structural_operation = max(
-                    float(scores.get("structural_remove", 0.0)),
-                    float(scores.get("structural_add", 0.0)),
-                )
                 remove_score = float(scores.get("structural_remove", 0.0))
+                structural_add_score = float(scores.get("structural_add", 0.0))
+                background_score = float(
+                    scores.get("structural_background", 0.0),
+                )
+                structural_score = max(
+                    remove_score,
+                    structural_add_score,
+                    background_score,
+                )
+                structural_operation = max(remove_score, structural_add_score)
                 appearance_score = max(
                     float(scores.get("attribute_appearance", 0.0)),
                     float(scores.get("target_hair", 0.0)),
@@ -3883,9 +4111,6 @@ class ImgEditorManager:
                 # región: sin lista de palabras nueva, el score medido
                 # structural_background ya existe. Gana sobre región local:
                 # pintar una zona no es cambiar de escenario.
-                background_score = float(
-                    scores.get("structural_background", 0.0),
-                )
                 # v5.1216: el hecho de postura salía SOLO de la lista de
                 # palabras del analizador, pero el concepto medido ya
                 # existía (CONCEPTS["pose"] describe «dance/bailando»):
@@ -3896,10 +4121,35 @@ class ImgEditorManager:
                 # (≥0,20 y ×1,25); las keywords siguen mandando sin
                 # condición (pose_hit previo intacto, nada regresa).
                 pose_score = float(scores.get("pose", 0.0))
-                if pose_score >= 0.20 and pose_score >= max(
-                    body_score, appearance_score, recolor_score,
-                    structural_score, background_score,
-                ) * 1.25:
+                from roop.img_editor.nlp.semantic_analyzer import (
+                    distinctive_concept_token_evidence,
+                    is_camera_view_request,
+                )
+
+                camera_view_hit = is_camera_view_request(scope)
+                pose_has_distinct_evidence = (
+                    distinctive_concept_token_evidence(scope, "pose") > 0
+                )
+                structural_add_leads = bool(
+                    structural_add_score >= 0.14
+                    and structural_add_score >= remove_score
+                    and structural_add_score >= max(
+                        body_score,
+                        appearance_score,
+                        recolor_score,
+                        background_score,
+                        pose_score if pose_has_distinct_evidence else 0.0,
+                        float(scores.get("camera_view", 0.0))
+                        if camera_view_hit else 0.0,
+                    ) * 1.10
+                )
+                if camera_view_hit or (
+                    pose_has_distinct_evidence and pose_score >= 0.20
+                    and pose_score >= max(
+                        body_score, appearance_score, recolor_score,
+                        structural_score, background_score,
+                    ) * 1.25
+                ):
                     pose_hit = True
                     facts["pose"] = True
                 scenario_leads = bool(
@@ -3913,7 +4163,8 @@ class ImgEditorManager:
                 local_candidate = max(structural_score, recolor_score)
                 local_competition = max(body_score, appearance_score)
                 region_leads = bool(
-                    not pose_hit and not body_leads and not appearance_leads
+                    not structural_add_leads
+                    and not pose_hit and not body_leads and not appearance_leads
                     and not scenario_leads
                     and local_candidate >= 0.20
                     and local_candidate >= local_competition * 1.25
@@ -3927,6 +4178,7 @@ class ImgEditorManager:
                     "direction": direction,
                     "appearance": appearance_leads,
                     "region": region_leads,
+                    "structural_add": structural_add_leads,
                     "recolor": bool(
                         region_leads and recolor_score >= 0.20
                         # v5.1209: mismo factor 1,25 del resto de
@@ -3937,13 +4189,22 @@ class ImgEditorManager:
                         and recolor_score >= structural_score * 1.25
                     ),
                     "ambiguous": bool(
-                        structural_operation >= 0.20
-                        and not pose_hit and not body_leads
-                        and not appearance_leads and not region_leads
+                        structural_add_leads
+                        or (
+                            structural_operation >= 0.20
+                            and not pose_hit and not body_leads
+                            and not appearance_leads and not region_leads
+                        )
                     ),
                     # v5.1209: solo ELIMINAR cierra la zona (añadir o
                     # colorear no debe tragarse los objetos medidos).
-                    "structural_remove": bool(remove_score >= 0.20),
+                    "structural_remove": bool(
+                        remove_score >= 0.20
+                        and remove_score >= max(
+                            structural_add_score, background_score,
+                            recolor_score,
+                        ) * 1.25
+                    ),
                 })
         body_hits = [item for item in judged if item["body"]]
         if body_hits:
@@ -4005,6 +4266,9 @@ class ImgEditorManager:
         # / cuerpo / apariencia) ni llega a esa compuerta.
         facts["structural_remove"] = bool(
             any(item["structural_remove"] for item in judged)
+        )
+        facts["structural_add"] = bool(
+            any(item["structural_add"] for item in judged)
         )
         return facts
 
@@ -4269,7 +4533,7 @@ class ImgEditorManager:
         # prompt_rewriter prepares the installed Windows CUDA DLL path.
         from llama_cpp import Llama
         return Llama(model_path=model_path, n_ctx=context_size,
-                     n_gpu_layers=gpu_layers, verbose=False)
+                     n_gpu_layers=gpu_layers, verbose=True)
 
     @staticmethod
     def _region_proposals(instruction: str, config: dict) -> list:
@@ -4313,7 +4577,10 @@ class ImgEditorManager:
             print(f"[ImgEditor] Traducción local no disponible: {exc}", flush=True)
             return None
 
-    def _proposed_region_passes(self, image: Image.Image, instruction: str, masker, faces=()) -> list:
+    def _proposed_region_passes(
+        self, image: Image.Image, instruction: str, masker, faces=(),
+        allow_multiple: bool = False,
+    ) -> list:
         """Ground a local language model's region proposal in this photo.
 
         This fallback keeps the complete instruction. The model supplies only
@@ -4336,16 +4603,20 @@ class ImgEditorManager:
                 raise ValueError("region_proposal.max_coverage debe estar entre 0 y 1")
             proposals = self._region_proposals(instruction, config)
             tokens = set(re.findall(r"\w+", instruction.casefold()))
-            grounded = [
-                query for query in proposals
-                if (words := set(re.findall(r"\w+", query.casefold())))
-                and words.issubset(tokens)
-            ]
-            if len(grounded) != 1:
+            grounded = []
+            seen_queries = set()
+            for query in proposals:
+                words = re.findall(r"\w+", query.casefold())
+                projected = " ".join(dict.fromkeys(word for word in words if word in tokens))
+                if projected and projected not in seen_queries:
+                    grounded.append(projected)
+                    seen_queries.add(projected)
+            if not grounded or (len(grounded) != 1 and not allow_multiple):
                 print("[ImgEditor] La propuesta no identifica una sola zona de la instrucción", flush=True)
                 return []
             best = None
             best_coverage = 0.0
+            measured_regions = []
             for query in grounded:
                 try:
                     measured = masker.generate_mask(image, query)
@@ -4361,12 +4632,34 @@ class ImgEditorManager:
                     np.asarray(measured), faces, image.width, image.height,
                 ) is not None:
                     continue
+                if allow_multiple and 0.0 < coverage <= max_coverage:
+                    measured_regions.append(measured)
                 if best_coverage < coverage <= max_coverage:
                     best, best_coverage = measured, coverage
-            if best is None:
+            if allow_multiple:
+                if not measured_regions:
+                    return []
+                final = np.zeros((image.height, image.width), dtype=np.uint8)
+                for measured in measured_regions:
+                    pixels = np.asarray(measured.convert("L"), dtype=np.uint8)
+                    continued = self._continue_measured_region(measured, pixels)
+                    if continued is not None:
+                        pixels = np.asarray(continued.convert("L"), dtype=np.uint8)
+                    if pixels.shape[:2] != final.shape:
+                        pixels = cv2.resize(
+                            pixels, (image.width, image.height),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                    final = np.maximum(final, pixels)
+                final_mask = Image.fromarray(final, "L")
+                best_coverage = self._mask_coverage(final_mask)
+                if best_coverage > max_coverage:
+                    return []
+            elif best is None:
                 return []
-            continued = self._continue_measured_region(best, np.asarray(best))
-            final_mask = continued if continued is not None else best
+            else:
+                continued = self._continue_measured_region(best, np.asarray(best))
+                final_mask = continued if continued is not None else best
             if faces and self._grow_measured_subject(
                 np.asarray(final_mask), faces, image.width, image.height,
             ) is not None:
@@ -4383,6 +4676,39 @@ class ImgEditorManager:
         except Exception as exc:
             print(f"[ImgEditor] Propuesta local de zona no disponible: {exc}", flush=True)
             return []
+
+    def _measure_camera_followup_mask(
+        self, image: Image.Image, instruction: str,
+    ) -> Optional[Image.Image]:
+        """Measure every local support before a post-camera edit."""
+        clauses = self._split_compound_instruction(instruction) or [instruction]
+        masker = self._get_clipseg_masker()
+        if masker is None:
+            return None
+        height, width = image.height, image.width
+        combined = np.zeros((height, width), dtype=np.uint8)
+        for clause in clauses:
+            passes = self._proposed_region_passes(
+                image, clause, masker, allow_multiple=True,
+            )
+            if not passes:
+                return None
+            clause_mask = np.zeros_like(combined)
+            for item in passes:
+                mask = item.get("mask")
+                if not isinstance(mask, Image.Image):
+                    continue
+                if mask.size != image.size:
+                    mask = mask.resize(image.size, Image.Resampling.NEAREST)
+                clause_mask = np.maximum(
+                    clause_mask, np.asarray(mask.convert("L"), dtype=np.uint8),
+                )
+            if not clause_mask.any():
+                return None
+            combined = np.maximum(combined, clause_mask)
+        if not combined.any():
+            return None
+        return Image.fromarray(combined, "L")
 
     def _grow_recolor_surface(
         self, image: Image.Image, region, faces=(), masker=None,
@@ -4490,9 +4816,210 @@ class ImgEditorManager:
         merged = cv2.GaussianBlur(merged, (31, 31), 0)
         return Image.fromarray(merged, "L")
 
+    def _complete_surface_recolor(
+        self, original: Image.Image, edited: Image.Image, surface: Image.Image,
+        faces=(),
+    ) -> Optional[Image.Image]:
+        """Paint the surface's old-colour remnant with the colour it already got.
+
+        The edit model recolours the surface and keeps the strip that touches
+        people, furniture and blinds in the old colour: measured 2026-11-02 on a
+        real edit, the raw generation (FastEdit_01057_.png) already carried the
+        orange band beside the woman, the arm, the foot and the bed. The paste
+        only writes the change it can measure, so that strip stayed orange and a
+        repeated instruction could no longer find it (0,6 % < the 4 % floor).
+        A repeat therefore returned the same photo, byte for byte.
+
+        This is not another generation and no shape, colour or word list is
+        involved: the old colour, the new colour, the seam and the shading all
+        come from the pixels of the measured surface. Only the surface is
+        touched, only pixels that still carry its old colour, and only where
+        they are connected to the part the model did recolour — a same-colour
+        object separated by another colour stays.
+        """
+        if surface is None:
+            return None
+        try:
+            width, height = original.size
+            mask = surface.convert("L")
+            if mask.size != original.size:
+                mask = mask.resize(original.size, Image.Resampling.NEAREST)
+            source = original.convert("RGB")
+            result = edited.convert("RGB")
+            if result.size != source.size:
+                result = result.resize(source.size, Image.Resampling.LANCZOS)
+            long_side = max(width, height)
+            scale = 768.0 / float(long_side) if long_side > 768 else 1.0
+            work = (
+                max(1, int(round(width * scale))),
+                max(1, int(round(height * scale))),
+            )
+            small_source = (
+                source if scale == 1.0
+                else source.resize(work, Image.Resampling.BOX)
+            )
+            small_edit = (
+                result if scale == 1.0
+                else result.resize(work, Image.Resampling.BOX)
+            )
+            small_mask = (
+                np.asarray(mask) if scale == 1.0
+                else np.asarray(mask.resize(work, Image.Resampling.NEAREST))
+            ) >= 96
+            area = int(small_mask.sum())
+            if area < 48:
+                return None
+            src_arr = np.asarray(small_source, dtype=np.int16)
+            edit_arr = np.asarray(small_edit, dtype=np.int16)
+            delta = np.abs(edit_arr - src_arr).max(axis=2)
+            inside = delta[small_mask]
+            if inside.size < 48:
+                return None
+            strong = float(np.percentile(inside, 98.0))
+            if strong < 4.0:
+                return None
+            threshold = float(
+                max(3.0, min(_otsu_threshold(inside.reshape(-1)), strong))
+            )
+            changed = (delta >= threshold) & small_mask
+            new_px = changed
+            old_px = small_mask & ~changed
+            if int(old_px.sum()) < 48:
+                return None
+            # A pass that barely moved the surface is a no-op or a ghost and has
+            # its own retry; here there is no new colour to copy from.
+            if int(new_px.sum()) < max(48, int(round(area * 0.20))):
+                return None
+            lab_src = cv2.cvtColor(
+                np.asarray(small_source), cv2.COLOR_RGB2LAB,
+            )
+            lab_edit = cv2.cvtColor(
+                np.asarray(small_edit), cv2.COLOR_RGB2LAB,
+            )
+            target_a = float(np.median(lab_edit[..., 1][new_px]))
+            target_b = float(np.median(lab_edit[..., 2][new_px]))
+            l_new = float(np.median(lab_edit[..., 0][new_px]))
+            old_ref = np.median(
+                lab_src[small_mask].astype(np.float32), axis=0,
+            )
+            # The envelope is the surface's OWN colour cluster. A p90 over all
+            # unchanged pixels is contaminated by whatever else the mask covers
+            # (a picture frame, a dark object): measured in the contract, a 10 %
+            # of foreign content pushed the limit from 20 to 170 and the whole
+            # frame plus an isolated patch came in. A robust sigma (MAD) keeps
+            # the surface's shading and leaves the foreign colours out.
+            distance = np.linalg.norm(
+                lab_src.astype(np.float32) - old_ref, axis=2,
+            )
+            surface_distance = distance[small_mask]
+            median_distance = float(np.median(surface_distance))
+            mad = float(np.median(np.abs(surface_distance - median_distance)))
+            spread = 1.4826 * mad
+            limit = max(median_distance + 4.0 * spread, 22.0)
+            # v5.1264: mas flexible (4*sigma, piso 22) para que el resto del
+            # color viejo (halo) entre en la reparacion sin inventar rellenos.
+            # "Still old" is a property of what the edit shows, not of the
+            # source: the source is old everywhere. Testing the source let a
+            # second pass re-detect the pixels the first one had just painted,
+            # because the endpoint threshold drifts with the new delta
+            # distribution (measured: threshold 3 -> 96 and 40 % of the surface
+            # repainted for no visible gain).
+            remnant_distance = np.linalg.norm(
+                lab_edit.astype(np.float32) - old_ref, axis=2,
+            )
+            residual = old_px & (remnant_distance <= limit)
+            if int(residual.sum()) < 48:
+                return None
+            l_old = float(np.median(lab_src[..., 0][residual]))
+            _count, labels = cv2.connectedComponents(
+                (residual | new_px).astype(np.uint8), connectivity=8,
+            )
+            touching = {int(value) for value in np.unique(labels[new_px]) if value}
+            keep = np.zeros(small_mask.shape, dtype=bool)
+            for label in touching:
+                keep |= labels == label
+            keep &= residual
+            if faces:
+                small_faces = []
+                for face in faces:
+                    box = tuple(float(value) * scale for value in face.bbox)
+                    small_faces.append(SimpleNamespace(bbox=box))
+                keep = ImgEditorManager._drop_other_person_contact(
+                    np.asarray(small_source, dtype=np.uint8),
+                    keep, small_mask, small_faces,
+                )
+            painted = int(keep.sum())
+            if painted < 48:
+                return None
+            # More than half of the surface still in the old colour is not a rim
+            # left by the model but a surface that was not recoloured at all.
+            if painted > int(area * 0.5):
+                return None
+            # The write is exact inside the remnant and stops at its border. A
+            # feathered write leaves the border partially old, so a repeated
+            # instruction repaints it again: measured in the contract, the second
+            # pass rewrote 4096 px by up to 27 levels and never settled. The
+            # continuity comes from the surface itself — the chroma is the one
+            # the model already used and the luminance keeps the old shading —
+            # so the border needs no synthetic gradient.
+            alpha = cv2.resize(
+                keep.astype(np.uint8) * 255, (width, height),
+                interpolation=cv2.INTER_NEAREST,
+            ).astype(np.float32) / 255.0
+            ys, xs = np.where(alpha > 0.0)
+            if not len(ys):
+                return None
+            x0, x1 = int(xs.min()), int(xs.max()) + 1
+            y0, y1 = int(ys.min()), int(ys.max()) + 1
+            # v5.1266: intensidad multiplicativa (`scale_l`) + eliminación reforzada (9x9 + 1.5x)
+            # conserva el sombreado pero puede desajustar la intensidad cuando
+            # la fuente y el destino tienen distancias luminosas distintas
+            # (p. ej. pared gris oscura vs gris claro). Se usa escala
+            # multiplicativa: L * (l_new / l_old) para que la intensidad
+            # coincida exactamente con la medida y el sombreado local se
+            # conserve proporcionalmente.
+            # v5.1266: escala multiplicativa con límite conservador (clip 0.85-1.15)
+            # para evitar desviaciones de color del modelo que dejen la foto distinta.
+            scale_l_raw = float(l_new) / float(l_old) if l_old > 0 else 1.0
+            scale_l = float(np.clip(scale_l_raw, 0.85, 1.15))
+            out = np.array(result, dtype=np.uint8)
+            tile = 1024
+            for y in range(y0, y1, tile):
+                for x in range(x0, x1, tile):
+                    y2, x2 = min(y1, y + tile), min(x1, x + tile)
+                    local_alpha = alpha[y:y2, x:x2]
+                    if float(local_alpha.max()) <= 0.0:
+                        continue
+                    patch = out[y:y2, x:x2]
+                    lab = cv2.cvtColor(patch, cv2.COLOR_RGB2LAB).astype(np.float32)
+                    lab[..., 1] = target_a
+                    lab[..., 2] = target_b
+                    lab[..., 0] = np.clip(lab[..., 0] * scale_l, 0.0, 255.0)
+                    recoloured = cv2.cvtColor(
+                        np.clip(lab, 0, 255).astype(np.uint8),
+                        cv2.COLOR_LAB2RGB,
+                    )
+                    blend = local_alpha[..., None]
+                    out[y:y2, x:x2] = (
+                        recoloured.astype(np.float32) * blend
+                        + patch.astype(np.float32) * (1.0 - blend)
+                    ).astype(np.uint8)
+            print(
+                f"[ImgEditor] Superficie completada: {painted} px del color viejo "
+                f"({painted / float(area):.1%} de la zona) pasan al color medido",
+                flush=True,
+            )
+            return Image.fromarray(out, "RGB")
+        except Exception as completion_error:
+            print(
+                f"[ImgEditor] Superficie sin completar: {completion_error}",
+                flush=True,
+            )
+            return None
+
     def _measured_region_passes(
         self, image: Image.Image, raw_prompt: str, translated_prompt: str,
-        surface_recolor: bool = False, faces=(),
+        surface_recolor: bool = False, faces=(), structural_remove: bool = False,
     ) -> list:
         """One mask for a measured add, remove, or recolor.
 
@@ -4535,10 +5062,49 @@ class ImgEditorManager:
             return []
         if masker is None:
             return []
+        from roop.img_editor.nlp.semantic_analyzer import LightLocalIntentAnalyzer
+
+        removal_target = (
+            self._extract_removal_target(translated_prompt)
+            or self._extract_removal_target(raw_prompt)
+        ) if structural_remove else ""
         best = None
         best_coverage = 0.0
+        if removal_target:
+            try:
+                candidate = masker.generate_mask(image, removal_target)
+            except Exception:
+                candidate = None
+            if candidate is not None:
+                candidate = candidate.convert("L")
+                if candidate.size != image.size:
+                    candidate = candidate.resize(
+                        image.size, Image.Resampling.BILINEAR,
+                    )
+                coverage = self._mask_coverage(candidate)
+                if 0.0 < coverage <= 0.90:
+                    best = np.asarray(candidate, dtype=np.uint8)
+                    best_coverage = coverage
+                    print(
+                        f"[ImgEditor] Objetivo de eliminación medido: "
+                        f"{removal_target!r}, cobertura={coverage:.1%}",
+                        flush=True,
+                    )
+
+        allow_multiple_regions = (
+            not surface_recolor and LightLocalIntentAnalyzer().get_structural_bias(
+                (translated_prompt or raw_prompt or "").strip(),
+            ) == "add"
+        )
+        if best is None and allow_multiple_regions:
+            proposed = self._proposed_region_passes(
+                image, (translated_prompt or raw_prompt or "").strip(),
+                masker, faces, allow_multiple=True,
+            )
+            if proposed:
+                return proposed
         width, height = image.size
-        for query in queries:
+        for query in (() if best is not None else queries):
             try:
                 candidate = masker.generate_mask(image, query)
             except Exception:
@@ -4556,6 +5122,7 @@ class ImgEditorManager:
         if best is None:
             return [] if surface_recolor else self._proposed_region_passes(
                 image, (translated_prompt or raw_prompt or "").strip(), masker, faces,
+                allow_multiple=allow_multiple_regions,
             )
         print(
             f"[ImgEditor] Región medida, cobertura={best_coverage:.1%}",
@@ -4651,8 +5218,6 @@ class ImgEditorManager:
         pie de 27×22 px en fast_1792015141).
         """
         gate_faces = detected_faces if detected_faces is not None else faces
-        if not gate_faces:
-            return []
         queries = self._subject_queries(raw_prompt, translated_prompt)
         if not queries:
             return []
@@ -4662,11 +5227,27 @@ class ImgEditorManager:
             return []
         if masker is None:
             return []
+        subject_measure = getattr(masker, "generate_subject_mask", None)
+        subject_template = None
+        if callable(subject_measure):
+            try:
+                from roop.img_editor.element_selection import load_settings
+                subject_template = load_settings()["segmenter"]["subject_prompt_template"]
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+                raise SubjectPromptConfigError(
+                    "No se puede leer segmenter.subject_prompt_template"
+                ) from error
         measured = []
         width, height = image.size
         for query in queries:
             try:
-                candidate = masker.generate_mask(image, query)
+                candidate = (
+                    subject_measure(image, query, subject_template)
+                    if callable(subject_measure)
+                    else masker.generate_mask(image, query)
+                )
+            except SubjectPromptConfigError:
+                raise
             except Exception:
                 continue
             if candidate is None:
@@ -4679,18 +5260,18 @@ class ImgEditorManager:
                 region = cv2.resize(region, (width, height), interpolation=cv2.INTER_LINEAR)
             limited = self._grow_measured_subject(region, gate_faces, width, height)
             if limited is None:
-                if coverage >= 0.04:
-                    print(
-                        f"[ImgEditor] '{query}' cubre {coverage:.1%} pero no coincide con una cara; se descarta",
-                        flush=True,
-                    )
-                continue
+                # The photo-conditioned subject mask is already visual
+                # evidence. A missed/tiny face must not veto an identified
+                # full-body subject; keep the exact mask local and do not
+                # expand it to a guessed person box.
+                limited = region
+                print(
+                    f"[ImgEditor] '{query}' medido por máscara semántica "
+                    f"({coverage:.1%}); se conserva la zona sin exigir solape facial",
+                    flush=True,
+                )
             grown_coverage = float((limited > 96).mean())
-            # The face overlap above is what makes this a person. In a
-            # full-body group photo that person can be under 4% of the frame.
-            # The old floor dropped them before the requested change was
-            # measured on them. A mask with no face is already gone. Under
-            # 48 px is still a speck.
+            # A mask with fewer than 48 pixels is still a speck.
             if int((limited > 96).sum()) < 48 or grown_coverage > 0.85:
                 continue
             if coverage < 0.04:
@@ -5145,7 +5726,16 @@ class ImgEditorManager:
         ):
             match = matches[1]
         if match:
-            return text[:match.start()].strip(" ,.;")
+            subject = text[:match.start()].strip(" ,.;")
+            # El modal queda pegado al sujeto cuando hay doble predicado
+            # («The woman who stands must go...» cortaba en «go» y dejaba
+            # «...stands must» como query CLIPSeg, log 2026-10-31 00:04).
+            # Solo auxiliares de gramatica, sin vocabulario de edicion.
+            subject = re.sub(
+                r"\s+(?:must|should|shall|can|will|have|has|debe|deben|tiene|tienen|haya|sea)\s*$",
+                "", subject, flags=re.I,
+            ).strip(" ,.;")
+            return subject
         # v5.1221: una cláusula que ABRE con sintagma determinante nombra a
         # su sujeto aunque el verbo posterior no esté en el patrón («the
         # woman wears no stockings»: wears no casa con is/has/go/tiene; sin
@@ -5490,7 +6080,7 @@ class ImgEditorManager:
         extended = self._complete_request_surface(
             image, part, subject, faces,
             masker=masker,
-            complete_hair=False,
+            complete_hair=True,
         )
         if extended is None:
             return part
@@ -6092,7 +6682,28 @@ class ImgEditorManager:
                 if mask_img is not None:
                     cov = self._mask_coverage(mask_img)
                     if cov > 0.005:
-                        print(f"[ImgEditor] Máscara objeto: cov={cov*100:.1f}% (th={th})")
+                        arr = np.array(mask_img.convert("L"))
+                        # Expansión por oscuridad: si hay un objeto oscuro
+                        # (zapato negro, cuchara en sombra) que CLIPSeg no
+                        # mide, se completa con la zona oscura conectada.
+                        # v5.1266: expansión reforzada para eliminar restos/bordes.
+                        # Se aumenta el cierre a (9,9) y se suma con peso 1.5
+                        # para que zonas oscuras conectadas (bordes de zapatos,
+                        # sombras residuales) entren en la máscara.
+                        dark = (arr < 50).astype(np.uint8) * 255
+                        close = cv2.morphologyEx(
+                            dark, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8),
+                        )
+                        expanded = np.clip(
+                            (arr.astype(np.int16) * 1.0
+                             + close.astype(np.int16) * 1.5), 0, 255,
+                        ).astype(np.uint8)
+                        mask_img = Image.fromarray(expanded, "L")
+                        print(
+                            f"[ImgEditor] Máscara objeto: cov={cov*100:.1f}% "
+                            f"(th={th}, expansión oscura aplicada)",
+                            flush=True,
+                        )
                         return mask_img
         except Exception as e:
             print(f"[ImgEditor] Máscara objeto falló: {e}")
@@ -6402,9 +7013,26 @@ class ImgEditorManager:
     ) -> Tuple[Optional[Image.Image], str, Optional[Image.Image]]:
 
         self._last_instruction_compliance = None
-        if engine in ("longcat", "longcat_full", "imagine"):
+        auto_requested = engine == "auto"
+        if auto_requested:
+            engine = "longcat"
+            print(
+                "[ImgEditor] Auto: LongCat Turbo como ruta general; "
+                "los conceptos de cámara medidos pueden activar Qwen Cámara",
+                flush=True,
+            )
+        elif engine in ("longcat_full", "imagine"):
             print(f"[ImgEditor] Alias legacy {engine} → kontext", flush=True)
             engine = "kontext"
+        manual_mask_requested = (
+            mask_image is not None and str(mask_mode).lower() == "manual"
+        )
+        if manual_mask_requested and engine != "longcat":
+            return None, (
+                "Omitida: la máscara pintada requiere Auto o LongCat, "
+                "que respetan la zona seleccionada; el motor elegido no admite "
+                "esta edición localizada"
+            ), mask_image
         if cancel_check and cancel_check():
             return None, "Cancelado", None
 
@@ -6594,11 +7222,8 @@ class ImgEditorManager:
             print("[ImgEditor] Qwen Cámara no aplica a esta solicitud; usando LongCat", flush=True)
             engine = "longcat"
 
-        # A camera move needs a model trained for new viewpoints. Qwen's
-        # multiple-angle LoRA sees the original photo in its first pass. If
-        # there are independent visual edits, LongCat applies them to the new
-        # view in a second pass. If Qwen does not finish, LongCat is not
-        # started: it keeps the original angle and queues behind a busy GPU.
+        # A camera move gets its dedicated pass. Independent edits follow only
+        # on regions measured in that new view; never regenerate the full frame.
         if (explicit_viewpoint_request and prompt and _compound_depth == 0
                 and mask_image is None and quality_style != "solo_mejora"
                 and not (quality_hybrid and quality_use_generative is True)
@@ -6609,46 +7234,73 @@ class ImgEditorManager:
                 from roop.img_editor.qwen_camera_comfy_client import (
                     QwenCameraComfyClient, camera_pose, remaining_edit,
                 )
+                if auto_requested:
+                    from roop.img_editor.edit_execution import permit_automatic_model
+                    from roop.img_editor.qwen_camera_comfy_client import UNET
+                    permit_automatic_model(UNET)
                 self._release_local_gpu_before_comfy()
                 pose = camera_pose(prompt_raw, prompt)
+                extra_edit = remaining_edit(prompt_raw, prompt)
+                extra_facts = (
+                    self._prompt_authority_facts(extra_edit, extra_edit)
+                    if extra_edit else {}
+                )
+                full_instruction_in_camera_pass = bool(
+                    extra_edit and (
+                        self._explicit_viewpoint_request(extra_edit, extra_edit)
+                        or extra_facts.get("pose")
+                        or extra_facts.get("scenario")
+                    )
+                )
+                camera_prompt = (
+                    f"{pose}. Apply the complete edit request: {prompt}"
+                    if full_instruction_in_camera_pass else pose
+                )
                 camera_result, camera_message = QwenCameraComfyClient().generate(
-                    img, pose, seed=seed, progress_callback=progress_callback,
+                    img, camera_prompt, seed=seed, progress_callback=progress_callback,
                     cancel_check=cancel_check,
                 )
                 if camera_result is not None:
                     output = camera_result.image.convert("RGB")
-                    extra_edit = remaining_edit(prompt_raw, prompt)
+                    from roop.img_editor.edit_execution import record_execution_scope
+                    record_execution_scope("fotograma completo (cambio de cámara)")
                     route_note = f"Qwen Camera {camera_message} ({pose})"
-                    if extra_edit:
+                    if extra_edit and full_instruction_in_camera_pass:
+                        route_note += " | instrucción mixta enviada en la pasada de cámara"
+                    elif extra_edit:
                         if cancel_check and cancel_check():
                             return None, "Cancelado", None
-                        from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
-                        edit_client = get_flux_edit_comfy_client()
-                        loaded, load_msg = edit_client.load("LongCat-Image-Edit-Turbo-Q4_K_S.gguf")
-                        if loaded:
-                            follow_prompt = (
-                                f"Edit this exact photo. Apply these remaining changes: {extra_edit}. "
-                                f"The camera is already at {pose.removeprefix('<sks> ')}; "
-                                "preserve that camera position, all people and their complete anatomy."
-                            )
-                            if negative_prompt:
-                                follow_prompt += f" Avoid: {negative_prompt}."
-                            follow_result, follow_message = edit_client.generate(
-                                image=output, prompt=follow_prompt,
-                                negative_prompt=negative_prompt,
-                                num_inference_steps=12, guidance_scale=1.0,
-                                denoise=1.0, seed=seed, no_kontext=True,
-                                lora_name=lora_name, lora_strength=lora_strength,
-                                progress_callback=progress_callback,
-                                cancel_check=cancel_check,
-                            )
-                            if follow_result is not None:
-                                output = follow_result.image.convert("RGB")
-                                route_note += " + LongCat Turbo para otras ediciones"
-                            else:
-                                route_note += f" | segunda edición falló: {follow_message}"
-                        else:
-                            route_note += f" | segunda edición no disponible: {load_msg}"
+                        local_mask = self._measure_camera_followup_mask(
+                            output, extra_edit,
+                        )
+                        if local_mask is None:
+                            return img, (
+                                "Edición combinada no aplicada: no se midió una "
+                                "región para los cambios restantes; foto original conservada"
+                            ), None
+                        follow_result, follow_message, _ = self.generate_intelligent(
+                            output,
+                            extra_edit,
+                            negative_prompt=negative_prompt,
+                            seed=seed,
+                            use_rewriter=False,
+                            use_semantic=False,
+                            engine="longcat",
+                            mask_image=local_mask,
+                            mask_mode="global",
+                            enhance_faces=False,
+                            lora_name=lora_name,
+                            lora_strength=lora_strength,
+                            progress_callback=progress_callback,
+                            cancel_check=cancel_check,
+                        )
+                        if follow_result is None:
+                            return img, (
+                                "Edición combinada no aplicada: falló el pase local; "
+                                f"foto original conservada ({follow_message})"
+                            ), None
+                        output = follow_result.convert("RGB")
+                        route_note += " + cambios restantes sobre regiones medidas"
                     if quality_hybrid:
                         from roop.img_editor.top_tier_finish import run_quality_enhance_after_edit
                         output, finish_note, quality_analysis = run_quality_enhance_after_edit(
@@ -6688,11 +7340,13 @@ class ImgEditorManager:
         if (prompt and mask_image is None and _compound_depth == 0
                 and not quality_only and quality_style != "solo_mejora"
                 and not (quality_hybrid and quality_use_generative is True)
-                and engine == "kontext" and not explicit_viewpoint_request):
+                and (engine == "kontext" or auto_requested)
+                and not explicit_viewpoint_request):
             from roop.img_editor.selected_region_edit import edit_described_subject
             described = edit_described_subject(
                 self, img, prompt_raw, prompt, detected_faces,
                 engine=engine, negative_prompt=negative_prompt, seed=seed,
+                automatic=auto_requested,
                 progress_callback=progress_callback, quality_mode=quality_mode,
                 auto_upscale=auto_upscale, enhance_tier=enhance_tier,
                 quality_preserve_faces=quality_preserve_faces,
@@ -6733,6 +7387,7 @@ class ImgEditorManager:
                     sources = [""] * len(clauses)
                 zones = []
                 unmeasured = []
+                unmeasured_local = []
                 # The full-prompt score dilutes one clause ("bald and naked"
                 # reads as weak body). The wrapper flags come from the
                 # strongest clause, the same way the single-clause path
@@ -6770,6 +7425,11 @@ class ImgEditorManager:
                             or clause_facts.get("local_region")
                             or clause_facts.get("region_ambiguous")):
                         compound_local = True
+                    local_clause = bool(
+                        clause_facts.get("local_appearance")
+                        or clause_facts.get("local_region")
+                        or clause_facts.get("region_ambiguous")
+                    )
                     zone = self._compound_clause_zone(
                         img, clause, source, clause_facts, source_faces,
                         detected_faces=detected_faces,
@@ -6778,6 +7438,20 @@ class ImgEditorManager:
                         zones.append(zone)
                     else:
                         unmeasured.append(clause)
+                        if local_clause:
+                            unmeasured_local.append(clause)
+                if unmeasured_local:
+                    missing = ", ".join(unmeasured_local)
+                    print(
+                        "[ImgEditor] Zona local no medida; se conserva la foto "
+                        f"en vez de regenerar globalmente: {missing}",
+                        flush=True,
+                    )
+                    return (
+                        img,
+                        "Zona solicitada no medida; foto conservada | cumplimiento visual no verificado",
+                        None,
+                    )
                 print(
                     "[ImgEditor] Compuesto: un solo pase Turbo con los "
                     f"{len(clauses)} cambios; zonas medidas={len(zones)}"
@@ -6787,7 +7461,7 @@ class ImgEditorManager:
                 self._release_local_gpu_before_comfy()
                 from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                 fast_client = get_flux_edit_comfy_client()
-                loaded, load_msg = fast_client.load("LongCat-Image-Edit-Turbo-Q4_K_S.gguf")
+                loaded, load_msg = fast_client.load(get_longcat_model_config()["model_file"])
                 fast_result = None
                 fast_msg = load_msg
                 # The union of the measured zones is both the sampler hole
@@ -7060,6 +7734,7 @@ class ImgEditorManager:
                         img, score_raw, prompt,
                         surface_recolor=False,
                         faces=source_faces,
+                        structural_remove=bool(authority_facts.get("structural_remove")),
                     )
                     if not subject_passes:
                         subject_passes = self._proposed_region_passes(
@@ -7077,6 +7752,7 @@ class ImgEditorManager:
                         img, score_raw, prompt,
                         surface_recolor=recolor_edit,
                         faces=source_faces,
+                        structural_remove=bool(authority_facts.get("structural_remove")),
                     )
                 elif preserve_frame:
                     subject_passes = self._measured_subject_passes(
@@ -7295,11 +7971,17 @@ class ImgEditorManager:
                     frame_note = "postura/cuerpo sin ancla de latente"
                 else:
                     frame_note = ""
-                if (appearance_edit or region_edit) and subject_mask is None and not subject_passes:
+                if (
+                    (appearance_edit or region_edit or body_edit)
+                    and subject_mask is None
+                    and not subject_passes
+                ):
+                    if body_edit:
+                        frame_note = "cuerpo no medido; se conserva la foto"
                     return img, f"{frame_note} | cumplimiento visual no verificado", None
                 self._release_local_gpu_before_comfy()
                 fast_client = get_flux_edit_comfy_client()
-                loaded, load_msg = fast_client.load("LongCat-Image-Edit-Turbo-Q4_K_S.gguf")
+                loaded, load_msg = fast_client.load(get_longcat_model_config()["model_file"])
                 if loaded:
                     multi_output = None
                     if len(subject_passes) > 1 and prompt_authority:
@@ -7434,10 +8116,19 @@ class ImgEditorManager:
                                 flush=True,
                             )
                         elif region_edit:
-                            fast_prompt = self._compose_generation_prompt(
-                                edit_text, engine="longcat", magnitude=0.85,
-                                pose_change=False, body_transform=False,
-                            )
+                            removal_target = (
+                                self._extract_removal_target(edit_text)
+                                or self._extract_removal_target(score_raw)
+                            ) if authority_facts["structural_remove"] else ""
+                            if removal_target:
+                                fast_prompt = self._compose_local_target_prompt(
+                                    edit_text, removal_target,
+                                )
+                            else:
+                                fast_prompt = self._compose_generation_prompt(
+                                    edit_text, engine="longcat", magnitude=0.85,
+                                    pose_change=False, body_transform=False,
+                                )
                             print(
                                 "[ImgEditor] Región: solo la zona medida, el resto de la foto queda fuera",
                                 flush=True,
@@ -7654,6 +8345,27 @@ class ImgEditorManager:
                                     "[ImgEditor] El predicado no tiene zona; "
                                     "se pega la región ya medida",
                                     flush=True,
+                                )
+                        if (
+                            multi_output is None
+                            and recolor_edit
+                            and subject_mask is not None
+                            and len(subject_passes) == 1
+                        ):
+                            # v5.1262: el modelo deja la franja de la superficie
+                            # pegada a personas/muebles con el color viejo
+                            # (medido 2026-11-02 en la generación cruda). Se
+                            # completa con el color que la propia superficie ya
+                            # recibió, sin otra generación y solo dentro de la
+                            # zona medida.
+                            completed = self._complete_surface_recolor(
+                                img, output, subject_mask, source_faces,
+                            )
+                            if completed is not None:
+                                output = completed
+                                fast_msg = (
+                                    f"{fast_msg}; superficie completada con el "
+                                    "color medido"
                                 )
                         if quality_hybrid or prompt_authority:
                             no_op = self._edit_is_nearly_unchanged(img, output)
@@ -8031,18 +8743,8 @@ class ImgEditorManager:
                     f"BodyTransform={body_transform_intensity:.2f}, Appearance={appearance_score:.2f}"
                     + (", BackgroundFocus=True" if background_focus else "")
                 )
-                # Detección de cambio de ángulo/POV (vista no vista → regenerar + FacePreserver)
-                # + cambio de POSTURA (el cuerpo destino no existe en la fuente: el
-                # modo EDIT con ancla la conserva y la pose NUNCA cambia; necesita
-                # el mismo régimen de regeneración que POV). Patrones existentes,
-                # cero vocabulario nuevo.
-                # Bilingüe SOLO eje pose: la traducción puede destruir la señal
-                # (log 12:56: 'DE RODILLAS'→'ON HIS KNEES', pose 0.19→0.0; el
-                # crudo SÍ puntúa en conceptos ES). La magnitud NO se fusiona:
-                # el ES puntúa más alto en general y el max secuestraría a body
-                # por la puerta mag>=0.80 (p. ej. 'pon un sombrero' crudo 0.81).
-                # La fuerza de pose la pone el bloque POSE (mag≥0.85 + global).
-                _change_scope = self._requested_change_scope(prompt)
+                # The raw-language axis is measured independently because
+                # translation can weaken posture evidence.
                 _raw_change_scope = self._requested_change_scope(prompt_raw)
                 try:
                     _raw_axes = nlp.get_axis_scores(_raw_change_scope) if hasattr(nlp, "get_axis_scores") else {}
@@ -8054,54 +8756,31 @@ class ImgEditorManager:
                 except Exception:
                     _raw_pose = 0.0
                 try:
-                    from roop.img_editor.prompt_analyzer import PromptAnalyzer
-                    _pa = PromptAnalyzer()
-                    _angle_hits = len(_pa._angle_pattern.findall(_change_scope.lower())) if hasattr(_pa, '_angle_pattern') else 0
-                    # v5.1131: tolerancia subset (la MISMA que usa pose) — el regex
-                    # exige la frase exacta ('de lado') pero frases equivalentes
-                    # ('que se vea desde el lado', 'visto desde el lado') dan 0 hits
-                    # aunque sus tokens SÍ están en ANGLE_KEYWORDS → POV caía al
-                    # régimen genérico y la vista no cambiaba.
-                    if _angle_hits == 0 and hasattr(_pa, "subset_hits"):
-                        try:
-                            _angle_hits = _pa.subset_hits(_raw_change_scope, _pa.ANGLE_KEYWORDS)
-                        except Exception:
-                            _angle_hits = 0
-                    angle_change = _angle_hits > 0
+                    angle_change = self._explicit_viewpoint_request(
+                        prompt_raw, prompt,
+                    )
                     if angle_change:
-                        print(f"[ImgEditor] Cambio de ángulo/POV detectado ({_angle_hits} señales) → regeneración + FacePreserver", flush=True)
-                    _pose_hits = len(_pa._pose_pattern.findall(_change_scope.lower())) if hasattr(_pa, '_pose_pattern') else 0
-                    # Subconjunto sobre el CRUDO: tolera typos que rompen la
-                    # frase ('DD RODILLAS' no casa el regex pero 'rodillas'
-                    # está). Solo listas existentes, sin palabras nuevas.
-                    _subset = 0
-                    try:
-                        if hasattr(_pa, "subset_hits"):
-                            _subset = _pa.subset_hits(_raw_change_scope, _pa.POSE_KEYWORDS)
-                    except Exception:
-                        _subset = 0
-                    # v5.1254 — el eje de postura COMPITE con el resto, como
-                    # ya hace `_prompt_authority_facts` (≥0,20 y ×1,25 sobre
-                    # los demás ejes). El umbral suelto 0,17 no es una medida
-                    # de postura: el verbo de cambio comparte textura con las
-                    # tres descripciones de eje, así que puntuaba en todas.
-                    # Medido 2026-10-27 (foto real, «cambia la camisa a rojo»):
-                    # pose 0,30 / structural 0,30 / attribute 0,29 → esta
-                    # puerta forzaba «POSE: mag≥0.85 + global» y el render
-                    # repintó el 79,72 % del lienzo para un cambio de color.
-                    # Con la competición mide 0,30 contra 0,30 y 0,29: no hay
-                    # postura que medir. Una postura real («ponla de pie»,
-                    # «de rodillas», «muévete a la izquierda») sigue dominando
-                    # su cláusula y conserva el régimen sin ancla.
+                        print(
+                            "[ImgEditor] Cambio de cámara medido → regeneración + FacePreserver",
+                            flush=True,
+                        )
                     _raw_structural = float((_raw_axes or {}).get("structural", 0.0))
                     _raw_attribute = float((_raw_axes or {}).get("attribute", 0.0))
+                    # The pose concept must lead the other measured axes; a
+                    # shared verb alone is not evidence of a new posture.
                     _pose_leads = bool(
                         _raw_pose >= 0.20
                         and _raw_pose >= 1.25 * max(_raw_structural, _raw_attribute)
                     )
-                    pose_change = (_pose_hits > 0) or _pose_leads or (_subset > 0)
+                    pose_change = _pose_leads
                     if pose_change:
-                        print(f"[ImgEditor] Cambio de postura detectado (patrón={_pose_hits}, eje_crudo={_raw_pose:.2f} vs structural={_raw_structural:.2f}/attribute={_raw_attribute:.2f}, tokens={_subset}) → regeneración sin ancla", flush=True)
+                        print(
+                            f"[ImgEditor] Cambio de postura medido "
+                            f"(pose={_raw_pose:.2f} vs "
+                            f"structural={_raw_structural:.2f}/attribute={_raw_attribute:.2f}) "
+                            "→ regeneración sin ancla",
+                            flush=True,
+                        )
                 except Exception:
                     angle_change = False
                     pose_change = False
@@ -8735,9 +9414,16 @@ class ImgEditorManager:
             if final_mask is None:
                 print("[ImgEditor] Structural remove: sin máscara objeto/persona — global agresivo")
         elif high_structural and structural_bias == "add" and final_mask is None:
-            # ADD sin máscara — el prompt + LongCat global da mejor resultado que mask+inpaint
-            print("[ImgEditor] Structural add: edit global (sin máscara, el prompt guía todo)")
-            pass  # final_mask se queda None → cae en force_global abajo
+            # ADD con máscara: protege personas existentes, deja el resto editable.
+            # Si la foto ya tiene gente, la máscara les cierra paso; si no, todo editable.
+            final_mask = self._build_person_addition_mask(img)
+            if final_mask is not None:
+                cov = self._mask_coverage(final_mask)
+                print(
+                    f"[ImgEditor] Máscara ADD persona cov={cov*100:.1f}% " +
+                    (f"(caras detectadas)" if faces else "(sin detección de cara)"),
+                    flush=True,
+                )
 
         structural_inpaint = (
             high_structural and structural_bias in ("remove", "add") and final_mask is not None
@@ -8816,7 +9502,9 @@ class ImgEditorManager:
             or (quality_hybrid and has_quality_request and not quality_primary)
         )
 
-        use_flux_structural_inpaint = bool(structural_inpaint and structural_bias == "remove")
+        use_flux_structural_inpaint = bool(
+            structural_inpaint and structural_bias == "remove" and engine != "longcat"
+        )
         _head_only_plan = self._head_only_plan(
             analysis, mask_target, body_transform or _weak_compound_body,
             cloth_mask_rejected, high_structural,
@@ -8824,6 +9512,8 @@ class ImgEditorManager:
 
         if use_flux_structural_inpaint:
             print("[ImgEditor] Structural remove → Flux Fill inpaint (máscara, sin Kontext)")
+        elif structural_inpaint and structural_bias == "remove" and engine == "longcat":
+            print("[ImgEditor] Structural remove → LongCat Turbo inpaint (máscara medida)")
         elif structural_inpaint:
             bias_label = structural_bias.upper()
             print(f"[ImgEditor] Structural {bias_label}: inpaint LongCat + denoise alto")
@@ -9321,11 +10011,13 @@ class ImgEditorManager:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
                     mag = analysis.get("magnitude", 0.0)
-                    # Full para cambios fuertes/corporales y Turbo para sutiles,
-                    # pero sin degradar un Full ya residente: esa alternancia
-                    # vaciaba el cache correcto entre ediciones consecutivas.
-                    is_body = bool(analysis.get("body_transform", False))
-                    version = self._select_longcat_version(client, mag, is_body)
+                    # LongCat retirado por defecto → Kontext. Pero si el usuario
+                    # selecciona LongCat explícitamente en el dropdown, usar
+                    # LongCat de verdad (no normalizar a Kontext).
+                    if engine == "longcat":
+                        version = get_longcat_model_config()["model_file"]
+                    else:
+                        version = get_kontext_model_config()["model_file"]
                 elif engine == "kontext":
                     from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
                     if self.flux_klein_client is None:
@@ -9343,7 +10035,7 @@ class ImgEditorManager:
                     if self.flux_klein_client is None:
                         self.flux_klein_client = get_flux_edit_comfy_client()
                     client = self.flux_klein_client
-                    version = "LongCat-Image-Edit-Q4_K_S.gguf"
+                    version = get_longcat_full_model_config()["model_file"]
                     # VRAM check: LongCat Full necesita ~12.3GB. En 8GB, el body router
                     # ya redirige a Kontext/Klein. Para non-body, warning si VRAM justa.
                     try:
@@ -9445,7 +10137,7 @@ class ImgEditorManager:
                             "(router global omitido)",
                             flush=True,
                         )
-                elif not flux_structural_override:
+                elif not flux_structural_override and engine != "longcat":
                     try:
                         _vram_router = get_vram_gb()
                     except Exception:
@@ -9479,7 +10171,7 @@ class ImgEditorManager:
                     except Exception:
                         _vram_focal = 0
                     if 0 < _vram_focal <= 10:
-                        version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                        version = get_longcat_model_config()["model_file"]
                         params = {"denoise": 1.0, "num_inference_steps": 12,
                                   "guidance_scale": 1.0, "mode": "img2img"}
                         print(
@@ -9547,7 +10239,7 @@ class ImgEditorManager:
                             and self._is_bald_request(prompt_pre_rewrite)
                         )
                         if locals().get("_hair_subject_no_face", False):
-                            version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                            version = get_longcat_model_config()["model_file"]
                             params = {"denoise": 1.0, "num_inference_steps": 12,
                                       "guidance_scale": 1.0, "mode": "img2img"}
                             prompt_enhanced += (
@@ -9560,7 +10252,7 @@ class ImgEditorManager:
                                 flush=True,
                             )
                         elif _bald_crop:
-                            version = "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
+                            version = get_longcat_model_config()["model_file"]
                             params = {"denoise": 1.0, "num_inference_steps": 12,
                                       "guidance_scale": 1.0, "mode": "img2img"}
                             print(
@@ -9685,7 +10377,12 @@ class ImgEditorManager:
                                 "allow_vision_engine": True,
                             }
                         else:
-                            load_params = {"qwen_version": version} if "qwen" in engine else {"flux_version": version}
+                            if "qwen" in engine:
+                                load_params = {"qwen_version": version}
+                            elif engine == "longcat":
+                                load_params = {"flux_version": version, "allow_vision_engine": True}
+                            else:
+                                load_params = {"flux_version": version}
                         success, msg = client.load(**load_params)
                         if not success:
                             # Turbo es el motor elegido (spec/00): si no carga
@@ -9832,7 +10529,7 @@ class ImgEditorManager:
                         # en junio para desnudo ("ha seguido las instrucciones").
                         # El patch _patch_strong_edit.py nunca llegó a aplicarse al
                         # manager — este bloque es su implementación real.
-                        if body_transform and _bdir_img == "uncover" and engine in ("longcat", "imagine", "longcat_full"):
+                        if engine in ("longcat", "longcat_full") and _bdir_img == "uncover":
                             gen_params["no_kontext"] = True
                             gen_params["drop_edit_image_ref"] = False
                             gen_params["prompt_authority"] = True
@@ -9923,7 +10620,7 @@ class ImgEditorManager:
                         # inpaint estructural que SÍ necesita su máscara.
                         if (bool(gen_params.get("no_kontext", False)) and final_mask is not None
                                 and not structural_inpaint and not flux_structural_override
-                                and not _compound_scene_background):
+                                and not _compound_scene_background and not manual_focal_mask):
                             final_mask = None
                             print("[ImgEditor] Bypass sin ancla → global puro (sin máscara focal ni composite: el cambio manda)", flush=True)
                         # El engine puede ser override a longcat_full más adelante.
@@ -10835,6 +11532,19 @@ class ImgEditorManager:
             # an independent local VLM.  Failure is reported to the retry loop;
             # an unavailable/inconclusive verifier never discards a result.
             if result is not None and prompt_raw and not quality_only:
+                # Liberar VRAM de ComfyUI antes de cargar el verificador (Moondream2)
+                # para que haya suficiente memoria para el proyector de visión.
+                try:
+                    import requests
+                    from roop.comfy_workflows import get_comfyui_url
+                    _comfy_url = get_comfyui_url()
+                    requests.post(f"{_comfy_url}/free", json={"unload_models": True, "free_memory": True}, timeout=10)
+                    import time
+                    time.sleep(1)
+                    import gc
+                    gc.collect()
+                except Exception:
+                    pass
                 try:
                     from roop.img_editor.instruction_verifier import get_instruction_verifier
                     verification = get_instruction_verifier().verify(
@@ -10873,6 +11583,19 @@ class ImgEditorManager:
                     print(f"[ImgEditor] Verificación visual omitida: {_verify_exc}", flush=True)
 
             if result is not None:
+                from roop.img_editor.edit_execution import record_execution_scope
+                scope_mask = final_mask
+                if scope_mask is None:
+                    scope_mask = locals().get("_longcat_focal_mask")
+                if scope_mask is not None:
+                    coverage = self._mask_coverage(scope_mask)
+                    record_execution_scope(
+                        f"máscara/región medida ({coverage:.1%} del fotograma)"
+                    )
+                elif locals().get("_compound_measurement_mask") is not None:
+                    record_execution_scope("zonas medidas de la edición compuesta")
+                else:
+                    record_execution_scope("fotograma completo")
                 return result, msg, final_mask
             return None, msg if msg else "Error: no se generó resultado", final_mask
 
@@ -10880,6 +11603,97 @@ class ImgEditorManager:
             import traceback
             traceback.print_exc()
             return None, f"Error: {str(e)}", final_mask
+
+
+    # ---------------------------------------------------------------------------
+    # Métodos auxiliares para peticiones de remoción local
+    # v5.1255 (2026-10-29): _requested_removal_target / _extract_removal_target
+    # detectan el objeto local a remover («sin zapatos», «sin gafas», …)
+    # ---------------------------------------------------------------------------
+
+    def _requested_removal_target(self, raw_prompt: str, instruction: str) -> str:
+        """Identify the specific object/person to remove from a local "uncover"."""
+        text_to_check = instruction or raw_prompt or ""
+        if not text_to_check or not text_to_check.strip():
+            return ""
+
+        try:
+            from roop.img_editor.nlp.semantic_analyzer import get_semantic_analyzer
+            scorer = get_semantic_analyzer(full_ai=False)
+
+            concept_scores = scorer.score_concepts(text_to_check)
+            rem_score = float(concept_scores.get("structural_remove", 0.0))
+            body_score = float(concept_scores.get("attribute_body", 0.0))
+
+            if rem_score < 0.08 and body_score < 0.08:
+                return ""
+
+            local_body = float(concept_scores.get("body_exposure_local", 0.0))
+            full_body = float(concept_scores.get("body_exposure_full", 0.0))
+            is_local = local_body > 0.1 or (local_body > 0 and full_body < 0.5)
+
+            target_type = scorer.detect_target(text_to_check)
+
+            # Try to extract specific target from both texts
+            for candidate in (instruction, raw_prompt, text_to_check):
+                if not candidate:
+                    continue
+                target = self._extract_removal_target(candidate)
+                if target and len(target) >= 3:
+                    if target_type in ("clothes", "subject", "hair") and is_local:
+                        return target
+                    if rem_score > 0.08 and is_local:
+                        return target
+                    if body_score > 0.08 and is_local:
+                        return target
+
+            if target_type in ("clothes", "subject", "hair") and is_local:
+                return "objeto"
+            if rem_score > 0.08:
+                return "objeto_removido"
+            if body_score > 0.08 and is_local:
+                return "objeto"
+        except Exception:
+            pass
+
+        return ""
+
+    @staticmethod
+    def _extract_removal_target(clause: str) -> str:
+        """Extract a removal complement by grammar, not by object vocabulary."""
+        text = str(clause or "").strip()
+        if not text:
+            return ""
+        scope = ImgEditorManager._requested_change_scope(text) or text
+        article = (
+            r"(?:(?:the|a|an|any|my|your|his|her|their|its|el|la|los|las|"
+            r"un|una|unos|unas|mi|tu|su|sus)\s+)?"
+        )
+        patterns = (
+            rf"\b(?:without|sin)\s+(?:wearing\s+|llevar\s+)?{article}"
+            r"(?P<target>[^,;.!?]+)",
+            rf"\bno\s+{article}(?P<target>[^,;.!?]+)",
+            rf"^\s*(?:please\s+)?(?:remove|delete|eliminate|erase|"
+            rf"take\s+(?:away|off)|quitar|quita|quítale|eliminar|elimina|"
+            rf"retirar|retira)\s+{article}(?P<target>.+?)"
+            r"(?:\s+(?:from|off|out\s+of|de|del|de\s+la|de\s+los|"
+            r"next\s+to|beside|near|junto\s+a|al\s+lado\s+de|cerca\s+de)"
+            r"\s+.+)?\s*$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, scope, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = match.group("target")
+            target = re.sub(
+                r"\s+(?:completely|entirely|at\s+all|anymore|por\s+completo)$",
+                "", target, flags=re.IGNORECASE,
+            )
+            target = re.sub(r"\s+", " ", target).strip(" \t\r\n\"'")
+            if len(target) >= 2:
+                return target
+        return ""
+
 
 def _calculate_autoregressive_iterations(analysis: Dict, engine: str) -> int:
     """

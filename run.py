@@ -10,13 +10,22 @@ import tempfile
 import glob
 import threading
 
-# Añadir CUDA 12.4 bin al PATH para que onnxruntime encuentre cublasLt64_12.dll
-_cuda_bin = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin"
-if os.path.exists(_cuda_bin):
-    os.environ["PATH"] = _cuda_bin + ";" + os.environ.get("PATH", "")
-    print(f"[INFO] CUDA 12.4 bin añadido al PATH: {_cuda_bin}")
-else:
-    # Intentar encontrar la versión más alta de CUDA disponible
+
+def _get_cuda_bin_path():
+    """Detect CUDA bin path from PyTorch version or latest installed CUDA."""
+    # Try to get CUDA version from PyTorch
+    try:
+        import torch
+        if torch.cuda.is_available():
+            cuda_version = torch.version.cuda
+            if cuda_version:
+                major_minor = ".".join(cuda_version.split(".")[:2])
+                cuda_bin = rf"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v{major_minor}\bin"
+                if os.path.exists(cuda_bin):
+                    return cuda_bin, f"PyTorch {torch.__version__} (CUDA {cuda_version})"
+    except Exception:
+        pass
+    # Fallback: find latest installed CUDA
     cuda_base = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
     if os.path.exists(cuda_base):
         versions = [d for d in os.listdir(cuda_base) if os.path.isdir(os.path.join(cuda_base, d)) and d.startswith('v')]
@@ -24,8 +33,16 @@ else:
         if versions:
             latest = os.path.join(cuda_base, versions[0], "bin")
             if os.path.exists(latest):
-                os.environ["PATH"] = latest + ";" + os.environ.get("PATH", "")
-                print(f"[INFO] CUDA {versions[0]} bin añadido al PATH: {latest}")
+                return latest, f"CUDA {versions[0]}"
+    return None, "CUDA no encontrado"
+
+
+_cuda_bin, _cuda_source = _get_cuda_bin_path()
+if _cuda_bin:
+    os.environ["PATH"] = _cuda_bin + ";" + os.environ.get("PATH", "")
+    print(f"[INFO] {_cuda_source} bin añadido al PATH: {_cuda_bin}")
+else:
+    print("[WARNING] No se encontró CUDA en el sistema")
 
 
 def cleanup_old_temps_async():
@@ -233,9 +250,10 @@ class _SessionTee:
     correlacionarla con eventos de Windows o con el log del lote activo.
     """
 
-    def __init__(self, stream, log_file):
+    def __init__(self, stream, log_file, verbose_console=True):
         self._stream = stream
         self._log_file = log_file
+        self._verbose_console = verbose_console
 
     def write(self, data):
         try:
@@ -243,7 +261,14 @@ class _SessionTee:
             self._log_file.flush()
         except Exception:
             pass
-        return self._stream.write(data)
+        if self._verbose_console:
+            result = self._stream.write(data)
+            try:
+                self._stream.flush()
+            except Exception:
+                pass
+            return result
+        return len(data)
 
     def flush(self):
         try:
@@ -277,8 +302,8 @@ def _open_ui_session_log():
         log_file.write(f"CommandLine: {sys.argv}\n")
         log_file.write(f"CWD: {os.getcwd()}\n\n")
         log_file.flush()
-        sys.stdout = _SessionTee(sys.stdout, log_file)
-        sys.stderr = _SessionTee(sys.stderr, log_file)
+        sys.stdout = _SessionTee(sys.stdout, log_file, verbose_console=True)
+        sys.stderr = _SessionTee(sys.stderr, log_file, verbose_console=True)
 
         def _close_ui_session_log():
             try:
@@ -320,7 +345,7 @@ def setup_runtime():
     # Forzar uso de venv que es donde está torch instalado
     scripts_dir = os.path.join(base_dir, "venv", "Scripts")
     torch_lib = os.path.join(base_dir, "venv", "Lib", "site-packages", "torch", "lib")
-    cuda_bin = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin"
+    cuda_bin = _get_cuda_bin_path()[0] or r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin"
     
     # Asegurar DLLs
     target_zlib = os.path.join(scripts_dir, "zlibwapi.dll")
@@ -337,7 +362,23 @@ def setup_runtime():
                 try: os.add_dll_directory(p)
                 except: pass
     
-    os.environ["PATH"] = cuda_bin + os.pathsep + os.environ["PATH"]
+    # Añadir directorio de llama_cpp para que el verificador de instrucciones
+    # pueda cargar ggml.dll y sus dependencias (ggml-cuda.dll necesita CUDA runtime)
+    llama_cpp_lib = os.path.join(base_dir, "venv", "Lib", "site-packages", "llama_cpp", "lib")
+    if os.path.exists(llama_cpp_lib):
+        if hasattr(os, 'add_dll_directory'):
+            try: os.add_dll_directory(llama_cpp_lib)
+            except: pass
+        os.environ["PATH"] = llama_cpp_lib + os.pathsep + os.environ.get("PATH", "")
+        # Precargar runtime de CUDA para que ggml-cuda.dll encuentre sus dependencias
+        for _cuda_runtime_dll in ("cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"):
+            _cuda_runtime_path = os.path.join(cuda_bin, _cuda_runtime_dll)
+            if os.path.exists(_cuda_runtime_path):
+                try: ctypes.WinDLL(_cuda_runtime_path)
+                except: pass
+    
+    if cuda_bin and os.path.exists(cuda_bin):
+        os.environ["PATH"] = cuda_bin + os.pathsep + os.environ["PATH"]
 
     # Precarga de cuDNN - Usar la versión que PyTorch instala
     if os.path.exists(torch_lib):
@@ -386,6 +427,9 @@ def set_console_icon():
 
 if __name__ == "__main__":
     _open_ui_session_log()
+    print("\n" + "="*70)
+    print("  AutoAuto v5.1273 (2026-11-02)")
+    print("="*70 + "\n")
     if set_console_icon():
         print("[INFO] Icono de AutoAuto aplicado a la ventana de consola")
     setup_runtime()

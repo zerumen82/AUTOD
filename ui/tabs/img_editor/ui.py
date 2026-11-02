@@ -4,6 +4,20 @@ from roop.img_editor.gen_prompt_config import get_editor_ui_config
 from .state import SelectionSession
 
 
+if hasattr(gr, "ImageEditor"):
+    ImageEditorWidget = gr.ImageEditor
+else:
+    class ImageEditorWidget(gr.Image):
+        """Compatibilidad con Gradio 3.x: la máscara manual se degrada a un Image normal si no existe el widget avanzado."""
+
+        def __init__(self, *args, **kwargs):
+            kwargs.pop("image_mode", None)
+            kwargs.pop("layers", None)
+            super().__init__(*args, **kwargs)
+
+    gr.ImageEditor = ImageEditorWidget
+
+
 CSS_STYLE = """
     .img-editor-container {
         background: #020617;
@@ -39,6 +53,26 @@ CSS_STYLE = """
 """
 
 
+def _compat_image(**kwargs):
+    fmt = kwargs.pop("format", None)
+    component = gr.Image(**kwargs)
+    try:
+        component.format = fmt
+    except Exception:
+        pass
+    return component
+
+
+def _compat_image_editor(**kwargs):
+    fmt = kwargs.pop("format", None)
+    component = ImageEditorWidget(**kwargs)
+    try:
+        component.format = fmt
+    except Exception:
+        pass
+    return component
+
+
 def build_img_editor_ui():
     gr.HTML(f"<style>{CSS_STYLE}</style>")
 
@@ -56,9 +90,20 @@ def build_img_editor_ui():
 
         with gr.Row():
             with gr.Column(scale=1):
-                input_img = gr.Image(
+                input_img = _compat_image(
                     label="Imagen de Entrada", type="pil", format="png", height=480,
                 )
+
+                with gr.Accordion("🖌️ Delimitar zona a mano (opcional)", open=False):
+                    gr.Markdown(
+                        "_Pinta toda la zona que quieres cambiar y un pequeño margen "
+                        "alrededor. El prompt indica qué hacer; el trazo solo delimita "
+                        "dónde. Si no pintas nada, el prompt solo también funciona igual._"
+                    )
+                    manual_mask_editor = _compat_image_editor(
+                        label="Pinta la zona que quieres editar", type="pil",
+                        image_mode="RGBA", format="png", layers=True, height=380,
+                    )
 
                 prompt = gr.Textbox(
                     label="¿Qué quieres cambiar?",
@@ -67,7 +112,7 @@ def build_img_editor_ui():
                         "añade un sombrero · vestido rojo · cambia el fondo por una playa · "
                         "más saturado y nítido…"
                     ),
-                    lines=3,
+                    lines=8,
                     elem_classes=["prompt-box-img"]
                 )
 
@@ -80,7 +125,7 @@ def build_img_editor_ui():
                         "El exterior conserva sus píxeles y el tamaño de entrada, también con Modo Calidad._"
                     )
                     analyze_btn = gr.Button("🔍 ANALIZAR ZONAS", variant="secondary")
-                    overlay_img = gr.Image(
+                    overlay_img = _compat_image(
                         label="Zonas detectadas: pulsa para marcar o desmarcar", height=380,
                         type="pil", interactive=False,
                     )
@@ -138,15 +183,17 @@ def build_img_editor_ui():
                 legacy_api_btn = gr.Button(visible=False)
                 legacy_options_btn = gr.Button(visible=False)
                 legacy_select_btn = gr.Button(visible=False)
+                legacy_region_btn = gr.Button(visible=False)
 
                 with gr.Accordion("⚙️ Opciones", open=False):
                     engine_choices = [
-                        ("🎨 Auto: motor según la instrucción (POV→Qwen, cuerpo fuerte→motor con visión)", "kontext"),
+                        ("♻️ Auto — LongCat; POV medido → Qwen Cámara", "auto"),
+                        ("LongCat Turbo (8 GB)", "longcat"),
+                        ("🎯 FLUX.1 Kontext Q4_K_M", "kontext"),
                         ("📷 Qwen Cámara (POV/ángulos, ~1152px en 8 GB)", "qwen_camera"),
                         ("Compatibilidad app antigua (Kontext)", "imagine"),
                         ("✨ FLUX.2 Klein 4B (img2img rápido, 4 pasos, entra en 8GB)", "klein"),
                         ("⚠️ FLUX.2 Klein 9B (NO entra en 8GB, usar solo con 12GB+)", "klein_9b"),
-                        ("🎯 FLUX.1 Kontext Q4_K_M (12B, ~6.5GB)", "kontext"),
                     ]
                     default_engine = get_editor_ui_config().get("default_engine")
                     if default_engine not in {value for _label, value in engine_choices}:
@@ -156,7 +203,12 @@ def build_img_editor_ui():
                         )
                     engine = gr.Dropdown(
                         choices=engine_choices,
-                        value=default_engine, label="Motor"
+                        value=default_engine, label="Motor",
+                        info=(
+                            "Auto usa el motor visual general y las rutas especializadas "
+                            "que ya miden la solicitud. Puedes forzar un motor; el resultado "
+                            "muestra el motor ejecutado, el alcance y la verificación."
+                        ),
                     )
                     with gr.Row():
                         denoise = gr.Slider(minimum=0.0, maximum=1.0, step=0.05, value=0.0,
@@ -185,7 +237,7 @@ def build_img_editor_ui():
             with gr.Column(scale=1):
                 with gr.Tabs():
                     with gr.TabItem("🖼️ RESULTADO"):
-                        output_img = gr.Image(label="Resultado", height=500, type="pil", format="png")
+                        output_img = _compat_image(label="Resultado", height=500, type="pil", format="png")
                     with gr.TabItem("🎭 MÁSCARA"):
                         mask_preview = gr.Image(label="Máscara generada", height=400)
 
@@ -195,6 +247,7 @@ def build_img_editor_ui():
 
     return {
         "input_img": input_img,
+        "manual_mask_editor": manual_mask_editor,
         "prompt": prompt,
         "gen_btn": gen_btn,
         "output_img": output_img,
@@ -215,6 +268,7 @@ def build_img_editor_ui():
         "legacy_api_btn": legacy_api_btn,
         "legacy_options_btn": legacy_options_btn,
         "legacy_select_btn": legacy_select_btn,
+        "legacy_region_btn": legacy_region_btn,
         "bt_use_as_input": bt_use_as_input,
         "bt_open_folder": bt_open_folder,
         "selection_state": selection_state,
