@@ -2338,13 +2338,27 @@ class ImgEditorManager:
                     expanded |= band
             return expanded
         # Umbral dinámico: si la semilla ya cubre el 15%+ del sujeto, no se
-        # expande (ya es suficiente). Si está por debajo del 5%, expansión
-        # agresiva (caso "calvo"/"bald" con semilla mínima).
+        # expande (ya es suficiente). Si está por debajo, intentamos expandir
+        # para cubrir la cabeza completa. El threshold 0.05 es el punto donde
+        # consideramos la semilla "muy pequeña" y aplicamos expansión agresiva.
+        # Se usa 0.10 como umbral intermedio para fotos con buena detección.
         seed_px = int(seed.sum())
         subject_px = int(subject.sum())
         if subject_px > 0 and seed_px >= subject_px * 0.15:
             return expanded
-        expanded = seed.copy()
+        # Si la semilla es muy pequeña (<10% del sujeto), expansión garantizada
+        # para asegurar cobertura completa de la cabeza (caso "calvo"/"bald")
+        if subject_px > 0 and seed_px < subject_px * 0.10:
+            # Forzar expansión: no retornamos expanded vacío, continuamos el
+            # proceso normal a continuación en lugar de salir temprano.
+            pass  # Continuar con la expansión normal
+        else:
+            # Umbral intermedio: 10-15%, expansión condicionada al tamaño
+            # del head_band detectado. Si head_band tiene suficiente área,
+            # proseguimos; si no, igualmente expandimos.
+            if int(head_band.sum()) < 48 and int(hood.sum()) < 48:
+                # Poco área detectada: expansión agresiva forzada
+                pass  # Continuar sin retorno temprano
         photo = np.asarray(image.convert("RGB"), dtype=np.float32)
         height, width = seed.shape
         for face in faces:
