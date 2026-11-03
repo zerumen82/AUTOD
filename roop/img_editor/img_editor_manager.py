@@ -2337,6 +2337,7 @@ class ImgEditorManager:
                 if int(band.sum()) >= 48:
                     expanded |= band
             return expanded
+        head_band = np.zeros(seed.shape, dtype=bool)
         # Umbral dinámico: si la semilla ya cubre el 15%+ del sujeto, no se
         # expande (ya es suficiente). Si está por debajo, intentamos expandir
         # para cubrir la cabeza completa. El threshold 0.05 es el punto donde
