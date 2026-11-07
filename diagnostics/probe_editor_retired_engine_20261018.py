@@ -1,4 +1,4 @@
-"""CPU contracts for retired LongCat identifiers and real Kontext workflow.
+"""CPU contracts for legacy aliases and explicit LongCat/Kontext workflows.
 
 Only HTTP I/O is intercepted. Model inventory, load selection and workflow
 construction execute production code; no inference or UI changes occur.
@@ -35,7 +35,6 @@ def http_get(url, **_kwargs):
 def main():
     aliases = (
         None, "kontext", "imagine",
-        "LongCat-Image-Edit-Turbo-Q4_K_S.gguf",
         "LongCat-Image-Edit-Q4_K_S.gguf",
         "longcat", "longcat_turbo", "longcat_full", "LongCat Turbo",
         "LONGCAT-Image-Edit-Q8_0.gguf",
@@ -87,6 +86,50 @@ def main():
         assert not any("qwen" in node["class_type"].lower() for node in workflow.values())
         assert not any("longcat" in json.dumps(node).lower() for node in workflow.values())
         print(f"PASS: native Kontext workflow uses FluxGuidance={configured['cfg']}, steps={configured['steps']}")
+
+        longcat = prompts.get_longcat_model_config()
+        loaded, message = client.load(longcat["model_file"])
+        assert loaded, message
+        assert client._flux_version == longcat["model_file"]
+        assert client._is_longcat_turbo and not client._is_kontext_dev
+        captured.clear()
+        with patch.object(editor.requests, "post", side_effect=intercept):
+            try:
+                client.generate(
+                    image=Image.new("RGB", (128, 128), "blue"),
+                    mask_image=Image.new("L", (128, 128), 255),
+                    prompt="Remove the object inside the measured region",
+                    seed=42,
+                    num_inference_steps=longcat["steps"],
+                    guidance_scale=longcat["cfg"],
+                    no_kontext=True,
+                    prompt_authority=True,
+                    keep_source_pixels=True,
+                    preserve_frame=True,
+                )
+            except WorkflowCaptured:
+                pass
+        assert len(captured) == 1
+        workflow = captured[0]
+        assert workflow["2"]["inputs"]["unet_name"] == longcat["model_file"]
+        assert any(
+            node["class_type"] == "TextEncodeQwenImageEditPlus"
+            for node in workflow.values()
+        ), "LongCat did not use its vision encoder"
+        assert any(
+            node["class_type"] in ("SetLatentNoiseMask", "VAEEncodeForInpaint")
+            for node in workflow.values()
+        ), "the measured edit mask was lost"
+        samplers = [
+            node for node in workflow.values()
+            if "KSampler" in node["class_type"]
+        ]
+        assert samplers and samplers[-1]["inputs"]["steps"] == longcat["steps"]
+        assert samplers[-1]["inputs"]["cfg"] == longcat["cfg"]
+        print(
+            "PASS: explicit LongCat Turbo builds a masked vision workflow "
+            f"at {longcat['steps']} steps / CFG {longcat['cfg']}"
+        )
 
         for version in (
             "Qwen_Image_Edit-Q2_K.gguf", "flux-2-klein-base-4b-Q4_K_S.gguf",

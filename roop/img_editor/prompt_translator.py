@@ -67,6 +67,51 @@ def _normalize_stray_word_punctuation(text: str) -> str:
     return re.sub(r"(?<=\s)\.(?=\w)", "", text or "")
 
 
+# «ir de X» es «ir vestido de X»: forma de vestir, no movimiento.
+# Medido el 2026-11-03 (log 12:27): «EL HOMBRE debe ir de sissy» se tradujo
+# como «MAN MUST GO FROM SISSY», una frase sin sentido que el modelo recibió
+# como están y no cambió nada de la foto. La regla es de gramática española
+# (la construcción «ir/estar de + estilo»), no un vocabulario de prendas ni de
+# tipos de edición: vale para cualquier X que el usuario escriba.
+_DRESS_AS = re.compile(
+    r"\b(ir|va|van|vaya|vayan|irá|irán|iría|irían|iba|iban|fue|fueron|"
+    r"estar|está|están|estaba|estaban|quedar|queda|quedan)\s+de\b",
+    re.IGNORECASE,
+)
+
+
+def _clause_measures_posture(text: str) -> bool:
+    """«de rodillas», «de pie», «de espaldas»… es postura, no forma de vestir.
+
+    Medido el 2026-11-03 (log 15:45): «la mujer debe estar de rodillas
+    mirando con deseo al hombre» se reescribió como «estar vestido de
+    rodillas» y el modelo recibió «The woman must be dressed on her knees».
+    La postura la miden los conceptos ya existentes del analizador; no se
+    añade vocabulario nuevo (ni prendas ni tipos de edición).
+    """
+    try:
+        from roop.img_editor.prompt_analyzer import PromptAnalyzer
+        analyzer = PromptAnalyzer()
+    except Exception:
+        return False
+    lowered = (text or "").lower()
+    try:
+        return bool(
+            analyzer._pose_pattern.findall(lowered)
+            or analyzer.subset_hits(lowered, analyzer.POSE_KEYWORDS) > 0
+        )
+    except Exception:
+        return False
+
+
+def _normalize_dress_as_idiom(text: str) -> str:
+    """Escribe «ir de X» como «ir vestido de X» antes de traducir."""
+    source = text or ""
+    if _clause_measures_posture(source):
+        return source
+    return _DRESS_AS.sub(lambda match: f"{match.group(1)} vestido de", source)
+
+
 def _normalize_glued_list_punctuation(text: str) -> str:
     """Separa una coma pegada a la palabra siguiente («gato,sentado»).
 
@@ -134,6 +179,14 @@ def _offline_translate(prompt: str):
         if corrected_source != normalized_list:
             print("[Translate:Local] Corregida duplicación ortográfica inequívoca antes de traducir", flush=True)
         source = corrected_source
+        dressed = _normalize_dress_as_idiom(source)
+        if dressed != source:
+            print(
+                "[Translate:Local] «ir de X» leído como forma de vestir "
+                "(«ir vestido de X») antes de traducir",
+                flush=True,
+            )
+            source = dressed
         words = max(1, len(re.findall(r"\w+", source)))
         encoded = tokenizer(source, return_tensors="pt", truncation=True, max_length=256)
         with torch.inference_mode():

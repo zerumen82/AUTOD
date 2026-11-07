@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import sys
-import os
 from pathlib import Path
 
 # Añadir directorio raíz al path

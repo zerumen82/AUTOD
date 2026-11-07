@@ -11,7 +11,11 @@ from dataclasses import dataclass
 
 from roop.comfy_workflows import get_comfyui_url
 from roop.img_editor.comfy_progress import new_client_id, wait_for_comfy_image
-from roop.img_editor.gen_prompt_config import get_kontext_model_config
+from roop.img_editor.gen_prompt_config import (
+    get_kontext_model_config,
+    get_longcat_model_config,
+)
+from roop.img_editor.edit_execution import allow_model, permit_vision_model, record_execution
 
 def get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -197,23 +201,40 @@ class FluxEditComfyClient:
         return exists
 
     def load(self, flux_version=None, allow_vision_engine: bool = False) -> Tuple[bool, str]:
-        # LongCat is retired. Normalize stale saved identifiers before cache,
-        # VRAM and loader selection so no focal or legacy call can reactivate it.
+        explicit_longcat = False
+        if flux_version and "longcat" in flux_version.casefold() and flux_version.casefold().endswith(".gguf"):
+            configured_longcat = get_longcat_model_config()["model_file"]
+            explicit_longcat = (
+                os.path.basename(flux_version).casefold() == configured_longcat.casefold()
+            )
+        # Keep stale LongCat aliases compatible with the editor default, while
+        # honoring an explicit request for the configured Turbo model.
         # v5.1229 — EXCEPCIÓN MEDIDA, explícita y estrecha: un cambio corporal
         # medido necesita el motor CON VISIÓN (Qwen-VL ve la foto y el texto
         # manda). Medido en FLUX.1/Kontext: el negative es inerte (CFG=1) y el
         # texto positivo no basta (participación de piel en la zona de prenda
         # medida: original 0,2675 → 0,0676 con el texto medido: el modelo viste
-        # más). Solo la ruta de selección lo pide, y su exterior sigue siendo
-        # píxel a píxel, así que las otras personas de la foto no se tocan.
+        # más). Solo las rutas corporales/postura medidas lo piden, y su exterior
+        # sigue siendo píxel a píxel, así que las otras personas no se tocan.
         if allow_vision_engine and flux_version:
             _vision = str(flux_version)
             if "longcat" in _vision.casefold() or "qwen" in _vision.casefold():
                 flux_version = _vision
+                # The measured body/pose route explicitly chooses this engine;
+                # the per-request policy allows exactly that model and nothing
+                # else (no silent substitution).
+                permit_vision_model(flux_version)
             else:
                 flux_version = get_kontext_model_config()["model_file"]
-        elif flux_version is None or flux_version.casefold() in ("kontext", "imagine") or "longcat" in flux_version.casefold():
+        elif (
+            flux_version is None
+            or flux_version.casefold() in ("kontext", "imagine")
+            or ("longcat" in flux_version.casefold() and not explicit_longcat)
+        ):
             flux_version = get_kontext_model_config()["model_file"]
+        allowed, policy_note = allow_model(flux_version)
+        if not allowed:
+            return False, policy_note
         comfy_url = get_comfyui_url()
         if not self.is_available():
             return False, f"ComfyUI no responde en {comfy_url}. ¿Está iniciado?"
@@ -447,6 +468,14 @@ class FluxEditComfyClient:
         if not self._loaded:
             return None, "No cargado - llama a load() primero"
 
+        # The UI policy also covers a client that was loaded by an earlier call.
+        # Capture the actual model used below, rather than a mutable singleton's
+        # version after the request has completed.
+        model_file = self._flux_version
+        allowed, policy_note = allow_model(model_file)
+        if not allowed:
+            return None, policy_note
+
         # También aceptado vía kwargs por llamadas genéricas del manager
         drop_edit_image_ref = bool(drop_edit_image_ref or kwargs.get("drop_edit_image_ref", False))
         no_kontext = bool(no_kontext or kwargs.get("no_kontext", False))
@@ -478,7 +507,7 @@ class FluxEditComfyClient:
         if not negative_prompt:
             negative_prompt = "low quality, blurry, distorted, low resolution"
 
-        is_longcat = "LongCat" in self._flux_version
+        is_longcat = "LongCat" in model_file
         is_kontext = self._is_kontext_dev
         is_qwen = self._is_qwen_image_edit or self._is_qwen_q5
         is_klein_9b = getattr(self, '_is_klein_9b', False)
@@ -576,12 +605,9 @@ class FluxEditComfyClient:
         mname = None
         if is_klein_edit or is_kontext:
             # El EDIT real (ReferenceLatent) usa la imagen COMPLETA como referencia
-            # y arranca de latente vacío — una máscara de inpaint no puede aplicar
-            # aquí (rompería el conditioning). Ignorada siempre en klein/kontext.
-            # v5.1228: el modo «foto» (ruido solo dentro de la zona medida) sí
-            # puede aplicar aquí, porque conserva el conditioning intacto y
-            # regenera únicamente la zona medida: es lo que permite que un
-            # cambio corporal medido se ejecute sin perder la foto de fondo.
+            # y arranca de latente vacío. Sin keep_source_pixels, la máscara se
+            # descarta; con él, VAEEncodeForInpaint limita la referencia que ve
+            # Klein. Kontext sigue usando su conditioning global.
             if not keep_source_pixels:
                 if mask_image is not None:
                     print(
@@ -635,7 +661,7 @@ class FluxEditComfyClient:
 
         wf = {
             "1": {"class_type": "LoadImage", "inputs": {"image": iname, "upload": "image"}},
-            "2": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": self._flux_version, "device": "default"}},
+            "2": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": model_file, "device": "default"}},
             "3": {"class_type": "DualCLIPLoaderGGUF" if self._dual_clip else ("CLIPLoaderGGUF" if self._is_gguf_clip else "CLIPLoader"), "inputs": {"clip_name1": self._clip_name, "clip_name2": self._clip_name2, "type": self._clip_type} if self._dual_clip else {"clip_name": self._clip_name, "type": self._clip_type, "device": "default"}},
             "4": {"class_type": "VAELoader", "inputs": {"vae_name": self._vae_name}},
         }
@@ -756,6 +782,15 @@ class FluxEditComfyClient:
                 # (denoise 0.80-0.90) deja regenerar la ropa manteniendo layout
                 # aproximado. La cara puede derivar (preferencia del usuario:
                 # adherencia > preservación facial).
+                actual_denoise = _img2img_denoise
+                positive_input = ["6g", 0]
+                klein_empty_latent = None  # KSampler usa ["5", 0] (foto real)
+            elif _img2img_denoise and keep_source_pixels and not _use_img_ref:
+                # img2img PURO SIN ReferenceLatent: el KSampler arranca del
+                # latente de la foto (VAEEncode ["5", 0]) con mucho ruido, así
+                # el texto puede cambiar la ropa sin que ReferenceLatent ancle
+                # demasiado y devuelva la prenda. Fuera de la máscara se
+                # conservan los píxeles originales vía SetLatentNoiseMask.
                 actual_denoise = _img2img_denoise
                 positive_input = ["6g", 0]
                 klein_empty_latent = None  # KSampler usa ["5", 0] (foto real)
@@ -1142,7 +1177,7 @@ class FluxEditComfyClient:
                 flush=True,
             )
         elif is_kontext:
-            _mode = f"img2img denoise={actual_denoise:.2f} (SIN ReferenceLatent)" if (_img2img_denoise and _use_img_ref) else f"EDIT ref={wf.get('6m', {}).get('inputs', {}).get('reference_latents_method', 'offset(default)') if _use_img_ref else 'no-ref'}"
+            _mode = f"img2img denoise={actual_denoise:.2f} (SIN ReferenceLatent)" if _img2img_denoise else f"EDIT ref={wf.get('6m', {}).get('inputs', {}).get('reference_latents_method', 'offset(default)') if _use_img_ref else 'no-ref'}"
             print(
                 "[FluxClient] FLUX.1 Kontext dev workflow (FluxGuidance + euler): "
                 f"guidance={_kg:.1f}, steps={num_inference_steps}, {_mode}, "
@@ -1173,6 +1208,9 @@ class FluxEditComfyClient:
         # (fases por nodo) y el /ws solo recibía "progress" en broadcast; por
         # eso la edición real mostró "Sampler 1/8" pero nunca "Fases:".
         client_id = new_client_id()
+        allowed, policy_note = allow_model(wf["2"]["inputs"]["unet_name"])
+        if not allowed:
+            return None, policy_note
         r = requests.post(f"{comfy_url}/prompt", json={"prompt": wf, "client_id": client_id})
         if r.status_code != 200:
             err = r.json().get("error", {}).get("message", r.text[:200])
@@ -1241,6 +1279,11 @@ class FluxEditComfyClient:
                 pil_img = canvas_mapping.restore(pil_img)
             except ValueError as error:
                 return None, f"No se pudo recuperar la geometría de la región: {error}"
+        engine_name = (
+            "Kontext" if is_kontext else "LongCat" if is_longcat
+            else "Qwen Image Edit" if is_qwen else "Klein" if is_klein_edit else "FLUX"
+        )
+        record_execution(engine_name, model_file)
         return GenResult(image=pil_img, time_taken=elapsed), f"OK ({elapsed:.0f}s)"
 
 _client = None

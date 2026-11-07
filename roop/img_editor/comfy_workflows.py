@@ -5,10 +5,8 @@ ComfyUI Workflows - Plantillas de workflows para Stable Diffusion
 """
 
 import os
-import sys
 import requests
-import time
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 # Puerto FIJO de NUESTRO ComfyUI (venv propio, con nodos GGUF).
 OUR_PORT = '8188'
@@ -806,7 +804,7 @@ def check_ipadapter_available() -> bool:
             break
     
     if not ipadapter_found:
-        print(f"[IPAdapter] [MISSING] No encontrado: ip-adapter_sd15.safetensors")
+        print("[IPAdapter] [MISSING] No encontrado: ip-adapter_sd15.safetensors")
         return False
     print(f"[IPAdapter] [OK] Encontrado: {ipadapter_found}")
     
@@ -824,7 +822,7 @@ def check_ipadapter_available() -> bool:
             break
     
     if not clip_vision_found:
-        print(f"[IPAdapter] [MISSING] No encontrado: CLIP Vision model")
+        print("[IPAdapter] [MISSING] No encontrado: CLIP Vision model")
         return False
     print(f"[IPAdapter] [OK] Encontrado: {clip_vision_found}")
     

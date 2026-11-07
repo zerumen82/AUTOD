@@ -1,84 +1,97 @@
-# AutoAuto Editor — App Android (APK)
+# AutoAuto — App Android nativa
 
-App Android **WebView** que se conecta **sola** al servidor AutoAuto de tu PC y permite
-editar imágenes exactamente como en **ImgEditor** (misma UI de Gradio del PC).
+La aplicación actual usa una interfaz Kotlin (`MainActivity`) y un cliente HTTP
+(`GradioClient`) para comunicarse con AutoAuto en el PC. Tiene modos **Editar**
+y **Generate**; el procesamiento se ejecuta en el PC. No es una WebView ni
+contiene todas las funciones de la interfaz de escritorio.
 
-## Qué hace la app
+## Conexión y uso
 
-- **Cero configuración**: No escribes IPs ni URLs. Abres la app y listo.
-- **Auto-descubrimiento**: Al abrirse, escanea la red local (puerto **7861**, el de Gradio)
-  y, en cuanto encuentra el PC con AutoAuto **encendido**, carga el ImgEditor a pantalla
-  completa.
-- **Servidor manual (opcional)**: botón **⚙** (arriba a la derecha) para pegar una IP o URL
-  concreta una sola vez. La app **la recuerda** y la usa en siguientes aperturas; también
-  tiene "Auto-descubrir" para volver al escaneo automático. Útil si el PC está en otra
-  subred, por VPN o con URL pública.
-- **Si el server está apagado**: muestra *"No se encontró el servidor AutoAuto encendido"*
-  con un botón **Reintentar** (no crashea).
-- **Editar imágenes**: Como usa la UI de Gradio del PC, tienes el ImgEditor completo
-  (subir foto desde la galería/cámara del móvil, prompt, motor LongCat/FLUX/Klein, Modo
-  Calidad, autoregresivo, etc.).
+1. Inicia AutoAuto en el PC y deja accesible su servidor Gradio en la red del
+   teléfono. El puerto habitual del proyecto es 7861.
+2. En la app, introduce la URL del servidor en el diálogo de conexión. Se
+   guarda en las preferencias y se reutiliza en siguientes aperturas. La app
+   no escanea automáticamente toda la red local.
+3. En **Editar**, elige una imagen de la galería, escribe la instrucción y
+   ajusta los controles disponibles. En **Generate**, basta una instrucción.
+4. La app muestra progreso y resultado; permite guardar, compartir y reutilizar
+   la imagen. Una conexión correcta no garantiza la calidad visual del modelo.
 
-## Requisitos en el PC
+Kontext es el motor predeterminado del Editor. Los alias LongCat antiguos se
+normalizan a Kontext en el servidor. El selector visual de regiones del
+escritorio tiene endpoints propios; la APK utiliza el contrato de edición
+legacy, sin enviar una selección explícita de regiones.
 
-- Windows con Java o sin él: el script descarga un **JDK 17** portátil.
-- iOS no: es Android (`.apk`).
-- El móvil y el PC deben estar en la **misma red WiFi**.
+## Contratos con el servidor
 
-## Cómo generar el APK (1 clic)
+`GradioClient` consulta `/config` para descubrir el prefijo de API (normalmente
+`/gradio_api`) y `/info` bajo ese prefijo para localizar los endpoints:
 
-1. Ten AutoAuto instalado/compilado (para el resto de funciones del PC).
-2. Ejecuta (doble clic):
+- Edición: prefiere `/edit_options` con nueve argumentos; conserva `/edit`
+  con ocho para servidores anteriores. El argumento adicional controla la
+  preservación de caras en Modo Calidad.
+- Generate: `/generate_image`, con diez argumentos. Los controles adicionales
+  del evento de escritorio `/generate_image_ui` no se envían desde la APK.
+- La imagen se sube mediante `/upload`; las llamadas y el progreso/resultados
+  usan `/call/<endpoint>` y `/call/<endpoint>/<event_id>` bajo el prefijo de API.
 
-   ```
-   android_app\build_apk.bat
-   ```
+El cliente conserva los píxeles originales en la subida para Modo Calidad;
+las ediciones normales pueden reducir la entrada a un lado máximo de 1024 px.
 
-3. La primera vez descarga ~2.5 GB de herramientas (JDK 17 + Android SDK + Gradle),
-   genera automáticamente una **clave de firma** y compila un APK **release firmado**.
-   Cuando termine tu APK estará en:
+## Compilar con las herramientas locales
 
-   ```
-   android_app\autoapp\app\build\outputs\apk\release\app-release.apk
-   ```
+Se requieren Windows, JDK 17, Gradle 8.7 y Android SDK 34 con build-tools 34.0.0,
+además de las dependencias Gradle del proyecto. En este workspace las herramientas
+están en `android_build_tools/`. Android mínimo: 8.0 (API 26).
 
-4. Copia este `.apk` a tu Android (USB, Drive, WhatsApp, etc.) e instálalo. En Android
-   acepta "Instalar desde esta fuente" si te lo pide (es normal en la primera instalación
-   de cualquier app que no viene de Google Play).
+Desde la raíz del repositorio, este comando usa las herramientas existentes y
+el caché local; no descarga dependencias:
 
-## Uso en el móvil
+```powershell
+$env:JAVA_HOME = (Resolve-Path 'android_app/android_build_tools/jdk17').Path
+& 'android_app/android_build_tools/gradle-8.7/bin/gradle.bat' `
+  -p 'android_app/autoapp' --offline --no-daemon :app:assembleDebug :app:lintDebug
+```
 
-1. Asegúrate de que AutoAuto esté iniciado en el PC (server en puerto 7861).
-2. Abre la app en el móvil.
-3. Espera a que "busque" el servidor (unos segundos) y se cargue el ImgEditor.
-4. Sube una foto, escribe el cambio y pulsa TRANSFORMAR.
+`autoapp/local.properties` debe apuntar al SDK instalado. Si falta una herramienta
+o una dependencia en caché, detenerse y solicitar autorización antes de instalar
+o descargar. El script legacy `build_apk.bat` puede descargar herramientas y
+dependencias; su ejecución requiere esa autorización. Para release exige una
+firma configurada por el usuario: no genera claves ni contraseñas predeterminadas.
 
-## Acceso remoto (fuera de casa) — opcional
+Salidas habituales:
 
-Si en `config.yaml` pones `server_share: true`, el PC genera una URL pública tipo
-`https://xxxx.gradio.live`. Para que la app la use:
+- Debug: `autoapp/app/build/outputs/apk/debug/app-debug.apk`.
+- Release: `autoapp/app/build/outputs/apk/release/app-release.apk`, firmado si
+  existe una configuración de firma válida en `autoapp/release-keystore.properties`.
 
-1. Abre `app\src\main\java\com\autoauto\app\MainActivity.kt`.
-2. En el `companion object`, escribe tu URL en `FALLBACK_URL`:
-   ```kotlin
-   private const val FALLBACK_URL: String = "https://tu-nombre.gradio.live"
-   ```
-3. Vuelve a ejecutar `build_apk.bat`.
+No publicar ni sobrescribir claves de firma. Una compilación correcta no
+equivale a instalar y probar la app en un teléfono. Para instalar un APK local,
+Android puede pedir permiso para la aplicación desde la que se abre el archivo.
 
-## Estructura relevante
+`release-keystore.properties` contiene `storeFile`, `storePassword`, `keyAlias`
+y `keyPassword`; debe referenciar una clave existente y permanecer fuera de Git.
+Las claves locales previas se conservan para mantener la compatibilidad de las
+actualizaciones. Este cambio no rota ni certifica sus credenciales anteriores.
 
-- `MainActivity.kt` — WebView + auto-descubrimiento del servidor.
-- `activity_main.xml` — pantallas de búsqueda / error / editor.
-- `build_apk.bat` — instala toolchain y compila el APK en 1 comando.
-- `app/build.gradle.kts` — versión SDK, paquetes y dependencias.
+## Archivos principales
 
-## Notas
+- `autoapp/app/src/main/java/com/autoauto/app/MainActivity.kt`: controles,
+  preferencias, conexión, galería y presentación de resultados.
+- `autoapp/app/src/main/java/com/autoauto/app/GradioClient.kt`: subida de imagen,
+  contratos API, progreso y descarga del resultado.
+- `autoapp/app/src/main/res/layout/activity_main.xml`: interfaz nativa.
+- `autoapp/app/build.gradle.kts`: SDK, versión, dependencias y firma opcional.
+- `autoapp/app/src/main/AndroidManifest.xml`: permisos y `FileProvider`.
 
-- La app necesita permiso de red local; conecta HTTP plano (cleartext) porque el server
-  Gradio es local (sin TLS). No requiere permisos de ubicación.
-- El `build_apk.bat` genera una **clave de firma** (`release-keystore.jks`) en la primera
-  compilación y la reutiliza siempre: así las actualizaciones se instalan encima sin
-  problemas. Guarda ese archivo (no lo borres) — es tu firma de la app.
-- Es un APK firmado con tu propia clave, listo para instalación directa en cualquier
-  Android. Solo para publicar en Google Play necesitarías configurar la firma específica
-  de la cuenta, pero para uso personal/instalación directa funciona tal cual.
+## Red y permisos
+
+La conexión local admite HTTP sin TLS (`usesCleartextTraffic=true`). El diálogo
+de servidor permite introducir una URL accesible desde el teléfono; para acceso
+remoto se necesita conectividad existente hacia el PC, sin recompilar una URL
+en el código. El manifiesto declara red/WiFi y permisos de imágenes o
+almacenamiento según versión de Android; no declara permiso de ubicación.
+
+La validación real de carga, edición, Generate, progreso y guardado en un teléfono
+sigue abierta en [validación pendiente](../spec/05-VALIDACION-PENDIENTE.md)
+hasta registrar evidencia.

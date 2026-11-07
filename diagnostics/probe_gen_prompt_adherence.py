@@ -333,7 +333,13 @@ src_android = open(
     "android_app/autoapp/app/src/main/java/com/autoauto/app/MainActivity.kt",
     encoding="utf-8",
 ).read()
-check("Android ofrece Q4 como primera opción", 'arrayOf("flux_dev_q4", "flux_dev_abliterated"' in src_android)
+check("Android ya no lleva la lista de motores escrita a mano",
+      'arrayOf("flux_dev_q4", "flux_dev_abliterated"' not in src_android)
+check("Android pide el catálogo al servidor", "fetchEngineCatalog" in src_android)
+from roop.img_editor.flux_gen_comfy_client import get_generation_engine_catalog
+_catalog = get_generation_engine_catalog()
+check("catálogo servido con motores y default válido",
+      bool(_catalog["engines"]) and _catalog["default"] in [e["alias"] for e in _catalog["engines"]])
 check("Android migra preferencias por alias", 'putString("genEngineAlias"' in src_android)
 
 # ---------------------------------------------------------------- [7] LoRA visible

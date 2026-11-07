@@ -4,8 +4,11 @@
 Prompt Rewriter - Inteligencia Semántica Pura (Sin Hardcoding)
 """
 
-import os, sys, json, re
-from typing import Optional, Dict, List, Tuple
+import os
+import sys
+import json
+import re
+from typing import Optional, Dict, List
 
 # Añadir CUDA al PATH si es Windows
 if sys.platform == "win32":
@@ -76,7 +79,7 @@ class PromptRewriter:
                 for p in moondream_paths:
                     if os.path.exists(p):
                         model_path = p
-                        print(f"[PromptRewriter] ADVERTENCIA: Usando moondream (menos preciso)")
+                        print("[PromptRewriter] ADVERTENCIA: Usando moondream (menos preciso)")
                         break
                 
             if not model_path:
@@ -88,17 +91,18 @@ class PromptRewriter:
             try:
                 import torch
                 if torch.cuda.is_available():
-                    vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    _vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                     # En una 3060 Ti 8GB, Qwen 0.5B cabe de sobra (ocupa <500MB en VRAM)
                     n_gpu_layers = 32 # Forzar capas a GPU para velocidad
-            except: pass
+            except BaseException:
+                pass
 
             print(f"[PromptRewriter] Cargando rewriter: {os.path.basename(model_path)} (GPU layers={n_gpu_layers})")
             self._llm = Llama(
                 model_path=model_path,
                 n_gpu_layers=n_gpu_layers,
                 n_ctx=8192,
-                verbose=False
+                verbose=True
             )
             print("[PromptRewriter] Rewriter listo")
         except ImportError:
@@ -116,11 +120,12 @@ class PromptRewriter:
                 # La destrucción del objeto Llama libera la memoria C++ asociada
                 del self._llm
                 self._llm = None
-                import gc, torch
+                import gc
+                import torch
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except:
+            except BaseException:
                 pass
 
     def fix_typos(self, text: str) -> str:
@@ -231,28 +236,40 @@ class PromptRewriter:
 
     @staticmethod
     def _classify_edit_support(prompt: str, llm) -> List[str]:
-        """Propose one existing editing support, leaving location context out."""
+        """Propose existing edit supports, leaving instruction context intact."""
         if not prompt or llm is None:
             return []
         try:
             system_msg = (
-                "An image editor needs a short segmentation query for the requested change. "
-                "Return only the words naming the existing object or surface to modify. "
-                "Names used only to locate another object must be left out. "
-                "For a new object, name its supporting surface. "
-                "Copy the region name from the request, using the same language. "
-                "Do not return JSON, explanations, or extra words."
+                "An image editor needs segmentation queries for existing regions that "
+                "support the requested changes. Return one short region query per line, "
+                "covering every distinct support needed by the complete request. "
+                "For an added item, name its existing supporting surface or spatial "
+                "anchor, not the item being added. Keep names used only to locate "
+                "another existing object out unless that object is itself a support. "
+                "Copy region names from the request in the same language; use only "
+                "words present there, without adding labels or suffixes. "
+                "Do not return bullets, JSON, explanations, or extra words."
             )
             response = llm.create_completion(
                 f"<|im_start|>system\n{system_msg}<|im_end|>\n"
                 f"<|im_start|>user\n{prompt.strip()}<|im_end|>\n"
                 "<|im_start|>assistant\n",
-                max_tokens=80, temperature=0.0, echo=False,
-                stop=["<|im_end|>", "\n"], repeat_penalty=1.05,
+                max_tokens=160, temperature=0.0, echo=False,
+                stop=["<|im_end|>"], repeat_penalty=1.05,
             )
-            query = response["choices"][0]["text"].strip().strip("\"'")
-            print(f"[PromptRewriter] Propuesta de soporte: {query!r}", flush=True)
-            return [query] if query else []
+            text = response["choices"][0]["text"].strip()
+            queries = []
+            seen = set()
+            for line in text.splitlines():
+                query = re.sub(r"^\s*(?:[-*]\s*|\d+[.)]\s*)", "", line)
+                query = query.strip().strip("\"'")
+                key = query.casefold()
+                if query and key not in seen:
+                    queries.append(query)
+                    seen.add(key)
+            print(f"[PromptRewriter] Propuestas de soporte: {queries!r}", flush=True)
+            return queries
         except Exception as exc:
             print(f"[PromptRewriter] Propuesta de soporte omitida: {exc}", flush=True)
             return []
@@ -426,23 +443,32 @@ class PromptRewriter:
             def extract_text(val):
                 if isinstance(val, dict):
                     for k in ['TARGET', 'target', 'value', 'Translation', 'TRANSLATION', 'instruction', 'text', 'prompt']:
-                        if k in val: return str(val[k]).strip()
+                        if k in val:
+                            return str(val[k]).strip()
                     for v in val.values():
-                        if isinstance(v, str): return v.strip()
-                    if val.values(): return str(list(val.values())[0]).strip()
+                        if isinstance(v, str):
+                            return v.strip()
+                    if val.values():
+                        return str(list(val.values())[0]).strip()
                 return str(val).strip() if val is not None else ""
 
             def extract_float(val, default=0.5):
                 if isinstance(val, dict):
                     for k in ['TARGET', 'target', 'value', 'Magnitude', 'MAGNITUDE', 'magnitude']:
                         if k in val: 
-                            try: return float(val[k])
-                            except: pass
+                            try:
+                                return float(val[k])
+                            except BaseException:
+                                pass
                     for v in val.values():
-                        try: return float(v)
-                        except: pass
-                try: return float(val)
-                except: return default
+                        try:
+                            return float(v)
+                        except BaseException:
+                            pass
+                try:
+                    return float(val)
+                except BaseException:
+                    return default
 
             def extract_bool(val, default=False):
                 if isinstance(val, bool):
@@ -451,13 +477,16 @@ class PromptRewriter:
                     return bool(val)
                 if isinstance(val, str):
                     normalized = val.strip().lower()
-                    if normalized in ("true", "yes", "1"): return True
-                    if normalized in ("false", "no", "0", ""): return False
+                    if normalized in ("true", "yes", "1"):
+                        return True
+                    if normalized in ("false", "no", "0", ""):
+                        return False
                 return default
 
             def get_flexible(d, keys):
                 """Busca una clave en un dict ignorando mayúsculas, espacios y guiones bajos."""
-                if not isinstance(d, dict): return None
+                if not isinstance(d, dict):
+                    return None
                 # Crear mapa normalizado: "mandatorytasks" -> "MANDATORY TASKS"
                 norm_map = {k.lower().replace(" ", "").replace("_", ""): k for k in d.keys()}
                 for k in keys:
@@ -471,7 +500,8 @@ class PromptRewriter:
             m_val = get_flexible(data, ["magnitude"])
             if m_val is None:
                 mt = get_flexible(data, ["mandatory tasks", "tasks"])
-                if mt: m_val = get_flexible(mt, ["magnitude"])
+                if mt:
+                    m_val = get_flexible(mt, ["magnitude"])
             magnitude = extract_float(m_val, 0.5)
             magnitude = max(0.0, min(1.0, magnitude))
 
@@ -480,7 +510,8 @@ class PromptRewriter:
             t_val = get_flexible(data, ["mask_target", "targeting"])
             if t_val is None:
                 mt = get_flexible(data, ["mandatory tasks", "tasks"])
-                if mt: t_val = get_flexible(mt, ["mask_target", "targeting"])
+                if mt:
+                    t_val = get_flexible(mt, ["mask_target", "targeting"])
             if t_val:
                 if isinstance(t_val, list) and t_val:
                     mask_target = str(t_val[0]).strip().lower()
@@ -492,7 +523,8 @@ class PromptRewriter:
             p_val = get_flexible(data, ["prompt", "instruction", "output", "translation"])
             if p_val is None:
                 mt = get_flexible(data, ["mandatory tasks", "tasks"])
-                if mt: p_val = get_flexible(mt, ["translation", "prompt", "instruction"])
+                if mt:
+                    p_val = get_flexible(mt, ["translation", "prompt", "instruction"])
             
             if p_val:
                 translated_prompt = extract_text(p_val)
@@ -536,7 +568,8 @@ class PromptRewriter:
             id_val = get_flexible(data, ["preserve_face", "identity", "preserve face"])
             if id_val is None:
                 mt = get_flexible(data, ["mandatory tasks", "tasks"])
-                if mt: id_val = get_flexible(mt, ["identity", "preserve_face"])
+                if mt:
+                    id_val = get_flexible(mt, ["identity", "preserve_face"])
             if id_val is not None:
                 preserve_face = bool(id_val)
 
@@ -545,7 +578,8 @@ class PromptRewriter:
             g_val = get_flexible(data, ["is_global", "scope", "is global"])
             if g_val is None:
                 mt = get_flexible(data, ["mandatory tasks", "tasks"])
-                if mt: g_val = get_flexible(mt, ["scope", "is_global"])
+                if mt:
+                    g_val = get_flexible(mt, ["scope", "is_global"])
             if g_val is not None:
                 is_global = extract_bool(g_val)
 

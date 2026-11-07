@@ -24,9 +24,14 @@ def execute(nodes, namespace):
 
 
 def manager_class():
+    # v5.1319: el extraction whitelist debe cubrir TODOS los helpers que los
+    # métodos extraídos referencian vía `ProcessMgr._...`; si falta uno, el
+    # AttributeError interno se traga y la función devolvió None (3 FAIL
+    # aparentes en producción que en realidad era el probe desactualizado).
     methods = [n for n in CLASS.body if isinstance(n, ast.FunctionDef) and n.name in {
         "_process_face_swap_v21", "_mouth_occlusion_evidence", "_localize_mouth_occlusion",
-        "_profile_occlusion_guides", "_soothe_swap_ring"}]
+        "_profile_occlusion_guides", "_soothe_swap_ring",
+        "_mouth_oral_domains", "_clip_occlusion_to_mouth"}]
     cls = ast.ClassDef(name="ProcessMgr", bases=[], keywords=[], body=methods, decorator_list=[])
     namespace = {"np": np, "cv2": cv2, "traceback": traceback,
                  "get_faceswap_config": get_faceswap_config}
@@ -157,7 +162,13 @@ class PipelineControls(unittest.TestCase):
         self.assertIsNone(cls._localize_mouth_occlusion(background, points))
         connected = positive.copy()
         connected[90:140, 125:130] = 1
-        self.assertIsNone(cls._localize_mouth_occlusion(connected, points))
+        # v5.1288: el componente que CRUZA los labios ya no se descarta entero
+        # (frac 0,64 > 0,40): se rescata recortado a la boca y su anillo. La
+        # ambigüedad real (dos componentes orales) sigue absteniéndose abajo.
+        rescued = cls._localize_mouth_occlusion(connected, points)
+        self.assertIsNotNone(rescued)
+        self.assertLessEqual(float((rescued > .1).mean()), 0.40)
+        self.assertTrue(np.all(rescued[:100] == 0))
         remote = background.copy()
         remote[132:251, 215:240] = 1
         self.assertIsNone(cls._localize_mouth_occlusion(remote, points))

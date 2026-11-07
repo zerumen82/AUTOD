@@ -1,0 +1,28 @@
+{
+  "_doc": "Modo Calidad: la puerta revierte pasos que empeoran nitidez, posterizacion, recorte de tonos, identidad o cromaticidad. Croma compara Lab a,b antes/despues del acabado color/luz, no con la foto original: permite luz y conserva recolors solicitados. Media/p95 son limites de seguridad calibrados con muestras no explicitas, no una garantia de deteccion de cambios diminutos. El 8K queda apagado hasta activar allow_8k.",
+  "acceptance_gate": true,
+  "gate": {
+    "sharpness_drop_tolerance": 0.06,
+    "poster_rise_tolerance": 0.04,
+    "clip_rise_tolerance": 0.008,
+    "full_metrics_max_side": 3600,
+    "chroma_mean_tolerance": 2.0,
+    "chroma_p95_tolerance": 6.0,
+    "chroma_max_side": 1024
+  },
+  "identity": {
+    "verify_after_face_restore": true,
+    "max_side": 2048,
+    "max_drop": 0.02
+  },
+  "upscale": {
+    "allow_8k": false,
+    "max_output_pixels": 12000000,
+    "min_source_side_4k": 700,
+    "min_source_side_8k": 1600,
+    "ai_gain_check": true,
+    "ai_gain_min_ratio": 1.08,
+    "ai_gain_crop": 256,
+    "ai_gain_max_side": 1600
+  }
+}

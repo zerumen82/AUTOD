@@ -31,7 +31,7 @@ CSS_STYLE = """
         background: linear-gradient(90deg, #22d3ee, #a855f7);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 32px;
+        font-size: 36px;
         font-weight: 800;
     }
     .btn-transform-main {
@@ -40,7 +40,7 @@ CSS_STYLE = """
         font-weight: 900 !important;
         height: 64px !important;
         border-radius: 14px !important;
-        font-size: 18px !important;
+        font-size: 20px !important;
         letter-spacing: 1px;
         text-transform: uppercase;
         border: none !important;
@@ -49,7 +49,16 @@ CSS_STYLE = """
         background: #0f172a !important;
         border: 2px solid #22d3ee !important;
         border-radius: 12px !important;
-        font-size: 16px !important;
+        font-size: 23px !important;
+        font-weight: 700 !important;
+    }
+    /* Gradio pinta el texto dentro de un textarea, que no hereda el tamaño
+       ni el peso del contenedor: sin esta regla el prompt seguía viéndose
+       pequeño y fino. */
+    .prompt-box-img textarea, .prompt-box-img input {
+        font-size: 23px !important;
+        font-weight: 700 !important;
+        line-height: 1.45 !important;
     }
 """
 
@@ -117,7 +126,10 @@ def build_img_editor_ui():
                     elem_classes=["prompt-box-img"]
                 )
 
-                with gr.Accordion("🎯 Seleccionar zonas (opcional)", open=False):
+                # Oculto por decisión del usuario (2026-11-03): la zona se delimita
+                # pintando. Los componentes siguen construidos para que el contrato
+                # de API (edit_manual_region, 15 entradas) no cambie.
+                with gr.Accordion("🎯 Seleccionar zonas (opcional)", open=False, visible=False):
                     gr.Markdown(
                         "_Analiza la foto, marca una o varias zonas detectadas y edita solo "
                         "esas. También puedes pulsar una zona de la vista previa. "

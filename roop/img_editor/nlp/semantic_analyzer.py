@@ -26,10 +26,14 @@ torch = None
 CONCEPTS: Dict[str, list] = {
     "pose": [
         "change pose posture stance body position limbs",
-        "stand sit kneel lie run dance walk turn face camera",
+        "stand sit kneel lie run dance walk turn the body toward the viewer",
+        "person in a standing seated sitting kneeling or lying posture",
+        "change a person's body posture to sit stand kneel or lie",
         "move left right up down reposition in frame",
         "cambiar pose postura posición del cuerpo brazos piernas",
-        "de pie sentado rodillas acostado bailando corriendo girar mirar cámara",
+        "de pie sentado rodillas acostado bailando corriendo girar el cuerpo hacia el espectador",
+        "persona de pie sentada arrodillada o acostada en una postura corporal",
+        "cambiar la postura corporal de una persona para sentarse ponerse de pie arrodillarse o acostarse",
         "mover izquierda derecha arriba abajo en el encuadre",
         # El matcher de tokens no cruza dance↔dancing («dance» no es
         # subcadena de «dancing»): medido 2026-10-16, "the cat dances"
@@ -37,12 +41,24 @@ CONCEPTS: Dict[str, list] = {
         # palabra de usuario (mismo precedente que «paint over/repaint»
         # en attribute_recolor).
         "dance dancing groove sway twirl spin rhythm",
-        # v5.1239 — el ángulo de cámara es pose (el cuerpo se ve de otra
-        # dirección); medido 2026-10-22, «CAMBIA EL ANGULO, IMAGEN DE
-        # LATERAL» medía pose=False y caía en la ruta ordinaria (copy
-        # machine) en vez del motor con visión que reinterpreta el marco.
-        "camera angle side view profile shot turn sideways angled three-quarter",
-        "ángulo de cámara vista lateral perfil de lado perfilado tres cuartos",
+    ],
+    "camera_view": [
+        "change the camera angle or the photographic perspective",
+        "change the camera viewpoint or perspective",
+        "change the viewpoint or point of view",
+        "show the room from an opposite camera angle",
+        "high angle overhead bird's eye low angle side view rear view",
+        "first person POV through someone's eyes and over the shoulder framing",
+        "camera perspective focal length and lens framing",
+        "photo taken from behind or from the side",
+        "cambiar el ángulo de cámara o la perspectiva fotográfica",
+        "cambiar el punto de vista de la cámara o la perspectiva",
+        "cambiar el punto de vista o el POV",
+        "mostrar la habitación desde un ángulo opuesto",
+        "ángulo alto cenital vista de pájaro contrapicado vista lateral trasera",
+        "POV en primera persona mirando por los ojos y encuadre sobre el hombro",
+        "perspectiva de cámara y encuadre del objetivo fotográfico",
+        "foto tomada desde atrás o desde un lado",
     ],
     "structural": [
         "add insert put new people objects props elements into scene",
@@ -60,7 +76,9 @@ CONCEPTS: Dict[str, list] = {
     ],
     "structural_add": [
         "add insert put include new element prop accessory hat glasses bag into scene",
+        "add one or more people or objects to an existing photo",
         "añadir insertar poner agregar objeto accesorio sombrero gafas bolso en escena",
+        "añadir una o varias personas u objetos a una foto existente",
     ],
     "structural_remove": [
         # v5.1239 — «from image»/«de la imagen» quitado: el sustantivo del
@@ -106,11 +124,19 @@ CONCEPTS: Dict[str, list] = {
     # Dirección del cambio corporal (para negatives sin pelear con el pedido).
     # uncover = quitar/menos ropa; cover = vestir/más ropa (nieve, abrigo...).
     "attribute_uncover": [
+        # v5.1284 — el NOMBRE de una prenda no es una dirección. Medido el
+        # 2026-11-03 (log 12:25): «EL HOMBRE debe vestir con un tanga» medía
+        # dirección «uncover» solo por el sustantivo «tanga», y esa dirección
+        # enrutaba la petición como un «quitar» (motor sin ancla, denoise 1.00
+        # sobre la zona de ropa): el resultado fue un estampado inventado en
+        # el jersey y ningún tanga. La dirección la dicen la acción (quitar,
+        # desvestir, exponer) y los cuantificadores de cobertura mínima (solo);
+        # las prendas viven en attribute_body. Da igual qué prenda se nombre:
+        # «ponerse un abrigo» y «ponerse un tanga» son la misma dirección.
         "remove take off undress strip naked bare skin less clothing minimal garment exposure",
         "without clothes no clothes without clothing desnudo sin ropa",
-        "quitar quitarse desvestir desnudar piel descubierta menos ropa prenda mínima tanga",
-        "thong tanga g-string bikini lingerie underwear swimsuit minimal tiny micro only solo",
-        "hilo dental biquini lencería ropa interior bañador mínimo solo únicamente",
+        "quitar quitarse desvestir desnudar piel descubierta menos ropa",
+        "minimal tiny micro only solo únicamente mínimo prenda mínima",
     ],
     "body_exposure_full": [
         "fully nude completely naked no clothes at all entire body bare",
@@ -121,8 +147,8 @@ CONCEPTS: Dict[str, list] = {
         "descalzo descalza pies desnudos sin zapatos quitar calzado solo pies",
     ],
     "attribute_cover": [
-        "dress put on wear coat jacket winter snow warm covered bundled sweater clothes on",
-        "vestir poner ponerse abrigo chaqueta nieve invierno ropa abrigada tapado jersey nieve",
+        "dress dressed clothed wearing put on wear coat jacket winter snow warm covered bundled sweater clothes on",
+        "vestir vestido vestida vestidos vestidas ponerse llevando ropa puesta ropa abrigada tapado jersey nieve",
     ],
     "attribute_age": [
         "age appear older younger aged elderly juvenile mature wrinkle wrinkle aged skin",
@@ -303,6 +329,86 @@ def score_camera_pose(prompt: str) -> Dict[str, Dict[str, float]]:
     return scores
 
 
+def _concept_token_evidence(prompt: str, concept: str) -> int:
+    if _camera_scorer is None:
+        return 0
+    prompt_tokens = _camera_scorer._tokenize(prompt)
+    best = 0
+    for anchor in CONCEPTS.get(concept, ()):
+        anchor_tokens = _camera_scorer._tokenize(anchor)
+        matches = sum(
+            any(
+                token == candidate
+                or _camera_scorer._token_match(token, candidate) != "none"
+                for candidate in anchor_tokens
+            )
+            for token in prompt_tokens
+        )
+        best = max(best, matches)
+    return best
+
+
+def distinctive_concept_token_evidence(prompt: str, concept: str) -> int:
+    """Count prompt tokens that support one concept and no competing intent."""
+    if not prompt or not prompt.strip() or concept not in CONCEPTS:
+        return 0
+    if _camera_scorer is None:
+        score_camera_pose(prompt)
+    prompt_tokens = _camera_scorer._tokenize(prompt)
+    anchors = {
+        name: [
+            _camera_scorer._tokenize(anchor)
+            for anchor in descriptions
+        ]
+        for name, descriptions in CONCEPTS.items()
+        if not name.startswith("target_")
+    }
+
+    def matches(token: str, concept_anchors: list[set[str]]) -> bool:
+        return any(
+            candidate == token
+            or _camera_scorer._token_match(token, candidate) != "none"
+            for words in concept_anchors
+            for candidate in words
+        )
+
+    target_anchors = anchors.get(concept, [])
+    other_anchors = [
+        descriptions
+        for name, descriptions in anchors.items()
+        if name != concept
+    ]
+    return sum(
+        matches(token, target_anchors)
+        and not any(matches(token, descriptions) for descriptions in other_anchors)
+        for token in prompt_tokens
+    )
+
+
+def is_camera_view_request(prompt: str) -> bool:
+    """Measure camera intent from the camera concept, not trigger words."""
+    if not prompt or not prompt.strip():
+        return False
+    if _camera_scorer is None:
+        score_camera_pose(prompt)
+    scores = _camera_scorer.score_concepts(prompt)
+    return (
+        scores.get("camera_view", 0.0) >= camera_pose_config()["signal_threshold"]
+        and _concept_token_evidence(prompt, "camera_view") >= 2
+    )
+
+
+def is_camera_only_request(prompt: str) -> bool:
+    """Whether a clause asks for camera change without another measured edit."""
+    if not is_camera_view_request(prompt):
+        return False
+    return not any(
+        _concept_token_evidence(prompt, name) >= 2
+        for name in CONCEPTS
+        if name != "camera_view" and not name.startswith("target_")
+    )
+
+
 def _resolve_semantic_model(model_name: str = "all-MiniLM-L6-v2"):
     if os.environ.get("HF_HUB_OFFLINE", "0") == "1":
         hf_cache = os.path.expanduser(
@@ -407,6 +513,9 @@ class _ConceptRouterMixin:
             return "cover"
         return "change"
 
+    # v5.1255 (2026-10-29): detect_target expuesto para que img_editor_manager
+    # pueda identificar el tipo de objeto a remover (clothes, hair, subject…)
+    # en peticiones de «quitar» local sin promover a exposición completa.
     def detect_target(self, prompt: str) -> str:
         if not prompt or not prompt.strip():
             return "subject"

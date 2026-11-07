@@ -6,11 +6,8 @@ ComfyUI Client - Cliente para interactuar con ComfyUI via API REST
 
 import os
 import time
-import base64
 import requests
-from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
-from io import BytesIO
 
 # Puerto por defecto
 DEFAULT_COMFY_PORT = '8188'
@@ -25,7 +22,7 @@ def get_comfyui_port():
             response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=1)
             if response.status_code == 200:
                 return port
-        except:
+        except Exception:
             continue
     
     # Si no se detecta, usar variable de entorno o defecto
@@ -60,18 +57,17 @@ class ComfyClient:
             if response.status_code == 200:
                 return response.json()
             return {}
-        except:
+        except Exception:
             return {}
     
     def get_images(self, prompt_id: str, node_id: str = "3") -> list:
         """Obtiene imagens de un prompt"""
         images = []
         
-        print(f"[ComfyClient] get_images: {prompt_id[:8]}...")
+        print(f"[ComfyClient] get_images: {prompt_id[:8]}...", flush=True)
         
         max_attempts = 1200  # Maximo 600 segundos esperando (10 minutos) - primera carga es lenta
         attempts = 0
-        last_status = ""
         found_images = False
         nan_detected = False
         
@@ -101,7 +97,7 @@ class ComfyClient:
                     if "images" in node_output:
                         for img in node_output["images"]:
                             if img.get("filename", "").lower().endswith("nan"):
-                                print(f"[ComfyClient] ERROR: Archivo con nombre NaN detectado")
+                                print("[ComfyClient] ERROR: Archivo con nombre NaN detectado")
                                 nan_detected = True
                 
                 if nan_detected:
@@ -192,7 +188,7 @@ class ComfyClient:
                     if "images" in node_output:
                         for img in node_output["images"]:
                             if img.get("filename", "").lower().endswith("nan"):
-                                print(f"[ComfyClient] ERROR: Archivo con nombre NaN detectado")
+                                print("[ComfyClient] ERROR: Archivo con nombre NaN detectado")
                                 nan_detected = True
                 
                 if nan_detected:
@@ -353,7 +349,7 @@ class ComfyClient:
             if response.status_code == 200:
                 return response.json()
             return {}
-        except:
+        except Exception:
             return {}
 
     def get_object_info(self) -> Dict:
@@ -458,7 +454,7 @@ class ComfyClient:
             if not os.path.exists(image_path):
                 return False, f"Imagen no encontrada: {image_path}"
             
-            print(f"[ComfyClient] ========== INICIANDO GENERACION ==========")
+            print("[ComfyClient] ========== INICIANDO GENERACION ==========")
             print(f"[ComfyClient] Workflow keys: {list(workflow.keys())}")
             
             # El workflow ya debe tener la imagen configurada (cargada previamente)
@@ -502,7 +498,7 @@ class ComfyClient:
                 try:
                     history = self.get_history(prompt_id)
                     print(f"[ComfyClient] Historial final: {history}")
-                except:
+                except Exception:
                     pass
                 return False, "Timeout: No se generó el video en el tiempo esperado"
                 
@@ -554,7 +550,7 @@ def check_comfy_available() -> bool:
         url = get_comfyui_url()
         response = requests.get(f"{url}/system_stats", timeout=5)
         return response.status_code == 200
-    except:
+    except Exception:
         return False
 
 
@@ -573,7 +569,7 @@ def disable_safety_checker() -> bool:
             if response.status_code == 200:
                 print("[ComfyClient] Safety checker desactivado via API")
                 return True
-        except:
+        except Exception:
             pass
         
         # Intentar endpoint de manager
@@ -582,7 +578,7 @@ def disable_safety_checker() -> bool:
             if response.status_code == 200:
                 print("[ComfyClient] Safety checker desactivado via Manager")
                 return True
-        except:
+        except Exception:
             pass
         
         print("[ComfyClient] No se pudo desactivar safety checker via API")
@@ -600,6 +596,6 @@ def get_comfy_version() -> str:
         if response.status_code == 200:
             data = response.json()
             return data.get("version", "Unknown")
-    except:
+    except Exception:
         pass
     return "Unknown"

@@ -14,7 +14,7 @@ import os
 import cv2
 import numpy as np
 from PIL import Image
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict
 
 
 class ControlNetUtils:
@@ -226,7 +226,7 @@ class ControlNetUtils:
         """
         try:
             # Intentar con MiDaS si está disponible
-            import torch
+            __import__("torch")  # Availability check with the original import side effects.
             # ... implementación MiDaS ...
             pass
         except ImportError:
@@ -281,7 +281,6 @@ class ControlNetUtils:
     
     def _check_controlnet_files(self) -> Dict[str, bool]:
         """Verifica ControlNets por archivos en disco"""
-        import os
         result = {"openpose": False, "tile": False, "depth": False, "canny": False}
         
         # Rutas posibles de ComfyUI

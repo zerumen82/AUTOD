@@ -22,7 +22,7 @@ def main():
         seed=123456,
     )
     assert result is not None, note
-    assert "Qwen Camera" in note and "LongCat Turbo" in note, note
+    assert "Qwen Camera" in note and "cambios restantes sobre regiones medidas" in note, note
     target = ROOT / "diagnostics/editor_qwen_camera_integrated.png"
     result.save(target)
     print(f"SAVED {target} {result.size} {note}", flush=True)

@@ -5,8 +5,13 @@ HART Image Edit ComfyUI Client
 Hybrid Autoregressive Transformer - genera imágenes 1024x1024 autoregresivamente
 """
 
-import os, sys, json, time, requests, io, subprocess, tempfile
-from typing import Optional, Tuple
+import os
+import json
+import time
+import requests
+import subprocess
+import tempfile
+from typing import Tuple
 from PIL import Image
 from dataclasses import dataclass
 
@@ -29,7 +34,7 @@ class HartEditComfyClient:
     def is_available(self):
         try:
             return requests.get(f"{COMFY}/system_stats", timeout=3).status_code == 200
-        except:
+        except BaseException:
             return False
 
     def get_model_paths(self) -> dict:

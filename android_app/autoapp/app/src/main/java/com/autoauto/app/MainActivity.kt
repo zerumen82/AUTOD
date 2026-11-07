@@ -42,8 +42,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -129,13 +127,11 @@ class MainActivity : AppCompatActivity() {
         "Kontext (edición fuerte)",
         "Qwen-Image-Edit Q5 (20B)"
     )
-    private val genEngines = arrayOf("flux_dev_q4", "flux_dev_abliterated", "schnell", "klein_base")
-    private val genEngineLabels = arrayOf(
-        "FLUX Dev Q4 (seguro, por defecto)",
-        "FLUX Abliterated (NSFW)",
-        "FLUX Schnell (rápido)",
-        "FLUX.2 Klein 4B (rápido + realista)"
-    )
+    // Motores de Generate: los dicta el servidor (api_name="generate_engines").
+    // La APK solo guarda un marcador mientras no hay conexión; nunca una lista
+    // propia de modelos, que se queda vieja y ofrece motores no instalados.
+    private var genEngines = arrayOf<String>()
+    private var genEngineLabels = arrayOf<String>()
     private var selectedEngine = 0
     private var selectedGenEngine = 0
 
@@ -160,7 +156,7 @@ class MainActivity : AppCompatActivity() {
             putString("lastResultPath", lastResultPath)
             putBoolean("isGenerateMode", isGenerateMode)
             putInt("genEngine", selectedGenEngine)
-            putString("genEngineAlias", genEngines[selectedGenEngine])
+            putString("genEngineAlias", genEngines.getOrNull(selectedGenEngine))
             putBoolean("genOrientationH", genOrientationH)
             putBoolean("genEnhance", genEnhanceCheck.isChecked)
             putBoolean("genRewriter", genRewriterCheck.isChecked)
@@ -267,6 +263,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         bindViews()
         setupEngineSpinner()
+        initGenEngineFallback()
         setupGenEngineSpinner()
         setupDenoiseSlider()
         setupIterationsSlider()
@@ -286,14 +283,11 @@ class MainActivity : AppCompatActivity() {
             serverUrl = savedInstanceState.getString("serverUrl")
         }
 
-        val saved = getManualUrl()
+        val saved = getManualUrl()?.trim()?.takeIf { it.isNotEmpty() }
         if (saved != null && client == null) connectTo(saved)
         else if (client == null) {
             showDisconnected()
-            scope.launch {
-                val found = quickDiscover()
-                if (found != null) withContext(Dispatchers.Main) { connectTo(found) }
-            }
+            showConnectDialog()
         }
         loadGallery()
         restoreLastResult()
@@ -491,10 +485,36 @@ class MainActivity : AppCompatActivity() {
         }
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         genEngineSpinner.adapter = adapter
+        genEngineSpinner.setSelection(selectedGenEngine.coerceIn(0, maxOf(genEngineLabels.size - 1, 0)))
         genEngineSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { selectedGenEngine = pos; saveSettings() }
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
+    }
+
+    /** Marcador previo a la conexión: el catálogo real llega del servidor. */
+    private fun initGenEngineFallback() {
+        if (genEngines.isNotEmpty()) return
+        genEngines = arrayOf(getString(R.string.default_generation_engine))
+        genEngineLabels = arrayOf("Motor por defecto del servidor")
+    }
+
+    /** Aplica el catálogo del servidor y conserva la elección guardada. */
+    private fun applyEngineCatalog(engines: List<GradioClient.EngineEntry>, defaultAlias: String) {
+        if (engines.isEmpty()) return
+        val savedAlias = prefs().getString("genEngineAlias", null)
+        genEngines = engines.map { it.alias }.toTypedArray()
+        genEngineLabels = engines.map { it.label }.toTypedArray()
+        setupGenEngineSpinner()
+        val wanted = listOfNotNull(savedAlias, defaultAlias)
+            .firstNotNullOfOrNull { alias -> genEngines.indexOf(alias).takeIf { it >= 0 } } ?: 0
+        restoringSettings = true
+        try {
+            genEngineSpinner.setSelection(wanted)
+        } finally {
+            restoringSettings = false
+        }
+        selectedGenEngine = wanted
     }
 
     // ---- Checkboxes (show/hide tier + iterations) ----
@@ -656,6 +676,13 @@ class MainActivity : AppCompatActivity() {
                     statusDot.setBackgroundColor(0xFF22C55E.toInt())
                     btnConnect.text = "OK"
                 }
+                // Catálogo real de Generate: qué modelos están instalados en el PC.
+                val catalog = try { c.fetchEngineCatalog() } catch (_: Exception) { null }
+                if (catalog != null) {
+                    withContext(Dispatchers.Main) {
+                        applyEngineCatalog(catalog.engines, catalog.defaultAlias)
+                    }
+                }
             } else withContext(Dispatchers.Main) { showDisconnected() }
         }
     }
@@ -681,18 +708,6 @@ class MainActivity : AppCompatActivity() {
     private fun hideProgress() {
         progressLayout.visibility = View.GONE
         progressStartTime = 0L
-    }
-
-    private fun quickDiscover(): String? {
-        val fallback = "http://100.122.235.80:7861"
-        return try {
-            val conn = URL("$fallback/config").openConnection() as HttpURLConnection
-            conn.connectTimeout = 1500; conn.readTimeout = 1500
-            if (conn.responseCode == 200) {
-                val body = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
-                if (body.contains("\"components\"")) fallback else null
-            } else { conn.disconnect(); null }
-        } catch (_: Exception) { null }
     }
 
     // ---- GENERATION ----
@@ -733,12 +748,12 @@ class MainActivity : AppCompatActivity() {
 
         scope.launch {
             try {
-                withContext(Dispatchers.Main) { showProgress("Generando con ${genEngineLabels[selectedGenEngine]}...", 10) }
+                withContext(Dispatchers.Main) { showProgress("Generando con ${genEngineLabels.getOrElse(selectedGenEngine) { "servidor" }}...", 10) }
                 val result = c.callGenerate(
                     prompt = prompt,
                     width = width,
                     height = height,
-                    engine = genEngines[selectedGenEngine],
+                    engine = genEngines.getOrElse(selectedGenEngine) { getString(R.string.default_generation_engine) },
                     enhanceQuality = genEnhanceCheck.isChecked,
                     useRewriter = genRewriterCheck.isChecked,
                     progressListener = object : GradioClient.ProgressListener {

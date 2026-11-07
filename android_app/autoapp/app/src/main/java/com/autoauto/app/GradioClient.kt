@@ -542,5 +542,76 @@ class GradioClient(private var baseUrl: String) {
         } catch (_: Exception) { "generate_image" }
     }
 
+    // ------------------------------------------------------------------
+    //  Catálogo de motores de Generate (api_name="generate_engines")
+    //  Lo sirve el servidor con los modelos realmente instalados: la APK no
+    //  mantiene lista propia, que se queda vieja y ofrece motores inexistentes.
+    // ------------------------------------------------------------------
+    data class EngineEntry(val alias: String, val label: String)
+    data class EngineCatalog(val engines: List<EngineEntry>, val defaultAlias: String)
+
+    fun fetchEngineCatalog(): EngineCatalog? {
+        return try {
+            val endpoint = "generate_engines"
+            val conn = openPost("$baseUrl$apiPrefix/call/$endpoint")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use { os ->
+                os.write(JSONObject().put("data", JSONArray()).toString().toByteArray())
+                os.flush()
+            }
+            if (conn.responseCode != 200) {
+                conn.disconnect()
+                Log.w("GradioClient", "Catalogo de motores: HTTP ${conn.responseCode}")
+                return null
+            }
+            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+            conn.disconnect()
+            val eventId = try {
+                JSONObject(responseText).optString("event_id", "")
+            } catch (_: Exception) { "" }
+            val payload = if (eventId.isBlank()) lastEventData(responseText)
+                          else lastEventData(readEventStream("$baseUrl$apiPrefix/call/$endpoint/$eventId"))
+            if (payload.isNullOrBlank()) return null
+            parseEngineCatalog(payload)
+        } catch (e: Exception) {
+            Log.w("GradioClient", "Catalogo de motores no disponible: ${e.message}")
+            null
+        }
+    }
+
+    private fun readEventStream(url: String): String {
+        return try {
+            val conn = openGet(url)
+            conn.setRequestProperty("Accept", "text/event-stream")
+            if (conn.responseCode != 200) { conn.disconnect(); return "" }
+            val text = conn.inputStream.bufferedReader().use { it.readText() }
+            conn.disconnect()
+            text
+        } catch (_: Exception) { "" }
+    }
+
+    private fun lastEventData(streamText: String): String? =
+        streamText.lines().lastOrNull { it.startsWith("data: ") }
+            ?.removePrefix("data: ")?.trim()
+
+    private fun parseEngineCatalog(payload: String): EngineCatalog? {
+        val arr = try { JSONArray(payload) } catch (_: Exception) { return null }
+        val json = when (val first = arr.opt(0)) {
+            is JSONObject -> first
+            is String -> try { JSONObject(first) } catch (_: Exception) { return null }
+            else -> return null
+        }
+        val list = json.optJSONArray("engines") ?: return null
+        val engines = ArrayList<EngineEntry>()
+        for (i in 0 until list.length()) {
+            val item = list.optJSONObject(i) ?: continue
+            val alias = item.optString("alias", "")
+            if (alias.isBlank()) continue
+            engines.add(EngineEntry(alias, item.optString("label", alias)))
+        }
+        if (engines.isEmpty()) return null
+        return EngineCatalog(engines, json.optString("default", engines[0].alias))
+    }
+
     data class EditResult(val image: Bitmap?, val status: String, val mask: Bitmap?)
 }

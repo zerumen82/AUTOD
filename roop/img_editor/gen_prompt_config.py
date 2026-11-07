@@ -10,6 +10,10 @@ from typing import Any, Dict, List
 _CACHE: Dict[str, Any] = {}
 
 
+class SubjectPromptConfigError(ValueError):
+    """The subject template cannot preserve the full visual query."""
+
+
 def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -103,3 +107,25 @@ def get_adult_gate_config() -> Dict[str, Any]:
         "concepts": list(raw.get("concepts") or []),
         "threshold": float(raw.get("threshold", 0.13)),
     }
+
+
+def get_longcat_model_config() -> Dict[str, Any]:
+    """Read the Editor's configured LongCat model and native sampling recipe."""
+    path = os.path.join(_project_root(), "config", "model_configs.json")
+    with open(path, encoding="utf-8") as stream:
+        model = json.load(stream)["longcat"]
+    model_file = model.get("model_file")
+    if not model_file:
+        raise ValueError("longcat configuration has no model_file")
+    return {**model, "model_file": model_file}
+
+
+def get_longcat_full_model_config() -> Dict[str, Any]:
+    """Read the Editor's configured LongCat Full model and native sampling recipe."""
+    path = os.path.join(_project_root(), "config", "model_configs.json")
+    with open(path, encoding="utf-8") as stream:
+        model = json.load(stream)["longcat_full"]
+    model_file = model.get("model_file")
+    if not model_file:
+        raise ValueError("longcat_full configuration has no model_file")
+    return {**model, "model_file": model_file}

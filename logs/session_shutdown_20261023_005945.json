@@ -1,0 +1,72 @@
+{
+  "reason": "ventana-cerrada",
+  "started": "2026-10-23 00:59:38",
+  "pid": 19032,
+  "ok": true,
+  "warm_imports": {
+    "loaded": [
+      "ui.tabs.comfy_launcher",
+      "roop.comfy_workflows",
+      "roop.img_editor.vision_guard",
+      "ui.tabs.faceswap.state"
+    ],
+    "failed": []
+  },
+  "settings": {
+    "stop_comfyui_on_close": true,
+    "release_local_gpu_on_close": true,
+    "abort_local_batch_on_close": true,
+    "queue_grace_seconds": 15,
+    "poll_seconds": 1
+  },
+  "before": {
+    "wall": "2026-10-23 00:59:38",
+    "vram_used_mb": 3898,
+    "vram_total_mb": 8192,
+    "comfyui_running": true,
+    "comfyui_queue_running": 0,
+    "comfyui_queue_pending": 0,
+    "local_batch_busy": false
+  },
+  "grace": {
+    "seconds": 15.0,
+    "waited_seconds": 0.06,
+    "idle": true,
+    "state": {
+      "wall": "2026-10-23 00:59:38",
+      "vram_used_mb": 3898,
+      "vram_total_mb": 8192,
+      "comfyui_running": true,
+      "comfyui_queue_running": 0,
+      "comfyui_queue_pending": 0,
+      "local_batch_busy": false
+    }
+  },
+  "local_batch_cancelled": false,
+  "comfyui": {
+    "attempted": true,
+    "stopped": true,
+    "message": "ComfyUI detenido: tracked 17924 tree-killed"
+  },
+  "local_gpu": {
+    "attempted": true,
+    "steps": [
+      "img_editor_local_released",
+      "face_analyser_released",
+      "torch_cache_emptied",
+      "gc_collected"
+    ],
+    "errors": []
+  },
+  "after": {
+    "wall": "2026-10-23 00:59:45",
+    "vram_used_mb": 1841,
+    "vram_total_mb": 8192,
+    "comfyui_running": false,
+    "comfyui_queue_running": 0,
+    "comfyui_queue_pending": 0,
+    "local_batch_busy": false
+  },
+  "vram_delta_mb": -2057,
+  "seconds": 7.01
+}

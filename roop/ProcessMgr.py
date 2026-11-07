@@ -4421,22 +4421,86 @@ class ProcessMgr:
         count, labels = cv2.connectedComponents(support.astype(np.uint8))
         areas = np.bincount(labels.ravel(), minlength=count)
         selected = None
+        oversized = None
         for label in range(1, count):
             candidate = np.where(labels == label, occ, 0.0)
             fraction = (
                 fraction_measure(candidate) if fraction_measure is not None
                 else float(areas[label]) / occ.size
             )
-            if not settings["occlusion_min_fraction"] <= fraction <= settings["occlusion_max_fraction"]:
+            if fraction < settings["occlusion_min_fraction"]:
                 continue
             oral, ring = ProcessMgr._mouth_occlusion_evidence(candidate, points)
             if (oral <= settings["mouth_occlusion_min_evidence"]
                     or ring <= settings["mouth_occlusion_min_ring_evidence"]):
                 continue
-            if selected is not None:
+            if fraction <= settings["occlusion_max_fraction"]:
+                if selected is not None:
+                    return None
+                selected = candidate
+                continue
+            # v5.1288: un objeto real DELANTE de la boca (mazorca, mano, vaso)
+            # puede medir más del 40 % de la cara y entonces el gate general
+            # descarta la máscara entera: log real 961031919.jpeg, boca abierta
+            # con frac=0,65 → occ_applied=False y restore=34 %, la boca del
+            # origen pintada sobre la mazorca. El componente que CRUZA los
+            # labios se conserva recortado a la boca y su anillo: protege el
+            # objeto sin borrar la cara. La ambigüedad sigue absteniéndose.
+            clipped = ProcessMgr._clip_occlusion_to_mouth(candidate, points)
+            if clipped is None:
+                continue
+            clipped_fraction = (
+                fraction_measure(clipped) if fraction_measure is not None
+                else float(np.mean(clipped > settings["occlusion_support_threshold"]))
+            )
+            if not settings["occlusion_min_fraction"] <= clipped_fraction <= settings["occlusion_max_fraction"]:
+                continue
+            if oversized is not None:
                 return None
-            selected = candidate
-        return selected
+            oversized = clipped
+        if selected is not None and oversized is not None:
+            return None
+        return selected if selected is not None else oversized
+
+    @staticmethod
+    def _mouth_oral_domains(points, shape):
+        """Elipse de labios y su anillo, en el marco de la máscara medida."""
+        try:
+            pts = np.asarray(points, dtype=np.float32).reshape(-1, 2)
+            if pts.shape[0] < 5 or not np.isfinite(pts[:5]).all():
+                return None
+            if shape is None or len(shape) < 2:
+                return None
+            h, w = int(shape[0]), int(shape[1])
+            if h < 2 or w < 2:
+                return None
+            center = tuple(np.rint(pts[3:5].mean(axis=0)).astype(int))
+            span = float(np.linalg.norm(pts[3] - pts[4]))
+            if span < 4:
+                return None
+            inner = np.zeros((h, w), dtype=np.uint8)
+            outer = np.zeros((h, w), dtype=np.uint8)
+            cv2.ellipse(inner, center, (max(4, int(span * 0.8)), max(4, int(span * 0.5))), 0, 0, 360, 1, -1)
+            cv2.ellipse(outer, center, (max(6, int(span * 1.4)), max(6, int(span * 1.1))), 0, 0, 360, 1, -1)
+            if int(inner.max()) <= 0 or int(outer.max()) <= 0:
+                return None
+            return inner.astype(np.float32), outer.astype(np.float32)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _clip_occlusion_to_mouth(mask, points):
+        """Recorta un objeto grande medido a la boca y su anillo inmediato."""
+        occ = np.asarray(mask, dtype=np.float32)
+        if occ.ndim != 2 or not occ.size or not np.isfinite(occ).all():
+            return None
+        domains = ProcessMgr._mouth_oral_domains(points, occ.shape)
+        if domains is None:
+            return None
+        clipped = occ * domains[1]
+        if float(clipped.max()) <= 0.0:
+            return None
+        return clipped
 
     @staticmethod
     def _mouth_occlusion_evidence(mask, points):
@@ -4448,18 +4512,14 @@ class ProcessMgr:
             occ = np.asarray(mask, dtype=np.float32)
             if pts.shape[0] < 5 or occ.ndim != 2 or not np.isfinite(pts[:5]).all():
                 return 0.0, 0.0
-            center = tuple(np.rint(pts[3:5].mean(axis=0)).astype(int))
-            span = float(np.linalg.norm(pts[3] - pts[4]))
-            if span < 4:
+            domains = ProcessMgr._mouth_oral_domains(pts, occ.shape)
+            if domains is None:
                 return 0.0, 0.0
-            inner = np.zeros(occ.shape, dtype=np.uint8)
-            outer = np.zeros(occ.shape, dtype=np.uint8)
-            cv2.ellipse(inner, center, (max(4, int(span * 0.8)), max(4, int(span * 0.5))), 0, 0, 360, 1, -1)
-            cv2.ellipse(outer, center, (max(6, int(span * 1.4)), max(6, int(span * 1.1))), 0, 0, 360, 1, -1)
-            ring = (outer > 0) & (inner == 0)
+            inner = domains[0] > 0.5
+            ring = (domains[1] > 0.5) & ~inner
             if not np.any(inner) or not np.any(ring):
                 return 0.0, 0.0
-            return float(occ[inner > 0].mean()), float(occ[ring].mean())
+            return float(occ[inner].mean()), float(occ[ring].mean())
         except Exception:
             return 0.0, 0.0
 
@@ -4927,6 +4987,145 @@ class ProcessMgr:
         blended = current.astype(np.float32) * (1.0 - alpha) + previous.astype(np.float32) * alpha
         return (current.astype(np.float32) * (1.0 - m3) + blended * m3).astype(np.uint8)
 
+    @staticmethod
+    def _face_with_kps(target_face, kps):
+        """Copia de la cara con los kps sustituidos, sin mutar el tracker.
+
+        v5.1319: la reconstrucción de geometría no debe escribir sobre el
+        objeto que el tracker sigue usando entre frames.
+        """
+        import copy
+        new_face = copy.copy(target_face)
+        try:
+            new_face["kps"] = kps
+        except Exception:
+            pass
+        try:
+            new_face.kps = kps
+        except Exception:
+            pass
+        return new_face
+
+    def _remember_good_face_geom(self, video_key, person_idx, target_face):
+        """v5.1319: guarda la geometría sana con la que se completó un swap.
+
+        Es el histórico que permite reconstruir kps degenerados en frames
+        siguientes (`_recovered_coherent_kps`). Solo se guarda si la
+        geometría pasa el mismo gate de coherencia.
+        """
+        try:
+            kps = np.asarray(getattr(target_face, "kps", None), dtype=np.float32)
+            bbox = np.asarray(getattr(target_face, "bbox", None), dtype=np.float32).reshape(-1)
+            if kps.shape != (5, 2) or bbox.size != 4:
+                return
+            if not (np.isfinite(kps).all() and np.isfinite(bbox).all()):
+                return
+            if not landmarks_fit_bbox(kps, bbox):
+                return
+            # Mismo rango que el gate v5.1202: los kps degenerados caben
+            # DENTRO del bbox (landmarks_fit_bbox los aprueba) pero con los
+            # ojos superpuestos (eye_rel<0,05) — no sirven como histórico.
+            _bw = max(1.0, float(bbox[2] - bbox[0]))
+            _eye_rel = float(np.linalg.norm(kps[1] - kps[0])) / _bw
+            if not (0.05 < _eye_rel < 1.20):
+                return
+            if not hasattr(self, "_last_good_face_geom"):
+                self._last_good_face_geom = {}
+            self._last_good_face_geom[f"{video_key}|{person_idx}"] = (
+                kps.copy(), bbox.copy(),
+            )
+        except Exception:
+            pass
+
+    def _recovered_coherent_kps(self, source_face, target_face, person_idx):
+        """v5.1319: geometría coherente para el bbox trackeado cuando el
+        regresor devuelve kps degenerados (gate v5.1202: eye_rel < 0,05).
+
+        En vídeo el rescate con referencias de foto está deshabilitado
+        (photo_path=None en `process_frame`) y el frame salía SIN swap con
+        la cara original: 334 frames en el lote 2026-11-07 (vídeo 3:
+        206 = 28,5 % del vídeo; vídeo 9: 61). Primero reusa el último kps
+        sano de ESTA persona en ESTE vídeo, trasladado al centro y escalado
+        al bbox actual (misma pose → proporciones sanas por construcción).
+        Si no hay histórico (arranque del vídeo), sintetiza los cinco
+        puntos del source elegido con sus proporciones relativas dentro
+        del bbox trackeado. Todo acotado al bbox: el bug original de
+        v5.1202 era un warp 1,6× por kps degenerados (MEMORY 2026-09-30),
+        y aquí la geometría sale del tracker. Devuelve None si nada pasa
+        las comprobaciones → se conserva el comportamiento actual (frame
+        sin swap); nunca se empeora.
+        """
+        try:
+            bbox = np.asarray(
+                getattr(target_face, "bbox", None), dtype=np.float64,
+            ).reshape(-1)
+            if bbox.size != 4 or not np.isfinite(bbox).all():
+                return None
+            bw = float(bbox[2] - bbox[0])
+            bh = float(bbox[3] - bbox[1])
+            if bw <= 0 or bh <= 0:
+                return None
+            center = np.array(
+                [(bbox[0] + bbox[2]) * 0.5, (bbox[1] + bbox[3]) * 0.5],
+                dtype=np.float64,
+            )
+
+            def _healthy(kps):
+                """Mismas dos comprobaciones que el gate de alineación."""
+                kps = np.asarray(kps, dtype=np.float32)
+                if kps.shape != (5, 2) or not np.isfinite(kps).all():
+                    return None
+                if not landmarks_fit_bbox(kps, bbox.astype(np.float32)):
+                    return None
+                eye_rel = float(np.linalg.norm(kps[1] - kps[0])) / bw
+                if not (0.05 < eye_rel < 1.20):
+                    return None
+                return kps
+
+            # 1) Último kps sano de esta persona en este vídeo (misma pose).
+            history = getattr(self, "_last_good_face_geom", None) or {}
+            stored = history.get(
+                f"{getattr(self, '_current_video_key', 'default')}|{person_idx}",
+            )
+            if stored is not None:
+                kps_h = np.asarray(stored[0], dtype=np.float64)
+                bbox_h = np.asarray(stored[1], dtype=np.float64).reshape(-1)
+                if kps_h.shape == (5, 2) and bbox_h.size == 4:
+                    bw_h = float(bbox_h[2] - bbox_h[0])
+                    if bw_h > 0 and np.isfinite(kps_h).all():
+                        center_h = np.array(
+                            [(bbox_h[0] + bbox_h[2]) * 0.5,
+                             (bbox_h[1] + bbox_h[3]) * 0.5],
+                        )
+                        moved = (kps_h - center_h) * (bw / bw_h) + center
+                        ok = _healthy(moved)
+                        if ok is not None:
+                            return ok
+
+            # 2) Proporciones del source elegido dentro del bbox trackeado.
+            src_kps = np.asarray(
+                getattr(source_face, "kps", None), dtype=np.float64,
+            )
+            src_bbox = np.asarray(
+                getattr(source_face, "bbox", None), dtype=np.float64,
+            ).reshape(-1)
+            if (src_kps.shape == (5, 2) and src_bbox.size == 4
+                    and np.isfinite(src_kps).all()
+                    and np.isfinite(src_bbox).all()):
+                src_bw = float(src_bbox[2] - src_bbox[0])
+                if src_bw > 0:
+                    src_center = np.array(
+                        [(src_bbox[0] + src_bbox[2]) * 0.5,
+                         (src_bbox[1] + src_bbox[3]) * 0.5],
+                    )
+                    synth = (src_kps - src_center) / src_bw * bw + center
+                    ok = _healthy(synth)
+                    if ok is not None:
+                        return ok
+            return None
+        except Exception:
+            return None
+
     def _swap_from_saved_reference(self, source_face, target_face, result_frame,
                                    original_frame, call_num, photo_path=None):
         """v5.1202: Swap de emergencia cuando los kps del detector son incoherentes
@@ -5031,10 +5230,26 @@ class ProcessMgr:
                         "o geometría no válida; se busca una referencia coherente",
                         flush=True,
                     )
-                    return self._swap_from_saved_reference(
-                        source_face, target_face, result_frame,
-                        original_frame, call_num, photo_path=photo_path,
-                    )
+                    # v5.1319: en vídeo se reconstruye la geometría a partir del
+                    # tracker/último kps sano en vez de entregar el frame sin swap.
+                    _fixed_kps = None
+                    if getattr(self.options, 'current_video_path', None) or not photo_path:
+                        _fixed_kps = self._recovered_coherent_kps(
+                            source_face, target_face, person_idx,
+                        )
+                    if _fixed_kps is not None:
+                        print(
+                            f"[ALIGN_RECOVER] Frame {call_num}: geometría "
+                            f"reconstruida (landmarks→bbox); swap continúa",
+                            flush=True,
+                        )
+                        target_face = self._face_with_kps(target_face, _fixed_kps)
+                        _kps_chk = _fixed_kps
+                    else:
+                        return self._swap_from_saved_reference(
+                            source_face, target_face, result_frame,
+                            original_frame, call_num, photo_path=photo_path,
+                        )
                 if _kps_chk is not None:
                     _kps_arr = np.asarray(_kps_chk, dtype=np.float32)
                     _bb_chk = np.asarray(target_face.bbox, dtype=np.float32)
@@ -5050,10 +5265,31 @@ class ProcessMgr:
                                 f"bbox={_bb_chk.tolist()}) — sin swap; usar refs guardadas",
                                 flush=True,
                             )
-                            return self._swap_from_saved_reference(
-                                source_face, target_face, result_frame,
-                                original_frame, call_num, photo_path=photo_path,
-                            )
+                            # v5.1319: en vídeo, reusa el último kps sano de la
+                            # persona (trasladado/escalado al bbox del tracker) o
+                            # sintetiza los del source; el frame NO se queda sin
+                            # swap si la geometría reconstruida pasa el gate.
+                            _fixed_kps = None
+                            if getattr(self.options, 'current_video_path', None) or not photo_path:
+                                _fixed_kps = self._recovered_coherent_kps(
+                                    source_face, target_face, person_idx,
+                                )
+                            if _fixed_kps is not None:
+                                print(
+                                    f"[ALIGN_RECOVER] Frame {call_num}: geometría "
+                                    f"reconstruida (eye_dist/bbox_w {_eye_rel:.3f}→"
+                                    f"{float(np.linalg.norm(_fixed_kps[1] - _fixed_kps[0])) / _bw:.3f}); "
+                                    "swap continúa",
+                                    flush=True,
+                                )
+                                target_face = self._face_with_kps(target_face, _fixed_kps)
+                                # Los kps ya no pasan por el return: el flujo
+                                # normal continúa con la geometría saneada.
+                            else:
+                                return self._swap_from_saved_reference(
+                                    source_face, target_face, result_frame,
+                                    original_frame, call_num, photo_path=photo_path,
+                                )
             except Exception as _e_align:
                 print(f"[ALIGN_REJECT] check falló ({_e_align}); se conserva el fotograma", flush=True)
                 return result_frame
@@ -5096,6 +5332,7 @@ class ProcessMgr:
                 if prev_bbox is not None:
                     # 1. Suavizado de BBox: Separar Centro de Tamaño para evitar "pumping"
                     curr_bbox = np.array(target_face.bbox)
+                    raw_kps = np.array(target_face.kps, copy=True)
                     prev_bbox_arr = np.array(prev_bbox)
                     
                     # Calcular centros y tamaños
@@ -5236,6 +5473,18 @@ class ProcessMgr:
                         # APLICAR suavizado de landmarks
                         new_kps = kps_ema * curr_kps + (1 - kps_ema) * prev_kps_arr
                         target_face.kps = new_kps.tolist()
+
+                    # Independent bbox/kps smoothing can move valid measured
+                    # landmarks outside the smoothed box. Preserve the validated
+                    # current-frame pair instead of storing invalid geometry.
+                    if not landmarks_fit_bbox(target_face.kps, target_face.bbox):
+                        target_face.bbox = tuple(curr_bbox.tolist())
+                        target_face.kps = raw_kps.tolist()
+                        print(
+                            f"[ALIGN_SMOOTH] Frame {call_num}: suavizado incoherente; "
+                            "se conserva la geometría medida actual",
+                            flush=True,
+                        )
 
                 # Guardar estados para el siguiente frame
                 if video_key:
@@ -6372,6 +6621,28 @@ class ProcessMgr:
                         floor=float(mask_settings["shaped_fallback_floor"]),
                     )
                 if self._mask_needs_safety_recovery(recovered_mask, face_w, face_h):
+                    # v5.1319: mismo hold temporal que el gate 1 (línea ~6090).
+                    # Los 227 "Contorno medido insuficiente" del lote 2026-11-07
+                    # (219 en el vídeo 9, sobre todo perfil/primer plano) salían
+                    # sin swap sin llegar a probar el reuso del frame anterior.
+                    prev_full = getattr(self, '_prev_frame_result', {}).get(video_key)
+                    last_bbox = getattr(self, '_last_swap_bbox', {}).get(video_basename)
+                    if (
+                        video_path
+                        and prev_full is not None
+                        and last_bbox is not None
+                        and self._should_hold_previous_swap(video_basename)
+                    ):
+                        fade_blend = self._faded_hold_blend(video_basename, 0.88)
+                        if fade_blend >= 0.10:
+                            prev_mask = getattr(self, '_last_swap_mask', {}).get(video_basename)
+                            # Sin throttling: son como mucho ~3 por episodio y
+                            # esta etiqueta es la evidencia del rescate (fix B).
+                            print("[MASK_HOLD] Contorno medido insuficiente; hold del frame anterior", flush=True)
+                            return self._hold_previous_face_region(
+                                original_frame, prev_full, last_bbox,
+                                blend=fade_blend, prev_mask=prev_mask,
+                            )
                     print("[MASK_SKIP] Contorno medido insuficiente; se conserva el fotograma", flush=True)
                     self._register_mask_skip()
                     return result_frame
@@ -6575,6 +6846,10 @@ class ProcessMgr:
             if not hasattr(self, '_last_swap_bbox'):
                 self._last_swap_bbox = {}
             self._last_swap_bbox[video_basename] = (x1, y1, x2, y2)
+            # v5.1319: guardar la geometría con la que este swap SÍ pasó el
+            # gate; es el histórico que usará `_recovered_coherent_kps` si en
+            # un frame siguiente el regresor devuelve kps degenerados.
+            self._remember_good_face_geom(video_key, person_idx, target_face)
             self._reset_hold_fade(video_basename)  # v5.1054c: swap real → fade desde cero
             if final_mask is not None:
                 if not hasattr(self, '_last_swap_mask'):

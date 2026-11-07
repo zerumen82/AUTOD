@@ -1,5 +1,354 @@
 # spec/02 — Requisitos (historias)
 
+## H-STATE-LOGS-FIX — corregir auditoría y contrastar últimos logs, 2026-11-06
+
+Usuario: «soluciona estos temas y mira los logs de los últimos FaceSwap e Image
+Editor». Autoriza corregir los hallazgos reproducidos de la revisión del 06/11
+y los defectos comprobados de estas rutas existentes. Conservar motores,
+versatilidad, contenido no solicitado y trabajos activos; sin instalaciones.
+
+- [x] El latido de consola respeta el intervalo configurado, sin imponer 30s;
+  mantiene pasos auténticos, reloj monotónico y cadencia propia del callback.
+- [x] Umbral residual, crecimiento y radio mínimo de reintento tienen su fuente
+  en configuración existente, con validación; una configuración inválida no se
+  oculta con un fallback. Comprobar valores distintos del predeterminado.
+- [x] Resolver incidencias lint del área Editor/Generate con cambios mínimos,
+  preservando respaldos y comportamiento; respaldos inválidos no son módulos.
+- [x] Contrastar logs recientes de ambos flujos, entrada/salida y causas;
+  distinguir original conservado, protección legítima y fallo reproducible.
+  Corregir los defectos demostrados conservando protección de identidad/vecinos.
+- [x] Composición local: feather y Poisson no escriben fuera de la zona medida,
+  de su soporte ni en huecos protegidos. La máscara de un reintento describe
+  también su ampliación. Prueba de composición real con dobles solo de modelos.
+- [x] Una instrucción compuesta sin región ni permiso medido de pose/escenario
+  no genera toda la foto. Puede usar el planner local existente para medir la
+  instrucción completa; si falta soporte conserva la foto e informa el límite.
+  Modo Calidad mantiene las mismas regiones de edición generativa que el edit
+  sin acabado; después puede mejorar globalmente luz/color/nitidez/resolución
+  mediante los pasos clásicos seleccionados. La selección explícita conserva
+  su contrato separado de exterior exacto. El texto genérico no presupone
+  caras/personas ausentes de la instrucción.
+- [x] Probes rojo→verde y regresiones pertinentes; lint, compilación y build
+  del launcher aislado; reviewer APPROVE y tester PASS del alcance actual.
+- [x] Verificación real neutral del código afectado, con hashes/logs/salidas
+  nuevos. No declarar calidad universal ni cerrar categorías sin PASS visual.
+- [x] Versión, bitácora, resultados y límites actualizados; conservar deudas
+  que requieran vídeo representativo, teléfono o aceptación visual del usuario.
+
+Estado técnico v5.1312: reviewer APPROVE acotado; tester 73 unittest + 11
+comprobaciones PASS, Ruff y compilación de 49 módulos PASS; build aislado PASS.
+Evidencia nueva: `diagnostics/out/continuation_20261106/`. Se corrigió el
+hallazgo aún abierto de instrucciones simples sin clasificar: sus propuestas
+medidas conservan `measured_request=True` al integrarse. Real neutral: 101.043
+píxeles cambiados y 0 fuera del soporte enviado al modelo; **FAIL visual** por
+taza azul desplazada y restos de la original. FaceSwap: foto frontal CPU con
+modelos reales y A/B idéntico, no vídeo ni prueba del suavizado temporal real.
+
+- [ ] Calidad visual de conservación/adherencia aceptada por el usuario; el
+  PASS técnico anterior no cierra versatilidad ni este límite visual.
+
+## H-EDIT-WAIT-FINISH — seguimiento de espera y acabado previo a reintentos, 2026-11-05
+
+El usuario autoriza «sí» al alcance propuesto tras el diagnóstico del aparente
+cuelgue: corregir seguimiento y revisar acabado previo a reintentos, reproduciendo
+la lentitud con modelos instalados. Evidencia inicial y discrepancias temporales
+en `diagnostics/out/editor_stall_20261105/diagnosis.md`. Mantener los motores,
+recetas, categorías, validación final y selectividad de cancelación existentes.
+
+- [x] Medir esperas, fases y pasos con reloj monotónico; cambios del reloj de
+  pared no adelantan timeout ni producen duraciones negativas. Timestamps del
+  historial se mantienen como marcas del servidor, con sus límites explícitos.
+- [x] Publicar progreso WebSocket auténtico disponible antes del sondeo HTTP;
+  mostrar latidos y edad del último evento sin inventar pasos ni afirmar que
+  el proceso está sano. Cadencias y timeout HTTP en configuración existente.
+- [x] Registrar tiempos del cliente, HTTP/callback y servidor cuando exista
+  historial; distinguir falta de eventos de fallo demostrado. Conservar
+  polling de respaldo, timeout efectivo, cancelación por ID y errores reales.
+- [x] La ruta de sujeto descrito valida el candidato antes de acabado TOP;
+  si ya falla, omite ese acabado y conserva el rechazo/reintento del caller.
+  Candidatos válidos mantienen el acabado y la comprobación final existentes.
+- [x] Probes rojo→verde, regresiones pertinentes (progreso, cancelación,
+  selección/Auto/calidad y Generate), lint/compilación/build y reviewer APPROVE.
+- [x] Tester independiente y reproducción neutral real con modelos actuales,
+  tiempos y salida preservados; no atribuir mejora de VRAM ni calidad general
+  sin evidencia. No reiniciar/interrumpir trabajos activos ni instalar nada.
+- [x] Versión/bitácora/deudas actualizadas; ninguna promesa de que quitar zapatos
+  o todas las categorías haya quedado resuelto por mejorar seguimiento.
+
+Evidencia v5.1310: `diagnostics/out/editor_stall_20261105/fix/`.
+Reviewer APPROVE técnico, tester PASS técnico acotado. Real: servidor74,892s,
+espera75,781s, generación78,781s;75callbacks/gapmáx1,25s. No reprodujo la
+demora histórica ni prueba entrega Gradio. El neutral tiene FAIL visual de
+conservación (cambia plato/encuadre además de taza); documentado en spec/03.
+Latidos cooperativos: una llamada HTTP/callback bloqueada puede retrasarlos.
+
+## H-EDIT-VERSATILITY-INTEGRITY — corregir la auditoría autorizada, 2026-11-05
+
+El usuario autoriza «ARREGLALOS» tras conocer los fallos de la auditoría de
+versatilidad. Corregir las rutas existentes conservando el alcance permanente,
+sin nuevos modelos/dependencias ni listas de tipos de edición. Diseño acotado:
+el soporte sale de regiones medidas; conservar todo el pedido y distinguir el
+objetivo de los vecinos. No prometer capacidad universal del modelo.
+
+- [ ] Una retirada no transforma los ceros de la máscara en zona editable;
+  se mide el objetivo pedido y se protege el exterior.
+- [ ] La retirada regional de objetos reconstruye su contexto fotográfico sin
+  imponer piel, piernas ni otros atributos corporales ajenos a la instrucción.
+  La ruta corporal conserva su contrato medido; el texto genérico vive en config.
+- [ ] El cierre de retirada de persona conserva su objetivo medido y protege
+  únicamente personas ajenas, sin deducir el objetivo por ocupación de caja.
+- [ ] Una adición compuesta debe medir soporte para todas las cláusulas; no
+  pegar una cabeza y omitir la adición. Si falta soporte, informar la cláusula
+  pendiente y conservar la foto, sin fingir cumplimiento ni regenerar al azar.
+- [ ] Órdenes separadas por punto y salto de línea conservan sus cláusulas,
+  sin confundir decimales o descripciones del mismo sujeto con órdenes nuevas.
+- [ ] La retirada pequeña recibe el mismo objetivo/contrato en simple y compuesto.
+- [ ] Una retirada regional pega íntegro el soporte medido, incluidos cambios
+  pequeños dentro del objetivo; no restaura material eliminado por filtrar deltas.
+- [ ] Cámara conserva la petición y quién observa, incluso cuando su pose discreta
+  coincide; una aproximación frontal no se declara POV real validado.
+- [ ] Probes de add/remove comprueban soporte, objetivo, vecinos y ejecución,
+  sustituyendo checks constantes/búsquedas de texto como garantía.
+- [ ] Reproducir fallos rojo→verde, suites pertinentes, lint/build y reviewer
+  APPROVE; tester independiente distingue defectos/fixtures/deudas previas.
+- [ ] Pruebas reales neutrales y aceptación visual del usuario para calidad;
+  registrar categorías aún no acreditadas, sin convertir un contrato CPU en PASS visual.
+- [ ] Cambios de versión y bitácora actualizados; conservar Generate/FaceSwap/Android.
+
+Evidencia inicial: `plans/AUDIT_editor_versatility_20261105.md` y
+`diagnostics/out/editor_versatility_audit_20261105/`. Los riesgos de clasificación
+de ropa/ojos/movimiento requieren reproducción específica antes de cambiar rutas;
+no sustituirlos por recetas de palabras o un modelo distinto sin evidencia.
+
+## H-EDIT-ATTRIBUTE-SCOPE — limitar la región a los atributos pedidos, 2026-11-05
+
+La segunda prueba neutral Auto con Grace conserva pelo y altera cara/gafas
+con la plantilla anterior, aunque el exterior sea exacto. Una plantilla
+genérica que conserva rasgos no solicitados mejora el resultado al repetir
+la misma semilla864801, referencia RGB y máscara. Workflows difieren solo
+en texto positivo y nombre de subida de la imagen equivalente.
+
+- [x] Incorporar solo la plantilla genérica probada desde configuración;
+  sin listas de rasgos, géneros, prendas ni recetas por foto.
+- [x] La instrucción completa sigue incluida; los atributos explícitamente
+  solicitados siguen siendo editables y las rutas existentes se conservan.
+- [x] Revisar independientemente el resultado Grace y repetir desde Auto
+  con configuración productiva, sin override del probe, en otra foto neutra.
+- [x] Regresiones de selección/apariencia/Auto, Ruff/compilación/build,
+  reviewer y tester; versión v5.1308 y bitácora con tiempos y límites.
+- [ ] Aceptación visual del usuario y cobertura general de fotos/categorías.
+  Los PASS son acotados: Grace pierde la gorra y conserva vello lateral muy
+  corto; no se certifica identidad exacta ni preservación absoluta de rasgos.
+
+## H-EDIT-TARGET-MASK — conservar la máscara local medida, 2026-11-05
+
+Al verificar la recuperación de Auto, `engine_status` reproduce un error
+anterior en la ruta local: después de medir un objetivo, se sobrescribe su
+máscara con el resultado de un auxiliar léxico sin retorno; `np.nonzero`
+recibe None/array0d y la edición falla. No ampliar el alcance de la zona.
+
+- [x] La geometría y el pase local usan la máscara ya medida, sin sustituirla
+  por un nombre de objeto ni perderla por un auxiliar sin retorno.
+- [x] Retirar el auxiliar erróneo sin retorno y la definición duplicada ya
+  reemplazada por Python; conservar intacta la extracción gramatical efectiva.
+- [x] Contrato del objetivo local vuelve a pasar; el fixture de despacho
+  debe representar una edición perceptible, manteniendo la guarda de no-op.
+- [x] Ruff/compilación/build, regresiones pertinentes y reviewer/tester
+  acotados; versión v5.1307 y bitácora. No afirmar PASS visual corporal global.
+
+## H-EDIT-AUTO-RECOVER — recuperar apariencia focal validada en Auto, 2026-11-04
+
+Continuación del arreglo solicitado: el usuario recuerda un commit que
+funcionaba y ante elegir motores responde «no sé… funcionaba y ahora cada
+vez peor». Se recupera el comportamiento validado de `68ad5fb` sin devolver
+al usuario decisiones internas ni sustituir todo el workspace histórico.
+Prueba previa explícita Kontext: callback real astronaut, PASS independiente,
+`appearance_reference_20261023/1793812998803975900`, exterior0. Antes del
+arreglo Auto elegía LongCat y evitaba esa ruta.
+
+- [x] Auto para apariencia pura medida usa el alias de configuración
+  `editor_ui.automatic_appearance_engine`; recuperar Kontext. Sin listas de
+  palabras, modelos nuevos ni cambio del default Auto.
+- [x] Motor explícito, lienzo manual/selección, cámara, pose, cuerpo,
+  escenario, añadir/quitar, recolor y compuestos conservan sus rutas.
+- [x] Permiso de modelo automático acotado al archivo configurado tras
+  decisión medida; configuración inválida falla antes de inferir.
+- [x] Contratos CPU rojo→verde y regresiones pertinentes; Ruff/compilación,
+  build aislado, reviewer APPROVE y tester PASS con límites explícitos.
+- [x] Prueba real desde Auto, imagen final inspeccionada y exterior protegido;
+  no usar el PASS de Kontext explícito como si acreditara el despacho Auto.
+- [x] Versión v5.1306, seguida de v5.1307 por corrección de máscara, y
+  bitácora/relevo con pruebas y límites.
+- [ ] Validación visual general y aceptación del usuario. Astronaut tiene
+  PASS acotado; el FAIL inicial de Grace queda preservado. La variante
+  genérica de H-EDIT-ATTRIBUTE-SCOPE mejora Grace y ya está en configuración,
+  con sus límites explícitos; no equivale a cumplimiento universal.
+
+## H-EDIT-REFINE-RECIPE — refino conserva el latente de foto y la receta, 2026-11-04
+
+Petición: revisar logs del 17:17–17:20, MEMORY/bitácora y último commit;
+corregir la regresión conservando cambios ajenos, versionar y registrar.
+HEAD `4d7ce3c` (v5.1280) conservaba los píxeles fuente en el refino. La
+sesión v5.1304 cambia de `mask=foto, ref=index_timestep_zero` a
+`mask=inpaint, ref=none`, aunque la receta configura referencia espacial.
+
+- [x] El refino usa el latente de la foto y conserva `appearance_sample`,
+  incluida la decisión configurada de referencia; no fuerza inpaint ni
+  sobrescribe `no_kontext` por tratarse de apariencia.
+- [x] Conserva el pegado completo de la región medida y las compuertas de
+  caras posteriores a HEAD. Sin cambios de motores, dependencias ni rutas.
+- [x] La máscara completada por los medidores existentes llega intacta a
+  la ventana de generación: retirar la dilatación posterior sin límite de
+  sujeto que excluye todas las cajas faciales y fabrica un hueco rectangular
+  en la cabeza editada. Mantener completadores medidos y `paste_limit`.
+- [x] Prueba rojo→verde con referencia activada/desactivada, contención,
+  zona vacía y ausencia de cambio real; probes de regresión pertinentes.
+- [x] Reviewer final APPROVE y tester PASS acotados al arreglo completo;
+  Ruff crítico/compilación/build aislado e inferencia neutral con evidencia.
+- [ ] PASS visual de edición completa y aceptación del usuario: **FAIL** en
+  el neutral actual (restos claros y orla); no cerrar calidad ni versatilidad.
+- [x] Versión y MEMORY actualizados con comparación Git y límites medidos.
+- [x] Comparación aislada de HEAD solicitada después: worktree limpio exacto
+  v5.1280 falla al importar el Editor por definiciones ausentes. Evidencia
+  `head_v51280_import.log` y `head_v51280_provenance.json`; reviewer confirma
+  el diagnóstico. No hay A/B visual ni PASS histórico; no se parchea HEAD.
+
+## H-FS-OCC-DOMAIN — cobertura de oclusión sobre su dominio medido, 2026-10-25
+
+Detectado al verificar la petición «DEJALO TODO CORRECTO Y SOLUCIONA POSIBLE
+PROBLEMAS». En retratos neutros astronaut→Grace, el raw/matriz permanecen
+iguales pero ArcFace cae0.71194→0.37511 entre baseline histórico y actual.
+Replay causal: la máscara amplia55% pasa a34% al limitarla al interior63%,
+pero el gate sigue dividiendo por todo el crop; debería medir alrededor53.5%
+del dominio válido y rechazarla. Sin modelos nuevos ni ajustes por foto.
+
+- [ ] Medir en el mismo dominio al recortar oclusión y decidir cobertura,
+  tanto en rescate oral como en aplicación final. Conservar umbrales de config,
+  guías y máscaras; no apagar oclusiones ni sustituirlas por elipses.
+- [ ] Pruebas CPU rojo→verde de cobertura amplia/local, invariancia al padding,
+  falta de interior y cambios de tamaño. Regresiones de bocas/perfiles/control
+  y tracking sin pérdidas; fixtures no certifican manos/objetos reales.
+- [ ] A/B con snapshot inmediatamente anterior, mismos retratos/modelos/raw/
+  geometría y medida ArcFace. Inspeccionar entrega y gafas; más de una foto
+  para acotar efecto, sin declarar identidad/perfiles/vídeos universales.
+- [ ] Ruff/compilación, reviewer APPROVE y tester PASS acotados; evidencia y
+  límites en MEMORY.md. Sigue pendiente vídeo representativo con ruta vigente.
+
+## H-AUDIT-FIX — corregir defectos y reconciliar documentación, 2026-10-25
+
+Autorización: «DEJALO TODO CORRECTO Y SOLUCIONA POSIBLE PROBLEMAS», tras
+la auditoría de Markdown/código. Correcciones sobre los flujos existentes,
+sin motores, dependencias ni funcionalidades nuevas.
+
+- [x] Una instrucción compuesta neutra no activa exposición corporal completa
+  por contar cláusulas ni añade un estado no solicitado. Fallos del analizador
+  se abstienen sin UnboundLocalError. Medición compartida y umbrales en config;
+  sin optimizar generación de desnudez ni ampliar lo pedido por el usuario.
+- [x] La restauración de calidad verifica cada identidad con correspondencia
+  uno-a-uno; detecta deterioro de otra cara, desaparición y evidencia inválida.
+  Se conservan configuración de omisión y presupuesto existentes.
+- [x] Eliminar F841 y pasar Ruff/compilación de archivos afectados y regresiones
+  CPU pertinentes de Editor, Generate, FaceSwap y contratos API Android.
+- [x] Android usa la URL elegida y guardada por el usuario, sin intentar una
+  dirección fija ajena cuando no hay configuración. Reutilizar diálogo actual.
+  El script release no crea claves con credenciales fijas ni sobrescribe firmas.
+- [x] Alinear documentos activos con arquitectura nativa Android, Kontext,
+  definición global de Listo y ejecuciones recientes, conservando historial.
+- [x] Build local sin arrancar launcher/UI del usuario; reviewer APPROVE,
+  tester PASS y evidencia registrada con límites. No equiparar contratos,
+  build del launcher o renders terminados con aprobación visual general.
+
+Revisión 29/10: el resultado siguiente corresponde al lote del 25/10, no
+aprueba modificaciones posteriores. Reviewer detecta un bypass por vocabulario
+y umbral literal en el alcance del manager; deuda reabierta en spec/03. El
+arreglo genérico de `NameError` en la ventana focal se verifica por separado.
+
+Resultado acotado:17/17suites CPU PASS; identidad ArcFaceCPU real4/4 y UI
+HTTP/color CPU real PASS, con aislamiento hardware declarado. Ruff y
+compilación128fuentes PASS, launcher/APK debug y lintRelease PASS. El usuario
+autoriza después las dependencias Gradle faltantes: lintDebug también PASS
+(0errores/68avisos, frente a65avisos release), sin cambiar versiones ni ocultar
+avisos. Autoriza GPU para verificar; dos renders Kontext revisados en MEMORY.md:
+calvicie PASS acotado; pelo azul PASS de color, no conservación exacta de corte.
+Ambos con exterior0. ADB no detecta teléfonos: uso real sigue pendiente.
+
+## H-EDIT-REFERENCE — postura descriptiva y referente equivocado, 2026-10-24
+
+Petición: «EL HOMBRE QUE ESTA DE PIE, DEBE SER CALVO» editó al hombre sentado.
+Log `ui_start_20261024_233557.log`, salida `edit_1792878147.png`; la referencia
+enviada `fast_1792877977.png` ya recortaba al hombre sentado. Mantener Kontext.
+
+- [x] Resolver relativas y continuación tras coma antes de extraer predicado,
+  sujeto y hechos. Una descripción de postura no pide una postura nueva;
+  preservar descriptores completos y compuestos independientes. Sin reglas
+  por géneros/prendas/posturas escritas a mano ni modelos/dependencias nuevos.
+- [x] Reproducir por separado el error POSE (alcance crudo «DE PIE, SER CALVO»)
+  y la asociación a cabeza equivocada. El primero no demuestra el segundo.
+  Conservar máscaras, detecciones y puntuaciones de todos los candidatos.
+- [x] Contratos CPU de gramática/selección/protección y regresiones verdes;
+  medir segmentación real CPU sobre fuente localizada, sin consultas GPU.
+  Reviewer APPROVE y tester PASS acotados (25/10): referencia11/11,
+  protección20/20, selección15/15; apariencia10/10 y motor15/15 de regresión.
+  Ruff/compilación/JSON verdes en archivos de este cambio.
+- [ ] Render nuevo e inspección visual de entrega pendientes; no renderizar
+  mientras el usuario usa GPU ni declarar calidad general resuelta.
+
+Corrección medida del referente: plantilla genérica configurable
+`segmenter.subject_prompt_template` aplicada solo al grounding focal de cabeza
+Kontext, preservando literalmente el sujeto. No reordenar palabras ni cambiar
+scoring, guardas, consultas head/hair o el prompt generativo. Plantilla inválida
+detiene sin fallback. CPU real sobre la fuente: sentado0.561660/depie0.432348
+antes; sentado0.506752/depie0.710356 después, elige únicamente detección2(depie).
+Evidencia `diagnostics/out/editor_referent_cpu_20261024/1792879177858900200/`
+incluye fuente, métricas y máscaras. Certifica localización en esa foto, no
+calvicie del modelo ni robustez universal. Las relativas anidadas siguen fuera
+del parser gramatical sencillo; no se ha instalado un parser ni otro modelo.
+
+## H-EDIT-ENGINE-STATUS — Kontext explícito y estado honesto, 2026-10-24
+
+Alcance aceptado por el usuario («VALE», seguido de «QUIERO QUE SEA KONTEXT»):
+corregir coherencia del selector y avisos para ediciones no explícitas. No
+optimizar el desnudado de personas reales ni modificar muestreo/composición.
+
+- [x] Una única opción Kontext, sin valores duplicados que oculten un modo Auto.
+- [x] En el callback de escritorio/API, seleccionar Kontext obliga a utilizar
+  el modelo Kontext configurado. Rechazar intentos de sustitución antes de
+  consultar/cargar/enviar el modelo alternativo. Un rechazo no permite fallback
+  ni guarda la foto original como si fuera una nueva edición.
+- [x] Registrar motor/modelo realmente ejecutados por petición; no deducirlos
+  del desplegable ni reutilizar datos de una petición anterior. Aislamiento por
+  contexto y limpieza incluso con error/cancelación. Sin cambiar firmas API.
+- [x] **Excepción explícita y estrecha, elegida por el usuario el 2026-10-25:**
+  la ruta corporal/postura medida declara `allow_vision_engine=True` y autoriza
+  solo ese archivo con `permit_vision_model` dentro de esa petición. El resto de
+  sustituciones sigue rechazándose antes de consultar/cargar/enviar. Motivo
+  medido: Kontext no quita la ropa (piel 0,0676) y el motor con visión sí
+  (0,5583). Sin esta excepción la ruta quedaba detenida aunque fuera la única
+  medida que cumple «quitar». `probe_editor_engine_status_20261024` 18/18 CPU.
+- [x] Estado de salida distingue señal positiva automática, no confirmada y
+  sin verificar; ninguna equivale a calidad anatómica universal. El acabado
+  clásico sin instrucción no se presenta como edición semántica validada.
+- [x] Duplicado reproducido antes (6 opciones/5 valores). Contratos nuevos15/15,
+  selección15/15, UI14/14, API8/9/13/14; Ruff y compilación de archivos nuevos
+  y tocados verdes. Reviewer APPROVE y tester PASS acotados al cambio nuevo.
+  UI servida con callbacks HTTP reales (prompt vacío y acabado de color CPU),
+  evidencia `diagnostics/out/editor_engine_status_20261024/1792877386254226100/`.
+  El contrato de éxito del cliente sustituye transporte/inferencia; no es render.
+  Reviewer final APPROVE tras ajustar el guard al punto de elegibilidad de ruta;
+  tester independiente14/14 más regresión de ruta mixta1/1 y selección15/15.
+- [ ] Render real no explícito con Kontext y validación visual pendientes.
+  GPU autorizada el25/10: dos pruebas reales completadas con modelo y estado
+  Kontext observados; revisión visual acotada en MEMORY.md, pendiente aceptación
+  visual del usuario y cobertura general. Sin reiniciar UI ni tocar
+  renders ajenos/Ollama. Las dependencias Gradle autorizadas no autorizan
+  instalar modelos ni otros paquetes. No inferir aceptación visual del usuario.
+
+Si una ruta previa necesita otro motor, ahora se detiene con aviso, sin inferencia
+alternativa ni guardar un candidato rechazado, **salvo** la excepción corporal/
+postura medida del párrafo anterior, que el usuario autorizó el 2026-10-25. No se
+ha portado esa receta a Kontext ni se promete resolver deformaciones/anatomía
+mediante este cambio.
+
 ## H-EDIT-SELECT — selección de elementos detectados, aprobada 2026-10-18
 
 El usuario propone analizar personas/objetos y permitir seleccionar el referente
@@ -740,10 +1089,42 @@ Diagnóstico que la motiva (MEMORY.md + código): la alineación `norm_crop2` us
 
 Diagnóstico que la motiva: `CLIPSeg` mide núcleo (`planta copa ~2 %`, `silla 3,26 %` sin ruedas, `mesa 1,2 %` rechazada por piso `4 %`); `ISNet 1,93 %→28,82 %` toma ambas personas; `visual_forward 62,7 %` escena; `SAM2 CPU 2,1-2,4 s` mejora contorno sin objeto completo; `GrabCut` solo diagnóstico. Receta `8 pasos/ref espacial regional` conserva personas pero deja `tronco/maceta/hojas`, `respaldo hueco`, `anillo claro`; `12/no_ref global` retira pero mueve escena; `ruido ventana completa` redibuja. `Calvo 800×533`: contar caras `2 vs 3` no prueba calvicie; `424243` evita cabeza extra pero deja pelo parcial; `fullsurface` crea cabeza ajena.
 
-- [ ] Cerrar objeto completo (`SAM2+GrabCut` integrado) con `IoU/cobertura` medida y exclusión de otras personas antes de tocar `denoise/steps`; no ampliar solo `paste`.
+- [ ] Cerrar objeto completo con `IoU/cobertura` medida y exclusión de otras
+  personas antes de tocar `denoise/steps`; no ampliar solo `paste`. El mecanismo
+  antiguo `SAM2+GrabCut` queda sustituido por la decisión documentada del 19/10:
+  SAM2 evaluado pero no promovido y GrabCut excluido; no reintroducirlos como
+  requisito vigente ni declarar cerrada la cobertura del selector.
 - [ ] Una sola receta `remove/add` con preservación medida: retira/añade sin restos, sin mover personas/objetos vecinos, sin segunda cabeza ni franja gris.
 - [ ] Verificación en varias semillas y fotos adicionales además de la escena de referencia; contratos `CPU/dispatch` en verde no equivalen a calidad visual.
 - [ ] Probes pertinentes y compilación Python verdes, revisión APPROVE y verificación PASS visual del tester; evidencia visual real, validación del usuario y bitácora.
+
+## H-EDIT-005 — Calidad de la inpaint de ropa con visión (vision zone pass)
+
+**Como** usuario **quiero** que la eliminación de ropa con el motor de visión no
+deje restos de tejido, no oscurezca la piel expuesta ni deje bordes difíciles.
+
+Diagnóstico medido en la última prueba real (v5.1259): la zona de ropa medida se
+regenera, pero con `denoise=1.0` el motor produce piel oscura (`L=-40, -32.6,
+-17.5`) y con `denoise=0.90/0.95` deja algo de tela bípeda. Se mide un `71,91 %`
+de cambio dentro de la zona, pero aun se ven tiras y el parche verde de la
+mascara residual. El foco no es que la zona cambie (cambia bien), sino que el
+resultado final sea limpio.
+
+- [ ] La ropa se elimina: ningún tejido visible en hombro/brazo derecho, en
+      inspección visual del render real (evidencia
+      `diagnostics/out/...`).
+- [ ] El tono de piel se preserva: la piel expuesta cercana a la zona generada
+      no queda oscura (`L` dentro de un rango acotado, no `L=-40`).
+- [ ] Los bordes son suaves: transición sin borde duro (`Poisson blend` activo,
+      dilatación 6 px, Gaussian 31×31, feather radius 4-10 px).
+- [ ] Externo a la zona: 0 px de cambio fuera de la máscara, sin afectar el
+      cuerpo/fondo original.
+- [ ] Se verifica con render real más color guard, no solo métrica; las pruebas
+      de fallo se etiquetan como inyección controlada.
+
+Parámetros nuevos en `config/quality_mode.json` (denoise 0.92-0.94, guidance 4.6
+si corresponde) o en la receta de visión; sin valores mágicos en el código.
+
 
 ## H-GEN-004 — Contratos Generate UI/eventos/APK y cancelación (propuesta 2026-10-20)
 
@@ -775,3 +1156,70 @@ Hechos verificados en disco: `roop/swapper.py:35` lee `roop.globals.providers`, 
 - [ ] `set_orientation` no destruye un tamaño personalizado sin aviso, o se documenta como comportamiento.
 - [ ] Quitar `get_compatible_dropdown_choices` calculado y no usado, o declarar por qué se conserva.
 - [ ] Valorar exponer helpers públicos en `flux_*_client` en vez de `_privados` (`_alias`, `_is_sdxl`, `_get_model_conf()`, `_clip_type`, `_is_longcat`, `_queue_is_idle`, `_sync_unload`). Solo propuesta; el refactor se decide aparte por su riesgo sobre el Editor.
+
+## H-QUALITY-COLOR-GUARD — Fidelidad cromática del acabado opcional (2026-10-26)
+
+Corrección autorizada por el usuario: «hazlo con algo no explícito», tras el
+hallazgo de una puerta que acepta desviaciones de tono. Alcance: solo acabado
+color/luz en Solo mejorar y después de editar; no motores, posición ni rutas
+corporales. No atribuir esta causa a la edición previa con calidad=False.
+
+- [x] Comparar la cromaticidad del candidato con el resultado YA editado antes
+  del acabado, no con la foto original; conservar un recolor solicitado.
+- [x] Medir distancia de canales Lab a,b con RGB float normalizado, separada de
+  luminosidad L. Media, p95 y presupuesto de píxeles en config/quality_mode.json.
+- [x] Revertir el paso color/luz si excede límites o no puede medirse; tamaño
+  incompatible o configuración inválida nunca equivalen a distancia cero.
+- [x] acceptance_gate=False omite la comprobación. Color desmarcado no añade
+  procesamiento; una mejora de luz válida sigue permitida.
+- [x] Reproducción roja -> verde: deriva fuerte y moderada, deriva localizada,
+  recolor preservado, ambas rutas de acabado, flags y configuración.
+- [x] Verificación CPU real sobre escena no explícita de tetera roja/taza azul,
+  guardando entrada/salida con nombre fresco y métricas; inspección visual.
+- [x] Lint, compilación y build aplicables, reviewer APPROVE y tester PASS
+  acotados. Evidencia: logs/quality_color_fix_20261026.md.
+- [ ] Validación visual del usuario pendiente hasta su respuesta.
+
+Limitación declarada: media/p95 en imagen reducida no garantizan detectar daño
+muy localizado. El arreglo protege el acabado opcional, no una desviación que
+ya llegue del motor cuando el modo Calidad está apagado.
+
+## H-FS-007 — Frames sin swap en vídeo: kps degenerados y máscara insuficiente (2026-11-07)
+
+Petición: revisar los vídeos del lote 2026-11-07 (9 archivos, sin errores de
+render) y arreglar los frames que salen sin swap — «Ambos arreglos»
+(«SI PROCEDE»). Causas medidas en los logs: 334 frames en el gate de kps
+(vídeo 3: 206/722 = 28,5 %, vídeo 9: 61) y 227 en «Contorno medido
+insuficiente» (219 en el vídeo 9). Sin estrechar rutas: las guardas siguen
+siendo medidas de geometría y segmentación, nunca listas de palabras.
+
+- [x] Fix A — kps degenerados (eye_dist/bbox_w < 0,05): en vídeo, antes de
+  entregar el frame sin swap se reconstruye la geometría
+  (`_recovered_coherent_kps`): reuso del último kps sano de la persona
+  trasladado y escalado al bbox actual; sin histórico, proporciones del source
+  dentro del bbox; si nada pasa el gate, fallback original (nunca peor).
+  El histórico (`_remember_good_face_geom`) solo guarda geometría que pasa
+  `landmarks_fit_bbox` y 0,05 < eye_rel < 1,20.
+- [x] Fix B — «Contorno medido insuficiente»: en el gate 2, antes de contar el
+  skip se prueba el mismo hold temporal del gate 1 (`[MASK_HOLD]`); sin
+  historia de swap, con corte duro reciente o agotado el fade → skip como
+  hasta ahora. El registro de skip solo cuenta cuando no hubo hold.
+- [x] Probe nuevo `diagnostics/probe_faceswap_video_reject_recovery_20261107.py`
+  con datos reales del lote (bbox, eye_rel, región de hold): 14 OK, 0 FAIL.
+  Descubrió y corrigió un agujero real: los kps degenerados caben dentro del
+  bbox, así que el histórico exige también el filtro eye_rel.
+- [x] Compilación, ruff (E9,F63,F7,F82) y regresión verde: align/mouth 9,
+  ellipse 5, temporal 5, reference_rescue OK (los probes de tracking siguen
+  exigiendo sus argumentos CLI/baseline de siempre, previo a este cambio).
+- [x] Render real acotado del vídeo 9 (frames 0-900) con
+  `probe_faceswap_video_recovery_render_20261107.py`: **PASS** (55/55 REJ
+  con `[ALIGN_RECOVER]` + píxel en bbox del tracker; MSK 35→4 con 13
+  `[MASK_HOLD]`; fallo inicial por bbox estático corregido en el probe y
+  re-verificado). Ver `plans/WORKLOG_video_recovery_20261107.md`.
+- [ ] Validación visual del usuario en el siguiente lote (la UI debe
+  reiniciarse para cargar ProcessMgr) y re-saneo de los vídeos 1, 2 y 6.
+
+Límite declarado: el vídeo 3 (peor caso) ya no existe en `.autodeep_temp`; la
+verificación se hace sobre el vídeo 9 y probes con sus datos reales. En fix B
+el fade del hold dura ~4 frames por diseño (v5.1074c): un episodio largo de
+máscara insuficiente sigue saltando frames cuando se agota el fade.

@@ -748,7 +748,11 @@ def wire_events(ui_comp):
     )
 
     def _resolve_target_path(f):
-        return f.name if hasattr(f, "name") else (f["name"] if isinstance(f, dict) else str(f))
+        if hasattr(f, "name"):
+            return f.name
+        if isinstance(f, dict):
+            return f.get("name", str(f))
+        return str(f)
 
     def _target_empty_outputs():
         return (gr.update(maximum=1, value=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
@@ -794,7 +798,7 @@ def wire_events(ui_comp):
         
         return (
             gr.update(maximum=first_entry.endframe, value=1), 
-            first_preview, 
+            gr.update(value=first_preview) if first_preview is not None else gr.update(), 
             gr.update(interactive=False), 
             gr.update(interactive=len(state.list_files_process)>1), 
             gr.update(visible=False), 

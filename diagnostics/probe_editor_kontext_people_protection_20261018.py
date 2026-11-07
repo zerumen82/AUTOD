@@ -56,7 +56,8 @@ class MeasuredMasker:
         self.queries.append(query)
         mask = Image.new("L", image.size, 0)
         draw = ImageDraw.Draw(mask)
-        selected = self.faces if self.ambiguous or query in ("head", "hair") else self.faces[1:]
+        selected = (self.faces if self.ambiguous or len(self.faces) == 1 or query in ("head", "hair")
+                    else self.faces[1:])
         for face in selected:
             x1, y1, x2, y2 = [int(v) for v in face.bbox]
             fw, fh = x2 - x1, y2 - y1
@@ -115,12 +116,31 @@ def _semantic_analysis():
 
 def _execute(engine="kontext", ambiguous=False, dominant=False, finish=False,
              weak_target=False, composite_fault=None, near_weak_other=False,
-             prompt=PROMPT, region=REGION, semantic_analyzer=None, rewritten_prompt=None):
-    scene, faces = _fixture(dominant, near_weak_other)
+             prompt=PROMPT, region=REGION, semantic_analyzer=None, rewritten_prompt=None,
+             missing_subject=False, near_weak_target=False, single_subject=False,
+             detected_age=None):
+    scene, faces = _fixture(dominant, near_weak_other or near_weak_target)
     if weak_target:
         faces[1].det_score = 0.31
+    if near_weak_target:
+        faces[0].det_score, faces[1].det_score = 0.95, 0.31
+    if single_subject:
+        faces = faces[1:]
+    if detected_age is not None:
+        for face in faces:
+            face.age = detected_age
     manager = ImgEditorManager()
     masker = MeasuredMasker(scene, faces, ambiguous)
+    if missing_subject:
+        original_mask = masker.generate_mask
+
+        def missing(image, query, **kwargs):
+            if query == region:
+                masker.queries.append(query)
+                return None
+            return original_mask(image, query, **kwargs)
+
+        masker.generate_mask = missing
     client = RecordingClient()
     finish_calls = []
     composite_calls = []
@@ -128,7 +148,8 @@ def _execute(engine="kontext", ambiguous=False, dominant=False, finish=False,
 
     def failing_composite(image1, image2, mask):
         composite_calls.append((image1.size, image2.size, mask.size))
-        if len(composite_calls) == composite_fault:
+        if ((composite_fault == 1 and len(composite_calls) == 1)
+                or (composite_fault == 2 and finish_calls)):
             raise RuntimeError("CPU injected composite failure")
         return real_composite(image1, image2, mask)
 
@@ -180,17 +201,24 @@ def _execute(engine="kontext", ambiguous=False, dominant=False, finish=False,
                            prompt=prompt, region=region)
 
 
-def _assert_protected(run, finish=False):
+def _assert_protected(run, finish=False, expected_query=None):
     assert run.output is not None, run.message
     assert run.client.generations, f"no generation: {run.message}"
     assert run.client.loads and all("kontext" in str(call.get("flux_version", "")).lower()
                                     for call in run.client.loads), run.client.loads
-    assert run.region in run.masker.queries, run.masker.queries
+    assert (expected_query or run.region) in run.masker.queries, run.masker.queries
+    from roop.img_editor.element_selection import load_settings
+    crop_options = ({"max_area": float(load_settings()["edit"]["crop_max_area"])}
+                    if len(run.manager._credible_faces(run.faces)) == 1 else {})
+    focal = run.manager._crop_focal_context(run.source, run.mask, report=False, **crop_options)
+    assert focal is not None, "output lost its measurable local crop"
+    assert focal[0].width * focal[0].height < run.source.width * run.source.height
+    expected_reference = run.manager._scale_kontext_focal_reference(focal[0])
     for call in run.client.generations:
         reference = call.get("image", call.get("source_image"))
-        assert reference.width * reference.height < run.source.width * run.source.height, (
-            f"Kontext received full image {reference.size}, expected a measured local crop"
-        )
+        assert reference.size == expected_reference.size
+        assert np.array_equal(np.asarray(reference), np.asarray(expected_reference)), (
+            "Kontext reference is not the measured crop at its configured resolution")
         assert call.get("mask_image") is None, "Kontext must never receive an inpaint mask"
     source, output = np.asarray(run.source), np.asarray(run.output)
     assert output.shape == source.shape, (output.shape, source.shape)
@@ -231,9 +259,8 @@ def _impossible_crop():
     assert run.manager._crop_focal_context(run.source, head, report=False) is None, (
         "invalid test fixture: head crop was viable"
     )
-    assert not run.client.generations, "infeasible focal crop fell back to global generation"
-    assert run.output is not None and np.array_equal(np.asarray(run.output), np.asarray(run.source)), run.message
-    assert "omitida" in run.message.lower(), run.message
+    assert run.client.generations, "focal crop became viable but no generation ran"
+    assert run.output is not None and not np.array_equal(np.asarray(run.output), np.asarray(run.source)), run.message
 
 
 def _weak_target():
@@ -243,6 +270,39 @@ def _weak_target():
     assert not run.client.generations, "discarded target caused editing of the remaining person"
     assert run.output is not None and np.array_equal(np.asarray(run.output), np.asarray(run.source)), run.message
     assert "omitida" in run.message.lower(), run.message
+
+
+def _spurious_detection_does_not_block_single_credible_face():
+    run = _execute(near_weak_other=True, missing_subject=True)
+    assert len(run.client.generations) == 1, run.message
+    before, after = np.asarray(run.source), np.asarray(run.output)
+    target = np.asarray(run.manager._head_mask_from_faces(run.source, [run.faces[1]])) >= 128
+    other = np.asarray(run.manager._head_mask_from_faces(run.source, [run.faces[0]])) > 0
+    assert np.any(after[target & ~other] != before[target & ~other]), "credible face was not edited"
+    assert np.array_equal(after[other], before[other]), "weak neighboring detection lost protection"
+
+
+def _near_weak_target():
+    run = _execute(near_weak_target=True)
+    assert not run.client.generations, "nearby weak target was replaced by credible neighbor"
+    assert run.output is not None and np.array_equal(np.asarray(run.output), np.asarray(run.source))
+    assert "omitida" in run.message.lower(), run.message
+
+
+def _single_portrait_keeps_editing():
+    run = _execute(dominant=True, single_subject=True)
+    assert len(run.client.generations) == 1, run.message
+    assert np.any(np.asarray(run.output) != np.asarray(run.source))
+    outside = np.asarray(run.mask) == 0
+    assert np.array_equal(np.asarray(run.output)[outside], np.asarray(run.source)[outside])
+
+
+def _focal_instruction_has_no_inferred_age():
+    from roop.img_editor.element_selection import load_settings
+    run = _execute(detected_age=63)
+    assert run.client.generations, run.message
+    expected = load_settings()["edit"]["prompt_template"].format(instruction=run.prompt)
+    assert all(item["prompt"] == expected for item in run.client.generations), run.client.generations[0]["prompt"]
 
 
 def _near_weak_other():
@@ -270,9 +330,9 @@ def _composite_failure():
 def _restoration_failure():
     run = _execute(finish=True, composite_fault=2)
     assert run.client.generations and run.finish_calls, "restoration case missed generation/finish"
-    assert len(run.composite_calls) == 2, run.composite_calls
+    assert len(run.composite_calls) >= 2, run.composite_calls
     assert run.composite_calls[0][0] != run.source.size, "first composite was not the crop"
-    assert run.composite_calls[1][0] == run.source.size, "fault missed final exterior restoration"
+    assert run.composite_calls[-1][0] == run.source.size, "fault missed final exterior restoration"
     assert run.output is not None and np.array_equal(np.asarray(run.output), np.asarray(run.source)), (
         "exterior restoration failure exposed the globally modified finish"
     )
@@ -382,6 +442,10 @@ def main():
     cases = [("localized", _localized), ("after_finish", _after_finish),
              ("ambiguous", _ambiguous), ("impossible_crop", _impossible_crop),
              ("weak_target", _weak_target), ("near_weak_other", _near_weak_other),
+             ("spurious_detection_fallback", _spurious_detection_does_not_block_single_credible_face),
+             ("near_weak_target", _near_weak_target),
+             ("single_portrait", _single_portrait_keeps_editing),
+             ("focal_instruction", _focal_instruction_has_no_inferred_age),
              ("composite_failure", _composite_failure),
              ("restoration_failure", _restoration_failure),
              ("rewriter_preserves_descriptor", _rewriter_preserves_descriptor),

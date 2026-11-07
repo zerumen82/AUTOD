@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from roop.img_editor.gen_prompt_modifiers import _resolve_modifier_parts, assemble_generation_prompt
 from roop.img_editor.flux_gen_comfy_client import FluxGenComfyClient
+from roop.img_editor.gen_prompt_config import get_kontext_model_config
 
 
 class Controls(unittest.TestCase):
@@ -36,9 +37,12 @@ class Controls(unittest.TestCase):
                     self.assertEqual(sampler["scheduler"], conf["scheduler"])
                     self.assertEqual(wf["1"]["inputs"], {"width": 640, "height": 512, "batch_size": 3})
                     cfg = 6.0 if overrides else conf["cfg"]
-                    if alias == "flux_dev_q4":
+                    if alias in ("flux_dev_q4", "longcat_full"):
                         self.assertEqual(sampler["cfg"], 1.0)
                         self.assertEqual(wf["14"]["inputs"]["guidance"], cfg)
+                        if alias == "longcat_full":
+                            self.assertEqual(client._flux_version, get_kontext_model_config()["model_file"])
+                            self.assertFalse(client._is_longcat)
                     else:
                         self.assertEqual(sampler["cfg"], cfg)
                     self.assertIn("watermark", wf["7"]["inputs"]["text"])
@@ -79,28 +83,28 @@ class Controls(unittest.TestCase):
         self.assertIn("wide angle shot", [value for _, value in parts])
         self.assertIn("warm tones", [value for _, value in parts])
 
-    def test_longcat_keeps_real_cfg(self):
+    def test_legacy_aliases_use_kontext_guidance(self):
         import roop.img_editor.flux_gen_comfy_client as mod
-        client = FluxGenComfyClient()
-        client._loaded = True
-        client._is_hart = False
-        client._is_longcat = True
-        client._is_longcat_turbo = False
-        client._alias = "longcat_full"
-        client._clip_type = "longcat_image"
-        captured = []
+        for alias in ("longcat", "longcat_full"):
+            with self.subTest(alias=alias):
+                client = FluxGenComfyClient()
+                self.assertTrue(client.load(alias)[0])
+                self.assertEqual(client._flux_version, get_kontext_model_config()["model_file"])
+                self.assertFalse(client._is_longcat)
+                captured = []
 
-        def capture(url, **kwargs):
-            captured.append(kwargs["json"]["prompt"])
-            raise RuntimeError("workflow capturado sin enviarlo")
+                def capture(url, **kwargs):
+                    captured.append(kwargs["json"]["prompt"])
+                    raise RuntimeError("workflow capturado sin enviarlo")
 
-        with patch.object(client, "is_available", return_value=True), \
-                patch.object(client, "_prepare_prompt", side_effect=lambda p: p), \
-                patch.object(mod.requests, "post", side_effect=capture):
-            client.generate("a white house", guidance_scale=2.5, lora_name="None")
-        self.assertEqual(len(captured), 1)
-        self.assertEqual(captured[0]["8"]["inputs"]["cfg"], 2.5)
-        self.assertFalse(any(n["class_type"] == "FluxGuidance" for n in captured[0].values()))
+                with patch.object(client, "is_available", return_value=True), \
+                        patch.object(client, "_prepare_prompt", side_effect=lambda p: p), \
+                        patch.object(mod.requests, "post", side_effect=capture):
+                    client.generate("a white house", guidance_scale=2.5, lora_name="None")
+                self.assertEqual(len(captured), 1)
+                self.assertEqual(captured[0]["8"]["inputs"]["cfg"], 1.0)
+                self.assertEqual(captured[0]["14"]["class_type"], "FluxGuidance")
+                self.assertEqual(captured[0]["14"]["inputs"]["guidance"], 2.5)
 
 
 if __name__ == "__main__":

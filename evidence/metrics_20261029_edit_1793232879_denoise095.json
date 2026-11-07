@@ -1,0 +1,42 @@
+{
+  "timestamp": "2026-10-29T01:12:38",
+  "test_name": "LongCat Turbo clothing removal - denoise fix validation",
+  "fix_applied": {
+    "file": "roop/img_editor/selected_region_edit.py:1673",
+    "change": "denoise 0.90 -> 0.95",
+    "before": 0.90,
+    "after": 0.95
+  },
+  "prompt": "The woman must go without clothes...",
+  "engine": "LongCat-Image-Edit-Turbo-Q4_K_S.gguf",
+  "workflow_params": {
+    "cfg": 1.0,
+    "denoise": 0.95,
+    "steps": 12,
+    "no_kontext": true,
+    "crop_resolution": "512x768 -> 832x1248",
+    "mode": "vision zone (crop+mask, keep_source_pixels=True)"
+  },
+  "timing": {
+    "total_seconds": 68.94,
+    "KSampler_seconds": 50,
+    "VAEDecode_seconds": 9,
+    "TextEncode_seconds": 7,
+    "seconds_per_step": 1.88
+  },
+  "generation_stats": {
+    "std": 62.93,
+    "mean": 107.70
+  },
+  "harmonization": {
+    "lab_shift_L": -16.9,
+    "lab_shift_a": 3.7,
+    "lab_shift_b": 4.9,
+    "ring_px": 28,
+    "limit_clip": 30
+  },
+  "result_file": "evidence/edit_1793232879_denoise095.png",
+  "result_source": "img_editor/edit_1793232879.png",
+  "py_compile": "VERDE",
+  "status": "applied_fix_validated_code_runs"
+}

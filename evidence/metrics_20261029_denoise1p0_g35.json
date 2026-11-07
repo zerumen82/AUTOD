@@ -1,0 +1,69 @@
+{
+  "source": "D:\\PROJECTS\\AUTOAUTO\\ui\\tob\\ComfyUI\\input\\fast_1793020935.png",
+  "raw_prompt": "la mujer debe ir desnuda",
+  "instruction": "The woman must go naked",
+  "seed": 424242,
+  "timestamp": "20261029_114529",
+  "zone_px": 41237,
+  "body_prompt": "Instruction: The woman must go naked. Keep the same room, objects, lighting and the exact same framing, composition and camera. The face of the edited person may change. Apply the requested change as completely, strongly and obviously as possible. The woman is fully nude, bare skin, no clothing at all. The requested change must be clearly visible in the result; do not preserve the previous state of what was asked to change. Leave every other person in the photo exactly as they are. The woman is fully nude, bare skin, no clothing at all.",
+  "regime_direction": "uncover",
+  "regime_magnitude": 0.69095,
+  "results": {
+    "denoise_1.0": {
+      "status": "ok",
+      "denoise": 1.0,
+      "seconds": 116.2,
+      "seed": 424242,
+      "recipe": {
+        "steps": 12,
+        "guidance": 3.5,
+        "denoise": 1.0,
+        "no_kontext": true
+      },
+      "zone_px": 41237,
+      "changed_inside_pct": 68.64,
+      "changed_outside_pct": 0.0,
+      "clothing_metrics": {
+        "threshold": 0.45,
+        "zone_px": 41237,
+        "person_px": 87421,
+        "person_minus_zone_px": 46499,
+        "clothing_inside_px": 2139,
+        "clothing_outside_px": 0,
+        "pct_inside": 5.19,
+        "pct_outside": 0.0,
+        "clothing_person_px": 2139
+      },
+      "result": "D:\\PROJECTS\\AUTOAUTO\\diagnostics\\out\\denoise_1p0_val_20261029_114529\\result_denoise1.0.png",
+      "note": "OK (109s)"
+    },
+    "denoise_0.95": {
+      "status": "ok",
+      "denoise": 0.95,
+      "seconds": 39.1,
+      "seed": 424242,
+      "recipe": {
+        "steps": 12,
+        "guidance": 3.5,
+        "denoise": 0.95,
+        "no_kontext": true
+      },
+      "zone_px": 41237,
+      "changed_inside_pct": 68.64,
+      "changed_outside_pct": 0.0,
+      "clothing_metrics": {
+        "threshold": 0.45,
+        "zone_px": 41237,
+        "person_px": 87421,
+        "person_minus_zone_px": 46499,
+        "clothing_inside_px": 2139,
+        "clothing_outside_px": 0,
+        "pct_inside": 5.19,
+        "pct_outside": 0.0,
+        "clothing_person_px": 2139
+      },
+      "result": "D:\\PROJECTS\\AUTOAUTO\\diagnostics\\out\\denoise_1p0_val_20261029_114529\\result_denoise0.95.png",
+      "note": "OK (38s)"
+    }
+  }
+}

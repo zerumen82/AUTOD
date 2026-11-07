@@ -40,6 +40,7 @@
     "system_prompt": "You extract the visible elements from an image description. Reply with a JSON object that has an \"objects\" array of short concrete noun phrases (2 to 4 words), each naming one clearly visible element. Do not include actions, relationships, locations or hidden items. Only elements the description mentions."
   },
   "segmenter": {
+    "subject_prompt_template": "a photo of {subject}",
     "weights_path": "models/CLIP/rd64-uni-refined.pth",
     "backbone_path": "~/.cache/clip/ViT-B-16.pt",
     "probability_threshold": 0.4,
@@ -49,9 +50,25 @@
     "duplicate_iou": 0.85,
     "face_coverage": 0.5
   },
+  "instruction_scope": {
+    "full_exposure_min_score": 0.3,
+    "full_exposure_local_ratio": 1.15,
+    "body_state_min_intensity": 0.3,
+    "multi_clause_uncover_enabled": true,
+    "multi_clause_uncover_min_clauses": 2,
+    "clothing_zone_min_ratio": 0.30
+  },
   "preview": {
-    "outline_color": [0, 190, 255],
-    "selected_color": [255, 170, 0],
+    "outline_color": [
+      0,
+      190,
+      255
+    ],
+    "selected_color": [
+      255,
+      170,
+      0
+    ],
     "outline_width_fraction": 0.003,
     "min_outline_width": 1,
     "selected_alpha": 0.22
@@ -61,13 +78,23 @@
     "crop_context_fraction": 0.35,
     "head_crop_context_fraction": 0.15,
     "object_context_fraction": 2.0,
-    "blind_fill": [127, 127, 127],
+    "blind_fill": [
+      127,
+      127,
+      127
+    ],
     "blind_dilate_radius": 6,
     "minimum_reference_side": 64,
     "maximum_reference_side": 768,
     "reference_canvas_multiple": 64,
     "feather_radius": 6,
+    "head_blend_method": "normal_clone",
+    "head_hair_margin_ratio": 0.15,
     "head_inclusion_coverage": 0.5,
-    "prompt_template": "Edit this exact image region: {instruction}. Apply the complete requested change to the selected element. Preserve the surrounding context."
+    "residual_failure_fraction": 0.4,
+    "residual_retry_growth_fraction": 0.35,
+    "residual_retry_min_radius_pixels": 8,
+    "prompt_template": "Edit this exact image region: {instruction}. Apply the complete requested change to the selected element. Make only the requested change; preserve every other feature of the subject and the surrounding photograph.",
+    "removal_reconstruction_prompt": "Naturally reconstruct the area it occupied to match the surrounding photograph, with continuous background, surfaces, texture and lighting. Preserve everything else; leave no translucent, faded or darkened remnant of the removed target."
   }
 }

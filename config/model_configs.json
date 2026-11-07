@@ -137,7 +137,7 @@
     },
     "region_proposal": {
       "enabled": true,
-      "max_coverage": 0.90,
+      "max_coverage": 0.9,
       "model_path": "models/llm/qwen2.5-3b-instruct-q4_k_m.gguf",
       "context_size": 8192,
       "gpu_layers": 0,
@@ -169,7 +169,7 @@
     },
     "region_proposal": {
       "enabled": true,
-      "max_coverage": 0.90,
+      "max_coverage": 0.9,
       "model_path": "models/llm/qwen2.5-3b-instruct-q4_k_m.gguf",
       "context_size": 8192,
       "gpu_layers": 0,
@@ -180,7 +180,8 @@
         "repeat_penalty": 1.05,
         "system_prompt": "Translate the image editing instruction into English. Preserve the exact requested action, all affected objects, and all location relationships. Preserve negation, exclusions and obligation: mandatory requirements must remain mandatory, not suggestions. In particular, Spanish debe or deben means must, not should. If it is already in English, repeat it unchanged. Return only the complete translated instruction. Do not interpret, simplify, or add anything."
       }
-    }
+    },
+    "model_file": "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
   },
   "longcat_full": {
     "name": "LongCat Full",
@@ -190,7 +191,8 @@
     "sampler": "euler_ancestral",
     "scheduler": "simple",
     "negative_prompt": "lowres, blurry, bad anatomy, text, watermark, cartoon, 3d render, oversaturated, deformed",
-    "img2img_denoise": 0.65
+    "img2img_denoise": 0.65,
+    "model_file": "LongCat-Image-Edit-Q4_K_S.gguf"
   },
   "lustify4": {
     "name": "LUSTIFY v4",
@@ -292,10 +294,10 @@
     "img2img_denoise": 0.65
   },
   "faceswap": {
-    "matching_distance_default": 0.20,
+    "matching_distance_default": 0.2,
     "occlusion_support_threshold": 0.1,
     "occlusion_min_fraction": 0.01,
-    "occlusion_max_fraction": 0.40,
+    "occlusion_max_fraction": 0.4,
     "mouth_occlusion_min_evidence": 0.18,
     "mouth_occlusion_min_ring_evidence": 0.12,
     "landmark_bbox_margin_fraction": 0.02,
@@ -303,7 +305,9 @@
     "align_constrain_scale_dev": 0.35,
     "align_constrain_crop_to_bbox_ratio": 1.5,
     "align_constrain_translate_bbox_fraction": 0.75,
-    "source_verification_detector_sizes": [640],
+    "source_verification_detector_sizes": [
+      640
+    ],
     "source_identity_similarity_threshold": 0.5,
     "mouth_occlusion_ring_outer_kernel": 25,
     "mouth_occlusion_ring_inner_kernel": 7,

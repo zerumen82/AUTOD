@@ -13,12 +13,15 @@ edición real hubo "Sampler 1/8" pero nunca fases ni resumen "Fases:").
 Usar new_client_id() en el POST y pasarlo también a wait_for_comfy_image.
 """
 import json
+import math
 import threading
 import time
 import uuid
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import requests
+
+from roop.img_editor.gen_prompt_config import get_generation_prompt_config
 
 try:
     import websocket as _websocket_client
@@ -49,7 +52,7 @@ def history_mean_seconds(base_url: str, prefix: str = "Gen", ttl: float = 60.0) 
     se promedian las duraciones execution_start → execution_success de las
     corridas cuyas salidas llevan el filename_prefix de Generate.
     """
-    now = time.time()
+    now = time.monotonic()
     if now - float(_HIST_CACHE.get("ts") or 0) < ttl:
         return float(_HIST_CACHE.get("mean") or 0.0)
     mean = 0.0
@@ -232,6 +235,7 @@ class WsProgress:
         self.node_ms: Dict[str, Dict[str, Any]] = {}
         self._node_start: Optional[float] = None
         self._step_ts: list = []
+        self._last_event: Optional[float] = None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._app = None  # WebSocketApp activo (para cerrarlo en stop())
@@ -316,6 +320,11 @@ class WsProgress:
         ):
             return
         with self._lock:
+            if mtype in (
+                "executing", "executed", "progress", "execution_start",
+                "execution_success", "execution_error", "execution_interrupted",
+            ):
+                self._last_event = time.monotonic()
             if mtype == "executing":
                 node = data.get("node")
                 if node:
@@ -325,7 +334,7 @@ class WsProgress:
                         "name": self.node_names.get(self.current_node_id, ""),
                         "ms": 0.0,
                     }
-                    self._node_start = time.time()
+                    self._node_start = time.monotonic()
             elif mtype == "progress":
                 try:
                     self.step = int(data.get("value") or 0)
@@ -333,7 +342,7 @@ class WsProgress:
                 except (TypeError, ValueError):
                     pass
                 if self.step > 0:
-                    self._step_ts.append(time.time())
+                    self._step_ts.append(time.monotonic())
                     if len(self._step_ts) > 64:
                         del self._step_ts[:32]
             elif mtype == "executed":
@@ -360,10 +369,26 @@ class WsProgress:
         if self._node_start is not None:
             entry = self.node_ms.get(self.current_node_id)
             if entry is not None:
-                entry["ms"] = entry.get("ms", 0.0) + (time.time() - self._node_start)
+                entry["ms"] = entry.get("ms", 0.0) + (time.monotonic() - self._node_start)
             self._node_start = None
 
     # ---------- lecturas ----------
+
+    def snapshot(self) -> Dict[str, Any]:
+        """Read a consistent event snapshot without inventing sampler progress."""
+        with self._lock:
+            return {
+                "step": self.step,
+                "total": self.total_steps,
+                "phase": self.phase_label(),
+                "done": self.done,
+                "error": self.error,
+                "ws_connected": self.connected,
+                "ws_event_age_seconds": (
+                    max(time.monotonic() - self._last_event, 0.0)
+                    if self._last_event is not None else None
+                ),
+            }
 
     def phase_label(self) -> str:
         if self.error:
@@ -431,15 +456,130 @@ def wait_for_comfy_image(
     v5.1206 — client_id: debe ser el MISMO valor enviado en el POST /prompt
     para recibir executing/executed (si no, solo llega progress en broadcast).
     """
-    t0 = time.time()
-    last_cb = 0.0
+    settings = get_generation_prompt_config()["comfy_progress"]
+    heartbeat = float(settings["heartbeat_interval_seconds"])
+    status_timeout = float(settings["status_timeout_seconds"])
+    callback_interval = float(settings["callback_interval_seconds"])
+    if not (all(math.isfinite(value) for value in (heartbeat, status_timeout, callback_interval))
+            and heartbeat > 0 and status_timeout > 0 and callback_interval >= 0):
+        raise ValueError("Configuración comfy_progress inválida")
+    t0 = time.monotonic()
+    wall_t0 = time.time()
+    last_cb = float("-inf")
+    last_console = float("-inf")
     last_phase = ""
     last_console_phase = ""
+    last_console_step = -1
     started_sampling = False
+    timing = {"http_max_seconds": 0.0, "callback_max_seconds": 0.0}
     ws_progress = WsProgress(base_url, prompt_id, node_names, client_id=client_id)
     ws_progress.start()
 
+    def emit(status):
+        nonlocal last_cb, last_console, last_phase, last_console_phase, last_console_step, started_sampling
+        now = time.monotonic()
+        prog = dict(status)
+        ws = ws_progress.snapshot()
+        elapsed = now - t0
+        prog["elapsed"] = elapsed
+        prog["timing"] = dict(timing)
+        prog["ws_event_age_seconds"] = ws["ws_event_age_seconds"]
+        prog["ws_connected"] = ws["ws_connected"]
+        if ws["step"]:
+            prog["step"] = ws["step"]
+            if ws["total"]:
+                prog["total"] = ws["total"]
+                prog["progress"] = max(float(prog.get("progress") or 0),
+                                       ws["step"] / float(ws["total"]))
+        if int(prog.get("step") or 0) > 0:
+            started_sampling = True
+        if prog.get("error") or ws["error"]:
+            prog["phase"] = "Error en ComfyUI"
+        elif prog.get("done"):
+            prog.update(progress=1.0, phase="Completado")
+        else:
+            prog["phase"] = ws["phase"] or _infer_phase(prog, elapsed, steps_hint)
+            sps = ws_progress.seconds_per_step()
+            if sps > 0 and ws["total"] and ws["step"]:
+                prog["eta"] = max(ws["total"] - ws["step"], 0) * sps
+
+        # Publish diagnostics before a callback that may itself block in the UI.
+        phase_now = prog["phase"]
+        step_now = int(prog.get("step") or 0)
+        if (phase_now != last_console_phase or step_now != last_console_step
+                or now - last_console >= heartbeat):
+            age = ws["ws_event_age_seconds"]
+            ws_note = f"último evento WS hace {age:.1f}s" if age is not None else "sin eventos WS"
+            print(
+                f"[ComfyUI] {phase_now} | {float(prog.get('progress') or 0) * 100:.0f}% | "
+                f"paso {int(prog.get('step') or 0)}/{int(prog.get('total') or 0) or steps_hint} | "
+                f"transcurrido {format_duration(elapsed)} | {ws_note} | "
+                f"HTTP máx {timing['http_max_seconds']:.2f}s | "
+                f"callback máx {timing['callback_max_seconds']:.2f}s",
+                flush=True,
+            )
+            last_console = time.monotonic()
+            last_console_phase = phase_now
+            last_console_step = step_now
+        if progress_callback and (now - last_cb >= callback_interval or phase_now != last_phase):
+            cb_start = time.monotonic()
+            try:
+                progress_callback(prog)
+            finally:
+                timing["callback_max_seconds"] = max(
+                    timing["callback_max_seconds"], time.monotonic() - cb_start,
+                )
+            last_cb = time.monotonic()
+            last_phase = phase_now
+        return prog
+
+    def finish():
+        http_start = time.monotonic()
+        try:
+            response = requests.get(f"{base_url}/history/{prompt_id}", timeout=15)
+            if response.status_code != 200:
+                return None, f"Error consultando historial: HTTP {response.status_code}"
+            hist = response.json().get(prompt_id)
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            timing["http_max_seconds"] = max(timing["http_max_seconds"],
+                                              time.monotonic() - http_start)
+        if hist is None:
+            return None
+        status = hist.get("status") or {}
+        messages = status.get("messages") or []
+        stamps = {kind: (data or {}).get("timestamp") for kind, data in messages}
+        start = stamps.get("execution_start")
+        end = stamps.get("execution_success")
+        if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end >= start:
+            timing["server_seconds"] = (end - start) / 1000.0
+        error = ws_progress.snapshot()["error"]
+        if status.get("status_str") == "error" and not error:
+            error = next((str(data.get("exception_message") or data.get("exception_type") or kind)
+                          for kind, data in messages if kind in (
+                              "execution_error", "execution_interrupted")), "Error en ComfyUI")
+        emit({"done": True, "error": error})
+        summary = ws_progress.summary()
+        if summary:
+            print(f"[ComfyUI] {summary}", flush=True)
+        print(
+            f"[ComfyUI] Tiempos: cliente monotónico={time.monotonic() - t0:.3f}s | "
+            f"reloj pared={time.time() - wall_t0:.3f}s | "
+            f"servidor={timing.get('server_seconds', 'sin dato')}s | "
+            f"HTTP máx={timing['http_max_seconds']:.3f}s | "
+            f"callback máx={timing['callback_max_seconds']:.3f}s",
+            flush=True,
+        )
+        if error:
+            return None, error
+        for node_out in hist.get("outputs", {}).values():
+            if node_out.get("images"):
+                return node_out["images"][0], "OK"
+        return None, "ComfyUI terminó sin imagen"
+
     try:
+        status = {"progress": 0}
         while True:
             if cancel_check and cancel_check():
                 stopped = stop_comfy_prompt(base_url, prompt_id)
@@ -448,86 +588,43 @@ def wait_for_comfy_image(
                     "Cancelado; ComfyUI sigue ocupado por esta tarea"
                 )
 
-            elapsed = time.time() - t0
-            prog = check_comfy_progress(base_url, prompt_id) or {"running": True, "progress": 0}
-            if ws_progress.step:
-                # El WebSocket da el paso real; este ComfyUI no expone /progress.
-                prog["step"] = ws_progress.step
-                if ws_progress.total_steps:
-                    prog["total"] = ws_progress.total_steps
-                    prog["progress"] = max(
-                        float(prog.get("progress") or 0.0),
-                        ws_progress.step / float(ws_progress.total_steps),
-                    )
-            if int(prog.get("step") or 0) > 0:
-                started_sampling = True
-            if stall_timeout and not started_sampling and not prog.get("done") and elapsed > stall_timeout:
-                stopped = stop_comfy_prompt(base_url, prompt_id)
-                return None, (
-                    f"Sin muestreo ({int(elapsed)}s)" if stopped else
-                    f"Sin muestreo ({int(elapsed)}s); ComfyUI sigue ocupado por esta tarea"
-                )
+            elapsed = time.monotonic() - t0
             if elapsed > timeout:
                 stopped = stop_comfy_prompt(base_url, prompt_id)
                 return None, (
                     f"Timeout ({int(timeout)}s)" if stopped else
                     f"Timeout ({int(timeout)}s); ComfyUI sigue ocupado por esta tarea"
                 )
-            if prog.get("done"):
-                prog["progress"] = 1.0
-                prog["phase"] = "Completado"
+            # WS is already available locally; never hide it behind HTTP polling.
+            emit(status)
+            ws = ws_progress.snapshot()
+            if ws["error"]:
+                return None, ws["error"]
+            if ws["done"]:
+                result = finish()
             else:
-                # ETA histórico: /progress no existe en este ComfyUI, se estima
-                # con la duración media de corridas previas de Generate.
-                if not prog.get("queued"):
+                http_start = time.monotonic()
+                status = check_comfy_progress(base_url, prompt_id, timeout=status_timeout) or {}
+                # Historical Generate ETA is a fallback only. A real WS phase
+                # avoids repeatedly downloading unrelated FastEdit/Gen history.
+                if not ws["phase"] and not status.get("queued") and not status.get("done"):
                     mean = history_mean_seconds(base_url)
                     if mean > 0:
-                        prog["eta"] = max(mean - elapsed, 0.0)
-                prog["phase"] = _infer_phase(prog, elapsed, steps_hint)
-                prog["elapsed"] = elapsed
-                # v5.1205 — el WS manda sobre la estimación: fase por nodo y
-                # ETA por s/paso real del sampler.
-                ws_phase = ws_progress.phase_label()
-                if ws_phase:
-                    prog["phase"] = ws_phase
-                sps = ws_progress.seconds_per_step()
-                if sps > 0 and ws_progress.total_steps and ws_progress.step:
-                    prog["eta"] = max(ws_progress.total_steps - ws_progress.step, 0) * sps
-
-            now = time.time()
-            if progress_callback and (now - last_cb >= 0.8 or prog["phase"] != last_phase):
-                progress_callback(prog)
-                last_cb = now
-                last_phase = prog.get("phase", "")
-
-            phase_now = prog.get("phase") or "Esperando"
-            if phase_now != last_console_phase:
-                step = int(prog.get("step") or 0)
-                total = int(prog.get("total") or 0) or steps_hint
-                pct = float(prog.get("progress") or 0) * 100
-                print(
-                    f"[ComfyUI] {phase_now} | {pct:.0f}% | paso {step}/{total} | "
-                    f"transcurrido {format_duration(elapsed)}"
+                        status["eta"] = max(mean - (time.monotonic() - t0), 0.0)
+                timing["http_max_seconds"] = max(timing["http_max_seconds"],
+                                                  time.monotonic() - http_start)
+                result = finish() if status.get("done") else None
+                if result is None:
+                    emit(status)
+            if result is not None:
+                return result
+            elapsed = time.monotonic() - t0
+            if stall_timeout and not started_sampling and elapsed > stall_timeout:
+                stopped = stop_comfy_prompt(base_url, prompt_id)
+                return None, (
+                    f"Sin muestreo ({int(elapsed)}s)" if stopped else
+                    f"Sin muestreo ({int(elapsed)}s); ComfyUI sigue ocupado por esta tarea"
                 )
-                last_console_phase = phase_now
-
-            if prog.get("done"):
-                ws_summary = ws_progress.summary()
-                if ws_summary:
-                    print(f"[ComfyUI] {ws_summary}", flush=True)
-                if ws_progress.error:
-                    print(f"[ComfyUI] WebSocket registró: {ws_progress.error}", flush=True)
-                try:
-                    h = requests.get(f"{base_url}/history/{prompt_id}", timeout=15)
-                    if h.status_code == 200 and prompt_id in h.json():
-                        hist = h.json()[prompt_id]
-                        for node_out in hist.get("outputs", {}).values():
-                            if "images" in node_out:
-                                return node_out["images"][0], "OK"
-                except Exception as e:
-                    return None, str(e)
-                return None, "ComfyUI terminó sin imagen"
-
             time.sleep(poll_interval)
     finally:
         ws_progress.stop()
@@ -558,7 +655,7 @@ def build_generation_progress_html(
             {phase}
         </div>
         <div style="color:#64748b;font-size:10px;text-align:center;margin-bottom:8px;">
-            No está colgado — LongCat/ComfyUI puede tardar 1–5 min la primera vez
+            Progreso recibido de ComfyUI; el tiempo depende de la fase y los recursos disponibles
         </div>
         <div style="margin-bottom:10px;background:rgba(255,255,255,0.05);border-radius:8px;height:22px;overflow:hidden;">
             <div style="width:{safe_pct:.1f}%;height:100%;background:{bar};transition:width 0.35s ease-out;

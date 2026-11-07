@@ -1,0 +1,132 @@
+{
+  "source": "ui\\tob\\ComfyUI\\input\\fast_1793020935.png",
+  "result": "img_editor\\edit_1793232879.png",
+  "threshold": 0.45,
+  "zone_px": 41237,
+  "source_clothing": {
+    "px": 32069,
+    "inside_zone_px": 31867,
+    "outside_zone_px": 202,
+    "outside_ratio": 0.0063,
+    "outside_components": [
+      {
+        "bbox": [
+          186,
+          275,
+          198,
+          323
+        ],
+        "area": 106
+      },
+      {
+        "bbox": [
+          377,
+          207,
+          383,
+          235
+        ],
+        "area": 82
+      },
+      {
+        "bbox": [
+          347,
+          465,
+          357,
+          468
+        ],
+        "area": 10
+      },
+      {
+        "bbox": [
+          372,
+          200,
+          374,
+          203
+        ],
+        "area": 3
+      },
+      {
+        "bbox": [
+          376,
+          205,
+          377,
+          206
+        ],
+        "area": 1
+      }
+    ]
+  },
+  "result_clothing": {
+    "px": 24022,
+    "inside_zone_px": 23996,
+    "outside_zone_px": 26,
+    "outside_ratio": 0.0011,
+    "inside_components": [
+      {
+        "bbox": [
+          227,
+          211,
+          381,
+          469
+        ],
+        "area": 23894
+      },
+      {
+        "bbox": [
+          205,
+          406,
+          212,
+          412
+        ],
+        "area": 38
+      },
+      {
+        "bbox": [
+          202,
+          280,
+          208,
+          286
+        ],
+        "area": 32
+      },
+      {
+        "bbox": [
+          229,
+          331,
+          235,
+          337
+        ],
+        "area": 32
+      }
+    ],
+    "outside_components": [
+      {
+        "bbox": [
+          348,
+          462,
+          362,
+          468
+        ],
+        "area": 16
+      },
+      {
+        "bbox": [
+          379,
+          227,
+          381,
+          233
+        ],
+        "area": 9
+      },
+      {
+        "bbox": [
+          364,
+          460,
+          365,
+          461
+        ],
+        "area": 1
+      }
+    ]
+  }
+}

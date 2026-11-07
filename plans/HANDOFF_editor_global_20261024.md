@@ -1,5 +1,35 @@
 # Relevo Image Editor — 24/10/2026, petición «anótalo todo»
 
+## Actualización 25/10 — reparación H-AUDIT-FIX
+
+El usuario autoriza corregir los defectos de la auditoría. Retirado el fallback
+que ampliaba alcance por contar cláusulas; el fallo `clauses` sin inicializar
+desaparece. Medición y límites compartidos en configuración. Calidad comprueba
+identidad individual con correspondencia uno-a-uno y revierte evidencia inválida.
+F841 eliminado; Ruff actual PASS. Reviewer APPROVE acotado al código nuevo;
+regresiones CPU independientes 17/17 suites PASS. La actualización de pruebas
+Generate comprueba el modelo físico Kontext y FluxGuidance del alias legacy,
+sin añadir un alias público ni restaurar estados LongCat artificiales.
+
+Build launcher PASS y APK debug offline PASS; lintRelease/lintVitalRelease PASS
+(0errores/65avisos previos). Usuario autoriza resolver dependencias Gradle:
+lintDebug también PASS (0errores/68avisos), sin suprimir advertencias.
+La calidad visual general sigue abierta. Se conservan las
+firmas/URLs elegidas por el usuario; no hay dirección fija ni creación de claves
+con credenciales predeterminadas. No se instalan dependencias sin autorización ni se reinician
+servicios ajenos. GPU autorizada para verificar tras preflight el 25/10;
+dos renders Kontext completados y revisados por root/tester en MEMORY.md.
+Calvicie PASS acotado; azul en Grace cumple color pero añade corte bob/flequillo,
+sin certificar conservación exacta del peinado. Ambas entregas con exterior0.
+Chroma nuevo también PASS acotado (escena neutra, T5único/CFG3.8), evidencia
+propia en MEMORY.md. El vídeo FaceSwap histórico ya no existe en su ruta;
+solicitada otra vigente, sin convertir la prueba en retrato en certificado de vídeo.
+
+Los logs del 25/10 ya registran renders Kontext terminados169.81s/157.29s;
+no equivalen a inspección visual de entrega. Las notas siguientes conservan
+la cronología del 24/10 y sus resultados de entonces; «actual» en ellas no
+sustituye esta actualización. Detalle y límites vigentes: MEMORY.md y spec/03.
+
 ## Actualización documental: commit/push y prueba por el usuario
 
 Petición posterior: actualizar documentación, commit y push; el usuario probará.

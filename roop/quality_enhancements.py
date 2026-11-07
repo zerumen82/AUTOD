@@ -190,8 +190,8 @@ def detect_foreground_occlusion(
             mouth_mid = (_feat[3] + _feat[4]) * 0.5
             lip_span = float(np.linalg.norm(_feat[3] - _feat[4]))
             axis_src = max(lip_span, eye_span * 0.8, 8.0)
-            axis_w = int(np.clip(axis_src * 1.8, 4.0, w * 0.35))
-            axis_h = int(np.clip(axis_src * 0.9, 4.0, h * 0.28))
+            axis_w = int(np.clip(axis_src * 2.0, 6.0, w * 0.40))
+            axis_h = int(np.clip(axis_src * 1.0, 6.0, h * 0.30))
             cv2.ellipse(
                 mouth_area,
                 (int(round(float(mouth_mid[0]))), int(round(float(mouth_mid[1])))),
@@ -199,9 +199,28 @@ def detect_foreground_occlusion(
                 0, 0, 360, 255, -1,
             )
         else:
-            cv2.circle(protect_mask, (int(w * 0.35), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
-            cv2.circle(protect_mask, (int(w * 0.65), int(h * 0.38)), int(min(w, h) * 0.06), 255, -1)
-            cv2.ellipse(mouth_area, (w // 2, int(h * 0.70)), (int(w * 0.24), int(h * 0.15)), 0, 0, 360, 255, -1)
+            # Estimación más robusta para perfiles: usar centro de ojos si hay,
+            # o posición relativa basada en bbox; nunca posición fija rígida.
+            if _feat is not None and len(_feat) >= 2 and np.isfinite(_feat[0]).all() and np.isfinite(_feat[1]).all():
+                eye_mid_x = float((_feat[0][0] + _feat[1][0]) / 2.0)
+                eye_y = max(float(_feat[0][1]), float(_feat[1][1]))
+                mouth_mid = (eye_mid_x, eye_y + (float(np.linalg.norm(np.asarray(_feat[0]) - np.asarray(_feat[1]))) * 0.9) if len(_feat) >= 2 else eye_y + 0.18 * h)
+            else:
+                mouth_mid = (w * 0.5, h * 0.72)
+            if _feat is not None and len(_feat) >= 5 and np.isfinite(_feat[3]).all() and np.isfinite(_feat[4]).all():
+                lip_span = float(np.linalg.norm(_feat[3] - _feat[4]))
+            else:
+                lip_span = max(w * 0.15, 8.0)
+            eye_span_est = float(np.linalg.norm(np.asarray(_feat[0]) - np.asarray(_feat[1]))) if (_feat is not None and len(_feat) >= 2) else w * 0.25
+            axis_src = max(lip_span, eye_span_est * 0.8, 8.0)
+            axis_w = int(np.clip(axis_src * 2.0, 6.0, w * 0.40))
+            axis_h = int(np.clip(axis_src * 1.0, 6.0, h * 0.30))
+            cv2.ellipse(
+                mouth_area,
+                (int(round(float(mouth_mid[0]))), int(round(float(mouth_mid[1])))),
+                (max(1, axis_w), max(1, axis_h)),
+                0, 0, 360, 255, -1,
+            )
 
         has_mouth_object = False
         mouth_obj_score = float(np.mean(cv2.bitwise_and(object_mask, mouth_area)))

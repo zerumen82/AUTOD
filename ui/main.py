@@ -44,6 +44,12 @@ function toggleIncognito(){
 GRADIO_BASE_PORT = int(os.environ.get('GRADIO_SERVER_PORT', '7861'))
 COMFYUI_PORT = os.environ.get('COMFYUI_PORT', '8188')
 
+# CSS para la interfaz (Gradio 6.0+ requiere pasarlo a launch(), no a Blocks)
+UI_CSS = """
+    .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+    .main-tabs { width: 100% !important; }
+"""
+
 
 def prepare_environment():
     """
@@ -223,11 +229,7 @@ def open_sd_webview():
 
 def create_ui():
     
-    css = """
-        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
-        .main-tabs { width: 100% !important; }
-    """
-    with gr.Blocks(title="AutoAuto - AI Editor", css=css) as demo:
+    with gr.Blocks(title="AutoAuto - AI Editor") as demo:
         # Header simple
         gr.Markdown("# AutoAuto")
         
@@ -384,11 +386,7 @@ def open_sd_webview():
 
 def create_ui():
     
-    css = """
-        .gradio-container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
-        .main-tabs { width: 100% !important; }
-    """
-    with gr.Blocks(title="AutoAuto - AI Editor", css=css) as demo:
+    with gr.Blocks(title="AutoAuto - AI Editor") as demo:
         # Header simple
         gr.Markdown("# AutoAuto")
         
@@ -494,7 +492,7 @@ def main():
     from ui.globals import start_capturing_prints
     start_capturing_prints()
 
-    # Silenciar excepciones inofensivas de uvicorn/starlette en streaming SSE (desconexión de clientes/APK)
+# Silenciar excepciones inofensivas de uvicorn/starlette en streaming SSE (desconexión de clientes/APK)
     import logging
     class _SuppressSSEStreamFilter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
@@ -529,6 +527,7 @@ def main():
             show_error=True,
             quiet=False,
             allowed_paths=allowed,
+            css=UI_CSS,
         )
     except OSError as e:
         if "Cannot find empty port" in str(e):
@@ -542,6 +541,7 @@ def main():
                 show_error=True,
                 quiet=False,
                 allowed_paths=allowed,
+                css=UI_CSS,
             )
         else:
             raise

@@ -1,5 +1,1031 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-07 — frames sin swap en vídeo: kps degenerados y máscara insuficiente (v5.1319)
+
+- **Petición**: revisar el lote de 9 vídeos del 07/11 (sin errores de render)
+  por qué quedaron frames sin cara swapeada y arreglarlo — «Ambos arreglos»
+  («SI PROCEDE»); al cerrar: bitácora + MEMORY + commit + push.
+- **Diagnóstico medida en los logs del lote** (`process_20261107_031047.log`
+  vídeo 3, `process_20261107_070133.log` vídeo 9 + contadores de los 9):
+  334 frames en `[ALIGN_REJECT] kps incoherentes` (eye_dist/bbox_w
+  0,003-0,050 frente a 0,40-0,45 normal; vídeo 3 = 206/722 = 28,5 %,
+  vídeo 9 = 61, vídeos 1/2/6 = 49/14/12) y 227 en `[MASK_SKIP] Contorno
+  medido insuficiente` (219 en el vídeo 9, concentrados en 494-2944).
+  0 holds y 0 MASK_SAFETY en todo el lote.
+- **Fix A** (`roop/ProcessMgr.py`): en ambos gates de `[ALIGN_REJECT]` de
+  `_process_face_swap_v21`, en vídeo se intenta
+  `_recovered_coherent_kps(source, target, person_idx)` antes del fallback:
+  (1) reusa el último kps sano de la persona (`_last_good_face_geom`,
+  guardado solo con `landmarks_fit_bbox` + 0,05 < eye_rel < 1,20) trasladado
+  y escalado al bbox actual; (2) si no hay histórico, sintetiza los 5 puntos
+  del source dentro del bbox; (3) si nada pasa el gate → fallback original
+  (contrato v5.1202: nunca peor que sin swap). Nueva etiqueta
+  `[ALIGN_RECOVER]`; en la rama «landmarks fuera del bbox» `_kps_chk` se
+  re-valida para que el segundo gate no rechace lo saneado.
+- **Fix B**: en el gate 2 de máscara, antes de `_register_mask_skip()`, se
+  replica el hold temporal del gate 1 (historia + fade ≥ 0,10 →
+  `_hold_previous_face_region`); nueva etiqueta `[MASK_HOLD]` sin
+  throttling (máx ~3/episodio) para poder contarla. Sin historia/corte
+  duro/fade agotado → skip como antes (el skip solo se cuenta si no hubo
+  hold). Rutas sin listas de palabras: siguen siendo medidas de geometría
+  y segmentación.
+- **Verificación**:
+  - Probe nuevo `diagnostics/probe_faceswap_video_reject_recovery_20261107.py`
+    con datos reales del lote: **14 OK, 0 FAIL**. Destapó un agujero real:
+    los kps degenerados CABEN dentro del bbox, así que el filtro eye_rel
+    del histórico era obligatorio (corregido).
+  - Render real acotado `diagnostics/probe_faceswap_video_recovery_render_20261107.py`
+    (vídeo 9 frames 0-900; baseline en ese tramo: 55 REJ + 35 MSK):
+    **CERRADO PASS** (1444 s, ~0,2 fps, VRAM 0 al final). Conteos:
+    baseline `{'rej': 55, 'recover': 0, 'msk': 35, 'hold': 0}` →
+    nuevo `{'rej': 55, 'recover': 55, 'msk': 4, 'hold': 13}`. Los 55
+    REJ del lote ahora tienen `[ALIGN_RECOVER]` y swap medido
+    (p.ej. frame 59: bbox tracker (525,396,591,497), 1398 px > 12).
+    MASK_SKIP 35 → 4 (solo los que agotaron el fade del hold) y
+    13 `[MASK_HOLD]`. Evidencia en
+    `diagnostics/out/video_recovery_render_20261107/report.json`.
+  - Regresión verde: align/mouth 9, ellipse 5, temporal 5,
+    reference_rescue, batch_cancel 30, **pipeline_controls 10** (3 FAIL
+    eran preexistentes y ajenos: el whitelist AST del probe no incluía
+    `_mouth_oral_domains`/`_clip_occlusion_to_mouth` de v5.1288 →
+    AttributeError tragado = evidencia 0,0; whitelist + aserción
+    `connected` alineada al contrato deliberado v5.1288). py_compile de los
+    116 .py cambiados + ruff (E9,F63,F7,F82) verdes.
+- **Límites**: el vídeo 3 (peor caso) se borró de `.autodeep_temp` — la
+  verificación es sobre el vídeo 9 + probes con datos de ambos. En fix B el
+  fade del hold dura ~4 frames (v5.1074c): episodios largos siguen
+  saltando frames al agotarse el fade. **Sin PASS visual del usuario**: la
+  UI debe reiniciarse para cargar el ProcessMgr nuevo. No se reinició
+  ningún servicio (ComfyUI :8188 activo).
+- Incremento v5.1318 → v5.1319 en `run.py`, `roop/core.py`, `AGENTS.md` y
+  `spec/00-PRINCIPIOS.md`; requisito H-FS-007 en `spec/02-REQUISITOS.md`;
+  bitácora en `plans/WORKLOG_video_recovery_20261107.md`.
+
+## 2026-11-07 — «sin zapatos»: la guarda de piel protegía el propio zapato; cubierta para Qwen lo quita (v5.1318)
+
+- **Petición**: «LA MUJER DEBE IR SIN ZAPATOS» seguía fallando en la UI (v5.1317,
+  logs 2026-11-06 22:58 y 23:46: el objetivo «shoes» sigue medido en la zona,
+  52-73 % de residuo tras 3 pasadas). Revisión a fondo de git/MEMORY pedida por
+  el usuario («PUES REVISALO BIEN»).
+- **Causa raíz medida** (`diagnostics/measure_shoe_write_zone_20261107.py`,
+  foto `img_editor/edit_1794006695.png`): en `_vision_zone_pass` la write_zone
+  era `zone & ~skin` y `_skin_pixels` clasifica **4248 de los 6575 px de la
+  zona (64,6 %)** como piel —suela y flores tienen tono cálido—: solo se
+  escribían 2327 px de CONTORNO alrededor y **0 de 4248 px del objeto** cambiaban
+  en las 4 primeras variantes (overlay `zone_skin_overlay.png`: rojo=objeto
+  protegido, verde=suelo). Kontext ya escribía la zona entera; con visión, la
+  misma medida. Fix: `if target_query: write_zone = zone` (la zona medida ES el
+  objeto a quitar; la guarda de piel sigue protegiendo piel ajena en el resto).
+- **Segunda palanca medida**: Qwen repite la superficie que ve en la foto, así
+  que para QUITAR se le pasa la vista cubierta (`manager._covered_surface_view`,
+  ya existente en la ruta de apariencia) como `reference_image`. Ahora
+  `_vision_zone_pass` la calcula sola cuando hay `target_query` y no se pasa
+  referencia (`auto_cover=True`), alineada al recorte (`box`).
+- **Evidencia** (`diagnostics/probe_editor_shoe_removal_variants_20261107.py`,
+  ComfyUI en marcha, sin reiniciar servicios; pre-fix en `before_writefix/`):
+  | variante | residuo tras | veredicto |
+  |---|---|---|
+  | prod (pre-fix, write_zone parcial) | 77-81 % | FAIL |
+  | prod (post-fix, sin cubierta) | 74 % | FAIL |
+  | **cover (post-fix, con cubierta)** | **26 %** | **PASS (umbral 40 %)** |
+  | endstate / cover_endstate (pre-fix) | 78 % | FAIL |
+  | nohole / cover_nohole | 94 % / 55 % | FAIL — el agujero se queda |
+- **Verificación numérica del resultado ganador** `result_cover.png`: flores
+  rosas 121 → **0 px**, tono cálido de suela 6433 → 3918 px, cambiado dentro de
+  la caja 17,4 %, fuera de caja 1,84 % (el resto de la foto intacto). El lector
+  de imágenes de la sesión devolvió imágenes obsoletas (fotos distintas a las
+  recién escritas); la verificación visual final en pantalla la hace el usuario
+  en la UI — **sin PASS visual declarado aún**.
+- **Variantes `no_hole`** (parámetro nuevo en `_vision_zone_pass`, espejo de
+  `_kontext_zone_pass`) NO se conectan a producción: 94 % y 55 % de residuo.
+- **Probes CPU**: paste/residual, paste_zone, scope_dispatch, local_uncover,
+  versatility integrity en verde; py_compile + ruff (E9,F63,F7,F82) verde.
+- **Límites**: una foto, un objetivo (zapatos); el mapa de versatilidad
+  (2026-11-02) solo se actualiza con PASS visual del caso en la UI. Sin listas
+  de palabras ni rutas estrechas: la decisión sigue siendo la medida de la
+  región y el segmentador.
+- Incremento v5.1317 → v5.1318 en `run.py`, `roop/core.py`, `AGENTS.md` y
+  `spec/00-PRINCIPIOS.md`.
+
+## 2026-11-06 — versatilidad: cambios acotados en verificación y aceptación (v5.1317)
+
+- Los cambios en `selected_region_edit.py` (verify_zone, reintentos con zona ampliada dentro del soporte, verificación de ropa residual solo en cuerpo completo) se miden con CLIPSeg y geometría, sin listas de palabras. No estrechan ninguna ruta: mantienen cuerpo, ropa, postura, fondo, quitar cosas/personas, añadir, ángulo y POV.
+- La aceptación del resultado residual en `img_editor_manager.py` restaura el comportamiento previo (conservar el intento del modelo) sin descartar ediciones por residual; no reduce versatilidad.
+- Mapa de versatilidad (entrada 2026-11-02) sigue vigente: sin PASS visual de quitar objetos (zapatos/cuchara); estas correcciones buscan habilitarlo, pero requieren prueba visual real para declararlo resuelto.
+- Incremento v5.1315 → v5.1317 (v5.1316 intermedia, sin entrada propia) en `run.py`, `roop/core.py`, `AGENTS.md`, `spec/00-PRINCIPIOS.md`.
+
+## 2026-11-06 — subida de versión solicitada: v5.1315
+
+- Incremento v5.1314 → v5.1315 en `run.py`, `roop/core.py`, `AGENTS.md` y `spec/00-PRINCIPIOS.md`.
+- Añadido fallback de inpaint clásico sobre los píxeles residuales del objetivo cuando el modelo no lo quitó.
+
+## 2026-11-06 — subida de versión solicitada: v5.1314
+
+- Incremento v5.1313 → v5.1314 en `run.py`, `roop/core.py` (APP_VERSION y título), `AGENTS.md` y `spec/00-PRINCIPIOS.md`.
+- Incluye correcciones del editor de imagen para no declarar cumplido un objetivo residual (zapatos/ropa) y reintentos con zona ampliada.
+
+## 2026-11-06 — subida de versión solicitada: v5.1313
+
+- Usuario: «SUBE LA VERSION». Incremento v5.1312 → v5.1313 en `run.py`,
+  `roop/core.py` (APP_VERSION y título), `AGENTS.md` y `spec/00-PRINCIPIOS.md`.
+- Solo identificación de versión; la evidencia técnica v5.1312 y sus límites
+  visuales siguen siendo históricos y no se reetiquetan como pruebas nuevas.
+  El FAIL visual del Editor y la validación de vídeo FaceSwap siguen abiertos.
+- Verificaciones del incremento en `diagnostics/out/version_1313_20261106/`.
+  Tester PASS: ejecución aislada de APP_VERSION/banner, título AST, sincronía,
+  compilación y lint crítico de run/core. Build launcher exit0; reviewer APPROVE
+  acotado. Whitespace previo core.py449 no modificado. No se ejecutó el EXE.
+  Sin instalaciones, commit, reinicios ni cambios de procesamiento.
+
+## 2026-11-06 — continuación del último WORKLOG, v5.1312: PASS técnico / FAIL visual
+
+- Petición: «revisa memory y el último workflow y continúa». Retomado
+  `plans/WORKLOG_state_logs_fix_20261106.md`; el TODO antiguo P1/P2 de final de
+  memoria ya estaba superado por código/23 contratos, no se reimplementó.
+- Revisión previa real seguía CHANGES_REQUESTED con hashes idénticos: propuesta
+  local simple sin clasificar perdía `measured_request=True`. Reviewer reprodujo
+  2.452 px fuera del objetivo. Corregido en `img_editor_manager.py`: conservar
+  ese flag al adoptar cada propuesta medida, sin recetas/motores nuevos.
+- RED unknown_scope7/8 → GREEN8/8. Tester independiente: 73 unittest +11
+  comprobaciones=84 PASS, Ruff del área y compilación49 módulos PASS. Reviewer
+  **APPROVE técnico acotado** sobre manager SHA25697128154…df7d8fe, residual,
+  compositor, progreso y geometría temporal. Build launcher aislado exit0;
+  no certifica todo el diff histórico ni ejecución del EXE.
+- Real Editor Auto neutral sin Calidad ni overrides: una inferencia20pasos,
+  espera89,078s/modelo97,593s/callback151,281s; hashes estables y cola0/0.
+  Recorte fuente exacto y máscara enviada comprobados: soporte117.864px,
+  101.043cambiados, **0fuera**. **FAIL visual confirmado por root y tester**:
+  taza azul más pequeña/desplazada, restos de taza/asa rojas y borde blanco.
+  Soporte respetado no acredita cobertura completa ni cumplimiento natural.
+- Real FaceSwap CPU nuevo astronaut→Grace: inswapper/XSeg/GFPGAN reales,
+  44.251px cambiados, A/B actual/control idéntico. Foto frontal; temporal
+  desactivado en este probe, no prueba el fix con vídeo ni perfiles/oclusión.
+- Último UI real `ui_start_20261106_102953.log`:6solicitudes/6salidas presentes.
+  Dos abstenciones por zona no medida guardan el mismo PNG; no son éxitos de
+  edición. Cuatro inferencias completadas (74,422/42,141/68,343/91,313s).
+  La tercera solicitud repetida SÍ termina y guarda `edit_1793958343.png`;
+  queda superada la nota de log cortado. Solo cabeceras/hashes/logs, sin PASS
+  visual de esas fotos. Diez process logs históricos de FaceSwap, sin nuevos
+  vídeos posteriores; los seis outputs antiguos siguen ausentes.
+- Calidad Auto: mismos soportes de edición generativa; el acabado clásico
+  opcional mejora globalmente luz/color/detalle/resolución. Selección explícita
+  mantiene exterior exacto. No cambiar diseño por el diff del acabado global.
+- Evidencia nueva `diagnostics/out/continuation_20261106/`: `latest_logs.json`,
+  `real_single/support_verification.json`, `tester/verdict.md` y
+  `tester/real_addendum.json`, `reviewer/review_final.json`, build y muestras.
+- WORKLOG y spec/02/spec/03 actualizados. Se mantiene v5.1312 del turno previo.
+  Pendiente calidad visual/aceptación, vídeo representativo, categorías de
+  versatilidad, Android instalado y demás deudas declaradas. Sin instalaciones,
+  commits, borrados, cambios de configuración de modelos ni reinicios.
+
+## 2026-11-06 — ítems 1 y 2 del WORKLOG state-logs-fix (latido + lint acotado)
+
+- Latido de consola: código actual ya usa `heartbeat` directo (sin `max(heartbeat, 30.0)`);
+  probe 6/6 PASS. Sin cambio de código. La nota previa en memoria estaba desactualizada.
+- Lint acotado (a): `roop/comfy_client.py` 15 incidencias → 0 (3 imports, 3 f-strings,
+  1 variable no usada, 8 bare except). `roop/img_editor/` ya estaba limpio. Respaldos
+  con bytes nulos no tocados. Ruff final PASS; py_compile OK.
+- Sin cambios de motores, prompts, recetas, muestreo, versiones, instalación, commit ni reinicios.
+- Pendiente: ítem 3 (contraste logs/salidas recientes) y validación visual real
+  (thong: tercer intento se cortó en los logs antes del final).
+
+## 2026-11-06 — revisión contrastada del código actual y consulta de Modo Calidad
+
+- Petición: revisar memory, bitácora, pendientes, requisitos y estado del código.
+  Informe `plans/REVISION_estado_20261106.md`; evidencia nueva en
+  `diagnostics/out/state_review_20261106_085256/summary.json` y logs contiguos.
+- Git antes de estas correcciones documentales: rama `experiment/klein-9b`,
+  HEAD `4d7ce3c` v5.1280, 64 modificados y 115 entradas sin rastrear. Disco
+  v5.1311; registro de servidor v5.1310/PID15720, proceso aún presente.
+- Tests CPU actuales: 42/43 PASS. Versatilidad23/23, acabado8/8, Generate6/6,
+  progreso5/6. FAIL de latidos de consola: `max(heartbeat, 30.0)` ignora
+  intervalos menores configurados. Callbacks tienen cadencia independiente;
+  no demuestra cuelgue ni resuelve la causa histórica39:12.
+- Probe pegado/residual06/11:11/11 PASS sintético. Los hashes actuales de
+  `comfy_progress.py` y `selected_region_edit.py` difieren de los aprobados
+  por tester/render v5.1310: esas evidencias no acreditan todo el código actual.
+  Los literales nuevos residual0.4/expansión0.35 quedan como deuda declarada.
+- Ruff Editor/Generate:94 incidencias,88 de código y6 respaldos con bytes nulos.
+  Sin esos respaldos: sintaxis52archivos y lint crítico PASS. No build nuevo
+  ni validación visual en este turno; seis respaldos ilegibles conservados.
+- Reviewer independiente inicial CHANGES_REQUESTED documental. Se corrige
+  spec/00 para describir Auto y se aclaran estados superados del umbral corporal
+  y build Android en spec/03. Hallazgos y deudas actuales quedan registrados.
+- Re-review independiente: APPROVE documental acotado del informe, memoria y
+  correcciones spec/00/spec/03; no aprobación global del código ni cierre de historias.
+- Duda del usuario sobre Modo Calidad: código UI confirma edición primero y
+  acabado después con los pasos marcados. Realismo es detalle/nitidez clásico,
+  sin otra generación; no garantiza reparar una edición fallida. Restaurar
+  caras puede alterar rasgos. Siguen pendientes calidad visual amplia/1080p/4K.
+- Sin cambios de procesamiento/versión, instalación, inferencias, build,
+  commit/push ni reinicio. El runner tuvo error cp1252 solo al imprimir el log
+  ya guardado; se completaron los checks restantes sin repetir la suite CPU.
+
+## 2026-11-06 — revisión de pendientes, bitácora y requisitos; v5.1311 (solo documentación)
+
+- Petición: «revisa pendientes y bitácora, y requisitos, memory y demás»;
+  después «haz lo que debas y las pendientes, sube versión cuando acabes».
+  Este turno cierra deudas administrativas y documentales; no cambia motores,
+  prompts, recetas, muestreo ni calidad de imagen.
+- Bitácora: `.autohand/memory/events/LOG.jsonl` solo contiene 3 eventos
+  `capability_used` (17/10 y 26/10); no registra validaciones. La historia
+  real sigue en esta memoria, `plans/WORKLOG_*`, `spec/03` y `fix/`.
+- Cerrado `todos.json`: las 4 tareas del 26/10 sobre LongCat/Kontext en
+  cambios corporales sin selección describían el comportamiento configurado
+  desde v5.1306 (`route_editor.default_engine=longcat`,
+  `editor_ui.automatic_appearance_engine=kontext`). Solo la apariencia pura
+  medida se redirige a Kontext; cuerpo, postura, cámara, escenario,
+  añadir/quitar y máscara explícita conservan su ruta. No era un defecto.
+- Cerrada la deuda de exposición corporal: `_full_body_exposure_clauses` lee
+  `instruction_scope.body_state_min_intensity` (0,3 en
+  `config/editor_selection.json`), valida el rango y ya no contiene el umbral
+  literal 0,35 de la nota del 29/10.
+- Verificado en código y en CPU hoy: la retirada regional de un objeto llama
+  `_compose_local_target_prompt(..., body_transform=False)` en
+  `img_editor_manager.py` (~8490), así que la frase «shows bare skin with
+  nothing covering it» ya no se aplica a objetos como la cuchara.
+  `probe_editor_versatility_integrity_20261105.py`: 23/23 PASS (22,56 s).
+  Falta repetir la muestra real; el contrato CPU no acredita la imagen.
+- Versión: **v5.1311 (2026-11-06)** en `AGENTS.md`, `spec/00`, `run.py` y
+  `roop/core.py`. `spec/03` decía v5.1309 y se corrige. El salto es solo
+  documental; al reabrir, `roop/core.py:247` ignora el servidor registrado con
+  otra versión y arranca uno nuevo, comportamiento ya existente.
+- Git sin commit: HEAD `4d7ce3c` v5.1280, 65 archivos rastreados modificados y
+  115 sin rastrear. No se hace commit/push en este turno.
+- UI abierta (PID 15720, :7861, v5.1310) intacta: no se reinició ni se
+  interrumpió. Reabrir AutoAuto carga v5.1311.
+- Abierto y sin cambios: FAIL visual de conservación de v5.1310 (taza/plato/
+  encuadre/café/cuchara/vapor); categorías de versatilidad sin PASS visual
+  (ropa, ojos, silla, cámara/POV en primera persona); 39:12 sin explicar;
+  FaceSwap perfiles/oclusión/vídeo; Android instalado; Chroma CFG/negativo;
+  Ruff global (~90 incidencias); render 1080p/4K del Modo Calidad.
+- Residuos detectados y no tocados: cinco copias `roop/img_editor/_full_*.py`
+  y `_original_backup*.py` (backups de ~12k líneas) fuera de uso.
+
+## 2026-11-05 — H-EDIT-WAIT-FINISH: verificación técnica final v5.1310
+
+- Usuario autorizó el alcance. Monotónico, WS antes de HTTP, latidos configurables
+  y telemetría; validación antes de TOP, preservando validación final y recetas.
+- Tester CPU: 57 unittest,13régimen,28WS+cleanup y11config inválidas PASS.
+  Generate:110checks de adherencia y6controles PASS (logs separados).
+- Ruff completo de2módulos/3probes, py_compile y lint crítico run/core verdes.
+  Build launcher aislado exit0 fix/build_1310.log. Reviewer APPROVE técnico;
+  tester PASS técnico acotado en fix/tester/cpu_verdict.json y real_verdict.json.
+- Real neutral fix/real_neutral_20261105_220448_580169: LongCat instalado,
+  12pasos/cfg1,1088x960, un prompt; servidor74,892s,espera75,781s,
+  generación78,781s;75callbacks/gapmáx1,25s/HTTPmáx0,250s/callbackmáx0,109s.
+  Seis muestras GPU, cero errores y cola0/0; seis hashes coinciden tras render.
+- FAIL visual de conservación: taza azul sí, pero cambia plato/encuadre/café/
+  cuchara y añade vapor. No acredita calidad general ni caso zapatos.
+- Latidos cooperativos: HTTP/callback bloqueados pueden retrasarlos. Prueba con
+  callback JSONL no acredita entrega Gradio. No se explica el39:12 histórico
+  ni se atribuye aceleración del modelo al parche. Fuentes primarias sobre
+  offload en fix/research.md sin cambios de flags. No se instaló ni reinició,
+  no se hizo commit/push; reabrir app carga cambios.
+- Toda evidencia: diagnostics/out/editor_stall_20261105/. Reviewer/tester
+  independientes; detalles visuales en fix/tester/real_visual_and_provenance.json.
+
+## 2026-11-05 — H-EDIT-WAIT-FINISH autorizado, corrección en curso (v5.1310)
+
+- Usuario responde «sí» al arreglo acotado de seguimiento y acabado previo
+  a reintentos; motores/recetas actuales y validación final se conservan.
+  Historia escrita antes del código en spec/02; tareas en
+  `plans/WORKLOG_editor_wait_finish_20261105.md`.
+- `edit_described_subject` valida antes de TOP en la rama del incidente.
+  Si falla, omite acabado y devuelve el candidato crudo al rechazo/reintento
+  existente del caller. Candidatos válidos mantienen settings/acabado y la
+  validación final. Cancelación antes/después. No altera selección explícita.
+- Probe nuevo finish_gate: RED5fallos/6, GREEN6/6; integración independiente
+  del caller se incorpora al probe permanente y queda8/8. No-op/ghost,
+  válido, auto_upscale, sin acabado, cancelación y aceptación/rechazo final.
+  Tester independiente PASS acotado; no equivale a calidad visual resuelta.
+- Lint del helper tenía F541 previo (f-string literal sin interpolación);
+  se retira únicamente su prefijo f sin alterar texto. Ruff de helper y
+  probes nuevos verde; guard/telemetría/real/build/review finales pendientes.
+
+## 2026-11-05 — diagnóstico del aparente cuelgue LongCat al editar zapatos
+
+- Usuario aporta log detenido en Muestreando 0/12, 6:38. Consulta real de
+  ComfyUI preservada en `diagnostics/out/editor_stall_20261105/`: historial,
+  cola, system_stats y extracto UI. Sin cambios de ejecución ni reinicios.
+- Prompt `0c92e6f4-6d60-42f4-b0ec-f893bc85ac21` terminó success en el servidor:
+  19:51:36.499→20:11:26.219, **1189,720 s**. El cliente imprime **39:12**,
+  con encoder396s/sampler787s/decode4s. Discrepancia temporal1162,280s:
+  time.time() no permite atribuirla por sí sola a bloqueo del cliente;
+  instrumentar reloj monotónico. Causa todavía no demostrada.
+- El segmentador señala 94 % del objetivo residual; se ejecuta acabado TOP
+  antes de rechazar por fantasma y anunciar ruta de reintento. No acredita
+  cumplimiento visual ni reparación. Cola vacía durante la consulta posterior;
+  PID UI25904 ya no aparece, ComfyUI sigue accesible. No se conoce la causa
+  del cierre UI. No se ha lanzado otra inferencia ni interrumpido el servicio.
+- Encoder instalado9.384.670.680bytes; presión de memoria/offload es hipótesis,
+  no causa acreditada. El unload Kontext→LongCat sí reportó6515MB libres.
+  Informe/propuesta acotada en `diagnosis.md`; implementación pendiente de
+  concretar con el usuario según la regla global de alcance/diseño.
+- Comprobación ejecutada del JSON: success/completed,1189,720s,cola0/0 PASS.
+  Reviewer independiente APPROVE del diagnóstico; no de una reparación.
+  Sin cambios ejecutables ni declaración de lint/build de un arreglo inexistente.
+
+## Requisito permanente — versatilidad del Image Editor (reafirmado 2026-11-05)
+
+- **Mandato del usuario para futuras sesiones**: editar cualquier foto con
+  naturalidad y cumplir la instrucción completa, también cuando combina varios
+  cambios. Incluye expresamente:
+  - Añadir o quitar personas, una o varias.
+  - Añadir o quitar cosas u objetos, uno o varios.
+  - Cambiar posiciones y posturas de personas y objetos.
+  - Cambiar ropa y apariencia: pelo, edad, piel y características físicas.
+  - Cambiar ángulo de cámara y punto de vista (POV).
+  - Cambiar fondo, escenario y decorado.
+  El usuario mantiene la petición «sin censura» registrada anteriormente.
+- **No reducir el alcance en arreglos futuros**: una corrección de calvicie,
+  ropa, paredes o cualquier otro caso debe conservar las demás posibilidades,
+  las instrucciones compuestas y el trabajo con una o varias personas. Estos
+  ejemplos no son una lista cerrada de ediciones permitidas ni reglas de
+  despacho: se decide con conceptos medidos y la región encontrada en la foto,
+  sin listas manuales de palabras, géneros o prendas. Conservar lo no solicitado.
+- **Requisito no equivale a capacidad ya validada**: el mapa de versatilidad de
+  la entrada 2026-11-02 y las pruebas posteriores documentan límites y pendientes.
+  Los contratos CPU verdes y un PASS de calvicie no acreditan todas las categorías.
+  Exigir evidencia visual real por categoría antes de declararla resuelta; leer
+  este mandato antes de modificar el Editor y mantenerlo en futuros relevos.
+- Actualización documental solicitada por el usuario; sin cambios de ejecución
+  ni de versión de la aplicación (sigue v5.1308).
+
+## 2026-11-05 — auditoría profunda de versatilidad solicitada por el usuario
+
+- Petición: revisar a fondo si el arreglo cubre añadir/quitar personas/cosas,
+  posiciones/posturas, ropa/apariencia, ángulo y POV. **La respuesta es parcial:
+  hay defectos de código actuales que requieren mejora.** Esta auditoría no
+  cambia ejecución ni versión (sigue v5.1308), ni instala, reinicia o hace commit.
+- Informe de trabajo y fuentes: `plans/AUDIT_editor_versatility_20261105.md`.
+  Evidencia nueva en `diagnostics/out/editor_versatility_audit_20261105/`.
+- Reviewer confirma fallos reproducidos: retirada de objeto calcula oscuridad
+  de la máscara y la convierte de 1.600 px a 38.400 px (100 %); cierre de retirada
+  de persona puede excluir los 4.600 px del propio objetivo; adición compuesta sin
+  zona puede quedar fuera del soporte; órdenes separadas por punto eluden el
+  guard de compuesto de Auto; retirada compuesta omite `structural_remove` al
+  medir. No atribuir la rama estructural tardía a toda petición Auto sin trazarla.
+- Root reproduce con funciones semánticas reales que POV desde los ojos del
+  hombre y de la mujer se convierten en la misma pose frontal sin texto restante:
+  se pierde el observador antes de inferir. `root_semantic_observations.json`
+  guarda 18 casos y hashes de las fuentes. La ficha primaria del LoRA fal describe
+  órbitas de cámara, no resuelve por sí sola ese requisito de primera persona.
+- Riesgos pendientes de muestra específica: «llevar un abrigo azul» mide recolor
+  en vez de cambio corporal; «ojos más grandes» mide cuerpo; mover una silla mide
+  pose. Son hechos de clasificación/ruta, no FAIL visuales recién generados.
+- Los probes add/remove de 4/4 y 7/7 contienen checks constantes y búsquedas de
+  texto; no prueban la protección espacial ni la integridad del objetivo. La
+  llamada a `_build_person_addition_mask` sí existe: la nota histórica «nunca
+  invocado» está superada; falta acreditar su ruta efectiva en Auto.
+- Se inspeccionaron los finales Auto astronaut y Grace ya registrados; mantienen
+  su PASS acotado y sus límites. El histórico coffee_remove_spoon_v3 conserva
+  cuchara visible. No hubo inferencias nuevas ni se presentan esos artefactos
+  históricos como ejecuciones nuevas de la versión actual. Lote CPU del tester
+  en curso; conservar los fallos en el informe antes de cerrar la auditoría.
+
+## 2026-11-05 — comprobación productiva final de la recuperación (v5.1308)
+
+- Terminó la prueba REAL desde Auto con configuración productiva, sin
+  sobreescritura de plantilla ni semilla, exec64041 exit0. Evidencia:
+  `diagnostics/out/appearance_reference_20261023/1793866121580301900/`.
+  `dispatch_0.json` se guardó antes de inferir: motor solicitado Auto,
+  override null y prompt idéntico a la plantilla configurada. El log y las
+  métricas confirman que Auto eligió Kontext y armonizó el borde de cabeza.
+- Inspección final del root: calvicie visible sin bloque de pelo ni halo
+  amplio; textura lisa y brillo frontal. Se conservan encuadre/contexto.
+  Una llamada de 20 pasos, referencia 753×768; 283 s de modelo y 371,297 s
+  de callback. Cambian 39.725 píxeles y cero fuera de la región. Tester
+  independiente confirma **PASS visual acotado** del FINAL productivo en
+  `native_auto_production_1308_verdict.json`: sin bloque/doble silueta/halo
+  amplio, exterior0 y maxdelta0; vello corto superior, brillo y textura lisa
+  permanecen como límites. No equivale a aceptación visual del usuario.
+- Diez suites CPU compartidas por la plantilla pasan, sin ocultar fallos:
+  selección, apariencia, Auto, multicláusula, recolor de parte/superficie,
+  adición, retirada, superficie completada y régimen corporal. Comandos y
+  resultados en `prompt_scope_results_20261105.json`; tester PASS técnico
+  acotado en `prompt_scope_technical_verdict_20261105.json`. El anterior
+  `engine_status` completo pasa 28/28 tras corregir la máscara local.
+- Reviewer APPROVE técnico de v5.1308; build aislado exit0 en
+  `build_1308_20261105.log`. Ruff/compilación pertinentes verdes; las deudas
+  globales previas de archivos ajenos no se presentan como resueltas.
+- Estado operativo comprobado: ComfyUI sin trabajos en ejecución ni en cola.
+  Las pruebas terminaron sin reiniciar el servidor ni la UI del usuario.
+  Para cargar el código actualizado en una instancia antigua hay que reabrir
+  AutoAuto. No se hizo commit/push ni instalación; se conservan los cambios
+  locales y todos los controles fallidos de comparación.
+- Entrega acotada: recuperado el despacho de apariencia que Auto evitaba,
+  corregida la pérdida de máscara y mejorada la plantilla regional genérica.
+  El mapa completo de versatilidad y la aceptación visual del usuario siguen
+  abiertos. No afirmar que cualquier foto/edición sea perfecta; Grace retira
+  la gorra y conserva vello muy corto, y la carga fría sigue siendo lenta.
+
+## 2026-11-05 — plantilla regional acotada y segundo neutral mejorado (v5.1308)
+
+- **Control real de Grace**: candidata
+  `appearance_reference_20261023/1793865362633754700/result.png` termina exit0.
+  Tester independiente **PASS acotado** de calvicie visible/gafas/rasgos más
+  reconocibles/sin halo amplio y exterior0. No es conservación absoluta:
+  desaparece la gorra y queda vello muy corto lateral; no certificar rasurado
+  literalmente sin pelo ni identidad exacta. Baseline anterior sigue FAIL.
+- **Aislamiento comprobado**: fuente, referencia RGB y máscara idénticas;
+  seed864801 en ambos workflows. Solo cambian el texto positivo y el nombre
+  de subida de imagen equivalente. `grace_preserve_verified_controls_20261105.json`
+  y `auto_visual_grace_preserve_verdict.json` en auto_appearance_recovery_20261104.
+  111166px cambiados, exterior0/maxdelta0,1llamada20pasos442s/504,328s callback.
+  Integridad automática0,81 frente0,00 del baseline; no sustituye inspección.
+- **Aplicado v5.1308**: solo `config/editor_selection.json::edit.prompt_template`
+  usa EXACTA plantilla ensayada: instrucción completa, cambio pedido y
+  conservación del resto de rasgos/contexto. Sin listas de atributos ni
+  estrechar lo explícitamente solicitado. Versiones AGENTS/run/core alineadas.
+  Snapshot `before_prompt_scope_20261105`; reviewer **APPROVE técnico acotado**.
+  Selección y regiones comparten plantilla: regresiones pertinentes en curso.
+- **Diagnóstico honesto**: el primer control guardó parámetros en memoria y
+  metrics al terminar; el workflow del servidor se preservó durante ejecución.
+  El probe ahora persiste `dispatch_N.json` ANTES de inferir, distinguiendo
+  original/override/seed/argumentos del cliente. No atribuir dispatch previo a
+  la candidata que se lanzó antes de ese ajuste. Ruff/compile del probe pasan.
+- **Validación productiva ACTIVA**: exec64041,
+  `real_auto_astronaut_production_1308.log`, Auto real sin override de plantilla
+  ni semilla. Comprobar imagen final/métricas y tester antes de cerrar cambio.
+  No usar automáticamente la prueba con override como prueba nativa productiva.
+- **Límites**: prueba de una petición en dos retratos; no cumplimiento universal
+  de categorías ni preservación absoluta. No se reinició UI/backend, instaló
+  nada ni hizo commit/push. La carga fría Kontext ha variado mucho; no prometer
+  rapidez por recuperar calidad. Relevo y spec conservan resultados fallidos.
+
+## 2026-11-05 — Auto verificado y máscara local recuperada (v5.1307)
+
+- Usuario retoma «sigue». Se inspecciona la salida REAL desde Auto de ayer:
+  `appearance_reference_20261023/1793822106826892700/result.png`.
+  Tester independiente **PASS acotado**: calvicie visible, sin bloque ni halo
+  amplio; brillo frontal fuerte y textura lisa, no perfección. Métricas
+  recalculadas38877px cambiados,0fuera región/maxdelta0, Auto eligióKontext,
+  1llamada20pasos,165s modelo/251,015s callback. Veredicto
+  `auto_appearance_recovery_20261104/auto_visual_astronaut_verdict.json`.
+- **Error local adicional corregido**: `edit_described_subject` ya tenía una
+  máscara válida de `_measured_target_zone`, pero la sobrescribía llamando a
+  un auxiliar léxico sin retorno; `np.nonzero(None)` fallaba como array0d.
+  Se retira SOLO esa reasignación. Se eliminan el stub y la primera definición
+  de `_requested_removal_target` que Python ya sustituía; reviewer comprueba
+  por AST que la definición efectiva y el extractor son idénticos.
+- **Fixture corregido sin debilitar el guard**: un test devolvía la imagen
+  idéntica como si fuera una edición y esperaba aceptación; ahora devuelve
+  cambio visible. Se añade rechazo explícito de la imagen idéntica, máscaras
+  superiores/inferiores y objetivo fuera de la silueta; composición real,
+  inferencia/detección dobles solo en CPU. Antes2fallos; después engine_status
+  completo**28/28**, Auto**15**, régimen corporal**13/13** y selección**15/15**
+  exit0. Artefactos `target_mask_results_20261105.json` y `v51307_*.log` en
+  `diagnostics/out/auto_appearance_recovery_20261104/`.
+- **Revisión/build**: reviewer **APPROVE** acotado a H-EDIT-TARGET-MASK,
+  Auto recuperación aprobado en v5.1306. Ruff completo del manager/probes y
+  crítico del resto/compilación verdes; build aislado exit0 en
+  `build_1307_20261105.log`. Versión **v5.1307 (2026-11-05)** en AGENTS/run/core.
+  No instalación, commit/push ni reinicio de UI/backend compartido.
+- **Segunda foto neutra — FAIL visual**: Grace con gorra desde Auto,
+  `appearance_reference_20261023/1793864753014300900/result.png` y
+  `real_auto_grace_20261105.log`.1llamada20pasos,246s modelo/331,844s callback,
+  exterior0, pero cambia cara, pierde gafas y conserva pelo. La métrica de
+  integridad avisa identidad0/1 mientras el verificador semántico da señal
+  positiva: esa señal NO demuestra una edición correcta. No cerrar calidad
+  ni afirmar dos fotos PASS por el primer resultado.
+- **Experimento neutral en curso, NO producción**: probar una restricción
+  genérica de preservar atributos no solicitados en la plantilla regional.
+  Misma semilla864801 recuperada del historyComfyUI de Grace fallida
+  (`grace_initial_history_20261105.json`). Probe real admite ahora --seed y
+  --prompt-template, registra prompt/seed reales antes de inferir. Exec47871,
+  log `real_auto_grace_preserve_20261105.log`. El texto fuente de esta variante
+  está en inglés equivalente; para llamarlo A/B controlado hay que comprobar
+  referencias RGB/máscaras y workflows frente al original, no asumirlos iguales.
+  No se ha cambiado config/editor_selection.json ni la plantilla productiva.
+  Ver estado de cola antes de tocar procesos; no repetir renders a ciegas.
+
+## 2026-11-04 — recuperar Auto sin pedir al usuario elegir motores (v5.1306)
+
+- **Continuación**: ante la elección técnica el usuario responde «no sé…
+  funcionaba y ahora cada vez peor». Sigue solicitando el arreglo. Se adopta
+  la recuperación mínima respaldada por la prueba Kontext, manteniendo el
+  alcance de reparación; no se convierte esa respuesta en autorización para
+  cambiar todos los motores/defaults ni rehacer el editor.
+- **Causa contrastada**: `68ad5fb` conservaba la ruta focal Kontext con
+  plantilla/escalado/armonización; Auto→LongCat introducido en `00d1924`
+  evita esos bloques. El mismo código actual con Kontext explícito sí pasó
+  la prueba neutral final con tester independiente (entrada anterior).
+- **Cambio v5.1306**: `editor_ui.automatic_appearance_engine=kontext` en
+  `config/generation_prompt.json`. Default UI sigue Auto. El manager recupera
+  esa ruta solo tras medir apariencia pura con los hechos existentes, sin
+  listas de palabras; compuestos/mezclas y hechos incompatibles conservan
+  su ruta. El permiso automático para el archivo Kontext configurado se
+  concede justo tras esa decisión. Alias inválido devuelve error claro.
+- **Protecciones**: motor explícito, máscara pintada/selección, cámara,
+  postura, cuerpo, escenario, añadir/quitar, recolor, recursión y modos de
+  calidad especiales no se redirigen. Se conservan los completadores y el
+  acabado focal existentes; no se añaden modelos ni dependencias.
+- **Evidencia CPU inicial**: nuevo
+  `diagnostics/probe_editor_auto_appearance_recovery_20261104.py`, RED antes
+  del cambio (`red.log`) y GREEN con 15 tests reales de despacho/política y
+  guardias (dobles declarados solo en tests). Los hechos reales reconocen
+  calvicie, envejecimiento y pelo rizado como apariencia; ojos más grandes
+  mantiene LongCat porque el analizador no lo clasifica como apariencia pura.
+  Esto acredita alcance, no calidad visual de esas otras categorías.
+- **Revisión**: reviewer APPROVE acotado a H-EDIT-AUTO-RECOVER; Ruff crítico
+  de producción y completo de ambos probes/compilación verdes. Snapshot
+  anterior a este cambio en `diagnostics/out/auto_appearance_recovery_20261104/before_current`;
+  conservar cambios locales previos. Build y regresiones adicionales en curso.
+- **Prueba real desde Auto en curso**: `real_auto_astronaut.log` en esa misma
+  carpeta; exec16398, callback real, astronaut neutral512. El probe real
+  existente admite ahora `--engine` y registra `engine_requested`; su default
+  anterior Kontext se conserva. No usar el PASS previo de Kontext explícito
+  como PASS de Auto. Al terminar inspeccionar FINAL, modelo real y exterior.
+- **Versión**: v5.1306 en AGENTS.md/run.py/roop/core.py. Sin commit, instalación,
+  rollback global ni reinicio de UI/backend compartido. Historia especificada
+  antes del código: H-EDIT-AUTO-RECOVER. Relevo actualizado al seguir.
+
+## 2026-11-04 — recuperar el commit bueno; relevo antes de agotar contexto
+
+- **Corrección del usuario**: «pero no lo has arreglado. hay un commit que
+  dije que pusiera esta semana creo que arregló Image Edit». Después pide
+  anotar antes de agotar tokens. La tarea sigue siendo corregir el resultado
+  visual; documentar NO la sustituye ni la cancela.
+- **Relevo completo**: `plans/HANDOFF_editor_commit_recovery_20261104.md`.
+  Contiene commits, pruebas, límites, proceso activo y siguiente paso exacto.
+- **Candidato mejor respaldado**: `68ad5fb` (27/10, manager global focal
+  Kontext), junto a `d3b4f8a` (selección/cabeza/normal_clone). Hay salidas
+  neutras PASS acotado de esa ruta del 24–25/10 que siguen en disco;
+  `1792858682799844700/result.png` se inspeccionó de nuevo.
+- `4d1cb41` (03/11) sí se titula «Image Editor P0 mejoras v5.1274», pero
+  añade heurísticas posteriores; no es el origen de ese PASS. `00d1924`
+  (03/11) ya introdujo Auto→LongCat EN GIT; rectifica cualquier frase previa
+  que atribuyera ese cambio solo a modificaciones locales posteriores.
+- **Hallazgo independiente del reviewer**: los arreglos Kontext siguen en
+  producción, pero Auto→LongCat en 8GB evita sus bloques de escala focal,
+  plantilla regional y armonización, que requieren engine=kontext.
+- **Prueba real en curso**: callback actual con Kontext explícito y astronaut
+  neutral, sin máscara manual; log `historic_kontext_route_current.log` dentro
+  de `diagnostics/out/refine_recipe_20261104/`. Nueva salida prevista en
+  `diagnostics/out/appearance_reference_20261023/1793812998803975900/`.
+  Exec session84899; prompt ComfyUI f8bdb519-68d1-40bf-b3bd-bce8c6c946ba.
+  Ver estado antes de reiniciar/interrumpir nada. No hay PASS nuevo aún.
+- **Estado**: v5.1305 sigue actual; en esta fase de búsqueda no hay otro
+  cambio de producción. La corrección técnica anterior tiene APPROVE/PASS
+  acotados, pero el problema visual sigue ABIERTO. No hacer rollback global,
+  reinstalar modelos ni declarar resuelto por contratos CPU.
+- **Actualización de la prueba**: el muestreo Kontext terminó sin interrupción
+  (438s, faseKSampler369s, arranque largo y luego~3,8s/paso). Raw neutral
+  `1793812998803975900/raw_0.png` inspeccionado: cabeza rapada sin bloque ni
+  orla LongCat. El log confirma armonización y exterior restaurado. Falta
+  ver la imagen final: el callback sigue con el verificador VL. Pregunta de
+  diseño enviada al usuario: recuperar esa ruta en Auto para apariencia
+  medida manteniendo LongCat en lienzo manual/otras rutas. Respuesta pendiente;
+  no se ha alterado el motor/default mientras tanto. Relevo actualizado.
+- **Resultado final nuevo (18:35)**: exec84899 exit0, callback actual con
+  Kontext explícito entrega `1793812998803975900/result.png` inspeccionado:
+  cabeza rapada sin el bloque/orla del control LongCat. **PASS visual del root
+  acotado a esta muestra/ruta explícita**, no Auto reparado ni calidad general.
+  1llamada20pasos, referencia753x768,440s modelo/606,641s callback,39748px
+  cambiados y0fuera región; señal automática positiva. El tester independiente
+  verifica imagen/métricas. Cola vacía; ya NO hay render activo de esta prueba.
+- **Siguiente cambio revisado pero NO aplicado**: conservar Auto/default y
+  manualLongCat; permitir desde configuración recuperar Kontext en apariencia
+  medida pura, sin compuestos/mezclas, usando hechos existentes y permisos
+  automáticos puntuales. Las demás rutas y motores explícitos permanecen.
+  Detalle y casos en el relevo. **Autorización de diseño pendiente del usuario**
+  en la pregunta enviada; no es una implementación ni un nuevo PASS de Auto.
+- **Tester independiente**: PASS acotado de imagen final Kontext explícito;
+  calvicie visible sin bloque/doble silueta/halo amplio. Recalculó39748px
+  cambiados, exterior0 y maxdelta0 fuera soporte. Veredicto/hashes en
+  `diagnostics/out/refine_recipe_20261104/historic_kontext_current_verdict.json`.
+  Relevo actualizado para continuar desde la decisión de Auto pendiente.
+
+## 2026-11-04 — comparación aislada del último commit: HEAD no importa el Editor
+
+- **Continuación autorizada**: el usuario respondió «sí» a la elección entre
+  comparar v5.1280 aislada primero o corregir la medición actual. Se siguió
+  la primera opción, coherente con su sospecha original sobre el último commit.
+- **Aislamiento**: worktree detached limpio en
+  `diagnostics/out/refine_recipe_20261104/head_v51280`, HEAD exacto
+  `4d7ce3c75caa5fc15f3bd366f83f8b0603f20a44`. No se modificó el histórico
+  ni se crearon enlaces a los modelos ni se copiaron. Intérprete: venv del proyecto;
+  cwd y módulos Python pertenecen al worktree. Sin instalaciones ni reinicios.
+- **Resultado real: FAIL al importar**, exit 1, antes de cualquier modelo o
+  inferencia. `img_editor_manager.py` importa `get_longcat_model_config` de
+  su propio `gen_prompt_config.py`, pero ese archivo no lo define. También
+  faltan `get_longcat_full_model_config` y `SubjectPromptConfigError` entre
+  las definiciones importadas. Las tres existen como cambios locales del
+  workspace actual sin commit. Evidencia: `head_v51280_import.log` y diff Git.
+- **Defecto estático adicional**: Ruff F821 exit 1 sobre el manager histórico
+  señala `hood` leído antes de definirse en línea 2360
+  (`head_v51280_ruff.log`). No se afirma haber ejecutado esa rama: el import
+  impide llegar hasta ella. Además el cliente histórico redirige LongCat a
+  Kontext; no sería una comparación del mismo motor sin distinguir esa ruta.
+- **Integridad**: hashes SHA256 de cinco fuentes/configuración coinciden con
+  los blobs de HEAD tras normalizar CRLF en ambos lados. Manifiesto
+  `head_v51280_provenance.json`. El primer intento de comprobar hashes
+  normalizaba solo el archivo de trabajo y se corrigió antes de darlo por
+  válido; no era una modificación de fuentes. `git -C <worktree> status
+  --short` vacío; reviewer independiente confirma commit limpio, imports
+  inconsistentes y traceback íntegramente dentro de la copia aislada:
+  **APPROVE de la conclusión/evidencia**, no del código histórico.
+- **Conclusión y límite**: no es posible producir un A/B visual con el commit
+  exacto porque no carga el Editor. No se parcheó HEAD para presentar una
+  variante como si fuera el commit original. Que antes funcionara con
+  archivos locales no incluidos en Git es una hipótesis compatible con el
+  diff, no un hecho demostrado. No se encontró banner v5.1280 en los logs
+  `ui_start_*.log` conservados. El worktree se conserva como evidencia.
+- **Producción**: sin nuevos cambios de código; versión actual v5.1305.
+  El mismo intento de import con el mismo intérprete en el workspace actual
+  termina exit 0 (`current_v51305_import.log`, `MANAGER_IMPORT_OK`), sin
+  cargar modelos. Esto compara el arranque, no la calidad visual.
+  La calidad visual sigue abierta (entrada siguiente). No se hizo rollback,
+  commit, render adicional ni cambio del lanzador/UI/backend compartido.
+
+## 2026-11-04 — revisión de logs, bitácora y último commit: receta del refino (v5.1305)
+
+- **Petición**: «revisa los logs… está mal», revisar también memoria/bitácora
+  y último commit porque el usuario cree que allí funcionaba; versionar y anotar
+  cualquier modificación. Se revisaron `logs/ui_start_20261104_171229.log`,
+  el anterior `ui_start_20261104_165302.log`, esta memoria, historial de proyecto
+  y bitácora `.autohand/memory/events/LOG.jsonl` (esta última solo contiene
+  eventos de comandos, no una validación del editor).
+- **Git verificado**: HEAD `4d7ce3c75caa5fc15f3bd366f83f8b0603f20a44`,
+  v5.1280, 2026-11-03 09:07:31 +0100, solo cambia la versión en `run.py`.
+  El commit anterior `7ba17a2` corrige `head_band`. La sesión del usuario
+  ejecutó v5.1304 con numerosos cambios locales posteriores sin commit. El
+  diff acredita diferencias de código, **no** que HEAD tuviera PASS visual.
+  No se ha hecho reset, checkout de archivos ni commit ni sobrescrito el
+  trabajo local ajeno.
+- **Causa técnica reproducida**: `_second_focused_pass` cambió
+  `keep_source_pixels=True` (HEAD) por `False`, seleccionando
+  `VAEEncodeForInpaint`. Además sobrescribía `appearance_sample.no_kontext`
+  con `drop_spatial_reference`, forzado a true en apariencia, ignorando
+  `spatial_reference=true` de la configuración. Corresponde al salto del log
+  de `mask=foto, ref=index_timestep_zero` a `mask=inpaint, ref=none`.
+- **Corrección genérica**: conservar latente de foto y reenviar la receta sin
+  override; retirar parámetros/bloque muerto `generation_mask`,
+  `drop_spatial_reference`, `paste_mask_full` y dos `pass`. Se conservan el
+  pegado COMPLETO de la región medida y las compuertas de caras añadidas y
+  degeneradas. El delta solo comprueba si hay cambio real antes de gastar
+  otra inferencia: no vuelve a filtrar la textura refinada. Sin motores,
+  dependencias ni listas de palabras nuevas. Versión en AGENTS/run/core:
+  v5.1305. Historia: H-EDIT-REFINE-RECIPE.
+- **Segunda regresión localizada en Git y verificada**: el helper nuevo
+  `_expand_measured_region` y su única llamada no existen en HEAD ni estaban
+  registrados como decisión consolidada. Dilataban la máscara ya completada
+  con margen literal del 15 %, sin límite de persona, y excluían TODAS las
+  cajas faciales, incluida la de la cabeza objetivo (el pelo frontal quedaba
+  dentro del rectángulo protegido). Retirados únicamente helper y llamada;
+  se conservan `_complete_request_surface`, `_expand_seed_to_head` y
+  `paste_limit`. Contrato CPU de despacho nuevo, con medición/cliente dobles
+  declarados y router/ventana/pegado reales: antes borraba 3.375 px del núcleo,
+  añadía 12.418 px, escribía 2.735 px fuera de la persona y 284 px en otra;
+  `tester/measured_scope_red.log`. No era solo una diferencia estética.
+- **Rectificación de la entrada v5.1304**: «Remanentes (pelo) — solución
+  final» y que `no_kontext=True` eliminaba remanentes sin fantasmas eran
+  conclusiones sin PASS visual y quedan **superadas**. No reinstaurar ese
+  override por esta nota histórica. La guardia facial tampoco prueba calidad
+  de textura, continuidad ni cumplimiento de la instrucción.
+- **Evidencia inicial**: `diagnostics/out/refine_recipe_20261104/red.log`
+  reproduce cuatro fallos (latente, receta sin referencia y refino sin
+  cambio); `green.log` registra el pase posterior. El probe amplía cobertura
+  de referencia activada/desactivada, fuerza/no mutación, contención exacta,
+  máscara vacía, no-op local y ambas compuertas faciales. Los dobles del probe
+  son contratos CPU, no inferencias ni validación visual.
+- **Revisión/build**: reviewer independiente APPROVE acotado al arreglo
+  genérico; PyInstaller `AutoAuto.spec` exit 0, salida aislada en
+  `diagnostics/out/refine_recipe_20261104/build_dist/AutoAuto.exe` y log
+  `build.log`. No se ejecutó el EXE ni se sustituyó el lanzador del usuario.
+- **Estado de verificación**: Ruff crítico E9,F63,F7,F82 de manager/probe/
+  run/core y Ruff completo del probe pasan; compilación Python pasa. Ruff
+  completo de esos cuatro archivos y `git diff --check` del lote arrastran
+  deuda previa fuera de las líneas corregidas (imports/estilo/variables y
+  espacios finales en run/core), **no se declaran verdes globalmente**.
+  Tester CPU del refino PASS acotado (30 comprobaciones); Editor/Generate/
+  FaceSwap pertinentes pasan. `added_face_20261017` falla antes del refino
+  (cero llamadas a generación/refino; abstención corporal), documentado sin
+  ocultarlo. Tracking se invocó primero sin argumentos (exit 2 de CLI), luego
+  correctamente: 453 + 27 comprobaciones PASS. Evidencia completa en
+  `tester/results.json`, `tester/verdict.json` y logs asociados. Verificación
+  adicional de la retirada de expansión: nuevo despacho GREEN con núcleo
+  borrado=0, añadidos=0, escritura fuera de medición/persona/otra persona=0
+  (`tester/measured_scope_green.log`). Calidad/aceptación abiertas.
+- **Primera prueba real neutral — FAIL visual**: `astronaut.png` local de
+  skimage ampliada de 512 a 2048 para ejercer la geometría de escalado (no
+  acredita detalle nativo). «La mujer debe tener el pelo rojo», semilla
+  424242, modelo real: `neutral_real/compare_real.png`, log `real.log`,
+  inferencia 86 s. Se añade pelo rojo alrededor y queda pelo original dentro;
+  no se declara correcto. La ruta fue **region_edit**, con máscara ampliada
+  al 87,2 % del cuadro y refino omitido por área: NO ejercita el arreglo de
+  receta focal. El 52,45 % de la foto supera delta 10; es un límite del
+  flujo previo de medición/pegado, no un PASS de conservación. Los casos de
+  apariencia y el A/B posterior se registran a continuación.
+- **Segundo neutral — FAIL visual**: mismo astronaut/semilla, «la mujer debe
+  ser calva», `neutral_appearance/compare_real.png`, `real_appearance.log`:
+  máscara 1.212.918 px (33,1 % del recorte), refino omitido por área; el crudo
+  ya conserva un rectángulo de pelo rodeado de calva. No es el acabado.
+- **A/B causal retirando SOLO la expansión**: misma fuente/prompts/semilla,
+  en una instancia diagnóstica con helper identidad (motor real, sin doble de
+  inferencia). Máscara 364.076 px; vuelve el refino 1064×1268 (escala previa
+  1,60×) con `mask=foto, ref=index_timestep_zero`, dos inferencias reales
+  (82 s + 87 s). Evidencia `real_without_expansion.log`, metadatos y muestras
+  por llamada y `neutral_without_expansion/compare_real.png`. La retirada se
+  integró después: el router conserva directamente la máscara completada,
+  equivalente al control diagnóstico. El cambio >10 niveles baja de 8,67 %
+  a 4,49 % de la foto. **Inspección visual del root: mejora parcial, FAIL
+  como edición completa**: ya no queda el bloque frontal de pelo, pero se
+  conservan restos claros y una orla del contorno previo. No usar esta prueba
+  como PASS de calvicie ni como validación de todo el mapa de versatilidad.
+  La entrada neutral amplificada solo acredita comportamiento y geometría,
+  no textura nativa de una foto de alta resolución. No se han renderizado
+  las imágenes explícitas del usuario ni reiniciado la UI/backend compartido.
+- **Cierre técnico acotado**: reviewer final **APPROVE** sobre receta del
+  refino + retirada de expansión; tester **PASS CPU** para ese alcance.
+  Los 9 probes finales dan exit 0 (refino, nuevo despacho, pegado medido,
+  superficies, retirada, adición, multicláusula, referencia de apariencia y
+  selección), `tester/final_results.json`. Ruff completo de ambos probes,
+  Ruff crítico de producción y py_compile pasan. Build final aislado exit 0
+  en `build_final.log`. `diff --check` de manager/probe/docs pasa admitiendo
+  CRLF; run/core mantienen espacios finales previos fuera del cambio.
+- **Corrección de evidencia del tester**: una primera invocación final
+  con runpy produjo «Ran 0 tests» y fue rechazada por el reviewer. Se conserva
+  como `tester/final_measured_scope_harness_zero_tests.log` y NO cuenta como
+  PASS. Repetición con carga explícita de suite y guardia de cantidad:
+  `COLLECTED_TESTS=1`, `Ran 1 test`, seis subtests verdes y todos los contadores
+  de fuga a cero (`tester/final_probe_editor_measured_scope_dispatch_20261104.log`).
+- **Estado de producto**: historia ABIERTA por FAIL visual parcial y falta
+  de aceptación del usuario. Se plantea elegir entre comparación aislada de
+  v5.1280 (sospecha original) y corregir la medición actual antes de ampliar el
+  diseño. No se ha hecho commit ni desplegado/ejecutado el EXE construido.
+
+## 2026-11-04 — «Revisa los logs de las últimas ediciones, el resultado es pobre» (v5.1304)
+
+- **Petición**: revisar los logs de las últimas ediciones del Image Editor y
+  corregir el resultado pobre. Casos: `edit_1793747703.png` (00:08, «EL HOMBRE
+  DEBE SER CALVO»), `edit_1793744356.png` y `edit_1793745430.png` (23:37,
+  `calidad=True`, cara/ojo/ceja duplicados). Logs
+  `logs/ui_start_20261104_000626.log` y `logs/ui_start_20261103_230945.log`.
+- **Causas medidas**:
+  1. **Pegado exacto con máscara binaria**: v5.1264 puso `feather_px = 0`
+     (`«Feather paste: 0px»`) para no dejar halo, pero la máscara que recibe
+     el modelo (`mask_1793747419.png`) es un agujero binario cabeza−rectángulo
+     de la cara; el modelo corta en seco contra la frente y ese corte se pega
+     tal cual. Un feather hacia dentro no sirve: atenúa los mechones finos que
+     cuelgan (medido en el probe [1]: 188 px al 74,5 % de fantasma).
+  2. **Refino que descartaba su propia mejora**: `_second_focused_pass`
+     pegaba solo la diferencia medida entre el refino y el pase 1. En el log
+     00:08 el refino tenía la textura buena (`FastEdit_01173_.png`) y el
+     resultado final conservó la calva plana del pase 1 (`FastEdit_01172_.png`).
+  3. **Refino sin compuerta de caras**: el pase 2 podía pintar ojos/cejas
+     duplicados (23:37) y se pegaba.
+  4. **Nitidez medida en todo el recorte**: en 2774×2293 dominado por pared
+     lisa salió `nitidez parche 5 -> 10 (original 9, 120 % de fuente)`, que
+     ocultaba que la cabeza iba a una fracción de la textura real.
+  5. **Atajo `_large_zone` (≥15 % del recorte)**: pegaba la máscara entera y
+     contradecía la doctrina v5.1211 del agujero de cabeza («pega el cambio
+     medido, no la máscara entera»); además perdía el material retirado que se
+     sale de la silueta (`probe_editor_measured_paste_zone` [1] fallaba 7/8).
+  6. **`hair_limit` no se reiniciaba por cara** en `_expand_seed_to_head`:
+     la segunda cabeza heredaba el tono de pelo de la primera.
+- **Fix aplicado** (`roop/img_editor/img_editor_manager.py`):
+  - `_soften_generation_edge` (nuevo): suaviza SOLO la máscara que ve el
+    modelo en ediciones de apariencia (ruta principal y
+    `_narrow_appearance_passes`), para que `SetLatentNoiseMask` mezcle el
+    cambio con lo de fuera y la costura nazca suave. Región/objeto siguen con
+    máscara binaria para no dejar el objeto a medio quitar.
+  - `_integrate_local_generation`: el pegado vuelve a ser exacto (0 px de
+    feather, sin halo); la nitidez se mide SOLO dentro de la zona que se pega
+    (`local_mask`) en la fuente y en el parche.
+  - `_second_focused_pass`: pega la zona medida ENTERA con el contenido
+    refinado y rechaza el refino si `_added_face_mask` detecta una cara nueva
+    o `_degenerate_faces_mask` una cara colapsada.
+  - Eliminado el atajo `_large_zone`: siempre se mide el cambio real.
+  - `_expand_seed_to_head`: `hair_limit = None` al inicio de cada cara.
+- **Verificación CPU** (sin render nuevo): `probe_editor_measured_paste_zone`
+  **8/8** (antes 7/8), `focused_refine` GRUPOS OK, `paste_guard` OK,
+  `bald_flow` exit 0, `bald_sharpness_fix_check` exit 0,
+  `test_integrate_smoke` PASS (nitidez 67 % de la fuente, fuera 0),
+  `added_face_20261017` GRUPOS OK, `surface_completion_20261102` **15/15**,
+  `addition_mask_20261102` **4/4**, `removal_paste_silhouette` OK,
+  `local_window_area`, `head_mask_scale`, `change_scope` y
+  `selection_contract` **15/15** exit 0. Ruff E9,F63,F7,F82 y py_compile
+  verdes.
+- **Fallos previos, no causados por este cambio**:
+  `probe_editor_compound_fast_dispatch` (assert «cambio solicitado apenas
+  visible» ausente, ya documentado el 2026-11-03) y
+  `probe_editor_selection_ui_contract` 16/17 (`ui_endpoint_contract` exige un
+  componente `imageeditor` que la UI oculta ya no expone).
+- **Suavizado del borde enviado al modelo**: el tope de `_soften_generation_edge`
+  pasó de 12 px (sigma 6) a 48 px (sigma 24) y la fracción de 0,02 a 0,08, para
+  que el borde tenga peso real en el espacio latente y la costura nazca suave en
+  vez de un corte que casi no se nota al bajar a latente. (24 px no bastó en el
+  render del usuario.)
+- **Guardia Kontext en edición corporal**: `edit_described_subject` y
+  `edit_selected_region` ahora llaman a `permit_automatic_model` cuando
+  `automatic=True` antes de `allow_model`, igual que la ruta de cámara. Evita el
+  rechazo "Auto detuvo la solicitud... Modelo rechazado: flux1-kontext-dev" en
+  ediciones de ropa/zapatos/medias. Verificado: py_compile y
+  `probe_editor_surface_completion_20261102` 15/15.
+- **Remanentes (pelo) — solución final**: `spatial_reference` se mantiene
+  `true` en `appearance_edit` (evita fantasmas). Los remanentes se eliminan en
+  el **refino focal**: este ahora regenera la **cabeza entera** (no solo el
+  delta de ~1 %) y con `no_kontext=True` (sin anclaje espacial), de modo que
+  el pelo residual desaparece. El refino regenera la cabeza entera (cara
+  incluida) a resolución nativa, con `no_kontext=True`; la compuerta de caras
+  (`_added_face_mask` / `_degenerate_faces_mask`) rechaza el refino si aparece
+  o colapsa una cara, por lo que no hay fantasmas. La cara se regenera con
+  mejor calidad en vez de pegarse a otro tamaño. El pegado sigue exacto (0 px).
+  General: funciona para cualquier edición de apariencia, no solo calva.
+  Verificado: `probe_editor_focused_refine` GRUPOS OK.
+- **Refino de textura (v5.1292b, mismo día)**: el pase 2 medía el delta entre
+  el refino y el pase 1 y pegaba solo ese delta (1,6 % de la cabeza), por eso
+  el refino con buena textura no llegaba a la calva plana. Ahora pega la cabeza
+  medida entera dentro de la ventana focal (sujeto, no delta), con pegado exacto
+  (0 px) y compuerta de caras; si el delta es demasiado pequeño para abrir
+  ventana, cae a la máscara del sujeto. Verificado: `probe_editor_focused_refine`
+  GRUPOS OK, `probe_editor_measured_paste_zone` 8/8.
+- **Pendiente**: PASS visual con una foto real (la UI se cerró a las 00:24 y
+  no se lanzó ningún render). No se ha tocado la UI activa ni se ha hecho
+  commit.
+
+## 2026-11-03 — Boca abierta con objeto (mazorca): la oclusión se descartaba entera (v5.1288)
+
+- **Queja**: «están muy bien menos aun las bocas, cuando están abiertas comiendo
+  una mazorca por ejemplo y esa oclusión la hace mal, y una pixelada», con el log
+  del lote de 29 fotos.
+- **Causa medida en el log** (`961031919.jpeg`, boca abierta ratio 0,30, cara
+  134×161): `[QUALITY] Oclusión SKIP (frac=65% > 40% — máscara no localizada)` →
+  `[MOUTH_DECISION] occ_frac=0.650 occ_applied=False ... blend_factor=0.341`.
+  `_localize_mouth_occlusion` solo aceptaba componentes con fracción ≤
+  `occlusion_max_fraction` (0,40); la mazorca y la mano que la sostiene forman un
+  único componente que cubre el 65 % de la cara → sin candidato → máscara tirada
+  entera → la boca del origen se pintaba sobre la mazorca (occlusión mal + boca
+  sucia). Las 3 fotos con `occ_applied=True` del lote estaban en 0,20-0,35.
+- **Fix**: el componente que CRUZA los labios (evidencia oral > 0,18 y anillo >
+  0,12, ya medidas) y supera el 40 % se conserva **recortado a la boca y su
+  anillo** (`_clip_occlusion_to_mouth`, elipse de `_mouth_oral_domains`), y su
+  fracción recortada debe volver a quedar dentro de 0,01-0,40. El gate general de
+  la cara (0,01-0,40, baja calidad) no se toca; dos candidatos válidos siguen
+  absteniéndose.
+- **Contrato**: `probe_faceswap_profile_mouth_occlusion.py` gana
+  `_check_mouth_rescue_large_object` (objeto al 65 % → rescate dentro de 0,40 con
+  la boca cubierta y la frente intacta; mancha no oral → sin rescate; sin puntos
+  → sin recorte). `probe_faceswap_occlusion_domain_20261025.py` 12/12 sigue
+  verde.
+- **Estado**: py_compile, ruff E9/F63/F7/F82 y ambos probes verdes. **Sin PASS
+  visual**: falta re-render del mismo lote con v5.1288 y mirar la boca con
+  mazorca. La «pixelada» no se declara resuelta: se atribuye a la boca del origen
+  mezclada al 34 % sobre el objeto; si persiste hay que mirar el recorte real.
+
+## 2026-11-03 — Postura nueva: la compuerta de caras le pintó el póster en la cara (v5.1287)
+
+- **Queja**: «revisa esta edición porque lo ha hecho pero mal la cara» sobre
+  `img_editor/edit_1793717267.png` (15:46, «la mujer debe estar de rodillas
+  mirando con deseo al hombre»): la mujer quedó de rodillas, pero sobre su cara
+  hay un rectángulo con el póster que sostiene.
+- **Causa medida**: la compuerta de caras añadidas de v5.1220 empareja el
+  centro de cada cara del resultado con los de la foto de entrada y restaura el
+  rectángulo de la foto original cuando no empareja. La cara REAL se movió con
+  la postura y quedó a 161 px de su sitio de pie (el log la dio por «nueva»); el
+  segundo intento que disparó —«leave every original person exactly where they
+  are», lo contrario de la petición— pintó el póster encima de su cara. La ruta
+  Turbo no tenía la exención de postura que la ruta Kontext ya usaba
+  (`_instruction_preserves_face_layout`).
+- **Fix**: `_instruction_moves_people_position()` en `img_editor_manager.py`
+  (conceptos `pose`/`scenario` ya medidos, sin listas nuevas) exime el retry y
+  la restauración en la ruta Turbo, igual que Kontext. Una edición de apariencia
+  (calvo, pelo) conserva la protección de v5.1220 intacta.
+- **Segundo defecto, misma sesión**: `prompt_translator._normalize_dress_as_idiom`
+  («ir/estar de X» → «ir vestido de X») reescribió «estar de rodillas» como
+  «estar vestido de rodillas» y el modelo recibió «The woman must be dressed on
+  her knees». Ahora la regla no se aplica cuando la cláusula mide postura
+  (`PromptAnalyzer.POSE_KEYWORDS`), y «EL HOMBRE debe ir de sissy» sigue
+  reescribiéndose.
+- **Pruebas**: `probe_editor_added_face_20261017.py` con el grupo nuevo «postura
+  nueva ⇒ sin retry ni restauración»; `py_compile` y `ruff E9,F63,F7,F82`
+  verdes.
+- **Límite/PASS visual**: los píxeles del resultado no se pueden comparar con el
+  original porque después corre el acabado (upscale 1920 + nitidez + color): la
+  comprobación de «¿es una copia pegada?» por correlación de plantilla da
+  −0,14…0,16 (no lo es). Falta un render nuevo con v5.1287 para el PASS visual.
+
+## 2026-11-03 — APK: los modelos de Generate los dicta el servidor (v5.1286)
+
+- **Queja**: «en la APK no están bien los modelos de Generate, no deben ser
+  hardcode». La lista vivía en `MainActivity.kt` (`arrayOf("flux_dev_q4",
+  "flux_dev_abliterated", "schnell", "klein_base")`): la app ofrecía motores
+  que el PC podía no tener instalados, y al instalar otros no aparecían hasta
+  recompilar la APK.
+- **Fuente única**: `get_generation_engine_catalog()` en
+  `roop/img_editor/flux_gen_comfy_client.py` = motores **instalados**
+  (`get_installed_generation_engines`) + default normalizado a un alias de la
+  lista.
+- **Servidor**: endpoint Gradio `generate_engines` (`queue=False`) en
+  `ui/tabs/gen/ui.py` y `ui/tabs/gen/events.py`, que devuelve el catálogo JSON.
+- **APK**: `GradioClient.fetchEngineCatalog()` lo pide al conectar y
+  `MainActivity.applyEngineCatalog()` reconstruye el desplegable conservando la
+  elección guardada por alias. Sin conexión queda un solo marcador («Motor por
+  defecto del servidor»), nunca una lista de modelos. `versionName` 1.6 /
+  `versionCode` 7.
+- **Pruebas**: `py_compile` de los tres .py tocados;
+  `probe_gen_prompt_adherence.py` **110 OK / 0 FAIL** (con los checks nuevos
+  «Android ya no lleva la lista escrita a mano», «Android pide el catálogo al
+  servidor» y «catálogo servido con motores y default válido»).
+- **Límite**: falta probarlo en el teléfono contra una UI viva. El desplegable
+  de **Edit** sigue con su lista propia: la queja era solo de Generate.
+
+## 2026-11-03 — «No hizo nada» en los últimos prompts: prenda ≠ dirección y «ir de X»
+
+Sesión `logs/ui_start_20261103_121405.log` (v5.1283, 12:15-12:28), tres
+peticiones y dos fallos distintos medidos en el propio log:
+
+1. **`EL HOMBRE debe vestir con un tanga`** → `Sufijo de desnudez total
+   omitido` y `dirección=uncover` (12:25-12:26). El analizador metía el
+   **nombre** de la prenda en el concepto de dirección: `attribute_uncover`
+   contenía `thong tanga g-string bikini lingerie underwear swimsuit …`, así
+   que «vestir con un tanga» medía `un 0,331 / co 0,211` → **uncover**. Esa
+   dirección enruta como un «quitar»: motor sin ancla, denoise 1,00 y la zona
+   de ropa libre → el jersey salió con un estampado inventado y ningún tanga
+   (`edit_1793705210.png`, cambio solo en la manga). **Fix**: una prenda no es
+   una dirección; `attribute_uncover` se queda con la acción (quitar,
+   desvestir, exponer) y los cuantificadores de cobertura mínima (`only`,
+   `solo`, `mínimo`), y las prendas siguen en `attribute_body`. Medido tras el
+   arreglo: `MAN must wear a thong.` → `un 0,000 / co 0,211` → **cover**;
+   «vestida solo con un tanga» y «sin medias, descalza» siguen en **uncover**.
+2. **`EL HOMBRE debe ir de sissy`** → `'MAN MUST GO FROM SISSY'` (12:27), el
+   modelo recibió una frase sin sentido y regeneró el marco sin cambiar la
+   ropa (`edit_1793705325.png`). Marian traduce el verbo de movimiento de la
+   construcción española «ir de + estilo». **Fix**: `_normalize_dress_as_idiom`
+   en `prompt_translator.py` escribe «ir vestido de X» antes de traducir (regla
+   de gramática, no vocabulario de prendas). Medido: `MAN must be dressed in
+   sissy`.
+3. **Sufijo de estado «cover»**: `_body_state_clause` añadía «body covered with
+   warm clothing» a cualquier petición de vestir con intensidad ≥ 0,30, y el
+   tanga mide 0,306: abrigo en un pedido de tanga. Ahora es «dressed in the
+   requested clothing, covering the body» (no inventa la prenda).
+
+Pruebas: `py_compile` OK; batería del analizador con los siete casos (prenda,
+compuesto, descalza, quitar camiseta); traducción real del modelo local con
+las dos frases del log; `probe_editor_multiclause_design_20261030.py` 15/15,
+`probe_editor_prompt_not_applied.py` OK,
+`probe_editor_selection_ui_contract_20261019.py` 17/17. **Fallos previos, no
+causados por este cambio** (idénticos antes y después con la lista vieja
+restaurada en memoria): `probe_editor_compound_fast_dispatch.py`
+(`«cambio solicitado apenas visible»` ausente) y
+`probe_editor_body_clause_guard.py` («el bañador pintado en la otra persona se
+pegó»). **Límite**: sin render nuevo; falta ver una edición real de «vestir
+con un tanga» y «ir de sissy» al reabrir AutoAuto (banner v5.1284).
+
+## 2026-11-03 — Dos zonas del Image Editor: cuál funciona y bug del lienzo pintado
+
+- **Decisión del usuario (2026-11-03)**: se oculta `🎯 Seleccionar zonas`
+  (`visible=False` en `ui.py`) y se deja **solo el lienzo pintado**, abierto
+  por defecto. Los componentes del analizador se siguen construyendo para no
+  romper el contrato de API (`edit_manual_region`, 15 entradas) ni su cableado.
+- **Por qué el lienzo y no el analizador**: el analizador nunca llegó a
+  ejecutarse en los logs (ni una traza de `analyze_regions`), depende de
+  Moondream en GPU (~1,9 GB libres) más CLIPSeg y Qwen 3B en CPU. El lienzo sí
+  llega al pipeline: con Auto/LongCat la máscara se entrega al cliente
+  (`Máscara focal entregada al cliente`); solo Kontext/Klein la rechazan,
+  porque son motores globales.
+
+- **UI v5.1283**: el prompt baja de 26 a **23 px** y pasa a **negrita**
+  (`font-weight: 700` en `.prompt-box-img` y en su `textarea`/`input`), a
+  petición del usuario: 26 px era demasiado. El tamaño y el peso deben ir
+  también en la regla del `textarea`, porque Gradio no los hereda.
+- **UI v5.1282**: `🖌️ Delimitar zona a mano` vuelve a estar **plegado**
+  (`open=False`) y el prompt crece a 26 px. El CSS de `.prompt-box-img`
+  fijaba el tamaño en el contenedor, pero Gradio escribe dentro de un
+  `textarea` que no lo hereda: se añadió la regla para `textarea`/`input`.
+- **Bug v5.1281 — `hood` sin asignar** (`img_editor_manager.py`,
+  `_expand_seed_to_head`): «Ruta rápida falló: local variable 'hood'
+  referenced before assignment» (log 11:25, «EL HOMBRE DEBE SER CALVO»).
+  Semilla de 2,7 % sobre un sujeto de 25,3 % = 10,7 % → entraba en un
+  `if/else` con las dos ramas en `pass` que leía `hood` antes de asignarlo.
+  Bloque eliminado: no hacía nada salvo romper la edición. Versión subida a
+  v5.1281 en `run.py` (banner), `roop/core.py` (`APP_VERSION` y título de
+  ventana) y `AGENTS.md`.
+- **Estado de las dos rutas**: la selección medida (H-EDIT-SELECT) sigue
+  aprobada en su contrato (17/17 en
+  `probe_editor_selection_ui_contract_20261019.py`) pero su UI queda oculta; el
+  lienzo pintado es la única zona visible y solo funciona con motor
+  Auto/LongCat, porque Kontext/Klein son globales.
+- **Bug medido en `logs/ui_start_20261103_103649.log` (10:36)**: dos clics de
+  TRANSFORMAR con máscara pintada imprimen `Selección manual recibida
+  (cobertura=5.9%)` y NADA más: no hay `DEBUG selection_state`, ni ComfyUI, ni
+  error. La única salida silenciosa era la comprobación de lienzo caducado
+  (`manual_canvas` distinto de la foto), que además dejaba el trazo viejo en el
+  lienzo, así que cada reintento fallaba igual. En ese mismo log el análisis de
+  zonas no aparece ni una vez (nunca llegó a Python).
+- **Fix v5.1281** (`ui/tabs/img_editor/events.py`): `_canvas_mismatch_reason`
+  sustituye la comparación píxel-exacta. El lienzo se acepta si el fondo es el
+  composite (las diferencias caen bajo el trazo, halo 3px) o si el editor lo
+  reescaló con la misma proporción (la máscara ya se reajusta en
+  `_extract_painted_mask`). Solo se rechaza otra foto (diferencia >1% fuera del
+  trazo o proporción distinta) y el rechazo se imprime con la medida. `on_analyze`
+  imprime ahora `Análisis de zonas solicitado` al entrar, para distinguir «no
+  llegó el clic» de «falló el análisis». Contrato UI **17/17 PASS**, py_compile
+  OK. Sin render nuevo: falta confirmar con una foto real que el trazo ya edita
+  solo su zona.
+
 ## 2026-11-02 — Arreglo de los 3 huecos del Image Editor (superficie, añadir, quitar)
 
 - **Hueco 1 — Superficie/decorado (orla naranja)**: implementado `_complete_surface_recolor`
@@ -4089,3 +5115,15 @@ longcat_turbo_denoise → KSampler denoise field).
 - No se reinició la UI activa (requerido por AGENTS.md) ni se tocó FaceSwap /
   Generate / Android.
 `evidence/metrics_20261029_edit_1793232879_denoise095.json`
+## 2026-11-05 — Limpieza de lint y sincronización de versión (relevo)
+
+- **Acción**: revisión integral de MEMORY, bitácora, requisitos y estado del código solicitada por el usuario. Sin cambios de ejecución ni de versión de la aplicación (sigue v5.1309).
+- **Lint**: `run.py` y `roop/core.py` quedan ruff-clean salvo E402 intencional en `run.py` (`from pathlib import Path` diferido por diseño, tras definir `resilient_unlink`). Corregidos E701/E722/F841/F541 y F401 (`gc`, `glob`, `_glob`). `py_compile` verde en ambos.
+- **Documentación**: `spec/00-PRINCIPIOS.md` cabecera actualizada de v5.1258 (2026-10-30) a v5.1309 (2026-11-05), alineada con `AGENTS.md`, `run.py` y `roop/core.py`.
+- **No tocado**: P1/P2 de versatilidad (pendientes en `spec/01`/`MEMORY`), crash de pytest por entorno DLL, resto del diff (63 archivos) sin lint archivo por archivo.
+- **Bitácora**: esta entrada registra la limpieza; no declara resuelto ningún defecto visual ni de versatilidad.
+
+**Relevo histórico superado:** P1 y P2 de versatilidad ya constan aplicadas y
+verificadas con 23/23 contratos (ver spec/03). El relevo vigente está al inicio
+de esta memoria y en `plans/WORKLOG_state_logs_fix_20261106.md`: PASS técnico
+v5.1312; calidad visual y vídeo representativo siguen pendientes.

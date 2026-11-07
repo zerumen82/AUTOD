@@ -5,7 +5,10 @@ Qwen Image Edit ComfyUI Client
 Usa los nodos oficiales de ComfyUI-QwenImageEdit con VAE convertido
 """
 
-import os, sys, json, time, requests, io
+import os
+import time
+import requests
+import io
 from typing import Optional, Tuple
 from PIL import Image
 from dataclasses import dataclass
@@ -28,7 +31,7 @@ class QwenEditComfyClient:
     def is_available(self):
         try:
             return requests.get(f"{COMFY}/system_stats", timeout=3).status_code == 200
-        except:
+        except BaseException:
             return False
 
     def get_model_paths(self, qwen_version: str = "q3") -> dict:
@@ -62,7 +65,7 @@ class QwenEditComfyClient:
                 missing.append(f"{name}: {path}")
         
         if missing:
-            return False, f"Modelos faltantes:\n" + "\n".join(missing)
+            return False, "Modelos faltantes:\n" + "\n".join(missing)
         
         self._model_paths = paths
         self._qwen_version = qwen_version
@@ -122,8 +125,10 @@ class QwenEditComfyClient:
             w, h = image.size
             new_w = (w // 64) * 64
             new_h = (h // 64) * 64
-            if new_w < 64: new_w = 64
-            if new_h < 64: new_h = 64
+            if new_w < 64:
+                new_w = 64
+            if new_h < 64:
+                new_h = 64
             if new_w != w or new_h != h:
                 print(f"[QwenEdit] Redimensionando {w}x{h} → {new_w}x{new_h} (múltiplo de 64)", flush=True)
                 image = image.resize((new_w, new_h), Image.LANCZOS)

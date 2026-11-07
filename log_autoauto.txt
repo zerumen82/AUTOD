@@ -1,0 +1,28 @@
+[INFO] PyTorch 2.6.0+cu124 (CUDA 12.4) bin añadido al PATH: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin
+ (TEMP) Configurado en: D:\PROJECTS\AUTOAUTO\.autodeep_temp
+[CLEANUP] Limpiando temporales antiguos de Gradio: C:\Users\INdaHouse\AppData\Local\Temp\gradio
+[CLEANUP] Limpiando temporales del proyecto: D:\PROJECTS\AUTOAUTO\.autodeep_temp
+[INFO] Sesión de UI volcada a: D:\PROJECTS\AUTOAUTO\logs\ui_start_20261027_171325.log (PID 22256)
+
+[STEP 1] Preparando entorno NVIDIA/CUDA...
+[CLEANUP] No se encontraron temporales para limpiar
+CuDNN DLL cargada (PyTorch): cudnn64_9.dll
+CuDNN DLL cargada (PyTorch): cudnn_adv64_9.dll
+Error cargando cudnn_cnn64_9.dll: [WinError 127] No se encontró el proceso especificado
+Error cargando cudnn_ops64_9.dll: [WinError 127] No se encontró el proceso especificado
+
+[STEP 2] Cargando motores de Inteligencia Artificial...
+  - Verificando ONNX Runtime...
+    Proveedores disponibles: ['AzureExecutionProvider', 'CPUExecutionProvider']
+  - ONNX Runtime: CPU only
+  - PyTorch version: 2.6.0+cu124
+  - PyTorch CUDA: OK
+  - GPU: NVIDIA GeForce RTX 3060 Ti (8.0 GB)
+
+[STEP 3] Lanzando interfaz Gradio...
+==================================================
+AUTO-AUTO - ARRANQUE
+==================================================
+[INIT] Configurando asyncio...
+[OK] Patch asyncio aplicado
+[OK] Patch Gradio SSE aplicado

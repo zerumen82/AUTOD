@@ -86,6 +86,92 @@ def live_swap(frame, options):
         return frame
 
 
+APP_VERSION = "v5.1319 (2026-11-07)"
+
+
+def _active_server_path():
+    try:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(base, "logs", "active_server.json")
+    except Exception:
+        return os.path.join("logs", "active_server.json")
+
+
+def _read_active_server():
+    import json as _json
+    try:
+        path = _active_server_path()
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as handle:
+            data = _json.load(handle)
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def _write_active_server(url, log_path=""):
+    import json as _json
+    try:
+        path = _active_server_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            _json.dump(
+                {
+                    "version": APP_VERSION,
+                    "pid": os.getpid(),
+                    "url": url,
+                    "log": log_path or "",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                },
+                handle,
+            )
+    except Exception:
+        pass
+
+
+def _tail_primary_log(log_path, own_log_hint=""):
+    """La ventana secundaria muestra los logs del servidor primario.
+
+    Sin esto la segunda consola se queda muda en '[UI] Abriendo
+    pywebview...' y el usuario cree que no hay logs (reporte 2026-10-30).
+    Solo lee: jamas escribe en el log primario (usa sys.__stdout__ para
+    no realimentar el _SessionTee propio; seguir el propio log causo el
+    bucle de 202MB del 2026-10-31).
+    """
+    import sys as _sys
+
+    def _emit(text):
+        try:
+            _sys.__stdout__.write(str(text) + "\n")
+            _sys.__stdout__.flush()
+        except Exception:
+            pass
+    try:
+        if not log_path or not os.path.exists(str(log_path)):
+            _emit("[INFO] Log primario no disponible; esta ventana no sigue logs.")
+            return
+        try:
+            if own_log_hint and os.path.abspath(str(log_path)) == os.path.abspath(str(own_log_hint)):
+                _emit("[INFO] El log primario es esta misma ventana; no se sigue a si misma.")
+                return
+        except Exception:
+            return
+        _emit(f"[INFO] Siguiendo log primario: {log_path}")
+        with open(log_path, "r", encoding="utf-8", errors="replace") as handle:
+            handle.seek(0, os.SEEK_END)
+            while True:
+                line = handle.readline()
+                if line:
+                    _emit(line.rstrip("\n"))
+                else:
+                    time.sleep(0.5)
+    except Exception as exc:
+        _emit(f"[INFO] Fin del seguimiento del log primario ({exc}).")
+
+
 def find_available_port(start_port=7861, max_attempts=10):
     """Busca un puerto disponible"""
     for port in range(start_port, start_port + max_attempts):
@@ -109,8 +195,17 @@ def is_gradio_running(url, timeout=5):
 
 def find_existing_autoauto_server(start_port=7861, max_attempts=10):
     """Reuse this project's Gradio server instead of starting another GPU stack."""
+    import socket
     for port in range(start_port, start_port + max_attempts):
         url = f"http://127.0.0.1:{port}"
+        # El puerto debe estar en LISTEN de verdad: un TIME_WAIT/FIN_WAIT
+        # huerfano no es un servidor vivo (log 2026-10-30: consolas
+        # secundarias "reutilizando" un 7861 ya muerto y consolas mudas).
+        try:
+            probe = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+            probe.close()
+        except OSError:
+            continue
         try:
             response = requests.get(f"{url}/config", timeout=0.5)
             if response.status_code == 200 and response.json().get("title") == "AutoAuto - AI Editor":
@@ -148,8 +243,31 @@ def run():
         print("=" * 50)
         
         existing_server_url = find_existing_autoauto_server()
+        _active = _read_active_server()
+        if existing_server_url and _active and str(_active.get("version", "")) != APP_VERSION:
+            print(
+                f"[SERVER] Servidor existente {_active.get('version', '?')} (PID "
+                f"{_active.get('pid', '?')}) distinto de {APP_VERSION}: se ignora "
+                "para cargar codigo nuevo. Cierra TODAS las ventanas si ves dos iconos."
+            )
+            existing_server_url = None
         if existing_server_url:
             print(f"[SERVER] Reutilizando AutoAuto existente en {existing_server_url}")
+            _primary_log = (_active or {}).get("log", "") if isinstance(_active, dict) else ""
+            _primary_pid = (_active or {}).get("pid", None) if isinstance(_active, dict) else None
+            # Sin marcador activo (servidor viejo) NO se sigue nada: seguir el
+            # propio log realimento el _SessionTee y genero el bucle de 202MB
+            # del 2026-10-31. Solo se sigue si hay primario distinto vivo.
+            if _active and _primary_pid and int(_primary_pid) != int(os.getpid()) and _primary_log and os.path.exists(str(_primary_log)):
+                print("[INFO] Ventana SECUNDARIA: los logs del Editor salen AQUI tambien (seguimiento activado).")
+                print(f"[INFO] Log primario (PID {_primary_pid}): {_primary_log}")
+                _tail_thread = threading.Thread(
+                    target=_tail_primary_log, args=(_primary_log, ""), daemon=True, name="PrimaryLogTail"
+                )
+                _tail_thread.start()
+            else:
+                print("[INFO] Ventana SECUNDARIA: los logs del Editor estan en la PRIMERA consola.")
+                print("[INFO] Para verlo todo en una sola, cierra TODAS y abre UNA sola vez.")
         
         # Configurar manejo de excepciones asyncio
         
@@ -232,6 +350,16 @@ def run():
                 print(f"[ERROR] Gradio no respondio despues de {max_wait}s")
                 print(f"[INFO] Abre manualmente: {server_url}")
                 return
+            try:
+                import glob as _glob2
+                _base2 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                _logs2 = sorted(
+                    _glob2.glob(os.path.join(_base2, "logs", "ui_start_*.log")),
+                    key=lambda p: os.path.getmtime(p),
+                )
+                _write_active_server(server_url, _logs2[-1] if _logs2 else "")
+            except Exception:
+                _write_active_server(server_url, "")
         
         # AHORA si abrir pywebview
         print("[UI] Abriendo pywebview...")
@@ -305,7 +433,7 @@ def run():
                 print(f"[DEBUG] Error forzando icono: {e}")
 
         window = webview.create_window(
-            "AutoAuto",
+            "AutoAuto v5.1319",
             url=server_url,
             width=1400,
             height=900

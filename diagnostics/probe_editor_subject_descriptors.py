@@ -40,11 +40,10 @@ assert groups and groups[0]["text"] == "Man must be bald", (
 print("OK: el sujeto medido con la consulta cruda despacha la instrucción traducida")
 
 # Log real 22:51 (edit_1792184313): el hombre a cuatro patas se detectó con
-# det 0.31 frente al 0.89 de la mujer → _credible_faces descartó SU cara, la
-# máscara 'Man' (que cubría su cabeza al 93,9%) no encontró cara que la
-# confirmara → «Sujeto no medido» y la foto salió SIN EDITAR. La puerta del
-# solape debe aceptar cualquier cara DETECTADA; el suelo de credibilidad
-# sigue vigente para los anclajes de calor/head (speck del pie, 27×22 px).
+# det 0.31 frente al 0.89 de la mujer. La máscara semántica mide al hombre;
+# esa evidencia de imagen no debe descartarse porque su cara no esté entre las
+# detecciones consideradas creíbles. Las caras siguen útiles para ampliar la
+# máscara, pero no son requisito para aceptar la región medida.
 synth = Image.new("RGB", (80, 60), (128, 128, 128))
 blob_px = np.zeros((60, 80), np.uint8)
 blob_px[35:55, 40:70] = 255  # dónde está la cara débil, dentro de la máscara
@@ -77,8 +76,8 @@ with patch.object(manager, "_get_clipseg_masker", new=lambda *a, **k: _StubMaske
         synth, "Man must be bald", "el hombre debe ser calvo", {}, [strong],
         detected_faces=[strong, weak],
     )
-assert not only_credible, (
-    "con solo las caras creíbles la máscara del sujeto debió descartarse (rojo del 22:51)",
+assert only_credible and len(only_credible) == 1, (
+    "la máscara semántica medida debe identificar al sujeto aunque su cara no se use como ancla",
     only_credible,
 )
 assert with_detected and len(with_detected) == 1, (
@@ -89,4 +88,4 @@ assert compound_zone is not None, (
     "el compuesto debe medir la zona del sujeto con las caras detectadas",
     compound_zone,
 )
-print("OK: la puerta del solape acepta la cara detectada (det 0.31) que _credible_faces descarta")
+print("OK: la máscara semántica identifica el sujeto aunque la cara no se use como ancla")

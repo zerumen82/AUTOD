@@ -59,13 +59,13 @@ class InstructionVerifier:
                 self._unavailable_reason = preflight.as_message()
                 return False
 
-            self._handler = MoondreamChatHandler(clip_model_path=vision_projector, verbose=False)
+            self._handler = MoondreamChatHandler(clip_model_path=vision_projector, verbose=True)
             self._llm = Llama(
                 model_path=text_model,
                 chat_handler=self._handler,
                 n_gpu_layers=0,
                 n_ctx=1024,
-                verbose=False,
+                verbose=True,
             )
             print("[InstructionVerifier] Moondream2 listo (verificación visual local)", flush=True)
             return True
@@ -166,11 +166,24 @@ class InstructionVerifier:
         self._llm = None
         try:
             if llm is not None:
-                del llm
+                try:
+                    llm.close()
+                except Exception as error:
+                    print(f"[InstructionVerifier] Cierre de texto incompleto: {error}", flush=True)
             if handler is not None:
-                close = getattr(handler, "close", None)
-                if callable(close):
-                    close()
+                try:
+                    close = getattr(handler, "close", None)
+                    if callable(close):
+                        close()
+                    else:
+                        # Installed Llava/Moondream handlers own the native
+                        # projector through ExitStack, without a close method.
+                        # Deleting a reference does not close that stack.
+                        stack = getattr(handler, "_exit_stack", None)
+                        if stack is not None:
+                            stack.close()
+                except Exception as error:
+                    print(f"[InstructionVerifier] Cierre de proyector incompleto: {error}", flush=True)
         finally:
             try:
                 import gc

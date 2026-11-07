@@ -301,6 +301,259 @@ def _measured_poster(finisher, image: Image.Image, tier: str) -> float:
         return 0.0
 
 
+def _gate_sharpness(image: Image.Image) -> float:
+    """Varianza del Laplaciano a 1280 px de lado (misma escala que analyze_image)."""
+    try:
+        import cv2 as _cv2
+        g = np.array(image.convert("L"), dtype=np.uint8)
+        m = max(g.shape[:2])
+        if m > 1280:
+            s = 1280.0 / m
+            g = _cv2.resize(
+                g, (max(1, int(g.shape[1] * s)), max(1, int(g.shape[0] * s))),
+                interpolation=_cv2.INTER_AREA,
+            )
+        return float(_cv2.Laplacian(g, _cv2.CV_64F).var())
+    except Exception:
+        return 0.0
+
+
+def _gate_clipping(image: Image.Image) -> float:
+    """Fracción de píxeles pegados a negro o blanco: recorte de tonos."""
+    try:
+        import cv2 as _cv2
+        g = np.array(image.convert("L"), dtype=np.uint8)
+        m = max(g.shape[:2])
+        if m > 1280:
+            s = 1280.0 / m
+            g = _cv2.resize(
+                g, (max(1, int(g.shape[1] * s)), max(1, int(g.shape[0] * s))),
+                interpolation=_cv2.INTER_AREA,
+            )
+        return float((g <= 4).mean() + (g >= 251).mean())
+    except Exception:
+        return 0.0
+
+
+def _gate_chroma_shift(before: Image.Image, after: Image.Image, max_side: int) -> Tuple[float, float]:
+    """Mean/p95 Lab a,b distance on paired pixels; L changes remain allowed.
+
+    Float RGB in 0..1 keeps OpenCV Lab in CIE units, rather than its scaled
+    uint8 representation. Resize both images equally only to bound CPU cost.
+    This color-only step must not change geometry; it cannot be registered by
+    stretching a candidate back into place.
+    """
+    import cv2 as _cv2
+
+    if before.size != after.size or min(before.size) < 1:
+        raise ValueError("geometría incompatible")
+    width, height = before.size
+    scale = min(1.0, max_side / max(width, height))
+    size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    chroma = []
+    for image in (before, after):
+        probe = image.convert("RGB")
+        if probe.size != size:
+            probe = probe.resize(size, Image.Resampling.BOX)
+        rgb = np.asarray(probe, dtype=np.float32) / 255.0
+        chroma.append(_cv2.cvtColor(rgb, _cv2.COLOR_RGB2LAB)[..., 1:])
+    distance = np.linalg.norm(chroma[1] - chroma[0], axis=-1)
+    return float(distance.mean()), float(np.percentile(distance, 95))
+
+
+class _StepGate:
+    """Puerta de aceptación medida (v5.1245).
+
+    Cada paso opcional se compara antes/después con la misma medida; sólo se
+    revierte cuando EMPEORA (nitidez, posterización, recorte de tonos o croma). No
+    decide por estética ni por listas de prompts.
+    """
+
+    def __init__(self, finisher, tier: str, cancel_check: Optional[CancelCheck] = None):
+        from roop.img_editor.image_quality_pipeline import quality_settings
+
+        self.finisher = finisher
+        self.tier = tier
+        self.cancel_check = cancel_check
+        self.settings = quality_settings()
+        self.enabled = bool(self.settings.get("acceptance_gate", True))
+        gate = self.settings.get("gate") or {}
+        self.tol_sharp = float(gate.get("sharpness_drop_tolerance", 0.06))
+        self.tol_poster = float(gate.get("poster_rise_tolerance", 0.04))
+        self.tol_clip = float(gate.get("clip_rise_tolerance", 0.008))
+        self.full_max = int(gate.get("full_metrics_max_side", 3600))
+        self.chroma_policy = gate
+
+    def snapshot(
+        self,
+        image: Image.Image,
+        *,
+        poster: Optional[float] = None,
+        include_poster: bool = False,
+    ) -> Dict[str, float]:
+        metrics = {"sharp": _gate_sharpness(image), "clip": _gate_clipping(image)}
+        if poster is not None:
+            metrics["poster"] = float(poster)
+        elif include_poster and max(image.size) <= self.full_max:
+            # La comparación es antes/después con la MISMA medida; se acota a 2400 px
+            # para que la puerta no cueste más que el propio acabado en 4K.
+            probe = image
+            if max(image.size) > 2400:
+                s = 2400.0 / max(image.size)
+                probe = image.resize(
+                    (max(1, int(image.size[0] * s)), max(1, int(image.size[1] * s))),
+                    Image.LANCZOS,
+                )
+            metrics["poster"] = _measured_poster(self.finisher, probe, self.tier)
+        return metrics
+
+    def check(
+        self,
+        name: str,
+        before_img: Image.Image,
+        after_img: Image.Image,
+        before_m: Dict[str, float],
+        after_m: Dict[str, float],
+        *,
+        checks: Tuple[str, ...],
+    ) -> Tuple[Image.Image, str]:
+        if not self.enabled:
+            return after_img, ""
+        if "poster" in checks and "poster" in before_m and "poster" in after_m:
+            if after_m["poster"] > before_m["poster"] + self.tol_poster:
+                msg = f"{name} revertido (poster {before_m['poster']:.2f}→{after_m['poster']:.2f})"
+                print(f"[TopTier] {msg}", flush=True)
+                return before_img, msg
+        if "sharp" in checks and before_m.get("sharp", 0.0) > 25.0:
+            drop = 1.0 - (after_m.get("sharp", 0.0) / before_m["sharp"])
+            if drop > self.tol_sharp:
+                msg = f"{name} revertido (nitidez -{drop:.0%})"
+                print(f"[TopTier] {msg}", flush=True)
+                return before_img, msg
+        if "clip" in checks:
+            rise = after_m.get("clip", 0.0) - before_m.get("clip", 0.0)
+            if rise > self.tol_clip:
+                msg = f"{name} revertido (recorte de tonos +{rise:.1%})"
+                print(f"[TopTier] {msg}", flush=True)
+                return before_img, msg
+        if "chroma" in checks:
+            try:
+                mean_limit = self.chroma_policy["chroma_mean_tolerance"]
+                p95_limit = self.chroma_policy["chroma_p95_tolerance"]
+                max_side = self.chroma_policy["chroma_max_side"]
+                for value in (mean_limit, p95_limit):
+                    if (isinstance(value, bool) or not isinstance(value, (int, float))
+                            or not np.isfinite(value) or value < 0):
+                        raise ValueError("tolerancia de croma inválida")
+                if type(max_side) is not int or max_side < 1:
+                    raise ValueError("presupuesto de croma inválido")
+                mean, p95 = _gate_chroma_shift(before_img, after_img, max_side)
+                if not np.isfinite(mean) or not np.isfinite(p95) or min(mean, p95) < 0:
+                    raise ValueError("medida de croma inválida")
+                if mean <= mean_limit and p95 <= p95_limit:
+                    return after_img, ""
+                reason = f"croma media {mean:.2f}/{mean_limit:.2f}, p95 {p95:.2f}/{p95_limit:.2f}"
+            except Exception as error:
+                reason = f"croma no verificable: {error}"
+            msg = f"{name} revertido ({reason})"
+            print(f"[TopTier] {msg}", flush=True)
+            return before_img, msg
+        return after_img, ""
+
+
+def _face_embeddings(image: Image.Image) -> Optional[np.ndarray]:
+    """Embeddings ArcFace de la foto (None si no hay cara o no hay analizador)."""
+    try:
+        import cv2 as _cv2
+        import roop.face_util as _fu
+
+        app = _fu.get_face_analyser()
+        if app is None:
+            return None
+        bgr = _cv2.cvtColor(np.array(image.convert("RGB")), _cv2.COLOR_RGB2BGR)
+        faces = app.get(bgr)
+        if not faces or any(getattr(f, "normed_embedding", None) is None for f in faces):
+            return None
+        embs = [np.asarray(f.normed_embedding, dtype=np.float32) for f in faces]
+        return np.stack(embs)
+    except Exception as exc:
+        print(f"[TopTier] Identidad no medida: {exc}", flush=True)
+        return None
+
+
+def _matched_face_cosines(ref: np.ndarray, cand: np.ndarray) -> Optional[np.ndarray]:
+    """Return one cosine per reference, using every candidate only once.
+
+    SciPy is an existing application dependency (also used by roop.utilities).
+    Invalid/incomplete evidence must not approve an irreversible face change.
+    """
+    from scipy.optimize import linear_sum_assignment
+
+    if ref is None or cand is None:
+        return None
+    ref = np.asarray(ref, dtype=np.float64)
+    cand = np.asarray(cand, dtype=np.float64)
+    if (
+        ref.ndim != 2 or cand.ndim != 2 or ref.shape != cand.shape
+        or not ref.size or not np.isfinite(ref).all() or not np.isfinite(cand).all()
+    ):
+        return None
+    ref_norm = np.linalg.norm(ref, axis=1, keepdims=True)
+    cand_norm = np.linalg.norm(cand, axis=1, keepdims=True)
+    if (
+        not np.isfinite(ref_norm).all() or not np.isfinite(cand_norm).all()
+        or np.any(ref_norm == 0) or np.any(cand_norm == 0)
+    ):
+        return None
+    sims = (ref / ref_norm) @ (cand / cand_norm).T
+    rows, columns = linear_sum_assignment(-sims)
+    return sims[rows, columns]
+
+
+def _faces_keep_identity(
+    original: Image.Image,
+    before: Image.Image,
+    after: Image.Image,
+    settings: Dict[str, Any],
+) -> Tuple[Image.Image, str]:
+    """La restauración no puede empeorar el parecido de ninguna cara medida."""
+    cfg = settings.get("identity") or {}
+    if not bool(cfg.get("verify_after_face_restore", True)):
+        return after, ""
+    if max(after.size) > int(cfg.get("max_side", 2048) or 2048):
+        return after, ""
+    try:
+        ref = _face_embeddings(original)
+        pre = _face_embeddings(before)
+        post = _face_embeddings(after)
+        sim_pre = _matched_face_cosines(ref, pre)
+        sim_post = _matched_face_cosines(ref, post)
+        max_drop = float(cfg.get("max_drop", 0.02))
+        valid = (
+            sim_pre is not None and sim_post is not None
+            and np.isfinite(max_drop) and max_drop >= 0
+        )
+    except Exception as exc:
+        print(f"[TopTier] Verificación individual de identidad falló: {exc}", flush=True)
+        valid = False
+    if not valid:
+        return before, "caras revertidas (identidad individual no verificable)"
+    drops = sim_pre - sim_post
+    if np.any(drops > max_drop):
+        face = int(np.argmax(drops))
+        msg = (
+            f"caras revertidas (cara {face + 1}, "
+            f"identidad {sim_pre[face]:.2f}→{sim_post[face]:.2f})"
+        )
+        print(f"[TopTier] {msg}", flush=True)
+        return before, msg
+    print(
+        f"[TopTier] Identidad individual tras restaurar {len(sim_post)} caras: "
+        f"mínima {sim_pre.min():.2f}→{sim_post.min():.2f}", flush=True,
+    )
+    return after, ""
+
+
 def normalize_quality_steps(steps: Optional[Dict[str, Any]]) -> Dict[str, bool]:
     """Pasos del Modo Calidad. None significa todos activos (API antigua)."""
     enabled = {"deposter": True, "upscale": True, "color": True, "realism": True}
@@ -420,13 +673,18 @@ def run_top_tier_quality(
 
     finisher = get_quality_finisher()
     tier = (enhance_tier or "hd").lower()
+    from roop.img_editor.image_quality_pipeline import limit_quality_tier, quality_settings
+
+    tier, tier_note = limit_quality_tier(image, tier)
+    settings = quality_settings()
     steps = normalize_quality_steps(quality_steps)
     if not preserve_faces and not any(steps.values()):
         return image.convert("RGB"), "ninguna opción de calidad marcada", {}
     analysis = finisher.analyze_image(image, tier=tier)
     profile = analysis.get("profile", {})
     scores = analysis.get("scores", {})
-    notes = []
+    notes = [tier_note] if tier_note else []
+    gate = _StepGate(finisher, tier, cancel_check)
     moves = _classical_finish_strengths(scores, profile, after_edit=False)
     print(
         f"[TopTier] Pipeline TOP tier={tier.upper()} — "
@@ -438,6 +696,8 @@ def run_top_tier_quality(
 
     if steps["deposter"]:
         dep = float(moves["depixelize"])
+        dep_before = out
+        dep_before_m = gate.snapshot(out, poster=float(scores.get("poster", 0.0)))
         if progress_callback:
             progress_callback({"phase": "Desposterizar", "progress": 0.08, "detail": f"{dep:.0%}"})
         out = finisher.depixelize(out, blend_strength=dep, tier=tier)
@@ -452,6 +712,12 @@ def run_top_tier_quality(
                     progress_callback({"phase": "Desposterizar (2ª pasada)", "progress": 0.14, "detail": f"poster={_p_now:.2f} → {dep2:.0%}"})
                 out = finisher.depixelize(out, blend_strength=dep2, tier=tier)
                 notes.append(f"desposterizar x2 {dep2:.0%} (poster={_p_now:.2f})")
+        out, dep_revert = gate.check(
+            "desposterizar", dep_before, out, dep_before_m,
+            gate.snapshot(out, include_poster=True), checks=("poster",),
+        )
+        if dep_revert:
+            notes.append(dep_revert)
     else:
         notes.append("paso desposterizar omitido")
 
@@ -487,8 +753,12 @@ def run_top_tier_quality(
     if preserve_faces:
         if progress_callback:
             progress_callback({"phase": "Preservar caras", "progress": 0.58, "detail": "identidad original"})
-        out = _preserve_faces(image, out)
+        faces_before = out
+        restored = _preserve_faces(image, out)
+        out, faces_revert = _faces_keep_identity(image, faces_before, restored, settings)
         notes.append("caras preservadas")
+        if faces_revert:
+            notes.append(faces_revert)
 
     if cancel_check and cancel_check():
         return out, " + ".join(notes), analysis
@@ -523,8 +793,16 @@ def run_top_tier_quality(
         if band > 0.05:
             if progress_callback:
                 progress_callback({"phase": "Naturalizar bandas", "progress": 0.78, "detail": f"{band:.0%}"})
+            band_before = out
+            band_before_m = gate.snapshot(out, poster=_p_final)
             out = finisher.soften_poster_bands(out, blend=band)
             notes.append(f"naturalizar bandas {band:.0%}")
+            out, band_revert = gate.check(
+                "naturalizar bandas", band_before, out, band_before_m,
+                gate.snapshot(out, include_poster=True), checks=("poster",),
+            )
+            if band_revert:
+                notes.append(band_revert)
 
         if tier == "8k" or max(out.size) >= 3600:
             stripe_mix = _lerp(0.12, 0.26, poster)
@@ -533,21 +811,39 @@ def run_top_tier_quality(
                 notes.append(f"anti-rayas {stripe_mix:.0%}")
 
     if steps["color"]:
+        color_before = out
+        color_before_m = gate.snapshot(out)
         out = finisher.enhance_color(out, blend=float(moves["color"]))
         notes.append(f"color {moves['color']:.0%}")
         use_clahe = (not moves["gentle"]) and max(out.size) <= 2800
         out = finisher.detail_boost(out, blend=float(moves["light"]), use_clahe=use_clahe)
         notes.append(f"luz {moves['light']:.0%}")
+        out, color_revert = gate.check(
+            "color/luz", color_before, out, color_before_m,
+            gate.snapshot(out), checks=("clip", "sharp", "chroma"),
+        )
+        if color_revert:
+            notes.append(color_revert)
     else:
         notes.append("paso color omitido")
 
     if not steps["realism"]:
         notes.append("paso realismo omitido")
     else:
+        banded = poster >= 0.30
+        realism_before = out
+        realism_before_m = gate.snapshot(out, include_poster=banded)
         out, realism_note = _apply_quality_realism(
             finisher, out, moves, poster, heavy_tier=(tier == "8k" or max(out.size) >= 3600),
         )
         notes.append(realism_note)
+        out, realism_revert = gate.check(
+            "realismo", realism_before, out, realism_before_m,
+            gate.snapshot(out, include_poster=banded),
+            checks=("sharp", "poster") if banded else ("sharp",),
+        )
+        if realism_revert:
+            notes.append(realism_revert)
 
     note_str = " + ".join(notes) if notes else "top tier"
     print(f"[TopTier] Listo — {note_str}", flush=True)
@@ -573,6 +869,9 @@ def run_top_tier_edit_finish(
         return image, "acabado edit omitido (mag baja)", {}
 
     finisher = get_quality_finisher()
+    from roop.img_editor.image_quality_pipeline import quality_settings
+
+    settings = quality_settings()
     tier = (enhance_tier or "hd").lower()
     cv_analysis = finisher.analyze_image(image, tier=tier)
     profile = cv_analysis.get("profile", {})
@@ -618,8 +917,14 @@ def run_top_tier_edit_finish(
 
     if progress_callback:
         progress_callback({"phase": "Preservar caras", "progress": 0.95, "detail": "original"})
-    out = _preserve_faces(original.convert("RGB"), out)
+    faces_before = out
+    restored = _preserve_faces(original.convert("RGB"), out)
+    out, faces_revert = _faces_keep_identity(
+        original.convert("RGB"), faces_before, restored, settings,
+    )
     notes.append("caras preservadas")
+    if faces_revert:
+        notes.append(faces_revert)
 
     if poster < 0.48 and mag < 0.72:
         amt = min(1.10, float(profile.get("sharpen", 1.06)))
@@ -651,6 +956,10 @@ def run_quality_enhance_after_edit(
 
     finisher = get_quality_finisher()
     tier = (enhance_tier or "hd").lower()
+    from roop.img_editor.image_quality_pipeline import limit_quality_tier, quality_settings
+
+    tier, tier_note = limit_quality_tier(image, tier)
+    settings = quality_settings()
     steps = normalize_quality_steps(quality_steps)
     if not preserve_faces and not any(steps.values()):
         return image.convert("RGB"), "ninguna opción de calidad marcada", {}
@@ -658,7 +967,8 @@ def run_quality_enhance_after_edit(
     profile = analysis.get("profile", {})
     scores = analysis.get("scores", {})
     poster = float(scores.get("poster", 0.0))
-    notes = []
+    notes = [tier_note] if tier_note else []
+    gate = _StepGate(finisher, tier, cancel_check)
     max_side = max(image.size)
     heavy_tier = tier == "8k" or max_side >= 3600
     moves = _classical_finish_strengths(
@@ -672,10 +982,18 @@ def run_quality_enhance_after_edit(
     out = image.convert("RGB")
     if steps["deposter"]:
         dep = float(moves["depixelize"])
+        dep_before = out
+        dep_before_m = gate.snapshot(out, poster=poster)
         if progress_callback:
             progress_callback({"phase": "Desposterizar", "progress": 0.90, "detail": f"{dep:.0%}"})
         out = finisher.depixelize(out, blend_strength=dep, tier=tier)
         notes.append(f"desposterizar {dep:.0%}")
+        out, dep_revert = gate.check(
+            "desposterizar", dep_before, out, dep_before_m,
+            gate.snapshot(out, include_poster=True), checks=("poster",),
+        )
+        if dep_revert:
+            notes.append(dep_revert)
     else:
         notes.append("paso desposterizar omitido")
 
@@ -696,8 +1014,14 @@ def run_quality_enhance_after_edit(
         return out, "cancelado", analysis
 
     if preserve_faces:
-        out = _preserve_faces(original.convert("RGB"), out)
+        faces_before = out
+        restored = _preserve_faces(original.convert("RGB"), out)
+        out, faces_revert = _faces_keep_identity(
+            original.convert("RGB"), faces_before, restored, settings,
+        )
         notes.append("caras preservadas")
+        if faces_revert:
+            notes.append(faces_revert)
 
     if cancel_check and cancel_check():
         return out, "cancelado", analysis
@@ -731,21 +1055,39 @@ def run_quality_enhance_after_edit(
             notes.append(f"anti-rayas {stripe_mix:.0%}")
 
     if steps["color"]:
+        color_before = out
+        color_before_m = gate.snapshot(out)
         out = finisher.enhance_color(out, blend=float(moves["color"]))
         notes.append(f"color {moves['color']:.0%}")
         use_clahe = (not moves["gentle"]) and max(out.size) <= 2800
         out = finisher.detail_boost(out, blend=float(moves["light"]), use_clahe=use_clahe)
         notes.append(f"luz {moves['light']:.0%}")
+        out, color_revert = gate.check(
+            "color/luz", color_before, out, color_before_m,
+            gate.snapshot(out), checks=("clip", "sharp", "chroma"),
+        )
+        if color_revert:
+            notes.append(color_revert)
     else:
         notes.append("paso color omitido")
 
     if not steps["realism"]:
         notes.append("paso realismo omitido")
     else:
+        banded = poster >= 0.30
+        realism_before = out
+        realism_before_m = gate.snapshot(out, include_poster=banded)
         out, realism_note = _apply_quality_realism(
             finisher, out, moves, poster, heavy_tier=heavy_tier,
         )
         notes.append(realism_note)
+        out, realism_revert = gate.check(
+            "realismo", realism_before, out, realism_before_m,
+            gate.snapshot(out, include_poster=banded),
+            checks=("sharp", "poster") if banded else ("sharp",),
+        )
+        if realism_revert:
+            notes.append(realism_revert)
 
     note_str = "mejora TOP post-edit (" + ", ".join(notes) + ")"
     print(f"[TopTier] {note_str}", flush=True)

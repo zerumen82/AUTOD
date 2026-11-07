@@ -1,0 +1,4 @@
+# Telescope feature
+- telescope pointer update speed when holding deep zoom
+- guide shot integration
+- contrast

@@ -272,6 +272,38 @@ def assert_local(run, ids, finish=False):
         assert run.finishes, "destructive finish not exercised"
 
 
+def assert_reinterpreted_frame(run, ids):
+    """Contract for a measured pose/camera change on an explicit selection.
+
+    v5.1251 (live contract): a full-body posture or camera change cannot be a
+    local crop, so the frame is reinterpreted with Kontext in img2img PURO:
+    the sampler starts from the FULL photo with high noise and NO
+    ReferenceLatent, because the clean anchor keeps the old pose (copy
+    machine measured). No inpaint mask. Heads measured outside the selection
+    are still restored from the original photo, and the selection itself
+    still changes. What is NOT asserted here: the exact prompt wording, the
+    number of loads, or how much of the frame is repainted — those vary with
+    the measured regime and are not part of this contract.
+    """
+    assert run.output is not None and run.output.size == run.source.size, run.message
+    args, options = run.client.loads[0]
+    version = str(options.get("flux_version", args[0] if args else ""))
+    assert "kontext" in version.lower(), f"pose route did not use Kontext: {version}"
+    request = run.client.generations[0]
+    img2img = request.get("kontext_img2img_denoise")
+    assert isinstance(img2img, (int, float)) and 0 < float(img2img) <= 1.0, (
+        "pose route kept the reference latent: the old pose would be copied")
+    assert request.get("mask_image") is None, "frame reinterpretation must not use an inpaint mask"
+    source, out = np.asarray(run.source), np.asarray(run.output)
+    selected = np.asarray(es.union_mask(run.analysis, ids)) > 0
+    assert np.any(out[selected] != source[selected]), "selected region did not change"
+    protected = es.protection_mask(run.analysis, ids)
+    if protected is not None:
+        assert not np.any(
+            out[np.asarray(protected) > 0] != source[np.asarray(protected) > 0]
+        ), "other head changed"
+
+
 def explicit_head():
     assert_local(execute(), ["head-right"])
 
@@ -311,9 +343,14 @@ def explicit_after_finish():
 
 
 def early_route_precedence():
-    for prompt in ("Improve quality and sharpness", "Show from an overhead camera angle",
+    # A selection still precedes textual routing: quality stays local on the
+    # measured crop, and a measured pose/camera change goes to the vision
+    # engine that follows the text (live contract v5.1238/v5.1240) instead of
+    # the global textual router. Neither may reach global inference.
+    assert_local(execute(prompt="Improve quality and sharpness"), ["head-right"])
+    for prompt in ("Show from an overhead camera angle",
                    "Make the person taller and change the posture"):
-        assert_local(execute(prompt=prompt), ["head-right"])
+        assert_reinterpreted_frame(execute(prompt=prompt), ["head-right"])
 
 
 def invalid_never_global():

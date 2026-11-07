@@ -267,6 +267,12 @@ def build_gen_ui():
         # posicionales): se registra aparte para no romper ese orden.
         api_legacy_btn = gr.Button(visible=False)
 
+        # Catálogo de motores para clientes móviles (api_name="generate_engines"):
+        # la APK pregunta qué modelos hay instalados en vez de llevar su propia
+        # lista escrita a mano, que se queda vieja y ofrece motores no instalados.
+        btn_engines = gr.Button(visible=False)
+        engines_json = gr.Textbox(visible=False)
+
     return {
         "prompt": prompt,
         "ref_image": ref_image,
@@ -298,4 +304,6 @@ def build_gen_ui():
         "bt_to_editor": bt_to_editor,
         "bt_open_folder": bt_open_folder,
         "api_legacy_btn": api_legacy_btn,
+        "btn_engines": btn_engines,
+        "engines_json": engines_json,
     }

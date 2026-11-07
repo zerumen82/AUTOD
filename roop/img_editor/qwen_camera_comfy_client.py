@@ -10,11 +10,14 @@ from PIL import Image
 
 from roop.comfy_workflows import get_comfyui_url
 from roop.img_editor.comfy_progress import wait_for_comfy_image
+from roop.img_editor.edit_execution import allow_model, record_execution
 from roop.img_editor.flux_edit_comfy_client import (
     GenResult, _queue_is_idle, _server_vram_free_mb, _sync_unload,
     get_models_base,
 )
-from roop.img_editor.nlp.semantic_analyzer import camera_pose_config, score_camera_pose
+from roop.img_editor.nlp.semantic_analyzer import (
+    camera_pose_config, is_camera_only_request, score_camera_pose,
+)
 
 
 UNET = "qwen-image-edit-2511-Q2_K.gguf"
@@ -86,23 +89,28 @@ def camera_pose(raw_prompt: str, translated_prompt: str = ""):
     return f"<sks> {azimuth} {elevation} {distance}"
 
 
+def _edit_clauses(raw_prompt: str, translated_prompt: str):
+    source = translated_prompt or raw_prompt
+    return [clause.strip() for clause in re.split(
+        r"\s*(?:[,;\n]|\.(?=\s+|$)|\band\b|\by\b|\bwhile\b|\bmientras\b)\s*",
+        source, flags=re.I,
+    ) if clause.strip()]
+
+
+def camera_instruction(raw_prompt: str, translated_prompt: str = ""):
+    """Retain the measured camera clauses, including the requested observer."""
+    return ", ".join(
+        clause for clause in _edit_clauses(raw_prompt, translated_prompt)
+        if is_camera_only_request(clause)
+    )
+
+
 def remaining_edit(raw_prompt: str, translated_prompt: str):
     """Remove only independent camera clauses; retain any mixed clause intact."""
-    source = translated_prompt or raw_prompt
-    clauses = re.split(r"\s*(?:[,;]|\band\b|\by\b)\s*", source, flags=re.I)
-    camera_terms = re.compile(
-        r"\b(?:pov|camera|angle|viewpoint|perspective|view|angulo|camara|vista|cenital|picado)\b",
-        re.I,
-    )
-    other_actions = re.compile(
-        r"\b(?:clothes|clothing|wear|dress|shirt|wall|color|hair|"
-        r"body|anatomy|pose|sit|sitting|stand|standing|kneel|kneeling|"
-        r"face|expression|hand|arm|leg|foot|feet|"
-        r"remove|add|replace|change.*(?:clothes|wall|hair|person)|ropa|pared|pelo|"
-        r"quitar|anadir|cambiar.*(?:ropa|pared|pelo|persona))\b", re.I,
-    )
-    kept = [c.strip() for c in clauses if c.strip() and
-            (not camera_terms.search(c) or other_actions.search(c))]
+    kept = [
+        clause for clause in _edit_clauses(raw_prompt, translated_prompt)
+        if not is_camera_only_request(clause)
+    ]
     return ", ".join(kept)
 
 
@@ -166,6 +174,9 @@ class QwenCameraComfyClient:
 
     def generate(self, image: Image.Image, pose: str, seed=None,
                  progress_callback=None, cancel_check=None):
+        allowed, policy_note = allow_model(UNET)
+        if not allowed:
+            return None, policy_note
         ready, note = self.available()
         if not ready:
             return None, note
@@ -210,6 +221,9 @@ class QwenCameraComfyClient:
 
     def _generate_once(self, url, image, pose, seed, progress_callback, cancel_check, started,
                        stall_timeout=CAMERA_FIRST_STEP_STALL_S, timeout=CAMERA_RUN_TIMEOUT_S):
+        allowed, policy_note = allow_model(UNET)
+        if not allowed:
+            return None, policy_note
         try:
             buffer = io.BytesIO()
             camera_input = image.convert("RGB")
@@ -229,6 +243,10 @@ class QwenCameraComfyClient:
             uploaded.raise_for_status()
             image_name = uploaded.json()["name"]
             workflow = self._workflow(image_name, pose, seed if seed is not None else int(time.time()))
+            model_file = workflow["2"]["inputs"]["unet_name"]
+            allowed, policy_note = allow_model(model_file)
+            if not allowed:
+                return None, policy_note
             queued = requests.post(f"{url}/prompt", json={"prompt": workflow}, timeout=30)
             queued.raise_for_status()
             payload = queued.json()
@@ -246,6 +264,7 @@ class QwenCameraComfyClient:
                 "type": meta.get("type", "output")}, timeout=90)
             response.raise_for_status()
             output = Image.open(io.BytesIO(response.content)).convert("RGB")
+            record_execution("Qwen Cámara", model_file)
             return GenResult(output, time.time() - started), (
                 f"OK ({time.time() - started:.0f}s, {camera_input.width}x{camera_input.height})")
         except Exception as exc:

@@ -4,19 +4,25 @@ import time
 import gc
 import traceback
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 import gradio as gr
 
 from roop.img_editor.img_editor_manager import get_img_editor_manager
+from roop.img_editor.edit_execution import begin_execution, end_execution, format_execution_status
 from roop.output_paths import get_img_editor_output_dir
 from . import state
 from .selection_events import (
-    on_analyze, on_new_image, on_point_select, on_select,
+    normalize_image, on_analyze, on_new_image, on_point_select, on_select,
     use_result_as_input as _use_result_as_input,
 )
 
 RETRY_ATTEMPTS = 2
+NOT_APPLIED_PREFIXES = (
+    "Omitida:",
+    "POV no aplicado:",
+    "Edición combinada no aplicada:",
+)
 
 
 def _extract_painted_mask(editor_value, background):
@@ -26,24 +32,70 @@ def _extract_painted_mask(editor_value, background):
     layers = editor_value.get("layers") or []
     if not layers:
         return None
-    try:
-        width, height = background.size
-        combined = np.zeros((height, width), dtype=np.uint8)
-        for layer in layers:
-            if not isinstance(layer, Image.Image):
-                continue
-            rgba = layer.convert("RGBA")
-            if rgba.size != (width, height):
-                rgba = rgba.resize((width, height), Image.Resampling.NEAREST)
-            combined = np.maximum(combined, np.asarray(rgba, dtype=np.uint8)[:, :, 3])
-        coverage = float((combined > 0).mean()) if combined.size else 0.0
-        if coverage <= 0.0001:
-            return None
-        print(f"[ImgEditor] Selección manual recibida (cobertura={coverage:.1%})", flush=True)
-        return Image.fromarray(combined).convert("L")
-    except Exception as exc:
-        print(f"[ImgEditor] Selección manual omitida: {exc}", flush=True)
+    if not isinstance(layers, (list, tuple)):
+        raise TypeError("Las capas de la máscara manual no tienen un formato válido")
+    width, height = background.size
+    combined = np.zeros((height, width), dtype=np.uint8)
+    for layer in layers:
+        if not isinstance(layer, Image.Image):
+            raise TypeError("Una capa de la máscara manual no es una imagen")
+        rgba = layer.convert("RGBA")
+        if rgba.size != (width, height):
+            rgba = rgba.resize((width, height), Image.Resampling.NEAREST)
+        combined = np.maximum(combined, np.asarray(rgba, dtype=np.uint8)[:, :, 3])
+    coverage = float((combined > 0).mean()) if combined.size else 0.0
+    if coverage <= 0.0001:
         return None
+    print(f"[ImgEditor] Selección manual recibida (cobertura={coverage:.1%})", flush=True)
+    return Image.fromarray(combined).convert("L")
+
+
+def _canvas_mismatch_reason(photo, canvas, painted_mask):
+    """Why the painted canvas cannot belong to the current photo, or None.
+
+    Gradio's ImageEditor may return the composite (photo + strokes) as its
+    background, so a pixel difference *under the painted layer* is not
+    evidence of a stale photo. Only the pixels the user did not paint can
+    prove that the canvas shows another photo.
+
+    A canvas with the same aspect ratio but a different size is the editor's
+    own rescale: the painted layers are resampled to the photo in
+    ``_extract_painted_mask``, so that is not a mismatch either.
+    """
+    if canvas is None:
+        return "el lienzo no devolvió la foto de entrada"
+    width, height = photo.size
+    if canvas.size != (width, height):
+        if canvas.size[0] * height == canvas.size[1] * width:
+            print(
+                f"[ImgEditor] Lienzo manual {canvas.size[0]}x{canvas.size[1]} "
+                f"reescalado por el editor; la máscara se ajusta a {width}x{height}",
+                flush=True,
+            )
+            return None
+        return (
+            f"el lienzo mide {canvas.size[0]}x{canvas.size[1]} y la foto "
+            f"{width}x{height}; son fotos distintas"
+        )
+    base = np.asarray(photo.convert("RGB"), dtype=np.int16)
+    drawn = np.asarray(canvas.convert("RGB"), dtype=np.int16)
+    ignore = np.zeros(base.shape[:2], dtype=bool)
+    if painted_mask is not None:
+        # The paint itself is expected to differ from the photo. A 3px halo
+        # absorbs the stroke edge, including the composite of the same photo.
+        ignore = np.asarray(
+            painted_mask.convert("L").filter(ImageFilter.MaxFilter(7))
+        ) >= 128
+    changed = (np.abs(base - drawn).max(axis=2) > 12) & ~ignore
+    ratio = float(changed.mean()) if changed.size else 0.0
+    if ratio > 0.01:
+        return f"la foto del lienzo difiere en {ratio:.1%} de la imagen sin pintar"
+    return None
+
+
+def _sync_manual_mask_editor(image):
+    normalized = normalize_image(image)
+    return normalized.convert("RGBA") if normalized is not None else None
 
 
 def open_output_folder():
@@ -126,7 +178,8 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                 quality_preserve_faces=True,
                 quality_deposter=True, quality_upscale=True,
                 quality_color=True, quality_realism=True,
-                progress=gr.Progress(), source="?", selection_state=None):
+                progress=gr.Progress(), source="?", selection_state=None,
+                manual_editor_value=None):
     with state._generation_lock:
         if state.is_generating:
             _txt = "Ya hay una transformacion en proceso"
@@ -179,7 +232,19 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             _end_generation()
             return None, "Formato de imagen no soportado", None
 
-        manual_mask = _extract_painted_mask(img_data, img)
+        manual_canvas = normalize_image(manual_editor_value)
+        manual_mask = _extract_painted_mask(manual_editor_value, img)
+        if manual_mask is not None:
+            mismatch = _canvas_mismatch_reason(img, manual_canvas, manual_mask)
+            if mismatch:
+                # Sin este print la petición moría en silencio: el usuario
+                # reintentaba y volvía a fallar sin ninguna traza en el log.
+                print(f"[ImgEditor] Lienzo manual rechazado: {mismatch}", flush=True)
+                _end_generation()
+                return None, (
+                    "La foto del lienzo manual cambió (" + mismatch
+                    + "); vuelve a cargarla y pinta de nuevo"
+                ), None
         # ImageEditor entrega un fondo RGBA. El gestor y FaceAnalysis reciben RGB;
         # conservar alpha aquí haría que el detector omitiera las caras antes del
         # preflight, aunque la selección manual fuese válida.
@@ -191,17 +256,15 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         # textual. Sin selección, el flujo automático se conserva intacto.
         selection_analysis = None
         selected_region_ids = None
-        print(f"[ImgEditor] DEBUG selection_state type={type(selection_state)}", flush=True)
         if isinstance(selection_state, state.SelectionSession):
             selection_analysis, selected_region_ids = selection_state.snapshot()
-            print(f"[ImgEditor] DEBUG snapshot: analysis={selection_analysis is not None}, ids={selected_region_ids}", flush=True)
-        else:
-            print(f"[ImgEditor] DEBUG selection_state is NOT SelectionSession: {selection_state}", flush=True)
         selection_kwargs = {}
+        if manual_mask is not None and selected_region_ids:
+            _end_generation()
+            return None, "Usa la máscara pintada o las zonas detectadas, no ambas a la vez", None
         if selected_region_ids:
             from roop.img_editor.element_selection import validate_selection
             valid, reason = validate_selection(img, selection_analysis, selected_region_ids)
-            print(f"[ImgEditor] DEBUG validate_selection: valid={valid}, reason={reason}", flush=True)
             if not valid:
                 _end_generation()
                 return None, f"Selección inválida: {reason}", None
@@ -235,7 +298,9 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         except Exception:
             pass
 
+    execution_token = None
     try:
+        execution, execution_token = begin_execution(engine_val)
         manager = get_img_editor_manager()
         try:
             iterations = max(1, min(int(auto_iterations), 20)) if autoregressive else 1
@@ -256,6 +321,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             best_hair_candidate = None
             attempts = 1 if selected_region_ids else RETRY_ATTEMPTS
             for attempt in range(attempts):
+                manager._last_instruction_compliance = None
                 res_img, msg, mask_img = manager.generate_intelligent(
                     image=current_img, prompt=p_text,
                     engine=engine_val,
@@ -285,6 +351,8 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                     progress_callback=_ui_progress,
                     **selection_kwargs,
                 )
+                if execution.rejection:
+                    return None, execution.rejection, final_mask
                 compliance = getattr(manager, "_last_instruction_compliance", None) or {}
                 hair_unmet = (res_img is not None
                               and compliance.get("source") == "hair_mask"
@@ -346,7 +414,7 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             current_img = res_img
 
             _cleanup_vram()
-            if str(msg).startswith("Omitida:"):
+            if str(msg).startswith(NOT_APPLIED_PREFIXES):
                 # La imagen sin cambios es una advertencia, no una edición
                 # terminada. Tampoco repitas una localización imposible en las
                 # iteraciones autorregresivas ni guardes un falso resultado.
@@ -376,6 +444,12 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             print(f"[ImgEditor] Release post-petición omitido: {_e}", flush=True)
 
         label = f"{last_msg}"
+        execution_status = format_execution_status(
+            execution, getattr(manager, "_last_instruction_compliance", None),
+            has_instruction=bool(p_text),
+        )
+        if execution_status:
+            label += f" | {execution_status}"
         if iterations > 1:
             label += f" ({iterations} iteraciones autoregresivas)"
         label += f" - Guardado en {output_dir}"
@@ -386,6 +460,8 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         traceback.print_exc()
         return None, f"Error: {str(e)}", None
     finally:
+        if execution_token is not None:
+            end_execution(execution_token)
         _end_generation()
 
 
@@ -395,8 +471,11 @@ def _show_quality_options(enabled):
 
 def _on_generate_desktop(*args, **kwargs):
     """Botón ✨ TRANSFORMAR del escritorio; el origen va al log."""
-    print(f"[ImgEditor] DEBUG _on_generate_desktop: len(args)={len(args)}, kwargs={list(kwargs.keys())}", flush=True)
-    if len(args) == 14:
+    if len(args) == 15:
+        kwargs["selection_state"] = args[-2]
+        kwargs["manual_editor_value"] = args[-1]
+        args = args[:-2]
+    elif len(args) == 14:
         kwargs["selection_state"] = args[-1]
         args = args[:-1]
     kwargs.setdefault("source", "desktop")
@@ -406,6 +485,15 @@ def _on_generate_desktop(*args, **kwargs):
 def _on_generate_api_select(*args, **kwargs):
     """Endpoint /edit_select conservado para clientes de 13 controles."""
     kwargs.setdefault("source", "api/edit_select")
+    return on_generate(*args, **kwargs)
+
+
+def _on_generate_api_region(*args, **kwargs):
+    """Endpoint /edit_region retained without the desktop-only paint canvas."""
+    if len(args) == 14:
+        kwargs["selection_state"] = args[-1]
+        args = args[:-1]
+    kwargs.setdefault("source", "api/edit_region")
     return on_generate(*args, **kwargs)
 
 
@@ -455,8 +543,14 @@ def wire_events(ui_comp):
 
     if "selection_state" in ui_comp:
         _bind_generate(
-            ui_comp["gen_btn"], desktop_inputs + [ui_comp["selection_state"]],
-            _on_generate_desktop, "edit_region",
+            ui_comp["gen_btn"],
+            desktop_inputs + [ui_comp["selection_state"], ui_comp["manual_mask_editor"]],
+            _on_generate_desktop, "edit_manual_region",
+        )
+        _bind_generate(
+            ui_comp["legacy_region_btn"],
+            desktop_inputs + [ui_comp["selection_state"]],
+            _on_generate_api_region, "edit_region",
         )
         _bind_generate(
             ui_comp["legacy_select_btn"], desktop_inputs,
@@ -508,15 +602,26 @@ def wire_events(ui_comp):
     # aplica como una sola región focal en la generación. Se cablea solo si la
     # UI incluye los componentes nuevos (las pruebas antiguas no los pasan).
     if "analyze_btn" in ui_comp and "overlay_img" in ui_comp and "region_choices" in ui_comp:
-        ui_comp["analyze_btn"].click(
-            fn=on_analyze,
-            inputs=[ui_comp["input_img"], ui_comp["selection_state"]],
-            outputs=[
-                ui_comp["overlay_img"], ui_comp["region_choices"],
-                ui_comp["selection_state"], ui_comp["status"],
-            ],
-            concurrency_limit=None, api_name="analyze_regions",
-        )
+        try:
+            ui_comp["analyze_btn"].click(
+                fn=on_analyze,
+                inputs=[ui_comp["input_img"], ui_comp["selection_state"]],
+                outputs=[
+                    ui_comp["overlay_img"], ui_comp["region_choices"],
+                    ui_comp["selection_state"], ui_comp["status"],
+                ],
+                concurrency_limit=None, api_name="analyze_regions",
+            )
+        except TypeError:
+            ui_comp["analyze_btn"].click(
+                fn=on_analyze,
+                inputs=[ui_comp["input_img"], ui_comp["selection_state"]],
+                outputs=[
+                    ui_comp["overlay_img"], ui_comp["region_choices"],
+                    ui_comp["selection_state"], ui_comp["status"],
+                ],
+                api_name="analyze_regions",
+            )
         ui_comp["region_choices"].input(
             fn=on_select,
             inputs=[ui_comp["region_choices"], ui_comp["input_img"], ui_comp["selection_state"]],
@@ -538,6 +643,13 @@ def wire_events(ui_comp):
                 ui_comp["selection_state"], ui_comp["status"],
             ],
             queue=False, api_name="reset_regions",
+        )
+    if "manual_mask_editor" in ui_comp:
+        ui_comp["input_img"].change(
+            fn=_sync_manual_mask_editor,
+            inputs=[ui_comp["input_img"]],
+            outputs=[ui_comp["manual_mask_editor"]],
+            queue=False, api_name=False,
         )
 
     ui_comp["bt_open_folder"].click(

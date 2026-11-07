@@ -1,4 +1,4 @@
-"""Check that camera and compound edits use the two-step route without GPU work."""
+"""Check that camera edits use measured local follow-ups without GPU work."""
 
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -32,8 +32,49 @@ class FakeCamera:
 
 def main():
     manager = ImgEditorManager()
+    camera_prompts = (
+        ("cambia el POV", "change the viewpoint"),
+        ("cambia el ángulo", "change the angle"),
+        ("Show the room from an overhead camera angle", "Show the room from an overhead camera angle"),
+        ("gira la foto para verla desde atrás", "rotate the photo to see it from behind"),
+    )
+    for raw, translated in camera_prompts:
+        assert manager._explicit_viewpoint_request(raw, translated), (raw, translated)
+    for prompt in (
+        "the person is sitting",
+        "elimina a la persona de la izquierda",
+        "cambia su posición en la habitación",
+        "Make the wall blue",
+        "Add a person near the door",
+        "view",
+    ):
+        assert not manager._explicit_viewpoint_request(prompt, prompt), prompt
+
+    assert remaining_edit(
+        "cambia el POV y pon la pared azul",
+        "change the viewpoint and make the wall blue",
+    ) == "make the wall blue"
+    assert remaining_edit(
+        "make the person sit while changing the camera viewpoint",
+        "make the person sit while changing the camera viewpoint",
+    ) == "make the person sit"
+    mixed_pose = "change the person to sit from a side angle"
+    assert remaining_edit(mixed_pose, mixed_pose) == mixed_pose
+    print("OK: camera concepts separate viewpoint requests from edits and retain mixed clauses")
+
     client = FakeClient()
     camera = FakeCamera()
+    camera.calls.clear()
+    measured_mask = Image.new("L", (48, 32), 255)
+    followup_calls = []
+    generate_original = manager.generate_intelligent
+
+    def _followup_dispatch(image, prompt, **kwargs):
+        if kwargs.get("mask_image") is not None:
+            followup_calls.append((image.copy(), prompt, kwargs))
+            return Image.new("RGB", image.size, "red"), "masked edit", kwargs["mask_image"]
+        return generate_original(image, prompt, **kwargs)
+
     with (
         patch("ui.tabs.comfy_launcher.is_comfyui_running", return_value=True),
         patch("roop.face_util.get_face_analyser", return_value=None),
@@ -41,6 +82,8 @@ def main():
         patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=client),
         patch("roop.img_editor.qwen_camera_comfy_client.QwenCameraComfyClient", return_value=camera),
         patch.object(manager, "_release_local_gpu_before_comfy"),
+        patch.object(manager, "_measure_camera_followup_mask", return_value=measured_mask),
+        patch.object(manager, "generate_intelligent", side_effect=_followup_dispatch),
     ):
         output, message, _ = manager.generate_intelligent(
             image=Image.new("RGB", (48, 32), "white"),
@@ -51,15 +94,46 @@ def main():
             enhance_faces=False,
         )
     assert output is not None, message
-    assert camera.calls == [((48, 32), "<sks> front view high-angle shot medium shot")]
-    assert any(
-        name == "load" and version == "LongCat-Image-Edit-Turbo-Q4_K_S.gguf"
-        for name, version in client.calls
-    ), client.calls
-    assert any(name == "generate" for name, _ in client.calls), client.calls
-    assert "Qwen Camera" in message and "LongCat Turbo" in message, message
-    assert "make the wall blue" in client.calls[-1][1]["prompt"].lower()
-    assert "camera angle" not in client.calls[-1][1]["prompt"].lower()
+    expected_pose = "<sks> front view high-angle shot medium shot"
+    assert camera.calls == [((48, 32),
+                             expected_pose + ". Show the room from an overhead camera angle")]
+    assert client.calls == [], f"camera output must not get a destructive second pass: {client.calls}"
+    assert "Qwen Camera" in message and "cambios restantes sobre regiones medidas" in message, message
+    assert "LongCat Turbo" not in message
+    assert output.getpixel((0, 0)) == (255, 0, 0)
+    assert len(followup_calls) == 1
+    assert followup_calls[0][1] == "make the wall blue"
+    assert followup_calls[0][2]["mask_image"] is measured_mask
+
+    camera.calls.clear()
+    followup_calls.clear()
+    client.calls.clear()
+    source = Image.new("RGB", (48, 32), "white")
+    with (
+        patch("ui.tabs.comfy_launcher.is_comfyui_running", return_value=True),
+        patch("roop.face_util.get_face_analyser", return_value=None),
+        patch("roop.img_editor.img_editor_manager.get_vram_gb", return_value=8.0),
+        patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=client),
+        patch("roop.img_editor.qwen_camera_comfy_client.QwenCameraComfyClient", return_value=camera),
+        patch.object(manager, "_release_local_gpu_before_comfy"),
+        patch.object(manager, "_measure_camera_followup_mask", return_value=None),
+        patch.object(manager, "generate_intelligent", side_effect=_followup_dispatch),
+    ):
+        output, message, _ = manager.generate_intelligent(
+            image=source,
+            prompt="Show the room from an overhead camera angle, make the wall blue",
+            engine="longcat",
+            use_semantic=False,
+            use_rewriter=False,
+            enhance_faces=False,
+        )
+    assert output is not None
+    assert output.tobytes() == source.tobytes()
+    assert "no se midió una región" in message and "foto original conservada" in message
+    assert not followup_calls
+    assert not client.calls, "an unmeasured follow-up must not trigger global generation"
+    print("OK: missing local support preserves the input and skips every follow-up generator")
+
     assert remaining_edit("cambia el POV", "change the viewpoint") == ""
     assert camera_pose("desde arriba, plano general") == "<sks> front view high-angle shot wide shot"
     assert camera_pose("desde atras a la izquierda") == (
@@ -89,7 +163,7 @@ def main():
             use_rewriter=False,
             enhance_faces=False,
         )
-    assert list(output.getdata()) == list(source.getdata()), "a failed camera pass must keep the input pixels"
+    assert output.tobytes() == source.tobytes(), "a failed camera pass must keep the input pixels"
     assert client.calls == [], client.calls
     assert message.startswith("POV no aplicado"), message
 
@@ -147,7 +221,7 @@ def main():
         f"(stall={first['stall_timeout']:.0f}s, timeout={first['timeout']:.0f}s, "
         f"attempts={len(captured)})"
     )
-    print("OK: camera first, remaining edit second, explicit pose and uncertainty reported")
+    print("OK: camera pass followed by a measured local edit, without global regeneration")
 
 
 if __name__ == "__main__":

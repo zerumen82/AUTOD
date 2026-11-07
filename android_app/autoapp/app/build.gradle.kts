@@ -5,8 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Firma release opcional: si existe release-keystore.properties (lo genera
-// create_keystore.bat / build_apk.bat), el APK release sale firmado y estable.
+// Firma release opcional: release-keystore.properties referencia una clave
+// configurada por el usuario; el build no genera ni sobrescribe credenciales.
 val keystorePropsFile = rootProject.file("release-keystore.properties")
 val hasSigning = keystorePropsFile.exists()
 val keystoreProps = Properties().apply {
@@ -23,8 +23,8 @@ android {
         applicationId = "com.autoauto.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 7
+        versionName = "1.6"
     }
 
     signingConfigs {

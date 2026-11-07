@@ -1,0 +1,162 @@
+Adding extra search path checkpoints D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+Adding extra search path unet D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\diffusion_models
+Adding extra search path text_encoders D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\text_encoders
+Adding extra search path vae D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\models\vae
+
+Prestartup times for custom nodes:
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+
+WARNING: You need pytorch with cu130 or higher to use optimized CUDA operations.
+Found comfy_kitchen backend triton: {'available': False, 'disabled': True, 'unavailable_reason': "ImportError: No module named 'triton'", 'capabilities': []}
+Found comfy_kitchen backend cuda: {'available': True, 'disabled': True, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8']}
+Found comfy_kitchen backend eager: {'available': True, 'disabled': False, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_mxfp8', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8', 'scaled_mm_mxfp8', 'scaled_mm_nvfp4']}
+Checkpoint files will always be loaded safely.
+Total VRAM 8192 MB, total RAM 32713 MB
+pytorch version: 2.8.0+cu128
+Set vram state to: NORMAL_VRAM
+Device: cuda:0 NVIDIA GeForce RTX 3060 Ti : cudaMallocAsync
+Enabled pinned memory 13085.0
+Using pytorch attention
+aimdo: src-win/cuda-detour.c:77:INFO:aimdo_setup_hooks: found driver at 00007FFC9FA20000, installing 4 hooks
+aimdo: src-win/cuda-detour.c:61:DEBUG:install_hook_entrys: hooks successfully installed
+aimdo: src/control.c:69:INFO:comfy-aimdo inited for GPU: NVIDIA GeForce RTX 3060 Ti (VRAM: 8191 MB)
+DynamicVRAM support detected and enabled
+Python version: 3.10.6 (tags/v3.10.6:9c7b4bd, Aug  1 2022, 21:53:49) [MSC v.1932 64 bit (AMD64)]
+ComfyUI version: 0.19.0
+comfy-aimdo version: 0.2.12
+comfy-kitchen version: 0.2.8
+Setting temp directory to: D:\PROJECTS\AUTOAUTO\.autodeep_temp\comfyui_runtime\temp
+ComfyUI frontend version: 1.42.10
+[Prompt Server] web root: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\comfyui_frontend_package\static
+Asset seeder disabled
+W1029 09:01:17.528601 5036 D:\PROJECTS\AUTOAUTO\venv\Lib\site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
+ComfyUI-GGUF: Allowing full torch compile
+Warning: Could not load sageattention: No module named 'triton'
+sageattention package is not installed, sageattention will not be available
+
+Import times for custom nodes:
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\websocket_image_save.py
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\autoauto_unload.py
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-QwenImageEdit
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-Boogu
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\hart
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ICEdit-ComfyUI-official
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-GGUF
+   0.0 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-FramePackWrapper
+   0.3 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-WanVideoWrapper
+   0.9 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\ComfyUI-MMAudio
+   6.3 seconds: D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use
+
+Failed to initialize database. Please ensure you have installed the latest requirements. If the error persists, please report this as in future the database will be required: (sqlite3.OperationalError) unable to open database file
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Starting server
+
+To see the GUI go to: http://127.0.0.1:8188
+got prompt
+Using pytorch attention in VAE
+Using pytorch attention in VAE
+VAE load device: cuda:0, offload device: cpu, dtype: torch.bfloat16
+Requested to load AutoencodingEngine
+Model AutoencodingEngine prepared for dynamic VRAM loading. 159MB Staged. 0 patches attached.
+Found quantization metadata version 1
+Using MixedPrecisionOps for text encoder
+CLIP/text encoder model load device: cuda:0, offload device: cpu, current: cpu, dtype: torch.float16
+Requested to load LongCatImageTEModel_
+Model LongCatImageTEModel_ prepared for dynamic VRAM loading. 7910MB Staged. 0 patches attached. Force pre-loaded 57 weights: 399 KB.
+gguf qtypes: F32 (247), Q5_K (49), Q4_K (112), BF16 (6)
+model weight dtype torch.bfloat16, manual cast: None
+model_type FLUX
+unet unexpected: ['norm_out.linear.bias', 'norm_out.linear.weight']
+Requested to load LongCatImage
+loaded completely; 5115.30 MB usable, 3763.33 MB loaded, full load: True
+[34m[ComfyUI-Easy-Use] server: [0mv1.3.7 [92mLoaded[0m
+[34m[ComfyUI-Easy-Use] web root: [0mD:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\custom_nodes\comfyui-easy-use\web_version/v2 [92mLoaded[0m
+  0%|          | 0/12 [00:00<?, ?it/s]  0%|          | 0/12 [00:00<?, ?it/s,   Model Initializing ...  ]  0%|          | 0/12 [00:05<?, ?it/s,  Model Initialization complete!  ]  8%|8         | 1/12 [00:05<00:57,  5.20s/it,  Model Initialization complete!  ]  8%|8         | 1/12 [00:03<00:57,  5.20s/it]                                    17%|#6        | 2/12 [00:03<00:18,  1.89s/it] 25%|##5       | 3/12 [00:05<00:17,  1.91s/it] 33%|###3      | 4/12 [00:07<00:15,  1.91s/it] 42%|####1     | 5/12 [00:09<00:13,  1.91s/it] 50%|#####     | 6/12 [00:11<00:11,  1.97s/it] 58%|#####8    | 7/12 [00:13<00:09,  1.91s/it] 67%|######6   | 8/12 [00:15<00:07,  1.93s/it] 75%|#######5  | 9/12 [00:17<00:05,  1.95s/it] 83%|########3 | 10/12 [00:19<00:05,  2.67s/it] 92%|#########1| 11/12 [00:21<00:02,  2.01s/it]100%|##########| 12/12 [00:23<00:00,  1.96s/it]100%|##########| 12/12 [00:23<00:00,  1.99s/it]
+Unloaded partially: 1858.29 MB freed, 1905.07 MB remains loaded, 25.32 MB buffer reserved, lowvram patches: 0
+0 models unloaded.
+Model AutoencodingEngine prepared for dynamic VRAM loading. 159MB Staged. 0 patches attached.
+!!! Exception during processing !!! CUDA error: an illegal memory access was encountered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 534, in execute
+    output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 334, in get_output_data
+    return_values = await _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, obj.FUNCTION, allow_interrupt=True, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 308, in _async_map_node_over_list
+    await process_inputs(input_dict, i)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 296, in process_inputs
+    result = f(**inputs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\nodes.py", line 316, in decode
+    images = vae.decode(latent)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\sd.py", line 975, in decode
+    model_management.raise_non_oom(e)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\model_management.py", line 289, in raise_non_oom
+    raise e
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\sd.py", line 968, in decode
+    out = self.first_stage_model.decode(samples, **vae_options).to(device=self.output_device, dtype=self.vae_output_dtype(), copy=True)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ldm\models\autoencoder.py", line 143, in decode
+    x = self.decoder(z, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\torch\nn\modules\module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\torch\nn\modules\module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ldm\modules\diffusionmodules\model.py", line 808, in forward
+    h1 = self.up[i_level].block[i_block](h1, temb, conv_carry_in, conv_carry_out, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\torch\nn\modules\module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\torch\nn\modules\module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ldm\modules\diffusionmodules\model.py", line 224, in forward
+    h = conv_carry_causal_3d(h, self.conv2, conv_carry_in=conv_carry_in, conv_carry_out=conv_carry_out)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ldm\modules\diffusionmodules\model.py", line 81, in conv_carry_causal_3d
+    out = op(x)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\torch\nn\modules\module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\torch\nn\modules\module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ops.py", line 426, in forward
+    return self.forward_comfy_cast_weights(*args, **kwargs)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ops.py", line 418, in forward_comfy_cast_weights
+    weight, bias, offload_stream = cast_bias_weight(self, input, offloadable=True)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ops.py", line 228, in cast_bias_weight
+    return cast_bias_weight_with_vbar(s, dtype, device, bias_dtype, non_blocking, compute_dtype, want_requant)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\ops.py", line 151, in cast_bias_weight_with_vbar
+    comfy.model_management.cast_to_gathered(xfer_source, xfer_dest, non_blocking=non_blocking, stream=offload_stream)
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\model_management.py", line 1287, in cast_to_gathered
+    dest_view.copy_(tensor, non_blocking=non_blocking)
+torch.AcceleratorError: CUDA error: an illegal memory access was encountered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\execution.py", line 539, in execute
+    comfy.model_management.reset_cast_buffers()
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\model_management.py", line 1222, in reset_cast_buffers
+    synchronize()
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\comfy\model_management.py", line 1777, in synchronize
+    torch.cuda.synchronize()
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\venv\lib\site-packages\torch\cuda\__init__.py", line 1085, in synchronize
+    return torch._C._cuda_synchronize()
+torch.AcceleratorError: CUDA error: an illegal memory access was encountered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Prompt executed in 106.41 seconds
+Fatal Python error: Aborted
+
+Stack (most recent call first):
+  File "D:\PROJECTS\AUTOAUTO\ui\tob\ComfyUI\main.py", line 357 in prompt_worker
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\threading.py", line 953 in run
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\threading.py", line 1016 in _bootstrap_inner
+  File "C:\Users\INdaHouse\AppData\Local\Programs\Python\Python310\lib\threading.py", line 973 in _bootstrap
+
+Extension modules: markupsafe._speedups, yaml._yaml, PIL._imaging, numpy._core._multiarray_umath, numpy.linalg._umath_linalg, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, psutil._psutil_windows, PIL._imagingft, av._core, av.logging, av.buffer, av.audio.format, av.error, av.dictionary, av.container.pyio, av.option, av.descriptor, av.format, av.index, av.utils, av.stream, av.container.streams, av.sidedata.encparams, av.sidedata.motionvectors, av.sidedata.sidedata, av.opaque, av.packet, av.container.input, av.container.output, av.container.core, av.codec.context, av.video.format, av.video.reformatter, av.plane, av.video.plane, av.video.frame, av.video.stream, av.codec.hwaccel, av.codec.codec, av.frame, av.audio.layout, av.audio.plane, av.audio.frame, av.audio.stream, av.filter.link, av.filter.context, av.filter.graph, av.filter.filter, av.filter.loudnorm, av.audio.resampler, av.audio.codeccontext, av.audio.fifo, av.bitstream, av.device, av.video.codeccontext, _cffi_backend, cython.cimports.libc.math, scipy._lib._ccallback_c, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, scipy.special._ufuncs_cxx, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_sqrtm_triu, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpack, scipy.sparse.linalg._propack._spropack, scipy.sparse.linalg._propack._dpropack, scipy.sparse.linalg._propack._cpropack, scipy.sparse.linalg._propack._zpropack, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.special._ellip_harm_2, _ni_label, scipy.ndimage._ni_label, regex._regex, _brotli, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.integrate._lsoda, scipy.optimize._group_columns, scipy._lib.messagestream, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._cobyla, scipy.optimize._slsqp, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy.optimize._cython_nnls, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.spatial._ckdtree, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.spatial._distance_wrap, scipy.spatial._hausdorff, scipy.spatial.transform._rotation, scipy.optimize._direct, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, scipy.interpolate._bspl, scipy.special.cython_special, scipy.stats._stats, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.stats._mvn, scipy.stats._rcont.rcont, av.subtitles.stream, sentencepiece._sentencepiece, sklearn.__check_build._check_build, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, _cyutility, sklearn._cyutility, sklearn.utils._isfinite, sklearn.utils.sparsefuncs_fast, sklearn.utils.murmurhash, sklearn.utils._openmp_helpers, sklearn.metrics.cluster._expected_mutual_info_fast, sklearn.preprocessing._csr_polynomial_expansion, sklearn.preprocessing._target_encoder_fast, sklearn.metrics._dist_metrics, sklearn.metrics._pairwise_distances_reduction._datasets_pair, sklearn.utils._cython_blas, sklearn.metrics._pairwise_distances_reduction._base, sklearn.metrics._pairwise_distances_reduction._middle_term_computer, sklearn.utils._heap, sklearn.utils._sorting, sklearn.metrics._pairwise_distances_reduction._argkmin, sklearn.metrics._pairwise_distances_reduction._argkmin_classmode, sklearn.utils._vector_sentinel, sklearn.metrics._pairwise_distances_reduction._radius_neighbors, sklearn.metrics._pairwise_distances_reduction._radius_neighbors_classmode, sklearn.metrics._pairwise_fast, scipy.signal._sigtools, scipy.signal._max_len_seq_inner, scipy.signal._upfirdn_apply, scipy.signal._spline, scipy.signal._sosfilt, scipy.signal._peak_finding_utils, numba.core.typeconv._typeconv, numba._helperlib, numba._dynfunc, numba._dispatcher, numba.core.runtime._nrt_python, numba.np.ufunc._internal, numba.experimental.jitclass._box, google.protobuf.pyext._message (total: 240)

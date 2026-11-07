@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allowList": [
+      "read_file:roop/img_editor",
+      "read_file:roop/*",
+      "run_command:grep -n \"_requested_removal_target_zone\\|_requested_removal_target\\b\\|_extract_removal_target\\|_requested_change_scope\" roop/img_editor/img_editor_manager.py"
+    ],
+    "denyList": []
+  },
+  "version": 1
+}

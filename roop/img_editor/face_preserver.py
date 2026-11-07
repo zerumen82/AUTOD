@@ -27,7 +27,7 @@ class FacePreserver:
 
     def initialize(self) -> Tuple[bool, str]:
         try:
-            import insightface
+            __import__("insightface")  # Preserve the original package initialization.
             from insightface.app import FaceAnalysis
 
             self.analyzer = FaceAnalysis(allowed_modules=['detection', 'recognition'])
@@ -68,7 +68,7 @@ class FacePreserver:
 
         except Exception as e:
             if 'conv_1_relu' in str(e) or 'broadcast' in str(e):
-                print(f"[FacePreserver] ONNX shape error (genderage), redimensionando imagen...")
+                print("[FacePreserver] ONNX shape error (genderage), redimensionando imagen...")
                 try:
                     w, h = image.size
                     scale = 512 / max(w, h)
@@ -82,7 +82,7 @@ class FacePreserver:
                             results.append({"bbox": bbox, "kps": [], "embedding": face.embedding, "det_score": face.det_score})
                         print(f"[FacePreserver] OK tras redimensionar: {len(results)} rostros")
                         return results
-                except:
+                except BaseException:
                     pass
             print(f"[FacePreserver] Error detectando rostros: {e}")
             return []
@@ -219,7 +219,7 @@ class FacePreserver:
                                     # Color/lighting match: adapt source face to the edited image's local tone.
                                     # Sample mostly from the upper/central part of the *generated* region (avoids new bare skin skewing the match too much).
                                     try:
-                                        target_area = result_cv2[py1:py2, px1:px2].astype(np.float32)
+                                        _target_area = result_cv2[py1:py2, px1:px2].astype(np.float32)
                                         # Use upper ~65% for skin tone reference (more likely to be head area even after body edit)
                                         upper_h = max(1, int(target_h * 0.65))
                                         target_face_sample = result_cv2[py1:py1+upper_h, px1:px2].astype(np.float32)

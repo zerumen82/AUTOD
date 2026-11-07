@@ -1,13 +1,17 @@
 import sys
 import os
+# Reduce third-party console noise (llama.cpp / ggml / transformers) by default.
+# Detailed diagnostics remain available via AUTOAUTO_DEBUG=1.
+os.environ.setdefault("LLAMA_LOG_LEVEL", "ERROR")
+os.environ.setdefault("GGML_LOG_LEVEL", "ERROR")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 import shutil
 import time
-import gc
 import ctypes
 import traceback
 import stat
 import tempfile
-import glob
 import threading
 
 
@@ -157,25 +161,29 @@ def resilient_move(src, dst, copy_function=shutil.copy2):
     import gc
     for i in range(50): # 10 segundos de paciencia
         try:
-            if i % 5 == 0: gc.collect()
+            if i % 5 == 0:
+                gc.collect()
             
             if os.path.exists(src):
-                try: 
+                try:
                     os.chmod(src, stat.S_IWRITE)
                     os.chmod(src, 0o777)
-                except: pass
+                except Exception:
+                    pass
                 
                 # Intentar reemplazo rapido si estan en la misma unidad
                 if os.path.exists(dst): 
                     try: 
                         os.chmod(dst, stat.S_IWRITE)
                         original_remove(dst)
-                    except: pass
+                    except Exception:
+                        pass
                 
                 try:
                     os.rename(src, dst)
                     return dst
-                except: pass
+                except Exception:
+                    pass
             
             return original_move(src, dst, copy_function)
             
@@ -186,7 +194,8 @@ def resilient_move(src, dst, copy_function=shutil.copy2):
                 
             if i == 0:
                 print(f"\n (BLOQUEO) Recuperando archivo: {os.path.basename(src)}...")
-            if i == 49: raise
+            if i == 49:
+                raise
             time.sleep(0.2)
     return original_move(src, dst, copy_function)
 
@@ -208,30 +217,37 @@ def resilient_remove(path, *args, **kwargs):
                 return
     for i in range(20):
         try:
-            try: os.chmod(path, stat.S_IWRITE)
-            except: pass
+            try:
+                os.chmod(path, stat.S_IWRITE)
+            except Exception:
+                pass
             # os.remove solo acepta el path, ignoramos args/kwargs extra
             return original_remove(path)
         except (PermissionError, OSError):
-            if i == 19: raise
+            if i == 19:
+                raise
             time.sleep(0.1)
 
 def resilient_unlink(self, missing_ok=False):
     """Parche para Path.unlink - usa self como path."""
     for i in range(20):
         try:
-            try: os.chmod(str(self), stat.S_IWRITE)
-            except: pass
+            try:
+                os.chmod(str(self), stat.S_IWRITE)
+            except Exception:
+                pass
             # Llamar al método original de Path
             return Path._original_unlink(self, missing_ok=missing_ok)
         except (PermissionError, OSError):
-            if i == 19: raise
+            if i == 19:
+                raise
             time.sleep(0.1)
 
 # Aplicar a los modulos cargados
 shutil.move = resilient_move
 os.remove = resilient_remove
-if hasattr(os, 'unlink'): os.unlink = resilient_remove
+if hasattr(os, 'unlink'):
+    os.unlink = resilient_remove
 
 # Parchear Path.unlink específicamente
 from pathlib import Path
@@ -352,30 +368,38 @@ def setup_runtime():
     if not os.path.exists(target_zlib):
         src_zlib = os.path.join(torch_lib, "zlibwapi.dll")
         if os.path.exists(src_zlib):
-            try: shutil.copy2(src_zlib, target_zlib)
-            except: pass
+            try:
+                shutil.copy2(src_zlib, target_zlib)
+            except Exception:
+                pass
 
     # Rutas para cargador de DLLs
     if hasattr(os, 'add_dll_directory'):
         for p in [cuda_bin, scripts_dir, torch_lib]:
             if os.path.exists(p):
-                try: os.add_dll_directory(p)
-                except: pass
+                try:
+                    os.add_dll_directory(p)
+                except Exception:
+                    pass
     
     # Añadir directorio de llama_cpp para que el verificador de instrucciones
     # pueda cargar ggml.dll y sus dependencias (ggml-cuda.dll necesita CUDA runtime)
     llama_cpp_lib = os.path.join(base_dir, "venv", "Lib", "site-packages", "llama_cpp", "lib")
     if os.path.exists(llama_cpp_lib):
         if hasattr(os, 'add_dll_directory'):
-            try: os.add_dll_directory(llama_cpp_lib)
-            except: pass
+            try:
+                os.add_dll_directory(llama_cpp_lib)
+            except Exception:
+                pass
         os.environ["PATH"] = llama_cpp_lib + os.pathsep + os.environ.get("PATH", "")
         # Precargar runtime de CUDA para que ggml-cuda.dll encuentre sus dependencias
         for _cuda_runtime_dll in ("cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"):
             _cuda_runtime_path = os.path.join(cuda_bin, _cuda_runtime_dll)
             if os.path.exists(_cuda_runtime_path):
-                try: ctypes.WinDLL(_cuda_runtime_path)
-                except: pass
+                try:
+                    ctypes.WinDLL(_cuda_runtime_path)
+                except Exception:
+                    pass
     
     if cuda_bin and os.path.exists(cuda_bin):
         os.environ["PATH"] = cuda_bin + os.pathsep + os.environ["PATH"]
@@ -428,7 +452,7 @@ def set_console_icon():
 if __name__ == "__main__":
     _open_ui_session_log()
     print("\n" + "="*70)
-    print("  AutoAuto v5.1280 (2026-11-03)")
+    print("  AutoAuto v5.1319 (2026-11-07)")
     print("="*70 + "\n")
     if set_console_icon():
         print("[INFO] Icono de AutoAuto aplicado a la ventana de consola")
@@ -436,7 +460,8 @@ if __name__ == "__main__":
     
     # Preparar rutas de Python
     root_dir = os.getcwd()
-    if root_dir not in sys.path: sys.path.insert(0, root_dir)
+    if root_dir not in sys.path:
+        sys.path.insert(0, root_dir)
     
     print("\n[STEP 2] Cargando motores de Inteligencia Artificial...")
     
@@ -470,7 +495,7 @@ if __name__ == "__main__":
             print(f"  - GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
     except Exception as e:
         print(f"  - PyTorch: NO DISPONIBLE ({e})")
-        print(f"  - [INFO] Continuando sin PyTorch (usando ONNX Runtime)...")
+        print("  - [INFO] Continuando sin PyTorch (usando ONNX Runtime)...")
     
     # LOG DE VERIFICACION
     with open(r'D:\PROJECTS\AUTOAUTO\debug_swap.log', 'a') as _lf:
@@ -484,7 +509,7 @@ if __name__ == "__main__":
         if reused_server:
             print("[EXIT] Ventana secundaria cerrada; servidor principal conservado")
             sys.exit(0)
-    except Exception as e:
+    except Exception:
         print("\n" + "!"*60)
         print(" [ERROR CRITICO EN EL MOTOR]")
         print("!"*60)
@@ -494,5 +519,7 @@ if __name__ == "__main__":
     print(" MANTENIENDO CONSOLA POR SEGURIDAD")
     print("="*70)
     try:
-        while True: time.sleep(10)
-    except KeyboardInterrupt: pass
+        while True:
+            time.sleep(10)
+    except KeyboardInterrupt:
+        pass

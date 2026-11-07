@@ -1,1 +1,3 @@
 {"version":1,"eventId":"cbd3447b-1a42-433b-b0b1-502a63c79008","operation":"capability_used","level":"project","capability":{"kind":"slash_command","name":"/model","source":"core"},"origin":"user","outcome":"succeeded","occurredAt":"2026-10-17T17:58:09.551Z"}
+{"version":1,"eventId":"c466eae7-b13a-4fad-9986-36560eae7498","operation":"capability_used","level":"project","capability":{"kind":"slash_command","name":"/session","source":"core"},"origin":"user","outcome":"succeeded","occurredAt":"2026-10-26T14:28:57.101Z"}
+{"version":1,"eventId":"939c5ba0-50bb-423a-9398-c5a6faeb5319","operation":"capability_used","level":"project","capability":{"kind":"slash_command","name":"/peers","source":"core"},"origin":"user","outcome":"succeeded","occurredAt":"2026-10-26T14:29:06.227Z"}

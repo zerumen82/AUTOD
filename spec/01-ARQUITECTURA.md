@@ -6,7 +6,7 @@
 |---|---|---|
 | AutoAuto UI (Gradio) | `ui/main.py` | Pestañas: 🚀 Generate, 🎨 Image Editor, Face Swap, Animate, Settings |
 | ComfyUI (local) | 8188, fijo (`ui/tabs/comfy_launcher.py:18-21`) | Generate, Image Editor, Animate — **compartido** |
-| Android (APK) | HTTP contra la UI Gradio | `android_app/autoapp/` |
+| Android (APK nativa Kotlin) | HTTP contra la API Gradio | `MainActivity.kt` + `GradioClient.kt` en `android_app/autoapp/` |
 
 ## Módulos clave
 
@@ -35,23 +35,61 @@ El backbone CLIP local se inyecta por parámetro; no se modifica `clip.load`.
 ### 🚀 Generate (`ui/tabs/gen/` + `roop/img_editor/flux_gen_comfy_client.py`)
 - `ui.py` → formulario (prompt, estilo/luz/encuadre/piel, orientación, motor, ESRGAN, rewriter).
 - `events.py` → `on_generate_image` → `get_flux_gen_client().generate_ai(...)`.
-- `flux_gen_comfy_client.py` → traducción ES→EN, rewriter LLM, ensamblado de prompt (`gen_prompt_modifiers.py`), workflow inline:
-  - rama SDXL `:674-697`, rama FLUX/LongCat/Klein `:698-772`, HART delegado `:655-672`.
-  - `denoise=1.0`, `batch=1`, seed por tiempo si no se pasa (`:691`, `:766`).
-- Salida: `generate/gen_<ts>.png` (`roop/output_paths.py`).
+- `flux_gen_comfy_client.py` → traducción ES→EN, rewriter LLM, ensamblado de
+  prompt (`gen_prompt_modifiers.py`) y workflows para SDXL, FLUX, Chroma y
+  Klein; HART se delega a su cliente. `generate()` distingue T2I de imagen de
+  referencia y admite de una a cuatro muestras. Sin seed explícita usa tiempo.
+- `on_generate_image` conserva los diez primeros argumentos para la APK;
+  el evento de escritorio añade controles, referencia y elección de ruta.
+- Salida: `generate/gen_<ts>.png` y muestras adicionales con sufijo numérico
+  (`roop/output_paths.py` y `ui/tabs/gen/events.py`).
 
 ### 🎨 Image Editor (`ui/tabs/img_editor/` + `roop/img_editor/img_editor_manager.py`)
-- `generate_intelligent()` (`:3975`) es la puerta de entrada: NLP (`nlp/semantic_analyzer.py`), routing de motor (`_route_edit_engine :467`), máscaras (objeto `:3719`, persona `:3741/3821`, fondo `:2186`, ropa `:5540`), ventana local (`_appearance_work_region :1616`), integración (`_integrate_local_generation`), verificación VLM (`instruction_verifier`).
-- Clientes: `flux_edit_comfy_client.py` (LongCat/Kontext/Klein), `qwen_camera_comfy_client.py` (POV), `qwen_edit`, `boogu`, `hart`, `icedit`, `omnigen2`.
-- Libera VRAM tras generar (`POST /autoauto/unload`, `custom_nodes/autoauto_unload.py:48`).
+
+- H-EDIT-REFERENCE (24/25-10): `_instruction_clauses` mantiene relativa y
+  continuación del predicado juntas antes de extraer alcance/sujeto/hechos.
+  En grounding focal de cabeza Kontext, CLIPSeg usa una plantilla fotográfica
+  configurada que contiene el sujeto íntegro una sola vez; head/hair y prompts
+  generativos siguen sus contratos. Bboxes y cobertura de todos los candidatos
+  quedan en log; configuración inválida se rechaza sin elegir otra cabeza.
+- H-EDIT-ENGINE-STATUS (24/10): el callback captura un informe por contexto de
+  ejecución. Kontext elegido fija el archivo configurado como modelo requerido;
+  la ruta medida con visión puede declarar expresamente otro modelo mediante
+  `permit_vision_model` / `allow_vision_engine=True` (autorización posterior del
+  25–28/10, registrada en MEMORY.md). Los clientes comprueban la política antes de sus efectos
+  externos y registran solamente ejecuciones que devuelven imagen. El informe
+  alimenta el estado visible; no altera prompts, máscaras ni muestreo. Un rechazo
+  permanece durante la petición para impedir reintentos/fallbacks encubiertos.
+- `generate_intelligent()` es la puerta de entrada: NLP
+  (`nlp/semantic_analyzer.py`), elección de motor (`_route_edit_engine`),
+  medición de máscaras, ventana local (`_appearance_work_region`), integración
+  (`_integrate_local_generation`) y verificación VLM (`instruction_verifier`).
+- Clientes: `flux_edit_comfy_client.py` (Kontext/Klein y compatibilidad de
+  alias antiguos), `qwen_camera_comfy_client.py` (POV), `qwen_edit`, `boogu`,
+  `hart`, `icedit`, `omnigen2`. La presencia de un cliente no autoriza usarlo
+  cuando el contexto exige el modelo Kontext configurado sin excepción explícita.
+- El cliente de edición puede conservar el modelo residente para reutilizarlo;
+  no hay descarga obligatoria tras cada render. La liberación explícita usa
+  `POST /autoauto/unload`; Generate aplica su propia descarga al finalizar.
+  El nodo está en `ui/tob/ComfyUI/custom_nodes/autoauto_unload.py`.
 
 ### Contratos compartidos
+
+- H-EDIT-WAIT-FINISH (05/11): `comfy_progress.py` mide espera/fases/pasos con
+  reloj monotónico. El progreso WS disponible precede al sondeo HTTP; los
+  latidos conservan pasos reales y muestran edad del evento/latencias, sin
+  acreditar salud del proceso. El historial aporta duración del servidor
+  por separado. Cadencias en `generation_prompt.json/comfy_progress`.
+  En la rama corporal sin selección de `edit_described_subject`, el candidato
+  se valida antes de TOP; el caller conserva rechazo/reintento y validación
+  final tras el acabado. No cambia la receta ni la selección de motor.
 - `roop/img_editor/prompt_translator.py` (ES→EN), `prompt_rewriter.py`, `comfy_progress.py`, `job_cancel.py` (scopes `SCOPE_GENERATION` / `SCOPE_IMG_EDITOR`).
-- `roop/comfy_workflows.get_comfyui_url()` — único símbolo usado de ese módulo legacy.
+- `roop/comfy_workflows.get_comfyui_url()` — compatibilidad de URL ComfyUI local.
 - Calidad: `image_quality_pipeline.py` (ESRGAN/tiers), `hyperreal_polish.py`, `top_tier_finish.py`.
 
 ### Config
-- `config/model_configs.json` → steps/cfg/sampler por motor (leído en `flux_gen_comfy_client.py:224-240`).
+- `config/model_configs.json` → modelo, steps/cfg/sampler por motor, leído por
+  los clientes de generación y edición.
 - `kontext.model_file/steps/cfg` es la fuente de modelo y receta del Editor.
   Los identificadores LongCat legacy se normalizan antes del caché/loaders.
   Para apariencia focal, la región visual selecciona una cabeza, Kontext edita
@@ -67,6 +105,9 @@ El backbone CLIP local se inyecta por parámetro; no se modifica `clip.load`.
 
 ## Reglas de integración Generate ↔ Editor
 
-1. Generate **no** importa `img_editor_manager` hoy; la Fase 2 lo añade como ruta opcional (solo cuando hay imagen de entrada y la instrucción es de edición).
+1. El puente Gen→Edit ya existe: con imagen de referencia, `_route_is_editor`
+   en `ui/tabs/gen/events.py` respeta `editor`/`img2img`; en `auto` consulta
+   `route_prefers_editor`. La rama de edición importa el manager de forma
+   diferida. Sin imagen no se usa el puente; `img2img` es el default actual.
 2. Cualquier parámetro nuevo de Generate usa el mismo patrón que el editor: aceptado por `generate(...)`, con default tomado de `config/`.
 3. El servidor 8188 no se reinicia entre pestañas; toda prueba real debe comprobar antes si hay un render activo.

@@ -1,8 +1,16 @@
 # AGENTS.md — AutoAuto
 
+## Versión vigente
+- **v5.1319 (2026-11-07)**
+
 ## Objetivo
 - Mejorar FaceSwap: eliminar el halo o blur elíptico fuera de la cara, seguir perfiles y oclusiones con estabilidad y aumentar nitidez y parecido con la fuente.
 - Mantener Image Editor, Generate y Android funcionales al cambiar el procesamiento.
+
+## Requisito permanente — versatilidad del Image Editor (2026-11-02)
+- El usuario exige editar cualquier foto con la misma naturalidad: cambiar postura, posición, ropa, características físicas (pelo, edad, piel), ángulo de cámara, POV, decorado; añadir o quitar cosas y añadir o quitar personas; una o varias. Sin censura.
+- Ninguna corrección de un caso concreto puede estrechar esas rutas. Un arreglo que solo funcione para calvicie, paredes o ropa se rechaza como solución general.
+- Estado medido y límites por categoría viven en `MEMORY.md` (entrada 2026-11-02, «Mapa de versatilidad»). Contratos CPU verdes ≠ cumplimiento visual: no declarar una categoría resuelta sin PASS visual de una muestra real.
 
 ## Entorno y preferencias vigentes
 - GPU RTX 3060 Ti de 8 GB, CUDA 12.4; proveedores CUDAExecutionProvider y CPUExecutionProvider.

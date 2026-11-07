@@ -197,9 +197,14 @@ def main() -> int:
         {"gentle": False, "sharpen": 1.08},
         0.64,
     )
+    # v5.1245 — a 1920×1080 el ESRGAN cabe en 24 bloques (≤48), así que el código
+    # vivo elige su textura antes que el fallback local. La expectativa antigua
+    # sólo aceptaba "realismo textura local"; lo que importa es que el paso de
+    # realismo se aplique de verdad (no omitido) y cambie la foto.
     check(
-        "poster alto aplica textura local",
-        "realismo textura local" in texture_note and "omitida" not in texture_note,
+        "poster alto aplica realismo (textura local o ESRGAN)",
+        ("realismo textura local" in texture_note or "ESRGAN textura" in texture_note)
+        and "omitida" not in texture_note,
         texture_note,
     )
     check(

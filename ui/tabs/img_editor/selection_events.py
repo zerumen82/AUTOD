@@ -39,6 +39,9 @@ def _matches(image, analysis):
 
 
 def on_analyze(img_data, selection_state):
+    # Primer print del handler: sin esta línea el log no distingue «no llegó
+    # el clic» de «el análisis falló», igual que en on_generate.
+    print("[ImgEditor] Análisis de zonas solicitado", flush=True)
     session = _session(selection_state)
     image = normalize_image(img_data)
     if image is None:
@@ -165,7 +168,13 @@ def use_result_as_input(image, selection_state):
     session = _session(selection_state)
     normalized = normalize_image(image)
     if normalized is None:
-        return (*_skip(4), "Primero genera un resultado")
+        return (
+            {"__type__": "update", "value": None},
+            {"__type__": "update", "value": None},
+            {"__type__": "update", "choices": [], "value": [], "visible": False},
+            {"__type__": "update", "value": session},
+            "Primero genera un resultado",
+        )
     from roop.img_editor.element_selection import image_fingerprint
     session.replace_image(image_fingerprint(normalized))
     return normalized, None, _empty_choices(), session, "Selección limpia (foto reutilizada)"

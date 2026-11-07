@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
+from unittest.mock import patch  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from roop.img_editor.img_editor_manager import ImgEditorManager  # noqa: E402
@@ -36,9 +37,11 @@ def check(cond, label):
 class FakeClient:
     def __init__(self):
         self.calls = 0
+        self.arguments = None
 
     def generate(self, image, prompt, mask_image=None, **kwargs):
         self.calls += 1
+        self.arguments = {"image": image, "mask_image": mask_image, **kwargs}
         # Refino sintetico: textura fuerte SOLO dentro de la mascara zoom.
         arr = np.asarray(image.convert("RGB")).astype(np.int16)
         m = np.asarray(mask_image.convert("L")) >= 160
@@ -110,54 +113,117 @@ def main():
         subject.crop(box),
     )
     check(zone is not None, "zona medida existente en la generacion 1")
-    zone_full = np.zeros((photo.size[1], photo.size[0]), dtype=np.uint8)
-    zf = Image.new("L", photo.size, 0)
-    zf.paste(zone, (box[0], box[1]))
-    zone_full = np.asarray(zf) >= 160
-
     client = FakeClient()
+    sample = {"num_inference_steps": 8, "denoise": 1.0, "no_kontext": False}
+    original_sample = sample.copy()
     out = mgr._second_focused_pass(
         client, edited, photo, subject, box, gsize,
         "p", None, 1, False, True, None, None, 1.0,
-        {"num_inference_steps": 8, "denoise": 1.0}, None, None,
+        sample, None, None,
     )
     check(client.calls == 1, "escala 2.0x -> exactamente una llamada al cliente")
+    check(client.arguments.get("keep_source_pixels") is True,
+          "el refino conserva el latente de foto, sin agujero de inpaint")
+    check(client.arguments.get("no_kontext") is False,
+          "la referencia espacial activada se conserva")
+    check(sample == original_sample, "el refino no muta la receta del llamador")
     check(out is not None, "escala 2.0x -> refino devuelto")
     if out is not None:
         check(out.size == photo.size, "refino al tamano de la foto")
         a = np.asarray(out).astype(np.int16)
         b = np.asarray(edited).astype(np.int16)
         d = np.abs(a - b).max(axis=2)
-        grow = cv2.dilate(zone_full.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
-        outside = ~grow
+        # El refino ahora regenera la cabeza entera (no solo el delta).
+        paste_region = np.asarray(subject.convert("L")) >= 160
+        outside = ~paste_region
         check(
             int(d[outside].sum()) == 0,
-            f"fuera de la zona pegada nada cambia (delta={int(d[outside].sum())})",
+            "fuera de la cabeza nada cambia (delta=%d)" % int(d[outside].sum()),
         )
-        inside = zone_full & (d > 0)
+        inside = paste_region & (d > 0)
         check(
-            inside.sum() >= 0.5 * zone_full.sum(),
-            f"la zona se refina ({100 * inside.sum() / max(1, zone_full.sum()):.0f}% de la zona)",
+            inside.sum() >= 0.5 * paste_region.sum(),
+            "la cabeza se refina (%d%% de la zona)" % (100 * inside.sum() / max(1, paste_region.sum())),
         )
+    # La configuración sin referencia también debe respetarse: el refino
+    # no puede sustituir la receta por una política fija de apariencia.
+    client = FakeClient()
+    out = mgr._second_focused_pass(
+        client, edited, photo, subject, box, gsize,
+        "p", None, 1, False, True, None, None, 1.0,
+        {"num_inference_steps": 8, "denoise": 0.85, "no_kontext": True},
+        None, None,
+    )
+    check(client.calls == 1 and out is not None,
+          "la receta sin referencia también ejecuta el refino")
+    check(client.arguments.get("no_kontext") is True,
+          "la referencia espacial desactivada se conserva")
+    check(client.arguments.get("denoise") == 0.85,
+          "la fuerza configurada se conserva")
+    check(client.arguments.get("keep_source_pixels") is True,
+          "sin referencia espacial sigue usando el latente de foto")
 
+    # Mismo recorte focal válido, pero sin edición: no debe regenerar el
+    # sujeto solo porque exista una máscara. La máscara de foto completa
+    # del caso final se rechaza por área y no detectaría esta regresión.
+    client = FakeClient()
+    out = mgr._second_focused_pass(
+        client, photo, photo, subject, box, gsize,
+        "p", None, 1, False, True, None, None, 1.0,
+        sample, None, None,
+    )
+    check(out is None and client.calls == 0,
+          "máscara local válida sin cambio -> sin refino ni gasto de GPU")
+
+    empty = Image.new("L", photo.size, 0)
+    client = FakeClient()
+    out = mgr._second_focused_pass(
+        client, edited, photo, empty, box, gsize,
+        "p", None, 1, False, True, None, None, 1.0,
+        sample, None, None,
+    )
+    check(out is None and client.calls == 0,
+          "máscara vacía -> sin refino ni gasto de GPU")
+
+    # La corrección de receta mantiene ambas compuertas del refino.
+    # Detectores controlados solo en este contrato CPU; nunca en producción.
+    for added, collapsed, label in (
+        (subject, None, "cara añadida"),
+        (None, subject, "cara degenerada"),
+    ):
+        client = FakeClient()
+        with (
+            patch.object(mgr, "_detect_edit_faces", return_value=[object()]),
+            patch.object(mgr, "_added_face_mask", return_value=added) as added_check,
+            patch.object(mgr, "_degenerate_faces_mask", return_value=collapsed) as collapsed_check,
+        ):
+            out = mgr._second_focused_pass(
+                client, edited, photo, subject, box, gsize,
+                "p", None, 1, False, True, None, None, 1.0,
+                sample, None, None,
+            )
+        check(client.calls == 1 and out is None,
+              f"{label} -> se rechaza el refino")
+        check(added_check.call_count == 1 and collapsed_check.call_count == 1,
+              f"{label} -> ambas compuertas siguen activas")
     # [4] ventana zoom sin estructura (<128 px) -> None sin llamada
     small = np.clip(
-        np.repeat((100 + 30 * np.sin(np.arange(320)[:, None] / 11.0)
-                   + 20 * np.sin(np.arange(240)[None, :] / 7.0))[:, :, None],
+        np.repeat((100 + 30 * np.sin(np.arange(160)[:, None] / 11.0)
+                   + 20 * np.sin(np.arange(120)[None, :] / 7.0))[:, :, None],
                   3, axis=2)
-        + np.random.default_rng(5).integers(-12, 12, size=(320, 240, 3)),
+        + np.random.default_rng(5).integers(-12, 12, size=(160, 120, 3)),
         0, 255,
     ).astype(np.uint8)
     small_img = Image.fromarray(small)
     small_subject = Image.fromarray(
-        np.full((320, 240), 255, dtype=np.uint8), "L"
+        np.full((160, 120), 255, dtype=np.uint8), "L"
     )
-    gen_small = small[0:160, 0:120].astype(np.int16)
-    gen_small[60:110, 50:90] = np.clip(gen_small[60:110, 50:90] + 70, 0, 255)
+    gen_small = small[0:80, 0:60].astype(np.int16)
+    gen_small[30:55, 25:45] = np.clip(gen_small[30:55, 25:45] + 70, 0, 255)
     edited = integrate(
         mgr, small_img,
         Image.fromarray(gen_small.astype(np.uint8)),
-        small_subject, (0, 0, 120, 160),
+        small_subject, (0, 0, 60, 80),
     )
     client = FakeClient()
     import io
@@ -165,8 +231,8 @@ def main():
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         out = mgr._second_focused_pass(
-            client, edited, small_img, small_subject, (0, 0, 120, 160),
-            (60, 80), "p", None, 1, False, True, None, None, 1.0,
+            client, edited, small_img, small_subject, (0, 0, 60, 80),
+            (30, 40), "p", None, 1, False, True, None, None, 1.0,
             {"num_inference_steps": 8, "denoise": 1.0}, None, None,
         )
     log = buf.getvalue()

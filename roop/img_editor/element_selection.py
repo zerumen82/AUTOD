@@ -423,9 +423,9 @@ def _moondream_description(image: Image.Image, settings: dict) -> str:
     handler = None
     llm = None
     try:
-        handler = MoondreamChatHandler(clip_model_path=str(_ROOT / inv["projector_path"]), verbose=False)
+        handler = MoondreamChatHandler(clip_model_path=str(_ROOT / inv["projector_path"]), verbose=True)
         llm = Llama(model_path=str(_ROOT / inv["model_path"]), chat_handler=handler,
-                    n_ctx=inv["context_size"], n_gpu_layers=0, n_threads=inv["threads"], verbose=False)
+                    n_ctx=inv["context_size"], n_gpu_layers=0, n_threads=inv["threads"], verbose=True)
         response = llm.create_chat_completion(
             messages=[{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": _image_data_url(image, inv["max_image_side"])}},
@@ -456,7 +456,7 @@ def _extract_noun_phrases(description: str, settings: dict) -> List[str]:
 
     ext = settings["extractor"]
     llm = Llama(model_path=str(_ROOT / ext["model_path"]), n_ctx=ext["context_size"],
-                n_gpu_layers=0, n_threads=ext["threads"], verbose=False)
+                n_gpu_layers=0, n_threads=ext["threads"], verbose=True)
     try:
         response = llm.create_chat_completion(
             messages=[
@@ -558,6 +558,50 @@ def _measure_labels(image: Image.Image, labels: Sequence[str], settings: dict) -
         masker.model = None
 
 
+def _complete_head_proposals(regions: List[SelectionRegion], inclusion: float) -> None:
+    """Complete detection proposals before the user sees/selects their outline.
+
+    A face ellipse and a person segmentation can both cut through hair. Use
+    the existing local coverage margin, then carry that head into a person
+    whose ORIGINAL support contains it unambiguously. Generation never grows
+    a user's accepted selection; its actual preview already shows this mask.
+    """
+    from roop.img_editor.img_editor_manager import ImgEditorManager
+
+    heads = [region for region in regions if region.kind == "head"]
+    original = {region.id: region.mask.copy() for region in heads}
+    completed = {}
+    for region in heads:
+        core = np.asarray(original[region.id].convert("L")) >= 128
+        seed = Image.fromarray(core.astype(np.uint8) * 255, "L")
+        completed[region.id] = np.asarray(
+            ImgEditorManager._complete_localized_region_mask(seed)) >= 128
+
+    def replace(region, support):
+        ys, xs = np.where(support)
+        if not xs.size:
+            return
+        region.mask = Image.fromarray(support.astype(np.uint8) * 255, "L")
+        region.bbox = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+        region.coverage = float(support.mean())
+
+    for region in regions:
+        if region.kind == "head":
+            continue
+        contained = [head for head in heads
+                     if _head_inside_selection(original[head.id], region.mask, inclusion)]
+        if len(contained) != 1:
+            continue
+        own = contained[0]
+        support = (np.asarray(region.mask.convert("L")) >= 128) | completed[own.id]
+        for other in heads:
+            if other.id != own.id:
+                support &= ~completed[other.id]
+        replace(region, support)
+    for region in heads:
+        replace(region, completed[region.id])
+
+
 def analyze_elements(image: Image.Image, settings: Optional[dict] = None) -> SelectionAnalysis:
     """Measure the selectable regions of one photo on CPU."""
     settings = settings or load_settings()
@@ -602,6 +646,7 @@ def analyze_elements(image: Image.Image, settings: Optional[dict] = None) -> Sel
     except Exception as exc:  # noqa: BLE001 - evidence probe
         message = f"análisis parcial: {exc}"
 
+    _complete_head_proposals(regions, float(settings["edit"]["head_inclusion_coverage"]))
     return SelectionAnalysis(
         fingerprint=fingerprint, size=image.size, regions=regions, message=message,
     )

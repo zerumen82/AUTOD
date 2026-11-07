@@ -4,7 +4,10 @@
 OmniGen2 ComfyUI Client - fp16 con Qwen externo + preload
 """
 
-import os, sys, json, time, requests, io
+import os
+import time
+import requests
+import io
 from typing import Optional, Tuple
 from PIL import Image
 from dataclasses import dataclass
@@ -29,7 +32,7 @@ class OmniGen2ComfyClient:
     def is_available(self):
         try:
             return requests.get(f"{COMFY}/system_stats", timeout=3).status_code == 200
-        except:
+        except BaseException:
             return False
 
     def get_model_paths(self) -> dict:
@@ -60,7 +63,7 @@ class OmniGen2ComfyClient:
         
         self._model_paths = self.get_model_paths()
         self._model_paths["vae"] = vae_found
-        return True, f"Modelos OK"
+        return True, "Modelos OK"
 
     def _do_preload(self):
         """Pre-carga el modelo en background cuando carga ComfyUI"""
@@ -259,7 +262,7 @@ class OmniGen2ComfyClient:
         result = queue_resp.json()
         prompt_id = result.get("prompt_id")
         if not prompt_id:
-            return None, f"No prompt_id"
+            return None, "No prompt_id"
         
         print(f"[OmniGen2] Prompt ID: {prompt_id}", flush=True)
         
@@ -274,7 +277,7 @@ class OmniGen2ComfyClient:
                 if prog_resp.status_code == 200:
                     prog_data = prog_resp.json()
                     exec_info = prog_data.get("exec_info", {})
-                    queue_remaining = exec_info.get("queue_remaining", 0)
+                    _queue_remaining = exec_info.get("queue_remaining", 0)
                     
                     # Intentar obtener el nodo actual si nuestro prompt está ejecutándose
                     # (Nota: ComfyUI no siempre expone el nodo exacto por REST de forma simple sin WebSockets, 

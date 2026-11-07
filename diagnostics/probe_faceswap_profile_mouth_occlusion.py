@@ -87,6 +87,57 @@ def _check_mouth_occlusion_evidence():
     print(f'oral object evidence lips={lips:.2f} ring={ring:.2f}; empty mask rejected')
 
 
+def _check_mouth_rescue_large_object():
+    import cv2
+
+    shape = (160, 160)
+    points = np.array([
+        [40, 45], [120, 45], [80, 70], [60, 100], [100, 100],
+    ], dtype=np.float32)
+    interior = np.ones(shape, dtype=np.float32)
+
+    def fraction(mask):
+        measured = np.asarray(mask, dtype=np.float32)
+        return float(np.count_nonzero(measured > 0.1)) / float(interior.size)
+
+    # Objeto real delante de la boca (mazorca/mano) que ocupa la mitad de la cara.
+    object_mask = np.zeros(shape, dtype=np.float32)
+    cv2.ellipse(object_mask, (80, 100), (58, 46), 0, 0, 360, 1.0, -1)
+    object_mask[10:60, 20:150] = 1.0
+    assert fraction(object_mask) > 0.4
+    rescued = ProcessMgr._localize_mouth_occlusion(
+        object_mask, points, fraction_measure=fraction,
+    )
+    assert rescued is not None, 'un objeto oral medido debe rescatar su zona'
+    rescued_fraction = fraction(rescued)
+    assert rescued_fraction <= 0.4, rescued_fraction
+    assert rescued[100, 80] > 0.5, 'la boca conserva el objeto medido'
+    assert rescued[20, 80] < 0.02, 'la frente no se pinta como oclusión'
+
+    # Mancha grande que no cruza los labios (pelo/sombra): sigue rechazada.
+    shadow = np.zeros(shape, dtype=np.float32)
+    shadow[10:70, 10:150] = 1.0
+    assert ProcessMgr._localize_mouth_occlusion(
+        shadow, points, fraction_measure=fraction,
+    ) is None
+
+    # El recorte por sí solo no autoriza nada: solo acota el objeto medido.
+    bounded = ProcessMgr._clip_occlusion_to_mouth(shadow, points)
+    assert bounded is not None
+    # La mancha llega hasta y=70; la elipse oral empieza en y=56: solo se
+    # conserva el solape con la boca y su anillo.
+    assert bounded[64, 80] > 0.5
+    assert bounded[20, 80] < 0.02 and bounded[100, 10] < 0.02
+    assert float(bounded[75:].sum()) < 1e-6
+
+    # Sin puntos orales no hay recorte posible.
+    assert ProcessMgr._clip_occlusion_to_mouth(object_mask, None) is None
+    print(
+        f'oral rescue clips a {fraction(object_mask):.2f} object to '
+        f'{rescued_fraction:.2f} around the mouth; non-oral blob rejected'
+    )
+
+
 def _check_mouth_depth_choice():
     kps = np.array([
         [40, 40], [80, 40], [60, 80], [48, 105], [72, 105],
@@ -163,6 +214,7 @@ def main():
     _check_frontal_window(manager)
     _check_mouth_floor(manager)
     _check_mouth_occlusion_evidence()
+    _check_mouth_rescue_large_object()
     _check_mouth_depth_choice()
     _check_guides()
     _check_occlusion()

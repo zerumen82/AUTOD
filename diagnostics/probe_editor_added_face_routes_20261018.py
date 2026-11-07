@@ -102,7 +102,10 @@ def patches(manager):
     return stack
 
 
-def compound(client, prompt="The man is bald, the walls are blue", cancelled=None):
+def compound(
+    client, prompt="The man is bald, the walls are blue", cancelled=None,
+    measured_zone=True,
+):
     manager = ImgEditorManager()
     source = photo()
     region = mask((120, 0, 240, 160))
@@ -114,7 +117,10 @@ def compound(client, prompt="The man is bald, the walls are blue", cancelled=Non
         patch("roop.img_editor.prompt_translator.translate_prompt", side_effect=lambda text: text),
         patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=client),
         patch.object(manager, "_explicit_viewpoint_request", return_value=False),
-        patch.object(manager, "_compound_clause_zone", return_value=region),
+        patch.object(
+            manager, "_compound_clause_zone",
+            return_value=region if measured_zone else None,
+        ),
         patch.object(manager, "_appearance_work_region", side_effect=lambda image, zone: (image, zone, (0, 0, *SIZE))),
         patch.object(manager, "_degenerate_faces_mask", return_value=None),
     ):
@@ -130,16 +136,6 @@ def assert_restored(source, output):
     assert np.array_equal(src[28:52, 178:202], dst[28:52, 178:202]), "extra face not restored"
     assert np.any(src[100:130, 140:165] != dst[100:130, 140:165]), "legitimate edit lost"
     assert np.array_equal(src[:, :100], dst[:, :100]), "unrequested region changed"
-
-
-def assert_restored_global(source, output):
-    # El compuesto de kontext es una pasada global: el marco entero se
-    # regenera: lo que la compuerta garantiza es que la cara añadida vuelve
-    # de la foto original y que la edición pedida sobrevive al reintento.
-    src, dst = np.asarray(source), np.asarray(output)
-    assert np.array_equal(src[28:52, 178:202], dst[28:52, 178:202]), "extra face not restored"
-    assert np.any(src[100:130, 140:165] != dst[100:130, 140:165]), "legitimate edit lost"
-    assert np.any(dst[:, :100, 2] == 220), "global pass did not regenerate the frame"
 
 
 def subjects(client, text="The walls are blue", two=False, cancelled=None, no_op=False):
@@ -184,7 +180,7 @@ def main():
         assert len(client.calls) == 2, f"{runner.__name__}: extra face did not trigger retry ({len(client.calls)})"
         assert "no face may be added" in client.calls[1]["prompt"]
         assert len(detected(output)) == 1
-        restored = assert_restored_global if runner is compound else assert_restored
+        restored = assert_restored
         for failed in (False, True):
             client = Client(persist=True, fail_retry=failed)
             source, output, message = runner(client)
@@ -203,7 +199,15 @@ def main():
     client = Client()
     subjects(client, "Add a person near the door")
     assert len(client.calls) == 1
-    print("PASS exemptions: pose, mixed add-person compound and structural subject pass")
+    client = Client()
+    source, output, message = compound(
+        client, "The walls are blue, Add a person near the door",
+        measured_zone=False,
+    )
+    assert client.calls == [], "an unmeasured local addition must not launch a global pass"
+    assert np.array_equal(np.asarray(source), np.asarray(output))
+    assert "foto conservada" in message.lower(), message
+    print("PASS exemptions: pose and measured structural edits; unmeasured additions abstain")
 
     client = Client(persist=True)
     source, output, _ = subjects(client, two=True)

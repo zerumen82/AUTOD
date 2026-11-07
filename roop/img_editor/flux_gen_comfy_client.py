@@ -243,6 +243,25 @@ def get_default_generation_engine() -> Optional[str]:
     return None
 
 
+def get_generation_engine_catalog() -> dict:
+    """Catálogo único de motores de Generate, para la UI y para clientes móviles.
+
+    Solo lista motores instalados: una lista escrita a mano en el cliente ofrece
+    modelos que el servidor no puede cargar y se queda vieja al instalar otros.
+    """
+    engines = get_installed_generation_engines()
+    if not engines:
+        engines = [("FLUX Dev Q4 (seguro, por defecto)", "flux_dev_q4")]
+    aliases = [alias for _label, alias in engines]
+    default = get_default_generation_engine()
+    if default not in aliases:
+        default = aliases[0]
+    return {
+        "default": default,
+        "engines": [{"alias": alias, "label": label} for label, alias in engines],
+    }
+
+
 @dataclass
 class GenResult:
     image: Image.Image
@@ -321,7 +340,19 @@ class FluxGenComfyClient:
 
     def _model_exists(self, subdir: str, name: str) -> bool:
         path = os.path.join(get_models_base(), subdir, name)
-        return os.path.exists(path)
+        if os.path.exists(path):
+            return True
+        # ComfyUI registra unet/ y diffusion_models/ juntos (folder_paths.py:29
+        # de ui/tob/ComfyUI) y el loader resuelve por ambos. Los GGUF pueden
+        # vivir en unet/ (flux1-kontext-dev-Q4_K_M.gguf está ahí); sin esta
+        # ruta alternativa el alias legacy longcat_full devolvía
+        # "Faltan archivos" aunque ComfyUI pudiera cargarlo — mismo fix que ya
+        # tenía flux_edit_comfy_client._model_exists.
+        if subdir == "diffusion_models" and name.endswith(".gguf"):
+            alt_path = os.path.join(get_models_base(), "unet", name)
+            if os.path.exists(alt_path):
+                return True
+        return False
 
     def _lora_exists(self, name: str) -> bool:
         if not name or name == "None":

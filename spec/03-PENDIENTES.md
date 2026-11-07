@@ -1,6 +1,207 @@
 # spec/03 — Pendientes y deudas declaradas
 
-## Revisión para publicación y prueba del usuario — 2026-10-24
+## 2026-11-06 — continuación v5.1312: técnico verificado, calidad abierta
+
+- `plans/WORKLOG_state_logs_fix_20261106.md` actualizado con pruebas nuevas en
+  `diagnostics/out/continuation_20261106/`. Latido, residual configurable,
+  compositor y geometría temporal: reviewer APPROVE técnico acotado y tester
+  PASS. Corregido el último fallo reproducido: propuesta simple sin clasificar
+  perdía `measured_request=True`. 84 comprobaciones CPU, Ruff y compilación
+  de 49 módulos PASS; build del launcher exit0. No aprobación global del repo.
+- **FAIL visual actual del Editor**: neutral de taza azul respeta el soporte
+  (101.043 px cambiados; 0 fuera), pero cambia geometría/posición y conserva
+  restos de la taza original. `real_single/result.png`; confirmado por tester.
+  Falta un resultado natural y aceptación del usuario; no convertir la máscara
+  medida en garantía de cobertura completa ni ampliar a ciegas por oscuridad.
+- Seis solicitudes en último log UI10:29; dos conservan la misma imagen por
+  zona no medida: pendientes de cumplimiento. Las cuatro inferencias siguientes
+  completan y tienen salidas presentes; la nota de tercer intento cortado se
+  supera. No hay validación visual de esas seis solicitudes en este turno.
+- FaceSwap foto frontal real CPU: A/B idéntico y tres modelos ejecutados.
+  El probe desactiva suavizado temporal: no valida el fix en un vídeo real.
+  Siguen pendientes perfiles/oclusión/halo/parecido y vídeo representativo.
+  Los seis outputs del lote histórico no están disponibles para inspección.
+- Modo Calidad Auto puede aplicar acabado clásico global solicitado. Sus
+  cambios de color/luz/detalle no prueban fuga generativa; selección explícita
+  conserva su contrato distinto de exterior exacto. 1080p/4K siguen abiertos.
+- Persisten versatilidad visual, POV/primera persona, Android instalado,
+  Chroma CFG/negativo y discrepancia histórica39:12; no reinstalar ni cambiar
+  motores para cerrar estas deudas sin diagnóstico/autorización pertinente.
+
+## 2026-11-06 — contraste ejecutado del estado actual (sin cambios de procesamiento)
+
+Captura histórica de las 08:52; el estado técnico vigente está en la entrada
+anterior y en el WORKLOG. Conservar estos datos como procedencia, no repetirlos
+como fallos actuales tras las correcciones verificadas.
+
+- Informe: `plans/REVISION_estado_20261106.md`; evidencia nueva en
+  `diagnostics/out/state_review_20261106_085256/`.
+- **FAIL de progreso en aquella captura (superado):** 42/43 tests CPU pasan; falla
+  `test_heartbeat_keeps_real_step_without_claiming_health`. La consola impone
+  `max(heartbeat, 30.0)` aunque la configuración solicite menos. Los callbacks
+  tienen su cadencia separada; no demuestra fallo de entrega Gradio ni cuelgue.
+- Los hashes actuales de `comfy_progress.py` y `selected_region_edit.py` no
+  coinciden con el tester/render v5.1310: su APPROVE/PASS no certifica estos
+  cambios posteriores. El probe nuevo de pegado/residual pasa 11/11, pero no
+  valida su calidad visual ni sustituye una revisión completa del alcance.
+- Ruff Editor/Generate: 94 incidencias (88 de código y 6 E902 de respaldos con
+  bytes nulos). Sintaxis y lint crítico de 52 archivos sin esos respaldos PASS.
+  No declarar lint global ni build actual verdes; no se recompiló el launcher.
+- Parámetros nuevos de residual/expansión siguen literales: `threshold=0.4`
+  y `grow_frac=0.35` en `selected_region_edit.py`; revisar conforme a NO HARDCODE.
+- Corregida solo documentación: predeterminado Auto en spec/00; estados
+  históricos del umbral corporal y build Android aclarados más abajo.
+- Permanecen las validaciones visuales/funcionales abiertas de Editor, FaceSwap,
+  Android instalado, Chroma CFG/negativo y Modo Calidad 1080p/4K.
+
+## 2026-11-06 — v5.1311: cierre documental y alineación de pendientes
+
+- Petición: «revisa pendientes y bitácora, y requisitos, memory y demás» y
+  después «haz lo que debas y las pendientes, sube versión cuando acabes».
+  Solo documentación y versión: sin cambios de motor, prompts, recetas ni píxeles.
+- Corregido el desfase: `spec/03` afirmaba v5.1309 mientras `AGENTS.md`,
+  `run.py` y `roop/core.py` ya eran v5.1310. Vigente **v5.1311 (2026-11-06)**.
+- Cerrada la deuda del 29/10 sobre exposición corporal: la ruta lee
+  `instruction_scope.body_state_min_intensity` (0,3) de
+  `config/editor_selection.json`, valida el rango y ya no usa el literal 0,35.
+- Cerradas las 4 tareas del 26/10 en `.autohand/agents/tasks/todos.json`:
+  LongCat en cuerpo sin selección es la ruta configurada desde v5.1306, no un
+  defecto; solo la apariencia pura medida se redirige a Kontext.
+- Verificado hoy: `probe_editor_versatility_integrity_20261105.py` 23/23 PASS y
+  retirada regional con `body_transform=False` (la frase de piel desnuda ya no
+  se envía para objetos). Falta la muestra real repetida de la cuchara.
+- Sigue abierto: FAIL visual de conservación v5.1310; categorías de
+  versatilidad sin PASS visual; 39:12; FaceSwap perfiles/oclusión/vídeo;
+  Android instalado; Chroma CFG/negativo; Ruff global ~90; render 1080p/4K.
+- Sin commit/push: HEAD `4d7ce3c` v5.1280; 65 modificados + 115 sin rastrear.
+  UI abierta (PID 15720, :7861) intacta; reabrir carga v5.1311.
+
+## 2026-11-05 — H-EDIT-WAIT-FINISH: límites v5.1310
+
+- FAIL visual de conservación: taza azul sí, pero cambia plato/encuadre/café/
+  cuchara y añade vapor. No acredita calidad general ni caso zapatos.
+- Latidos cooperativos: HTTP/callback bloqueados pueden retrasarlos. Prueba con
+  callback JSONL no acredita entrega Gradio. No se explica el39:12 histórico
+  ni se atribuye aceleración del modelo al parche. Fuentes primarias sobre
+  offload en fix/research.md sin cambios de flags. No se instaló ni reinició,
+  no se hizo commit/push; reabrir app carga cambios.
+- Toda evidencia: diagnostics/out/editor_stall_20261105/. Reviewer/tester
+  independientes; detalles visuales en fix/tester/real_visual_and_provenance.json.
+
+## 2026-11-05 — auditoría de versatilidad: defectos actuales, v5.1308
+
+Informe y reproducciones: `plans/AUDIT_editor_versatility_20261105.md` y
+`diagnostics/out/editor_versatility_audit_20261105/`. Es una revisión del alcance
+existente, sin nueva implementación ni cambio de versión. No declarar versatilidad
+cumplida por las muestras de apariencia ni por las suites CPU verdes.
+
+- Estado tras la revisión de 2026-11-05 y comparación con el código actual:
+  - **P1 `_build_object_removal_mask`**: el código ya no convierte los ceros de la máscara en zona editable. Prueba: `probe_editor_versatility_integrity_20261105.py::RemovalContracts::test_generic_removal_helper_does_not_invent_a_body_surface` / `::test_auto_regional_object_removal_prompt_reconstructs_neutral_scene` → **PASS**.
+  - **P1 `_closed_structural_zone`**: ya distingue objetivo medido de personas protegidas. Prueba: `...::test_person_closure_keeps_target_and_excludes_adjacent_neighbor` → **PASS**.
+  - **P2 `_compound_clause_zone`**: transmite `structural_remove` y mantiene zona simple/compuesta. Prueba: `...::test_small_target_same_mask_in_simple_and_compound` → **PASS**.
+  - **P2 cobertura de probes add/remove**: los controles constantes/búsqueda de texto se reemplazaron por contratos con píxeles, objetivo y ruta real (clases `RemovalContracts`, `AdditionContracts`, `CameraContracts` del mismo archivo). Prueba: 23/23 **PASS** en `python -m pytest diagnostics/probe_editor_versatility_integrity_20261105.py -q`.
+
+- Riesgos de clasificación confirmados (sin FAIL visual generado): abrigo
+  azul puede medir recolor, ojos grandes puede medir cuerpo, silla
+  desplazada puede medir pose. Requieren muestras específicas antes de
+  cambios de rutas.
+
+- No se implementó aún:
+  - validación visual del usuario por categoría;
+  - pruebas de cámara/POV sobre una imagen adecuada;
+  - muestras específicas de ropa/ojos/movimiento;
+  - prueba en teléfono Android instalado; el build/lint previo ya pasó
+    según spec/05, sin acreditar todavía la ejecución en el dispositivo;
+  - vídeo representativo de FaceSwap;
+  - actualización de la versión de aplicación (el código ya estaba en v5.1310;
+    ver entrada 2026-11-06).
+
+## 2026-11-05 — recuperación entregada y límites visuales, v5.1308
+
+- Auto recupera apariencia focal Kontext y la plantilla regional conserva
+  atributos no solicitados. Prueba nativa astronaut sin overrides con exterior0
+  y calvicie visible; Grace controlada mejora frente al FAIL conservado.
+- La preservación de todos los atributos no es absoluta: Grace retira gorra
+  y conserva vello corto. No certificar todas las fotos/categorías ni identidad
+  exacta. Aceptación visual del usuario y mapa de versatilidad siguen abiertos.
+- Carga fría lenta y variable (283s modelo/371,297s callback en la prueba
+  productiva final; otras corridas fueron mayores). No declarar rapidez resuelta.
+- Error de máscara local que producía array0d corregido y engine_status28/28.
+  Diez suites pertinentes de la plantilla pasan; deudas de lint ajenas siguen
+  separadas. No restaurar el stub ni la dilatación genérica posterior de máscara.
+
+## 2026-11-04 — H-EDIT-REFINE-RECIPE, v5.1305
+
+- Comparación aislada posterior: HEAD v5.1280 no carga el Editor por imports
+  de funciones/excepción ausentes en sus propias fuentes. Worktree limpio y
+  hashes verificados; `head_v51280_import.log`/`head_v51280_provenance.json`.
+  No usar ese commit como referencia visual validada ni confundirlo con la
+  carpeta de trabajo que pudiera existir el día del commit. Sin parchearlo,
+  no hay render comparable. Producción permanece en v5.1305.
+
+- Restaurado el contrato de latente foto y receta configurada del refino,
+  manteniendo pegado completo y compuertas faciales. No equivale a resolver
+  calidad visual ni remanentes; pendiente aceptación visual del usuario.
+- La afirmación de MEMORY v5.1304 «solución final» sin referencia espacial
+  queda rectificada en la entrada v5.1305; no usarla para repetir ese override.
+- Ruff completo de manager/run/core y diff --check de run/core tienen deuda
+  anterior al arreglo; lint crítico, probe y build se verifican por separado.
+  No ampliar esta corrección para limpiar el resto de cambios sin commit.
+- Prueba neutral «la mujer debe tener el pelo rojo» (astronaut, semilla
+  424242): FAIL visual, pelo rojo añadido alrededor del original. La ruta
+  region_edit amplió máscara al 87,2 % y omitió refino por área. Evidencia
+  `diagnostics/out/refine_recipe_20261104/neutral_real/compare_real.png` y
+  `real.log`. La corrección de receta focal no resuelve esta medición/pegado
+  anterior; no declarar versatilidad ni calidad general resueltas.
+- La dilatación genérica posterior y el hueco de todas las cajas faciales
+  se han retirado tras reproducción CPU de fuga a otra persona y A/B real.
+  El refino vuelve a ejecutarse con su receta de foto; desaparece el bloque
+  frontal protegido, pero la prueba neutral todavía conserva restos claros
+  y orla. **FAIL visual de edición completa**; pendiente completar la región
+  sin restaurar la expansión arbitraria ni el override sin referencia.
+  Evidencia `real_without_expansion.log` y
+  `neutral_without_expansion/compare_real.png` en la carpeta de esta historia.
+
+## Continuación verificada — 2026-10-29
+
+- Revisión solicitada: «revisa pendientes y sigue», con relevo antes de agotar
+  contexto. Se está contrastando documentación histórica con código actual.
+- Bloqueo general reproducido y corregido: `_appearance_work_region` lanzaba `NameError`
+  por `body_direction` no definido, también con una máscara local no explícita
+  y sin persona. Retirado solo el bloque suelto dentro de H-EDIT-003/H-AUDIT-FIX;
+  la inclusión geométrica de la persona ya existe más abajo. Probe nuevo
+  `probe_editor_focal_window_20261029.py`: rojo (6 errores) → verde (5 métodos),
+  con ventana local, bordes, persona completa, fuente intacta y máscara vacía.
+  Reviewer APPROVE y tester independiente PASS acotados; Ruff del manager/probe,
+  compilación y build del launcher verdes. Foto neutral real: crop exacto,
+  fuente intacta, máscara/persona sin pérdida (geometría explícita, sin render).
+- Baseline: compilación Editor/Generate verde; Ruff global del área falla.
+  Después del fix quedan 90 incidencias previas (antes 91), ninguna en manager.
+  Evidencia y ejecuciones en `diagnostics/out/pending_audit_20261029/145422/`.
+  No equivale a aprobación del workspace ni a validación visual general.
+  Relevo: `plans/HANDOFF_pendientes_20261029.md`.
+- Deuda histórica del lote previo (superada por el contraste del 06/11 en la
+  cabecera; se conserva como registro): `measured_full_body_exposure` contiene una
+  lista manual que evita los conceptos medidos; `_full_body_exposure_clauses`
+  incorpora un umbral literal 0,35. Reviewer CHANGES_REQUESTED por las reglas
+  de enrutamiento/configuración. No modificado en esta corrección genérica;
+  los contratos actuales de alcance (10/10) no acreditan cumplimiento de esa
+  regla ni cubren todo el vocabulario añadido.
+- Color guard opcional: contratos 11/11 e identidad 14/14 siguen verdes;
+  continúa pendiente aceptación visual del usuario. Riesgo de estiramiento
+  con proporciones incompatibles ya medido el 26/10: abierto, sin causa
+  atribuida a una edición real. No repetir A/B fallidos sin hipótesis nueva.
+- FaceSwap: perfiles/oclusiones/vídeos completos y validación visual abiertos.
+  Android: prueba instalada pendiente; el build/lint previo no la sustituye.
+
+## Histórico: revisión para publicación y prueba del usuario — 2026-10-24
+
+Los fallos por contar cláusulas, el F841 de calidad y la comparación de identidad
+descritos abajo se corrigieron el 25/10 (H-AUDIT-FIX en spec/02 y MEMORY.md).
+Se conservan como historial, no como deuda actual. Los fallbacks nuevos por
+vocabulario/umbral del working tree son una deuda posterior, declarada arriba.
+Las afirmaciones de motor de este bloque también preceden a la autorización
+del 25–28/10; consultar spec/00 y spec/01 actuales.
 
 - Usuario autoriza actualizar documentación, commit y push; hará la prueba
   visual. No se ejecutan nuevos renders ni se reinicia su UI en este turno.
@@ -27,7 +228,11 @@
   aunque otra empeore. No certifica identidad individual en fotos con varias
   personas. Pendiente de revisión específica, sin cambiar el diseño aquí.
 
-## Referente débil y global — v5.1250, 2026-10-24
+## Histórico: referente débil y global — v5.1250, 2026-10-24
+
+Actualización 29/10: la repetición de Grace indicada aquí ya se ejecutó el
+25/10. PASS acotado de color azul, sin certificar el corte exacto (añade bob y
+flequillo); véanse MEMORY.md y spec/05. No repetirla como ejecución ausente.
 
 Estado al pedir «anótalo todo»: relevo vigente
 `plans/HANDOFF_editor_global_20261024.md`. Global astronaut PASS; Grace
@@ -35,7 +240,7 @@ INTERRUMPIDA, sin veredicto visual. Cierre nativo de proyector PASS en dos
 ciclos,1224MB liberados cada uno, sin acumulación. **Conservar Ollama activo por
 instrucción explícita del usuario.** Falta repetir solo Grace desde proceso
 limpio y con presupuesto de VRAM compatible, sin detener aplicaciones ajenas.
-El estado actual es el de este resumen; los intentos anteriores quedan en el relevo.
+El estado de entonces es el de este resumen; los intentos anteriores quedan en el relevo.
 
 - weak_target lejos/cerca corregido: competir entre todas las detecciones antes de exigir elegibilidad del ganador, sin regresar a una única detección total; fallback sin región sigue permitido y protege vecinos. CPU20/20 y reviewer APPROVE. La deuda15/16 de v5.1249 ya está corregida en código; no marcarla pendiente sin contrastar esta actualización.
 - Global: baseline real produjo pelo blanco al pedir calvicie y omitió un retrato por35%. Plantilla regional sin edad inferida, recorte configurado de una sola cara creíble y armonización compartida; CPU20/20 + apariencia10/10 y reviewer APPROVE del cambio. Global corregido1792858682799844700 (astronaut) PASS visual acotado. Grace1792858908810863000 INTERRUMPIDA intencionalmente, sin imagen final validada; no atribuir a OOM ni afirmar dos fotos aprobadas. Log `logs/appearance_global_real_20261024.log`.
@@ -405,6 +610,22 @@ El estado actual es el de este resumen; los intentos anteriores quedan en el rel
 
 ## Deudas del proyecto (de `MEMORY.md`, no introducidas por H-GEN-001)
 
+## Relevo en curso del Editor — 2026-10-28
+
+- Reescritura sin commitear (`working tree`): `image_quality_pipeline.py`
+  (~3244 líneas), `selected_region_edit.py` (+450), `top_tier_finish.py`
+  (+370), `element_selection.py`, `run.py`, `config/editor_selection.json`,
+  `config/generation_prompt.json`. HEAD (`1dacf32`) es el código desplegado.
+- Compatibilidad: decidir si el lote se commita (posteando pruebas) o se
+  revierte/desfasado, antes de cerrar calidad. Especificar alcance y si afecta
+  fuentes fuera de Image Editor (FaceSwap/Generate); no tocar Servidor ComfyUI
+  8188 ni un render activo sin comprobar estado.
+- Calidad de la inpaint de ropa con visión (H-EDIT-005, nuevo): pendiente de
+  pruebas y validación visual del usuario.
+- H-EDIT-SELECT / H-EDIT-SELECT-BODY / H-EDIT-SELECT-V ya APPROVE y PASS en
+  código; validación visual del usuario sigue pendiente.
+
+
 - Recolor de parte 2026-10-06: revisadas las correcciones de `_measured_region_passes` que quedaron pendientes el 2026-10-05. Solo recolor usa la parte medida con el sujeto como contexto; add/remove conserva su ruta estructural y su reparación; parte no medida con solape facial real se abstiene sin repintar. Contratos CPU verdes (recolor_part_dispatch 4/4, compound/viewpoint/proposal/paste_zone y demás exit 0). Render real GPU del caso «pelo rojo» (`hair_red_part_v3`): una inferencia, 0,97 % cambiado, pelo rojo sin borrar a la mujer ni mover al hombre. PASS acotado a esa foto/petición/semilla; H-EDIT-003 y H-EDIT-004 siguen abiertas.
 
 - Caja de contexto H-EDIT-004 2026-10-06: hipótesis medida con `probe_editor_object_context_real.py` (Sobel bajo la semilla ponderado por píxeles no excluidos, umbral 1,05) — el bbox de la semilla CLIPSeg (y_max=436) cortaba la consulta «plant» por encima del suelo (y≈522–608). Caja medida [877,234,1136,526] con suelo y=522. CLIPSeg en caja sube precisión 0,705→0,770 y recall 0,637→0,667 con 0 solape de silla; SAM2 con caja recupera tronco 0,473→0,828 pero maceta solo 0,094; GrabCut re-invasa silla (925–966 px). Calor CLIPSeg dentro de la maceta ~0 (máx 0,004) con y sin caja: el fallo no es de encuadre, la consulta no genera evidencia de «maceta». Sin candidato integrable hoy; integrar dejaría restos de maceta. Veredicto `diagnostics/out/editor_object_complete_20261006/root_context_diagnosis.md`. Sin cambios de producción, sin GPU, sin descargas. H-EDIT-004 abierta; pendiente decisión: ruido/generación en la caja hasta el síntoma de suelo, o consulta/soporte distinto del planner 3B.
@@ -495,3 +716,12 @@ El estado actual es el de este resumen; los intentos anteriores quedan en el rel
 - Resuelto medido: «CAMBIA EL ANGULO, IMAGEN DE LATERAL» (y perfil/lado/de pie) miden POSE=True y salen por la rama `pose_change` (motor con visión, foto completa, sin ancla, marco reinterpretado, caras ajenas protegidas); contrato `pose_change_uses_the_vision_engine` → suite selección 9/9. Causa raíz: el sustantivo del medio («imagen/foto/image») en los conceptos `structural`/`structural_remove`/`attribute_appearance` daba +0,25 a toda petición que mencionara la foto y hacía imposible ganar la competición de pose. Ancla POV borrada por la sesión del 19/10 restaurada → probe cámara 10/10.
 - Pendiente: render real del ángulo sobre la foto del usuario + inspección visual; requiere reinicio de la app (Generate v5.1237 + pose + conceptos + ancla POV en proceso).
 - **Deuda preexistente (commit `9b5b6d0`) — RESUELTA 2026-10-22 (v5.1240)**: el alias `longcat→kontext` (línea 6104) normaliza antes de `engine in ("longcat","imagine")` (6391) → ruta Turbo 6388-7634 inalcanzable para kontext. La compuerta de caras añadidas **v5.1220 quedó sin efecto para kontext** (todos sus call sites en la ruta muerta; la integridad visual ordinary solo avisa, no restaura). Arreglo: compuerta portada a la ruta ordinary de kontext (tras `result = result_obj.image`, generación a foto completa, `_instruction_preserves_face_layout` como exención, reintento único con `_same_people_retry_prompt` y restauración por `Image.composite` si persiste o falla). Los 2 contratos viejos actualizados al contrato vivo sin perder aserciones de protección: `probe_editor_added_face_routes_20261018` (compound = pasada global) PASS y `probe_editor_compound_fast_dispatch` ( despacho vía `engine="qwen_camera"`, la única entrada viva a la ruta Turbo: fallback 6288→6294→6391) rc=0 con 63 OK.
+
+## 2026-10-28 — Segundo pase residual (LongCat Turbo inpaint sobre tiras)
+- Ejecutado: diagnostics/probe_editor_residual_second_pass_20261028.py (arranco ComfyUI propio, cerro con close_if_ours)
+- Base: img_editor/edit_1793205552.png (primera edicion LongCat Turbo)
+- Mascara residual: 26067 px (CLIPSeg th 0.3/0.4/0.5, sujeto The woman)
+- Metricas: dentro=71.91%, fuera=0.00%, seed 424242, denoise 0.95, steps 12
+- Tiempo: 111 s
+- Resultado: diagnostics/out/residual_second_pass_20261028/20261028_180929/
+- Veredicto: segundo pase elimina mayoria de tiras; borde intacto; solucion practica probada.

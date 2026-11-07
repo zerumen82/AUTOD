@@ -24,6 +24,7 @@ from PIL import Image  # noqa: E402
 
 from diagnostics.probe_editor_selection_contract_20261019 import fixture  # noqa: E402
 from roop.img_editor import element_selection as es  # noqa: E402
+from roop.img_editor.img_editor_manager import ImgEditorManager  # noqa: E402
 from ui.tabs.img_editor import events, selection_events as callbacks, state  # noqa: E402
 from ui.tabs.img_editor.state import SelectionSession  # noqa: E402
 from ui.tabs.img_editor.ui import build_img_editor_ui  # noqa: E402
@@ -284,6 +285,74 @@ def desktop_forwards_clean_selection():
     )
 
 
+def painted_mask_keeps_prompt_and_limits_region():
+    photo = Image.new("RGB", (48, 36), (40, 60, 80))
+    background = photo.convert("RGBA")
+    layer = Image.new("RGBA", photo.size, (0, 0, 0, 0))
+    from PIL import ImageDraw
+    ImageDraw.Draw(layer).rectangle((8, 7, 17, 18), fill=(255, 0, 0, 255))
+    editor_value = {"background": background, "layers": [layer], "composite": background}
+    calls = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return kwargs["image"], "CPU inference", None
+
+    manager = SimpleNamespace(generate_intelligent=generate,
+                              _last_instruction_compliance=None,
+                              _release_local_gpu_before_comfy=lambda: None)
+    with tempfile.TemporaryDirectory(prefix="editor_manual_mask_") as directory:
+        with (
+            patch.object(events, "get_img_editor_manager", return_value=manager),
+            patch.object(events, "get_img_editor_output_dir", return_value=directory),
+            patch.object(events, "_cleanup_vram"),
+        ):
+            output, message, _mask = events._on_generate_desktop(
+                photo, "Remove the spoon inside the painted area", "auto", 0,
+                False, 1, False, "hd", True, True, True, True, True,
+                SelectionSession(), editor_value,
+            )
+    assert output is not None and "guardado" in message.lower(), message
+    assert len(calls) == 1
+    request = calls[0]
+    assert request["prompt"] == "Remove the spoon inside the painted area", request["prompt"]
+    assert request["engine"] == "auto"
+    assert request["mask_mode"] == "manual"
+    assert request["mask_image"].size == photo.size
+    mask = np.asarray(request["mask_image"].convert("L")) > 0
+    assert mask.sum() == 10 * 12 and mask[10, 12] and not mask[0, 0], (
+        "painted alpha did not define the exact edit region"
+    )
+
+
+def painted_mask_rejects_stale_canvas():
+    photo = Image.new("RGB", (32, 24), (10, 20, 30))
+    stale = Image.new("RGBA", photo.size, (30, 20, 10, 255))
+    layer = Image.new("RGBA", photo.size, (0, 0, 0, 0))
+    layer.putpixel((8, 8), (255, 0, 0, 255))
+    manager = SimpleNamespace(generate_intelligent=lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("stale painted selection reached generation")))
+    with patch.object(events, "get_img_editor_manager", return_value=manager):
+        output, message, _mask = events._on_generate_desktop(
+            photo, "Remove the spoon", "auto", 0, False, 1, False, "hd",
+            True, True, True, True, True, SelectionSession(),
+            {"background": stale, "layers": [layer], "composite": stale},
+        )
+    assert output is None and "cambió" in message.lower(), message
+
+
+def incompatible_engine_rejects_manual_mask():
+    manager = object.__new__(ImgEditorManager)
+    photo = Image.new("RGB", (16, 12), (1, 2, 3))
+    mask = Image.new("L", photo.size, 255)
+    output, message, returned_mask = manager.generate_intelligent(
+        photo, "Remove the spoon", engine="kontext",
+        mask_image=mask, mask_mode="manual",
+    )
+    assert output is None and message.startswith("Omitida:"), message
+    assert returned_mask is mask
+
+
 def ui_endpoint_contract():
     with gr.Blocks() as app:
         ui = build_img_editor_ui()
@@ -295,11 +364,18 @@ def ui_endpoint_contract():
         "quality_mode", "enhance_tier", "quality_preserve_faces", "quality_deposter",
         "quality_upscale", "quality_color", "quality_realism",
     )]
-    for name, count in (("edit", 8), ("edit_options", 9), ("edit_select", 13), ("edit_region", 14)):
+    for name, count in (("edit", 8), ("edit_options", 9), ("edit_select", 13),
+                        ("edit_region", 14), ("edit_manual_region", 15)):
         assert len(endpoints[name]["inputs"]) == count, (name, endpoints[name])
-        expected = ordered[:count] if count <= 13 else ordered + [ui["selection_state"]._id]
+        if count <= 13:
+            expected = ordered[:count]
+        elif name == "edit_region":
+            expected = ordered + [ui["selection_state"]._id]
+        else:
+            expected = ordered + [ui["selection_state"]._id, ui["manual_mask_editor"]._id]
         assert endpoints[name]["inputs"] == expected, f"{name}: argument order changed"
     assert isinstance(ui["input_img"], gr.Image)
+    assert isinstance(ui["manual_mask_editor"], gr.ImageEditor)
     assert ui["output_img"].type == "pil" and ui["output_img"].format == "png", (
         "output must round-trip through reuse as a lossless PIL image"
     )
@@ -309,13 +385,20 @@ def ui_endpoint_contract():
         "actual Gradio result preprocessing lost pixels or returned a NumPy array"
     )
     assert isinstance(ui["selection_state"].value, SelectionSession)
-    assert not any(item["type"] == "imageeditor" for item in config["components"])
+    assert any(item["type"] == "imageeditor" for item in config["components"])
     overlay_id = ui["overlay_img"]._id
     assert any([overlay_id, "select"] in item["targets"] or (overlay_id, "select") in item["targets"]
                for item in config["dependencies"]), "point selection not wired"
     bound = [(item, app.fns[item["id"]].fn) for item in config["dependencies"]]
     replacements = [item for item, fn in bound if fn is callbacks.on_new_image]
     assert replacements and all(item["queue"] is False for item in replacements), "image invalidation queued behind analysis"
+    sync_callbacks = [item for item, fn in bound if fn is events._sync_manual_mask_editor]
+    assert sync_callbacks and all(
+        item["inputs"] == [ui["input_img"]._id]
+        and item["outputs"] == [ui["manual_mask_editor"]._id]
+        and item["queue"] is False
+        for item in sync_callbacks
+    ), "paint canvas is not reset from the current source image"
     reuse = [item for item, fn in bound if fn is callbacks.use_result_as_input]
     assert reuse and reuse[0]["inputs"] == [ui["output_img"]._id, ui["selection_state"]._id], "reuse lost session input"
 
@@ -327,7 +410,9 @@ def main():
              late_analysis_discarded, delayed_request_after_replacement,
              delayed_request_after_clear, delayed_request_after_reuse,
              concurrent_analysis_is_rejected,
-             desktop_forwards_clean_selection, ui_endpoint_contract]
+             desktop_forwards_clean_selection, painted_mask_keeps_prompt_and_limits_region,
+             painted_mask_rejects_stale_canvas, incompatible_engine_rejects_manual_mask,
+             ui_endpoint_contract]
     failures = []
     for check in cases:
         try:

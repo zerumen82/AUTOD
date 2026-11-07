@@ -1,12 +1,15 @@
+import json
 import os
 import queue
 import threading
 import time
-from types import SimpleNamespace
 
 import gradio as gr
 
-from roop.img_editor.flux_gen_comfy_client import get_flux_gen_client
+from roop.img_editor.flux_gen_comfy_client import (
+    get_flux_gen_client,
+    get_generation_engine_catalog,
+)
 from roop.img_editor.gen_prompt_modifiers import get_compatible_dropdown_choices, preview_modifiers
 from roop.img_editor.comfy_progress import build_generation_progress_html, format_duration
 from roop.img_editor.gen_prompt_config import get_generate_ui_config
@@ -474,6 +477,16 @@ def wire_events(ui_comp):
     )
     ui_comp["btn_cancel"].click(
         fn=None, cancels=[gen_event, gen_event_legacy], queue=False,
+    )
+
+    # Catálogo de motores instalados para la APK: el cliente móvil deja de
+    # llevar la lista de modelos escrita a mano y la pide al servidor.
+    ui_comp["btn_engines"].click(
+        fn=lambda: json.dumps(get_generation_engine_catalog(), ensure_ascii=False),
+        inputs=[],
+        outputs=[ui_comp["engines_json"]],
+        api_name="generate_engines",
+        queue=False,
     )
 
     print("[GenTab] Eventos conectados (modo modular, sin censura, máxima calidad)")

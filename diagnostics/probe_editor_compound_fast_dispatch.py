@@ -238,6 +238,15 @@ def main():
             if manager._split_compound_instruction(translated):
                 clauses = manager._split_compound_instruction(translated)
                 generations = [args for name, args in client.calls if name == "generate"]
+                if not generations:
+                    assert "no medida" in message.lower(), (prompt, message, client.calls)
+                    assert output.convert("RGB").tobytes() == source.convert("RGB").tobytes(), (
+                        prompt, message,
+                    )
+                    print(
+                        f"OK: región local no medida se abstiene sin regeneración global: {prompt}"
+                    )
+                    continue
                 assert len(generations) == 1, (len(generations), clauses)
                 prompts = [item["prompt"] for item in generations]
                 original_clauses = manager._split_compound_instruction(prompt)

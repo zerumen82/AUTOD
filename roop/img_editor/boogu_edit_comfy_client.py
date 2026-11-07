@@ -5,8 +5,10 @@ Boogu Image Edit ComfyUI Client
 Asume modelo GGUF Boogu Image Edit con nodos GGUF estándar.
 """
 
-import os, sys, json, time, requests, io
-import numpy as np
+import os
+import time
+import requests
+import io
 from typing import Optional, Tuple
 from PIL import Image
 from dataclasses import dataclass
@@ -40,7 +42,7 @@ class BooguEditComfyClient:
         try:
             r = requests.get(f"{get_comfyui_url()}/system_stats", timeout=5)
             return r.status_code == 200
-        except:
+        except Exception:
             return False
 
     def _model_exists(self, subdir: str, name: str) -> bool:
@@ -156,9 +158,6 @@ class BooguEditComfyClient:
 
         drop_edit_image_ref = bool(drop_edit_image_ref or kwargs.get("drop_edit_image_ref", False))
         no_kontext = bool(no_kontext or kwargs.get("no_kontext", False))
-        ref_method = reference_latents_method or "offset"
-        if no_kontext:
-            ref_method = "none"
 
         # Prompt negativo base
         if not negative_prompt:
@@ -168,15 +167,16 @@ class BooguEditComfyClient:
         is_longcat = "longcat" in self._boogu_version.lower()
         is_kontext = "kontext" in self._boogu_version.lower()
         is_qwen = "qwen" in self._boogu_version.lower() and "image" in self._boogu_version.lower()
-        is_klein = "klein" in self._boogu_version.lower()
 
         # Image preprocessing
         t0 = time.time()
         image = image.convert("RGB")
         w, h = image.size
         new_w, new_h = (w // 64) * 64, (h // 64) * 64
-        if new_w < 64: new_w = 64
-        if new_h < 64: new_h = 64
+        if new_w < 64:
+            new_w = 64
+        if new_h < 64:
+            new_h = 64
         if new_w != w or new_h != h:
             image = image.resize((new_w, new_h), Image.LANCZOS)
 
@@ -189,7 +189,9 @@ class BooguEditComfyClient:
             image = image.resize((new_w, new_h), Image.LANCZOS)
 
         iname = f"boogu_input_{int(t0)}.png"
-        buf = io.BytesIO(); image.save(buf, "PNG"); buf.seek(0)
+        buf = io.BytesIO()
+        image.save(buf, "PNG")
+        buf.seek(0)
         comfy_url = get_comfyui_url()
         r = requests.post(f"{comfy_url}/upload/image", files={"image": (iname, buf, "image/png")})
         if r.status_code != 200:
@@ -198,7 +200,9 @@ class BooguEditComfyClient:
         mname = None
         if mask_image:
             mname = f"mask_{int(t0)}.png"
-            mbuf = io.BytesIO(); mask_image.convert("L").resize((new_w, new_h)).save(mbuf, "PNG"); mbuf.seek(0)
+            mbuf = io.BytesIO()
+            mask_image.convert("L").resize((new_w, new_h)).save(mbuf, "PNG")
+            mbuf.seek(0)
             requests.post(f"{comfy_url}/upload/image", files={"image": (mname, mbuf, "image/png")})
 
         # Build workflow similar to FluxEdit but without complex branching; assume standard img2img with reference latents

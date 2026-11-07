@@ -3,10 +3,15 @@
 """Post-procesado de calidad para Image Editor: restauración por tiles + upscale ESRGAN + nitidez."""
 
 from typing import Any, Callable, Dict, Optional, Tuple
+import json
 import os
 import cv2
 import numpy as np
+from pathlib import Path
 from PIL import Image
+
+import roop.globals
+from roop.utilities import resolve_relative_path
 
 # Tier UI = solo objetivo de resolución máxima; la fuerza de cada paso sale del análisis de la imagen.
 TIER_TARGET_SIDE = {"hd": 1920, "4k": 3840, "8k": 7680}
@@ -18,9 +23,6 @@ UPSCALE_MODEL_FILES = {
     "esrganx4": "real_esrgan_x4.onnx",
     "lsdirx4": "lsdir_x4.onnx",
 }
-
-import roop.globals
-from roop.utilities import resolve_relative_path
 
 ProgressCallback = Callable[[Dict[str, Any]], None]
 
@@ -40,6 +42,121 @@ def _emit_quality_progress(
             progress_callback({"phase": phase, "progress": progress, "detail": detail})
         except Exception:
             pass
+
+
+# Tolerancias medidas del Modo Calidad (v5.1245). Se leen de config/quality_mode.json
+# para poder ajustarlas sin tocar el pipeline; los valores por defecto son los medidos
+# con diagnostics/probe_quality_benchmark_20261023.py.
+DEFAULT_QUALITY_SETTINGS: Dict[str, Any] = {
+    "acceptance_gate": True,
+    "gate": {
+        "sharpness_drop_tolerance": 0.06,
+        "poster_rise_tolerance": 0.04,
+        "clip_rise_tolerance": 0.008,
+        "full_metrics_max_side": 3600,
+        "chroma_mean_tolerance": 2.0,
+        "chroma_p95_tolerance": 6.0,
+        "chroma_max_side": 1024,
+    },
+    "identity": {
+        "verify_after_face_restore": True,
+        "max_side": 2048,
+        "max_drop": 0.02,
+    },
+    "upscale": {
+        "allow_8k": False,
+        "max_output_pixels": 12_000_000,
+        "min_source_side_4k": 700,
+        "min_source_side_8k": 1600,
+        "ai_gain_check": True,
+        "ai_gain_min_ratio": 1.08,
+        "ai_gain_crop": 256,
+        "ai_gain_max_side": 1600,
+    },
+}
+_QUALITY_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "config" / "quality_mode.json"
+_QUALITY_SETTINGS_CACHE: Dict[str, Any] = {"mtime": None, "data": None}
+
+
+def _merge_settings(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_settings(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def quality_settings() -> Dict[str, Any]:
+    """Ajustes del Modo Calidad, releídos cuando cambia el fichero."""
+    try:
+        mtime = _QUALITY_SETTINGS_PATH.stat().st_mtime
+    except OSError:
+        return dict(DEFAULT_QUALITY_SETTINGS)
+    if _QUALITY_SETTINGS_CACHE["mtime"] == mtime and _QUALITY_SETTINGS_CACHE["data"]:
+        return _QUALITY_SETTINGS_CACHE["data"]
+    try:
+        raw = json.loads(_QUALITY_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(
+            f"[QualityFinisher] config/quality_mode.json ilegible ({exc}) — "
+            "se usan los valores medidos por defecto",
+            flush=True,
+        )
+        return dict(DEFAULT_QUALITY_SETTINGS)
+    data = _merge_settings(DEFAULT_QUALITY_SETTINGS, raw)
+    _QUALITY_SETTINGS_CACHE["mtime"] = mtime
+    _QUALITY_SETTINGS_CACHE["data"] = data
+    return data
+
+
+def limit_quality_tier(image: Image.Image, tier: str = "hd") -> Tuple[str, str]:
+    """Tope de resolución por detalle del origen y presupuesto de píxeles.
+
+    v5.1245 — en 8 GB de VRAM un 8K pedido sobre una foto de 600 px no devuelve
+    detalle: sólo tarda y puede desbordar. Baja el tier (nunca lo sube) y deja
+    constancia de por qué. Con allow_8k=true en config se respeta el 8K.
+    """
+    requested = (tier or "hd").lower()
+    if requested not in TIER_TARGET_SIDE:
+        requested = "hd"
+    effective = requested
+    cfg = quality_settings().get("upscale", {})
+    w, h = image.size
+    source_side = max(w, h)
+    allow_8k = bool(cfg.get("allow_8k", False))
+    min_4k = int(cfg.get("min_source_side_4k", 700) or 0)
+    min_8k = int(cfg.get("min_source_side_8k", 1600) or 0)
+    max_pixels = int(cfg.get("max_output_pixels", 0) or 0)
+    reasons = []
+
+    if effective == "8k":
+        if not allow_8k:
+            effective = "4k"
+            reasons.append("8K apagado en config")
+        elif source_side < min_8k:
+            effective = "4k"
+            reasons.append(f"origen {source_side}px < {min_8k}px")
+    if effective == "4k" and source_side < min_4k:
+        effective = "hd"
+        reasons.append(f"origen {source_side}px < {min_4k}px")
+
+    if max_pixels > 0 and effective != "8k" and w > 0 and h > 0:
+        while effective != "hd":
+            target = TIER_TARGET_SIDE[effective]
+            scale = target / float(max(w, h))
+            projected = w * scale * h * scale
+            if projected <= max_pixels:
+                break
+            reasons.append(f"{effective.upper()} son {projected / 1e6:.1f} MP > {max_pixels / 1e6:.1f} MP")
+            effective = "4k" if effective == "8k" else "hd"
+
+    if effective == requested:
+        return effective, ""
+    note = f"tope {requested.upper()}→{effective.upper()} ({'; '.join(reasons)})"
+    print(f"[QualityFinisher] Resolución limitada: {note}", flush=True)
+    return effective, note
 
 
 def _clip01(v: float) -> float:
@@ -887,6 +1004,73 @@ class ImageQualityFinisher:
         out = cv2.addWeighted(anti_band, blend, bgr, 1.0 - blend, 0)
         return Image.fromarray(cv2.cvtColor(np.clip(out, 0, 255).astype(np.uint8), cv2.COLOR_BGR2RGB))
 
+    def _textured_crop_box(self, image: Image.Image, size: int) -> Tuple[int, int, int, int]:
+        """Recorte cuadrado en la zona con más textura (medida, no el centro a ciegas)."""
+        w, h = image.size
+        side = max(64, min(int(size), w, h))
+        try:
+            bgr = self._pil_to_bgr(image)
+            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (96, 96), interpolation=cv2.INTER_AREA).astype(np.float32)
+            gx = cv2.Sobel(small, cv2.CV_32F, 1, 0, ksize=3)
+            gy = cv2.Sobel(small, cv2.CV_32F, 0, 1, ksize=3)
+            energy = gx * gx + gy * gy
+            best = (0, 0)
+            best_val = -1.0
+            for row in range(3):
+                for col in range(3):
+                    cell = energy[row * 32:(row + 1) * 32, col * 32:(col + 1) * 32]
+                    val = float(cell.mean())
+                    if val > best_val:
+                        best_val = val
+                        best = (row, col)
+            cx = int((best[1] + 0.5) * w / 3.0)
+            cy = int((best[0] + 0.5) * h / 3.0)
+        except Exception:
+            cx, cy = w // 2, h // 2
+        x1 = max(0, min(w - side, cx - side // 2))
+        y1 = max(0, min(h - side, cy - side // 2))
+        return x1, y1, x1 + side, y1 + side
+
+    def _ai_detail_gain(
+        self,
+        image: Image.Image,
+        plan: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
+        """A/B medido: motor IA del plan frente a Lanczos, sobre la zona con textura.
+
+        v5.1245 — si el motor IA no gana nitidez real en ESTA foto, se usa Lanczos
+        (menos VRAM, sin riesgo de rejilla). La medición es local y barata.
+        """
+        cfg = quality_settings().get("upscale", {})
+        if not bool(cfg.get("ai_gain_check", True)):
+            return True, ""
+        if max(image.size) > int(cfg.get("ai_gain_max_side", 1600) or 1600):
+            return True, ""
+        if not self._upscale_model_available("esrganx2"):
+            return True, ""
+        try:
+            box = self._textured_crop_box(image, int(cfg.get("ai_gain_crop", 256) or 256))
+            patch = image.crop(box)
+            # Se prueba el MISMO motor del plan, no siempre ESRGAN x2: un LSDIR x4
+            # puede ganar donde el x2 no gana (y al revés).
+            up_ai, note = self.upscale(patch, plan=plan, force=True)
+            if not note or "lanczos" in note.lower() or "omitido" in note.lower():
+                return True, ""
+            up_ref = patch.resize(up_ai.size, Image.LANCZOS)
+            var_ai = float(cv2.Laplacian(np.array(up_ai.convert("L")), cv2.CV_64F).var())
+            var_ref = float(cv2.Laplacian(np.array(up_ref.convert("L")), cv2.CV_64F).var())
+            if var_ref < 25.0:
+                return True, ""
+            ratio = var_ai / var_ref
+            min_ratio = float(cfg.get("ai_gain_min_ratio", 1.08) or 1.08)
+            if ratio < min_ratio:
+                return False, f"A/B ESRGAN/Lanczos {ratio:.2f}x < {min_ratio:.2f} → Lanczos"
+            return True, f"A/B ESRGAN/Lanczos {ratio:.2f}x"
+        except Exception as exc:
+            print(f"[QualityFinisher] A/B de upscale omitido: {exc}", flush=True)
+            return True, ""
+
     def upscale_to_tier(
         self,
         image: Image.Image,
@@ -897,9 +1081,21 @@ class ImageQualityFinisher:
         upscale_plan: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Image.Image, str]:
         tier = (tier or "hd").lower()
+        cfg = quality_settings().get("upscale", {})
         target_side = self.TIER_MAX_SIDE.get(tier, 1920)
         w, h = image.size
         max_side = max(w, h)
+        max_pixels = int(cfg.get("max_output_pixels", 0) or 0)
+        if max_pixels > 0 and tier != "8k" and w > 0 and h > 0:
+            ratio_side = max(w, h) / float(min(w, h) or 1)
+            budget_side = int((max_pixels * ratio_side) ** 0.5)
+            if target_side > budget_side > 0:
+                print(
+                    f"[QualityFinisher] Presupuesto de resolución: {tier.upper()} {target_side}px "
+                    f"→ {budget_side}px ({max_pixels / 1e6:.1f} MP)",
+                    flush=True,
+                )
+                target_side = budget_side
 
         if max_side >= int(target_side * 0.92):
             return image, f"ya ~{tier.upper()} ({w}×{h})"
@@ -908,6 +1104,17 @@ class ImageQualityFinisher:
         engine = plan.get("label", "ESRGAN x2")
         out = image
         notes = []
+
+        if plan.get("subtype"):
+            worth, gain_note = self._ai_detail_gain(image, plan)
+            if not worth:
+                tw = max(1, int(round(w * target_side / float(max_side))))
+                th = max(1, int(round(h * target_side / float(max_side))))
+                out = image.resize((tw, th), Image.LANCZOS)
+                print(f"[QualityFinisher] {gain_note}", flush=True)
+                return out, f"upscale {tier.upper()} (Lanczos {w}×{h} → {tw}×{th}; {gain_note})"
+            if gain_note:
+                notes.append(gain_note)
 
         if plan.get("mode") == "scaled" and plan.get("subtype") == "lsdirx4":
             _emit_quality_progress(
@@ -1313,7 +1520,6 @@ class ImageQualityFinisher:
 
         analysis = adaptive_profile or self.analyze_image(out, tier=tier)
         profile = analysis.get("profile", {})
-        scores = analysis.get("scores", {})
 
         _emit_quality_progress(
             progress_callback,

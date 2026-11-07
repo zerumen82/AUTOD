@@ -17,9 +17,8 @@ Características "al estilo Imagine":
 - Fallbacks seguros
 """
 
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple
 from PIL import Image
-import os
 
 from roop.img_editor.img_editor_manager import get_img_editor_manager
 from roop.img_editor.prompt_translator import translate_prompt
@@ -53,7 +52,7 @@ class LocalImagineService:
         self.engine = self.SUPPORTED_ENGINES.get(raw, "imagine")
         self.use_semantic = use_semantic
         self._manager = None
-        is_ar = self.engine == "hart"
+        _is_ar = self.engine == "hart"
         print(f"[LocalImagine] Servicio iniciado. Engine={self.engine}")
 
     def _get_manager(self):

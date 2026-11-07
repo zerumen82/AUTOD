@@ -7,7 +7,6 @@ evitando errores de Processor en Windows.
 """
 
 import os
-import sys
 import torch
 import numpy as np
 import cv2
@@ -128,7 +127,8 @@ class ClothingSegmenter:
         """
         if not self._is_loaded:
             success, msg = self.load()
-            if not success: return None, None
+            if not success:
+                return None, None
             
         try:
             # Asegurar RGB para evitar error de tensores (4 canales -> 3 canales)
@@ -228,7 +228,7 @@ class ClothingSegmenter:
             # Convertir a PIL Image
             mask_image = Image.fromarray(mask_array, mode="L")
             
-            logger.info(f"[ClothingSegmenter] ✅ Máscara local generada")
+            logger.info("[ClothingSegmenter] ✅ Máscara local generada")
             
             return mask_image, mask_array
             
@@ -251,7 +251,7 @@ class ClothingSegmenter:
             combined = probs.max(dim=0)[0].cpu().numpy()
             
             return cv2.resize(combined, original_size, interpolation=cv2.INTER_LINEAR)
-        except:
+        except BaseException:
             return None
 
     def _clean_mask(self, mask: np.ndarray, dilation: int = 6) -> np.ndarray:

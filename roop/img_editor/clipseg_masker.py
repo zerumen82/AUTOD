@@ -6,6 +6,9 @@ import numpy as np
 from PIL import Image
 from typing import Optional, Tuple
 import cv2
+from string import Formatter
+
+from roop.img_editor.gen_prompt_config import SubjectPromptConfigError
 
 
 class CLIPSegMasker:
@@ -123,6 +126,27 @@ class CLIPSegMasker:
         except Exception as exc:
             print(f"[CLIPSeg] Error midiendo '{prompt}': {exc}")
             return None
+
+    def generate_subject_mask(self, image: Image.Image, subject: str,
+                              prompt_template: str) -> Optional[Image.Image]:
+        """Condition a subject query as a photograph, keeping every descriptor.
+
+        CLIP text conditioning is sensitive to noun-phrase framing. This is
+        one configured template and one prediction, not a vocabulary router
+        or a paraphrase of the user's subject. Anatomical completion masks
+        continue to use generate_mask directly.
+        """
+        try:
+            fields = [(field, spec, conversion)
+                      for _literal, field, spec, conversion in Formatter().parse(prompt_template)
+                      if field is not None]
+        except (TypeError, ValueError) as error:
+            raise SubjectPromptConfigError("segmenter.subject_prompt_template no es válida") from error
+        if fields != [("subject", "", None)]:
+            raise SubjectPromptConfigError(
+                "segmenter.subject_prompt_template debe contener {subject} una vez, sin recortarlo"
+            )
+        return self.generate_mask(image, prompt_template.format(subject=subject))
 
     def generate_mask(self, image: Image.Image, prompt: str, threshold: float = 0.4) -> Optional[Image.Image]:
         """

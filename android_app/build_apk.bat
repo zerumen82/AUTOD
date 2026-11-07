@@ -74,17 +74,14 @@ if not exist "%SDK%\platforms\android-34" (
 rem Escribir local.properties apuntando al SDK
 > "%PROJECT%\local.properties" echo sdk.dir=%SDK:\=/%
 
-rem ---------------- 5/6 : Crear clave de firma (solo la primera vez) ----------------
-set "KS=%PROJECT%\release-keystore.jks"
+rem ---------------- 5/6 : Usar firma configurada por el usuario ----------------
 set "KSPROP=%PROJECT%\release-keystore.properties"
 if not exist "%KSPROP%" (
-    echo [5/6] Generando clave de firma para el APK release...
-    "%JAVA_HOME%\bin\keytool.exe" -genkeypair -v -keystore "%KS%" -storepass autoauto123 -alias autoauto -keypass autoauto123 -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=AutoAuto, OU=Dev, O=AutoAuto, L=City, ST=State, C=ES" >nul 2>&1
-    > "%KSPROP%" echo storeFile=%KS:\=\\%
-    >> "%KSPROP%" echo storePassword=autoauto123
-    >> "%KSPROP%" echo keyAlias=autoauto
-    >> "%KSPROP%" echo keyPassword=autoauto123
-    echo    Clave creada.
+    echo [ERROR] Falta release-keystore.properties con una firma elegida por el usuario.
+    echo Configura storeFile, storePassword, keyAlias y keyPassword antes del build release.
+    echo No se crean ni sobrescriben claves automaticamente. Consulta README_APK.md.
+    pause
+    exit /b 1
 ) else (
     echo [5/6] Clave de firma existente detectada.
 )
@@ -102,10 +99,10 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo   LISTO! Tu APK (firmado, sin "origen desconocido") esta en:
+echo   LISTO! Tu APK release firmado esta en:
 echo   %PROJECT%\app\build\outputs\apk\release\app-release.apk
 echo.
 echo   Copiala a tu Android e instala. Al abrirla se conecta sola
-echo   a tu PC si AutoAuto esta encendido (misma red WiFi, 7861).
+echo   a la URL que hayas guardado en la app. La primera vez pide el servidor.
 echo ============================================================
 pause

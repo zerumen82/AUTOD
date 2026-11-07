@@ -126,7 +126,8 @@ class AddedFaceThenCleanClient:
                 f"OK attempt {attempt}")
 
 
-def _run_flow(manager, client, added_face_effect):
+def _run_flow(manager, client, added_face_effect,
+              prompt="Quita el pelo", translated="Remove the hair"):
     def fake_finish(image, original, **kwargs):
         return image, "acabado simulado", {"scores": {}}
 
@@ -134,14 +135,14 @@ def _run_flow(manager, client, added_face_effect):
     with (patch("roop.img_editor.img_editor_manager.ImgEditorManager"
                 "._added_face_mask", side_effect=added_face_effect),
           patch("roop.img_editor.prompt_translator.translate_prompt",
-                return_value="Remove the hair"),
+                return_value=translated),
           patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client",
                 return_value=client),
           patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit",
                 side_effect=fake_finish),
           contextlib.redirect_stdout(log)):
         output, message, _ = manager.generate_intelligent(
-            image=_photo(), prompt="Quita el pelo", engine="longcat",
+            image=_photo(), prompt=prompt, engine="longcat",
             quality_mode=True, enhance_tier="4k",
             quality_preserve_faces=False,
         )
@@ -210,11 +211,61 @@ def _check_no_detector_no_retry():
           "defecto reproducido)")
 
 
+def _check_pose_request_does_not_restore():
+    """v5.1287: una postura nueva mueve las caras; ahi no se juzga ni se restaura.
+
+    Log real 2026-11-03 15:46: «la mujer debe estar de rodillas mirando con
+    deseo al hombre». La cara REAL de la mujer bajo con la postura, quedo a
+    161 px de su sitio de pie y se midio como cara anadida; el segundo
+    intento, ademas de contradecir la postura («leave every original person
+    exactly where they are»), pinto el poster de la foto encima de su cara.
+    La compuerta no debe consultarse cuando la instruccion es una postura.
+    """
+    manager = ImgEditorManager()
+    assert manager._instruction_moves_people_position(
+        "la mujer debe estar de rodillas mirando con deseo al hombre"
+    ), "una postura medida debe mover a la gente"
+    assert manager._instruction_moves_people_position(
+        "The woman must be kneeling looking with desire at the man"
+    ), "la postura traducida tambien mueve a la gente"
+    assert not manager._instruction_moves_people_position("Quita el pelo")
+    assert not manager._instruction_moves_people_position("The man is bald")
+
+    client = AddedFaceThenCleanClient()
+    mask = _rect_mask()
+    consulted = []
+
+    def effect(*args, **kwargs):
+        consulted.append(args)
+        return mask
+
+    output, console = _run_flow(
+        manager, client, effect,
+        prompt="la mujer debe estar de rodillas mirando con deseo al hombre",
+        translated="The woman must be kneeling looking with desire at the man",
+    )
+    assert output is not None
+    attempts = [call for name, call in client.calls if name == "generate"]
+    assert len(attempts) == 1, (
+        "una postura nueva no debe disparar el retry de caras: "
+        f"intentos: {len(attempts)}"
+    )
+    assert not consulted, (
+        "la compuerta de caras no debe consultarse cuando la gente se mueve"
+    )
+    assert "Cara anadida por el modelo" not in console, console
+    assert "Cara añadida por el modelo" not in console, console
+    assert "se restaura de la foto original" not in console, console
+    print("OK: postura nueva -> sin retry de caras ni restauracion del "
+          "rectangulo de la foto original")
+
+
 def main():
     _check_matching_contracts()
     _check_added_face_triggers_retry()
     _check_persistent_added_face_restored()
     _check_no_detector_no_retry()
+    _check_pose_request_does_not_restore()
     print("GRUPOS OK")
 
 

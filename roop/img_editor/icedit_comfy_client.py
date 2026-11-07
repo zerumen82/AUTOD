@@ -6,7 +6,10 @@ Instrucciones: https://github.com/River-Zhang/ICEdit
 VRAM: ~4-6GB (nunchaku)
 """
 
-import os, sys, json, time, requests, io
+import os
+import time
+import requests
+import io
 from typing import Optional, Tuple
 from PIL import Image
 from dataclasses import dataclass
@@ -43,7 +46,7 @@ class ICEditComfyClient:
     def is_available(self):
         try:
             return requests.get(f"{COMFY}/system_stats", timeout=3).status_code == 200
-        except:
+        except BaseException:
             return False
     
     def _resolve_flux_fill(self, base: str) -> str:
@@ -90,7 +93,7 @@ class ICEditComfyClient:
                 missing.append(f"{name}: {path}")
         
         if missing:
-            return False, f"Modelos faltantes:\n" + "\n".join(missing)
+            return False, "Modelos faltantes:\n" + "\n".join(missing)
         
         self._model_paths = paths
         return True, "Modelos OK"
