@@ -1,5 +1,29 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-09 — corrección en desvestir/sin ropa y extracción de sujeto en participios/adjetivos (v5.1320)
+
+- **Diagnóstico en logs de edición (09/11)**:
+  1. `la mujer debe ir sin ropa` en Auto (`logs/ui_start_20261109_161142.log` y `logs/ui_start_20261109_191039.log`): en `selected_region_edit.py`, cuando la ropa no alcanza el min_ratio de la silueta, la zona pasa a `persona medida menos la cabeza`. La condición `vision_zone` quedaba en `False` e intentaba cargar Kontext (`flux1-kontext-dev-Q4_K_M.gguf`), pero en Auto (`automatic_longcat=True`) solo se había autorizado LongCat; la compuerta de `edit_execution.py` abortó con «Auto detuvo la solicitud porque una ruta intentó sustituir un motor permitido sin una decisión medida» devolviendo la foto sin cambios.
+  2. `el hombre tumbado debe ser calvo` (`logs/ui_start_20261109_191039.log`): `_leading_visual_subject` tomaba la primera palabra tras «the», extrayendo el participio/adjetivo `lying` en vez del sintagma nominal `lying man`. CLIPSeg consultó `a photo of lying` (cobertura 0,00%), abortando la edición focal por región no localizada.
+  3. ComfyUI Access Violation: al pasar de Kontext a LongCat con `--disable-dynamic-vram`, `_handle_clone` en `comfy_kitchen/tensor/base.py:400` causó excepción fatal C++ en PyTorch 2.8.0 cu128 en Windows durante el ciclo de `unpatch_model`.
+  4. Modo Calidad: caras posterizadas antes de quitar bandas eludían CodeFormer aun después de desposterizar; y caras con identidad degradada pasaban el corte relativo.
+- **Correcciones**:
+  - `roop/img_editor/selected_region_edit.py`:
+    (a) `edit_described_subject` autoriza explícitamente tanto `LongCat` como `Kontext` mediante `permit_automatic_model` al inicio y antes de cada carga si `automatic=True`, impidiendo bloqueos indebidos de la guarda de ejecución.
+    (b) `vision_zone` incluye `persona medida menos la cabeza` y `banda inferior` en peticiones `uncover`, enrutando al motor con visión (LongCat) para eliminar la ropa y preservar la pose tal como exige el mandato de versatilidad sin censura.
+  - `roop/img_editor/img_editor_manager.py`:
+    (a) `_leading_visual_subject` ahora extrae el sintagma nominal completo antes del verbo modal/auxiliar (p. ej. `lying man`, `man on the right`, `sitting woman`), permitiendo que CLIPSeg ubique la máscara focal correctamente en sujetos con descriptores de postura o posición.
+    (b) Re-medición facial de posterización tras limpiar bandas para no descartar CodeFormer prematuramente.
+  - `roop/img_editor/top_tier_finish.py` y `config/quality_mode.json`: umbral `min_absolute: 0.60` para revertir restauraciones que caigan por debajo del parecido facial aceptable.
+  - `roop/img_editor/image_quality_pipeline.py`: caché de análisis adaptativo por digest `blake2b` para acelerar pases múltiples en imágenes grandes.
+  - `ui/tabs/comfy_launcher.py`: flag `--disable-dynamic-vram` para GPUs ≤ 8 GB.
+- **Verificación**:
+  - `probe_editor_versatility_integrity_20261105.py`: 23/23 PASS (8,96 s).
+  - `probe_editor_selection_contract_20261019.py`: 15/15 PASS.
+  - `probe_editor_selection_body_regime_20261021.py`: 13/13 PASS.
+  - Compilación `py_compile` y `ruff` (E9, F63, F7, F82) verdes en todos los módulos modificados.
+- Incremento v5.1319 → v5.1320 en `run.py`, `roop/core.py`, `AGENTS.md`, `spec/00-PRINCIPIOS.md` y `MEMORY.md`.
+
 ## 2026-11-07 — frames sin swap en vídeo: kps degenerados y máscara insuficiente (v5.1319)
 
 - **Petición**: revisar el lote de 9 vídeos del 07/11 (sin errores de render)

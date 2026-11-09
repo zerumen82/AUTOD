@@ -529,6 +529,9 @@ def _faces_keep_identity(
         sim_pre = _matched_face_cosines(ref, pre)
         sim_post = _matched_face_cosines(ref, post)
         max_drop = float(cfg.get("max_drop", 0.02))
+        floor = float(cfg.get("min_absolute", 0.0) or 0.0)
+        if not np.isfinite(floor) or floor < 0:
+            floor = 0.0
         valid = (
             sim_pre is not None and sim_post is not None
             and np.isfinite(max_drop) and max_drop >= 0
@@ -539,6 +542,26 @@ def _faces_keep_identity(
     if not valid:
         return before, "caras revertidas (identidad individual no verificable)"
     drops = sim_pre - sim_post
+    # El criterio relativo (no empeorar) aprobaba caras que ya no eran las de la
+    # foto: 0.45→0.46 pasaba con blend. El mínimo absoluto corta ese caso: si la
+    # restauración no llega al suelo, se revierte; si la cara YA estaba por
+    # debajo, se entrega (revertir no devuelve el parecido) pero se dice.
+    floor_note = ""
+    if floor > 0:
+        worst = int(np.argmin(sim_post))
+        if sim_post[worst] < floor <= sim_pre[worst]:
+            msg = (
+                f"caras revertidas (cara {worst + 1}, identidad "
+                f"{sim_pre[worst]:.2f}→{sim_post[worst]:.2f} < mínimo {floor:.2f})"
+            )
+            print(f"[TopTier] {msg}", flush=True)
+            return before, msg
+        if sim_pre.min() < floor:
+            floor_note = (
+                f"identidad baja {sim_pre.min():.2f}→{sim_post.min():.2f} "
+                f"(mínimo {floor:.2f})"
+            )
+            print(f"[TopTier] {floor_note}", flush=True)
     if np.any(drops > max_drop):
         face = int(np.argmax(drops))
         msg = (
@@ -551,7 +574,7 @@ def _faces_keep_identity(
         f"[TopTier] Identidad individual tras restaurar {len(sim_post)} caras: "
         f"mínima {sim_pre.min():.2f}→{sim_post.min():.2f}", flush=True,
     )
-    return after, ""
+    return after, floor_note
 
 
 def normalize_quality_steps(steps: Optional[Dict[str, Any]]) -> Dict[str, bool]:

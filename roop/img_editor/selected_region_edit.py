@@ -2065,14 +2065,15 @@ def edit_described_subject(
     # This route writes the change on the measured zone of one person with
     # Kontext. If it cannot place the change on one person, it keeps the photo
     # and no model is loaded.
-    from roop.img_editor.gen_prompt_config import get_kontext_model_config
+    from roop.img_editor.gen_prompt_config import get_kontext_model_config, get_longcat_model_config
     _km = (
         get_longcat_model_config() if automatic_longcat
         else get_kontext_model_config()
     )
     _km_file = _km["model_file"]
     if automatic:
-        permit_automatic_model(_km_file)
+        permit_automatic_model(get_longcat_model_config()["model_file"])
+        permit_automatic_model(get_kontext_model_config()["model_file"])
     allowed, policy_note = allow_model(_km_file)
     if not allowed:
         return None, policy_note, None
@@ -2311,7 +2312,9 @@ def edit_described_subject(
     # For explicit full-body ("persona medida completa (con cabeza)"),
     # Kontext img2img puro works better than vision engine on large zone.
     vision_zone = (
-        (zone_label == "zona de ropa medida" or target_zone is not None)
+        (zone_label in ("zona de ropa medida", "persona medida menos la cabeza", "banda inferior (fallback 'uncover')")
+         or target_zone is not None
+         or automatic_longcat)
         and bool(regime.get("body"))
         and str(regime.get("direction", "")).lower() == "uncover"
         # Paso A (2026-10-26): el usuario elegía Kontext y la excepción se
@@ -2329,11 +2332,15 @@ def edit_described_subject(
     compose_support = subject if target_zone is None else (subject | zone)
     if vision_zone:
         vision_model = get_longcat_model_config()["model_file"]
+        if automatic:
+            permit_automatic_model(vision_model)
         ok, note = client.load(flux_version=vision_model,
                                allow_vision_engine=True)
         if not ok:
             return kept(f"el motor con visión no está disponible: {note}")
     else:
+        if automatic:
+            permit_automatic_model(_km["model_file"])
         ok, note = client.load(flux_version=_km["model_file"])
         if not ok:
             return kept(f"Kontext no disponible: {note}")

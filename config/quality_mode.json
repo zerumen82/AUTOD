@@ -13,7 +13,8 @@
   "identity": {
     "verify_after_face_restore": true,
     "max_side": 2048,
-    "max_drop": 0.02
+    "max_drop": 0.02,
+    "min_absolute": 0.6
   },
   "upscale": {
     "allow_8k": false,

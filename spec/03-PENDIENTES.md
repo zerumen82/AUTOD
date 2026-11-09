@@ -1,5 +1,15 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## 2026-11-09 — v5.1320: corrección en desvestir/sin ropa y sintagma de sujeto
+
+- `MEMORY.md` actualizado con el diagnóstico y cierre de los incidentes de la jornada:
+  1. `la mujer debe ir sin ropa` en Auto: `edit_described_subject` autoriza explícitamente LongCat y Kontext con `permit_automatic_model` y asume `vision_zone` para `persona medida menos la cabeza` y `banda inferior` en `uncover`.
+  2. `el hombre tumbado debe ser calvo`: `_leading_visual_subject` extrae el sintagma nominal (`lying man`, `man on the right`), evitando que CLIPSeg reciba participios o adjetivos sueltos sin sustantivo.
+  3. ComfyUI v0.19.0: flag `--disable-dynamic-vram` para ≤8GB; pendiente vigilar el manejo de descarga entre modelos (`_handle_clone` en `comfy_kitchen`).
+  4. Modo Calidad: `min_absolute: 0.60` en `top_tier_finish.py` y caché `blake2b` en `image_quality_pipeline.py`.
+- Suites CPU pertinentes: versatilidad 23/23 PASS, contratos de selección 15/15 PASS, régimen corporal 13/13 PASS. Sintaxis `py_compile` y `ruff` (E9, F63, F7, F82) verdes.
+- Pendientes vigentes: validación visual del usuario, mapa de versatilidad (zapatos/ropa/postura), FaceSwap perfiles/vídeo representativo y build Android instalado en terminal.
+
 ## 2026-11-06 — continuación v5.1312: técnico verificado, calidad abierta
 
 - `plans/WORKLOG_state_logs_fix_20261106.md` actualizado con pruebas nuevas en

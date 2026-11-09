@@ -6062,18 +6062,31 @@ class ImgEditorManager:
         tokens = re.findall(r"[a-z]+(?:['-][a-z]+)?", (prompt or "").lower())
         if not tokens:
             return ""
-        if llm_subject:
-            subject_tokens = re.findall(r"[a-z]+", llm_subject.lower())
-            if subject_tokens and any(token in tokens for token in subject_tokens):
-                return llm_subject.strip().lower()
         lead_words = {"please", "make", "turn", "change", "edit", "set", "render",
                       "give", "let", "the", "a", "an"}
         while tokens and tokens[0] in lead_words:
             tokens.pop(0)
+        stop_verbs = {
+            "must", "should", "shall", "will", "would", "can", "could",
+            "may", "might", "is", "are", "was", "were", "be", "being",
+            "been", "has", "have", "had", "needs", "need", "to"
+        }
         # A bare instruction such as "be bald" does not name a person.
-        if not tokens or tokens[0] in {"be", "is", "are", "must", "should", "have", "has"}:
+        if not tokens or tokens[0] in stop_verbs:
             return ""
-        return tokens[0] if len(tokens[0]) >= 3 else ""
+        phrase_tokens = []
+        for t in tokens:
+            if t in stop_verbs:
+                break
+            phrase_tokens.append(t)
+            if len(phrase_tokens) >= 4:
+                break
+        phrase = " ".join(phrase_tokens).strip() if phrase_tokens else ""
+        if llm_subject:
+            s = llm_subject.strip().lower()
+            if s and s in phrase and len(s) >= len(phrase):
+                return s
+        return phrase if len(phrase) >= 3 else ""
 
     @staticmethod
     def _is_hair_edit(prompt: str) -> bool:
@@ -11812,6 +11825,37 @@ class ImgEditorManager:
                     face_sharpness = float(face_scores.get("sharpness", 0.0))
                     face_restore = float(face_scores.get("restore", 1.0))
                     face_poster = float(face_scores.get("poster", 0.0))
+                    # La medida facial puede venir de ANTES de la limpieza de
+                    # bandas. Si el resultado que se entrega ya no está
+                    # posterizado, CodeFormer sí puede restaurar: se mide la
+                    # imagen actual en vez de rendirse con la puntuación vieja
+                    # (log 09/11: poster=0.62 omitía la restauración aun
+                    # después de desposterizar).
+                    if face_poster >= 0.45 and result is not None:
+                        try:
+                            from roop.img_editor.image_quality_pipeline import (
+                                get_quality_finisher,
+                            )
+                            _cf_finisher = get_quality_finisher()
+                            _cf_tier = (enhance_tier or "hd").lower()
+                            _cf_fresh = _cf_finisher.analyze_image(result, tier=_cf_tier)
+                            _cf_scores = _cf_fresh.get("scores", {})
+                            _cf_poster = float(_cf_scores.get("poster", face_poster))
+                            print(
+                                f"[ImgEditor] CodeFormer reevaluado sobre el resultado "
+                                f"(poster {face_poster:.2f}→{_cf_poster:.2f})",
+                                flush=True,
+                            )
+                            qa = _cf_fresh
+                            face_scores = _cf_scores
+                            face_sharpness = float(_cf_scores.get("sharpness", face_sharpness))
+                            face_restore = float(_cf_scores.get("restore", face_restore))
+                            face_poster = _cf_poster
+                        except Exception as _cf_remeasure:
+                            print(
+                                f"[ImgEditor] Re-medición facial omitida: {_cf_remeasure}",
+                                flush=True,
+                            )
                     if ((face_sharpness >= 0.72 and face_restore <= 0.30)
                             or face_poster >= 0.45 or face_restore >= 0.70):
                         print(

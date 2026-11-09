@@ -3,6 +3,8 @@
 """Post-procesado de calidad para Image Editor: restauración por tiles + upscale ESRGAN + nitidez."""
 
 from typing import Any, Callable, Dict, Optional, Tuple
+import copy
+import hashlib
 import json
 import os
 import cv2
@@ -62,6 +64,7 @@ DEFAULT_QUALITY_SETTINGS: Dict[str, Any] = {
         "verify_after_face_restore": True,
         "max_side": 2048,
         "max_drop": 0.02,
+        "min_absolute": 0.60,
     },
     "upscale": {
         "allow_8k": False,
@@ -171,6 +174,21 @@ class ImageQualityFinisher:
     def __init__(self):
         self._upscaler = None
         self._upscale_subtype = None
+        # Una misma edición mide la MISMA imagen varias veces (antes del
+        # acabado, tras el pulido y tras limpiar bandas). El mapa de artefactos
+        # cuesta segundos en 4K; se reutiliza por CONTENIDO, no por identidad de
+        # objeto, para no devolver la medida de otra imagen reciclada por Python.
+        self._analysis_cache: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+
+    @staticmethod
+    def _analysis_key(
+        image: Image.Image, tier: str
+    ) -> Optional[Tuple[Any, ...]]:
+        try:
+            digest = hashlib.blake2b(image.tobytes(), digest_size=16).hexdigest()
+        except Exception:
+            return None
+        return (image.size, image.mode, tier, digest)
 
     def release_gpu_caches(self):
         """v5.1133d — libera las sesiones ONNX cacheadas (ESRGAN/LSDIR) del proceso
@@ -212,6 +230,16 @@ class ImageQualityFinisher:
         tier = (tier or "hd").lower()
         if tier not in TIER_TARGET_SIDE:
             tier = "hd"
+
+        key = self._analysis_key(image, tier)
+        cached = self._analysis_cache.get(key) if key else None
+        if cached is not None:
+            print(
+                f"[QualityFinisher] Análisis reutilizado tier={tier.upper()} "
+                f"{image.size[0]}×{image.size[1]}: {cached.get('summary', '')}",
+                flush=True,
+            )
+            return copy.deepcopy(cached)
 
         bgr = self._pil_to_bgr(image)
         h, w = bgr.shape[:2]
@@ -464,7 +492,15 @@ class ImageQualityFinisher:
         )
         print(f"[QualityFinisher] Análisis adaptativo tier={tier.upper()} {w}×{h}: {summary}", flush=True)
 
-        return {"tier": tier, "scores": scores, "profile": profile, "summary": summary}
+        result = {"tier": tier, "scores": scores, "profile": profile, "summary": summary}
+        if key:
+            if len(self._analysis_cache) >= 4:
+                self._analysis_cache.pop(next(iter(self._analysis_cache)), None)
+            # Se guarda una copia: el llamador puede tocar 'scores' (p. ej. el
+            # pulido reescribe 'poster') y eso no debe contaminar la medida
+            # cacheada de esta misma imagen.
+            self._analysis_cache[key] = copy.deepcopy(result)
+        return result
 
     @staticmethod
     def _upscale_model_path(subtype: str) -> str:

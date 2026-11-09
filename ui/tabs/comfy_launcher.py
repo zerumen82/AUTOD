@@ -374,6 +374,15 @@ def start(
         # ~10-17s/it (v5.1105) a 56→80s/it degradando intra-run (25 min/run).
         # El flag lo apaga: mismo offload legacy ModelPatcher de siempre.
         cmd.append("--disable-async-offload")
+
+        # 2026-11-09 - ComfyUI 0.19 activa DynamicVRAM (comfy-aimdo) por defecto
+        # en Nvidia. En 8 GB con Kontext, el planificador recibio 56 MB libres
+        # de 8192 (mem_get_info interceptado por aimdo) mientras nvidia-smi
+        # mostraba 7,4 GB libres, y el GGUF del CLIP negativo fallo con
+        # torch.OutOfMemoryError en el nodo 7 de tres ediciones seguidas. El
+        # flag vuelve al ModelPatcher legacy, la ruta que ya edito en esta GPU.
+        if vram_gb <= 8:
+            cmd.append("--disable-dynamic-vram")
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
         print(f"[ComfyLauncher] Directorio: {COMFYUI_DIR}")
         print(f"[ComfyLauncher] Python: {python_exe}")
