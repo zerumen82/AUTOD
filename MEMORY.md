@@ -9,14 +9,16 @@
   en Animate **14/14 PASS**. Los 5 ficheros de modelo presentes con el tamaño
   publicado.
 - **720p medido y antes no registrado**: `97f_720p` (1280×704, 97f, 25 fps) →
-  **815,8 s**, pico VRAM **6916 MB**, pico RSS ComfyUI **25,7 GB**, MP4 de
-  825 KB con AAC 24 kHz estéreo y 3,88 s. Evidencia en
-  `diagnostics/out/ltx2_matrix_20261110/matrix.json` y `97f_720p.mp4`. El
-  último fotograma sale limpio (verificado extrayéndolo).
+  **815,8 s** en frío, pico VRAM **6916 MB**, pico RSS ComfyUI **25,7 GB**,
+  MP4 de 825 KB con AAC 24 kHz estéreo y 3,88 s. En la re-ejecución de hoy, ya
+  en caliente, **185,9 s** (prompt 179,82 s), pico **7218 MB** y RSS **24,2 GB**.
+  Evidencia en `diagnostics/out/ltx2_matrix_20261110/matrix.json` y
+  `97f_720p.mp4`. El último fotograma sale limpio (verificado extrayéndolo).
 - **49f**: el MP4 es válido (1,96 s, AAC) pero el **último fotograma sale
-  fundido e ilegible** (verificado extrayendo el fotograma final; `f49_04.png`
-  ya lo mostraba). 97f no presenta el defecto. Sigue pendiente decidir recortar
-  el último fotograma o usar 97f.
+  fundido e ilegible**. Re-ejecutado hoy en frío con la misma semilla (1234):
+  **828,7 s** (prompt 13:13), pico **7728 MB**, RSS **26,3 GB**, y el fotograma
+  final es el mismo (tamaño y aspecto idénticos). 97f no presenta el defecto.
+  Sigue pendiente decidir recortar el último fotograma o usar 97f.
 - **Matriz arreglada** (`diagnostics/ltx2_matrix_20261110.py`): (1) el
   `shutil.copy2` a la misma ruta daba `SameFileError` tras cada trabajo bueno
   (el script moría con exit 1 aun con el render correcto); (2) `matrix.json`
@@ -35,6 +37,10 @@
   no hay esa foto en el proyecto. La UI y ComfyUI estaban apagados al revisar;
   el último log de UI (v5.1325) termina con un aborto Fortran de ComfyUI tras un
   lote FaceSwap de 14 vídeos. La UI viva nunca cargó v5.1328.
+- **Cierre**: commit `0b63713` (push `a55acbe..0b63713` a
+  `origin/experiment/klein-9b`) con 38 ficheros; `py_compile` de los 31 `.py`
+  del lote en verde. La re-ejecución de la matriz quedó en
+  `diagnostics/out/ltx2_matrix_20261110/matrix.json` con ambas filas.
 
 ## 2026-11-10 — LTX-2 Q4 con audio nativo medido en 8 GB (v5.1328)
 

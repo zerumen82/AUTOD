@@ -10,13 +10,15 @@
   caliente; pico VRAM 7 535 MB (92 %), mínimo
   1,8 GB de RAM libre, ComfyUI 20,6 GB RSS. La ruta cabe por el pagefile, no por
   VRAM: es el requisito que hay que declarar.
-- **720p medido** (`97f_720p`): 1280×704, 97f → **815,8 s**, pico VRAM
-  **6916 MB**, pico RSS **25,7 GB**, MP4 de 825 KB con AAC 24 kHz y 3,88 s.
-  Último fotograma limpio. Evidencia en
+- **720p medido** (`97f_720p`): 1280×704, 97f → **815,8 s** en frío y
+  **185,9 s** en caliente (prompt 179,82 s), pico VRAM **6916/7218 MB**, pico
+  RSS **25,7/24,2 GB**, MP4 de 825 KB con AAC 24 kHz y 3,88 s. Último
+  fotograma limpio. Evidencia en
   `diagnostics/out/ltx2_matrix_20261110/`.
-- Coste a 49 frames (960×544): 1,96 s de vídeo, MP4 273 KB, muestreo 3 min 07 s
-  y ~25 min de carga en frío; audio intacto. El último fotograma sale fundido
-  (recortar o usar 97). Un `/history` lento ya no aborta la ejecución.
+- Coste a 49 frames (960×544): 1,96 s de vídeo, MP4 273 KB; re-ejecutado en
+  frío hoy: **828,7 s** (prompt 13:13), pico **7728 MB**, RSS **26,3 GB**; audio
+  intacto. El último fotograma sale fundido (recortar o usar 97). Un `/history`
+  lento ya no aborta la ejecución.
 - Salida con audio nativo real: AAC 24 kHz estéreo, 3,88 s, media −27,3 dB.
   Evidencia en `diagnostics/out/ltx2_audio_20261110/`.
 - Motor **expuesto** en Animate (`ltx2_audio`) con los parámetros medidos (8
@@ -24,7 +26,8 @@
   sonidos. Probe de cableado **14/14**.
 - **Matriz arreglada** (`diagnostics/ltx2_matrix_20261110.py`): sin
   `SameFileError`, `matrix.json` conserva filas anteriores y el timeout por
-  defecto es 3600 s (la carga fría medida es 1790 s).
+  defecto es 3600 s (la carga fría medida hoy es 828,7 s; la corrida anterior
+  tardó 1790 s).
 - Pendiente: validación visual con retrato real (cara, boca, diálogo); el
   trabajo `97f_540p_retrato` necesita `--portrait` y no hay esa foto en el
   proyecto. Decidir el último fotograma a 49f.
