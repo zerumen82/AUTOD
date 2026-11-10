@@ -33,6 +33,66 @@
   proyecto. Decidir el último fotograma a 49f.
 
 
+## 2026-11-10 — v5.1328: Mejoras Image Editor + Face Swap
+
+### Face Swap — Tracking Continuity (v5.1328)
+- Archivo: `roop/ProcessMgr.py` línea 5803
+- Cambio: Cuando tracking se pierde (det_score < 0.05 y velocity > 100),
+  reutiliza `_last_swap_bbox` en lugar de hacer fallback a la cara más grande
+  del frame. Previene cambios de cara inesperados en video y mantiene
+  consistencia de identidad entre fotogramas.
+- Estados: Implementado, compilación verificada con `py_compile`.
+- Pendiente: Validación visual en video real con movimiento de cámara.
+
+### Image Editor — Zero Signal Detector (v5.1328)
+- Archivo: `roop/img_editor/img_editor_manager.py` líneas 729-743
+- Cambio: Cuando `mag ≤ 0.55` Y todas las medidas de concepto son ~0
+  (body_exposure_full, body_exposure_local, pose, camera_view, structural),
+  fuerza `mag = 0.90` y `forced_strong_regime = True`. Evita routing
+  inconsistente cuando el prompt no contiene conceptos reconocidos (ej: "the
+  boy is bald" daba mag=0.50 + target=background absurdo).
+- Estados: Implementado, compilación verificada con `py_compile`.
+- Pendiente: Validación visual con prompts fuera de vocabulario de conceptos.
+
+### Image Editor — Umbrales Unificados (v5.1328)
+- Archivo: `roop/img_editor/img_editor_manager.py` líneas 885-892
+- Cambio: Usar `full_exposure_min_score` de `config/editor_selection.json`
+  (0.3) en lugar de hardcode `0.80`. Elimina discrepancias de comportamiento.
+- Estados: Implementado, requiere bloque try/except (líneas 885-889).
+- Pendiente: Validar que `self._body_scope_policy()` existe y funciona.
+
+### Image Editor — Modo Calidad UI Mejorada (v5.1328)
+- Archivo: `ui/tabs/img_editor/events.py` líneas 536-567
+- Cambio: `on_quality_estimate` muestra texto formateado con iconos,
+  resolución máxima prevista, fuente, factor de escalado y advertencias.
+- Estados: Implementado, infraestructura de wiring ya existía (líneas 629-638).
+- Pendiente: Validar visualmente en UI relanzada.
+
+### Face Swap — Halo/Edge Removal (v5.1328)
+- Archivo: `roop/quality_enhancements.py` líneas 480-544
+- Cambio: `apply_quality_enhancements` aplica `_apply_edge_aware_mask` que
+  detecta bordes con Sobel en luminancia y reduce el peso del blend solo en
+  bandas de borde, protegiendo contornos y reduciendo halo. Umbral Sobel:
+  28.0, fuerza de borde: 0.85.
+- Estados: Implementado, parámetros configurables, compilación verificada con `py_compile`.
+- Pendiente: Validación visual en video con caras de perfil y movimiento.
+  Los parámetros ahora son configurables vía options dict para adaptarse a
+  diferentes escenarios de vídeo.
+
+### Deudas pendientes (spec/02-REQUISITOS.md)
+- [x] **IE-3**: Mover valores hardcoded `threshold=0.45` y `grow_frac=0.70` en
+  `selected_region_edit.py` a `config/editor_selection.json`.
+- [x] **AN-2**: Recortar último fotograma en `ltx2_audio.generate()` cuando
+  `frames < 97`. Implementado: código en `ltx2_audio.py:315-329` recorta el último
+  frame para evitar el defecto de fundido; o elegir 97f para calidad.
+- [x] **AN-3**: Exponer 720p (1280×704) en UI Animate cuando VRAM > 8 GB.
+  Implementado: `resolve_generation()` en `ltx2_audio.py:191-206` usa 540p (960×544)
+  para VRAM ≤ 8 GB y 720p (1280×704) para VRAM > 8 GB.
+- [x] **AN-4**: Alinear slider de pasos con los 8 pasos destilados del grafo LTX-2.
+  Implementado: `ui/tabs/animate/logic.py:43` - steps=8 fijos para engine=ltx2_audio.
+- Validación visual real: retrato con cara/boca/diálogo para Animate.
+
+
 ## 2026-11-10 — v5.1327: obediencia medible y controles de Animate
 
 - Un resultado con **0 px** cambiados ya no se guarda como edición: se informa

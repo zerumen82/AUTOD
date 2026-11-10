@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 from roop.img_editor import element_selection as selection
+from roop.img_editor.config.editor_selection import get_config
 from roop.img_editor.gen_prompt_config import (
     get_kontext_model_config,
     get_longcat_model_config,
@@ -46,7 +47,7 @@ def _measured_clothing_zone(manager, image, support, analysis=None):
     if not segmenter or not segmenter.is_available():
         return None
     try:
-        mask, _ = segmenter.segment_clothing(image, threshold=0.45)
+        mask, _ = segmenter.segment_clothing(image, threshold=get_config()["instruction_scope"]["body_detection_threshold"])
     except Exception:
         return None
     if mask is None:
@@ -327,12 +328,19 @@ def _residual_policy(settings=None):
         growth = _residual_fraction(
             settings["residual_retry_growth_fraction"], "residual_retry_growth_fraction",
         )
+        growth2 = _residual_fraction(
+            settings.get(
+                "residual_retry_growth_fraction_2",
+                settings["residual_retry_growth_fraction"],
+            ),
+            "residual_retry_growth_fraction_2",
+        )
         radius = settings["residual_retry_min_radius_pixels"]
     except KeyError as error:
         raise ValueError(f"Falta edit.{error.args[0]} en editor_selection.json") from error
     if isinstance(radius, bool) or not isinstance(radius, int) or radius < 0:
         raise ValueError("edit.residual_retry_min_radius_pixels debe ser un entero no negativo")
-    return threshold, growth, radius
+    return threshold, growth, growth2, radius
 
 
 def _residual_ratio_failed(residual, zone, threshold=None):
@@ -480,16 +488,17 @@ def _body_destruction_reason(original, edited, zone) -> str:
 def _expand_zone_within_support(zone, support, grow_frac=None):
     """Grow a measured target inside its support without naming garments.
 
-    Incomplete segmenter coverage (dark patent leather, thin straps) leaves
-    the real object partly outside the first zone. Expanding by a fraction of
-    the zone's own span, clipped to the already measured person∪target
-    support, gives the sampler room on a second pass without word lists.
+    The zone the model regenerates is measured, never a word list: the
+    clothing segmenter locates the garments of the photo and they are
+    intersected with the measured selection. Returns None when the garments
+    cannot be located, so the caller falls back to the measured support.
     """
     import cv2
 
-    _, growth, minimum_radius = _residual_policy()
+    threshold, growth, growth2, minimum_radius = _residual_policy()
     if grow_frac is not None:
         growth = _residual_fraction(grow_frac, "residual_retry_growth_fraction")
+        growth2 = _residual_fraction(grow_frac, "residual_retry_growth_fraction_2")
     z = np.asarray(zone, dtype=bool)
     if support is None:
         s = np.ones_like(z, dtype=bool)
@@ -2598,7 +2607,7 @@ def edit_described_subject(
             and _note_reports_residual_failure(note)
             and not (cancel_check and cancel_check())
         ):
-            expanded2 = _expand_zone_within_support(zone, compose_support, grow_frac=0.70)
+            expanded2 = _expand_zone_within_support(zone, compose_support, grow_frac=get_config()["instruction_scope"]["region_growth_fraction"])
             grew2 = int(expanded2.sum()) > int(np.asarray(zone, dtype=bool).sum())
             if grew2:
                 print(

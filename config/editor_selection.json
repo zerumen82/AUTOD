@@ -54,6 +54,8 @@
     "full_exposure_min_score": 0.3,
     "full_exposure_local_ratio": 1.15,
     "body_state_min_intensity": 0.3,
+    "body_detection_threshold": 0.45,
+    "region_growth_fraction": 0.70,
     "multi_clause_uncover_enabled": true,
     "multi_clause_uncover_min_clauses": 2,
     "clothing_zone_min_ratio": 0.30
@@ -93,6 +95,7 @@
     "head_inclusion_coverage": 0.5,
     "residual_failure_fraction": 0.4,
     "residual_retry_growth_fraction": 0.35,
+    "residual_retry_growth_fraction_2": 0.70,
     "residual_retry_min_radius_pixels": 8,
     "prompt_template": "Edit this exact image region: {instruction}. Apply the complete requested change to the selected element. Make only the requested change; preserve every other feature of the subject and the surrounding photograph.",
     "removal_reconstruction_prompt": "Naturally reconstruct the area it occupied to match the surrounding photograph, with continuous background, surfaces, texture and lighting. Preserve everything else; leave no translucent, faded or darkened remnant of the removed target."
