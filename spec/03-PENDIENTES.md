@@ -1,5 +1,145 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## 2026-11-10 — v5.1328: LTX-2 Q4 con audio nativo (prueba real en 8 GB)
+
+- Grafo y utilidades en `roop/animate/ltx2_audio.py`; probe de contrato
+  (`probe_ltx2_audio_contract_20261110.py`, **16/16** re-ejecutado) y runner con
+  medición (`real_animate_ltx2_audio_20261110.py`).
+- Medido en RTX 3060 Ti 8 GB + 34,3 GB RAM + pagefile 78 GB: 960×544, 97
+  fotogramas, 8 pasos → **12 min 28 s** en frío y 1 min 58 s con caché
+  caliente; pico VRAM 7 535 MB (92 %), mínimo
+  1,8 GB de RAM libre, ComfyUI 20,6 GB RSS. La ruta cabe por el pagefile, no por
+  VRAM: es el requisito que hay que declarar.
+- **720p medido** (`97f_720p`): 1280×704, 97f → **815,8 s**, pico VRAM
+  **6916 MB**, pico RSS **25,7 GB**, MP4 de 825 KB con AAC 24 kHz y 3,88 s.
+  Último fotograma limpio. Evidencia en
+  `diagnostics/out/ltx2_matrix_20261110/`.
+- Coste a 49 frames (960×544): 1,96 s de vídeo, MP4 273 KB, muestreo 3 min 07 s
+  y ~25 min de carga en frío; audio intacto. El último fotograma sale fundido
+  (recortar o usar 97). Un `/history` lento ya no aborta la ejecución.
+- Salida con audio nativo real: AAC 24 kHz estéreo, 3,88 s, media −27,3 dB.
+  Evidencia en `diagnostics/out/ltx2_audio_20261110/`.
+- Motor **expuesto** en Animate (`ltx2_audio`) con los parámetros medidos (8
+  pasos, CFG 1,0, 25 fps, fotogramas 8n+1); `compose_prompt` arma el párrafo con
+  sonidos. Probe de cableado **14/14**.
+- **Matriz arreglada** (`diagnostics/ltx2_matrix_20261110.py`): sin
+  `SameFileError`, `matrix.json` conserva filas anteriores y el timeout por
+  defecto es 3600 s (la carga fría medida es 1790 s).
+- Pendiente: validación visual con retrato real (cara, boca, diálogo); el
+  trabajo `97f_540p_retrato` necesita `--portrait` y no hay esa foto en el
+  proyecto. Decidir el último fotograma a 49f.
+
+
+## 2026-11-10 — v5.1327: obediencia medible y controles de Animate
+
+- Un resultado con **0 px** cambiados ya no se guarda como edición: se informa
+  «Edición sin cambios» y se conserva la foto (cubre la máscara vacía de
+  CLIPSeg del log 01:01). La etiqueta de éxito publica el cambio medido.
+- `measure_change` mide dentro/fuera de la máscara y `verify(before=)` usa el
+  recorte cambiado; probes CPU 6/6 y 8/8 respectivamente.
+- Animate expone fotogramas/pasos/sonido; defaults intactos (37/12/24).
+- Pendiente: validación visual real de una animación con este código; no se
+  declara PASS visual. La ruta de cámara con «plano» sigue sin medir («haz un
+  plano del salon» → «Make a plan of the living room»).
+- **Validación real de cámara**: enruta y cambia en los dos casos. Retrato
+  neutro (astronauta, 512×512, 59 s): PASS visual acotado, 89,9 % cambiado con
+  cara/identidad coherentes. Composición de dos cuerpos en contacto: FAIL visual
+  (anatomía fundida) con la misma receta Q2/4 pasos. Falta decidir si se toca
+  la receta para composiciones difíciles (más pasos o Kontext con denoise
+  medio); próximas pruebas con fotos neutras, sin repetir la referencia
+  explícita.
+
+## 2026-11-10 — v5.1326: búferes de swap y cámara sin tildes
+
+- `_prime_warp_edges` y `_soothe_swap_ring` mezclan in-place y por canal:
+  pico 33,6 → 11,4 MB y 27,7 → 13,4 MB a 720×720; salida idéntica bit a bit
+  (`probe_warp_edges_buffers_20261110.py`, 12 casos, 0 FAIL).
+- Cámara: `_tokenize` pliega tildes, el ámbito corto de cámara se acepta con un
+  token y las palabras sueltas en MAYÚSCULAS se bajan antes de Marian
+  (`probe_editor_camera_caps_20261110.py`, 12/12).
+- Pendiente: repetir un render real con este código (el lote de 14 vídeos
+  quedó sin reanudar) y validar visualmente que no hay halo ni cambio de borde.
+
+## 2026-11-10 — v5.1325: comprobación de destrucción corporal
+
+- `_body_destruction_metrics` / `_body_destruction_reason` en
+  `selected_region_edit.py`, conectadas a `_vision_zone_pass` y
+  `_kontext_zone_pass`: rechazan la pasada (se conserva la foto) si cambia
+  >0,2 % de píxeles fuera de la zona escrita o si aplana piel texturada en
+  ≥15 % de la piel de la zona con bloque contiguo ≥5 %.
+- Probe nuevo `diagnostics/probe_editor_body_destruction_20261110.py` 0 FAIL:
+  tono legítimo 0 %, relleno plano 90 %/78 %, bloques 20 %/8 %, fuera de zona
+  0,6 %, sin cambios 0 %.
+- Pendiente: repetir «la mujer debe ir descalza» en la UI reabierta y
+  confirmar que la salida ya no se entrega con las piernas tapadas; el probe
+  es CPU y no demuestra cumplimiento visual.
+
+## 2026-11-10 — v5.1324: auditoría de uncover y banda inferior
+
+- `_vision_zone_pass` acepta `write_mask`: los reintentos de residual ven la
+  zona ampliada pero escriben solo lo medido al principio (antes 81 345 px de
+  banda reescrita en el caso «descalza»).
+- `_covered_surface_view` descarta cubiertas >35 % de la persona o >15 % de la
+  foto, con log, en vez de pintarlas con el color de alrededor.
+- Rutas revisadas y acotadas sin cambios: `_measured_target_zone` (≥400 px,
+  ≤50 % de la persona), `_measured_scene_zone` (`max_ratio` 0,5),
+  `_measured_clothing_zone` (segmentador + dilate 14), `_kontext_zone_pass`
+  (recorte dilatado, pegado limitado a `write_limit & original_zone`).
+- Deudas declaradas: la banda inferior sigue siendo geométrica cuando no hay
+  ropa ni objetivo medido; el residual fallido conserva el intento del modelo
+  (decisión 2026-11-06); la banda sin objetivo no verifica cumplimiento.
+- Verificación: probes de uncover 14/15 y 13 PASS, py_compile/ruff y probe
+  sintético de cubierta verdes. Pendiente PASS visual con render real.
+
+## 2026-11-10 — v5.1323: quitar sin objeto y casing mixto
+
+- `_requested_removal_target` ya no devuelve los placeholders «objeto» /
+  «objeto_removido»: sin complemento gramatical no hay objetivo local, así que
+  se evita el prompt «Remove the objeto», la cubierta beige de
+  `_covered_surface_view` y los tres reintentos de residual que dejaron
+  `edit_1794266098.png` / `edit_1794266288.png` sin piernas.
+- `_normalize_mixed_case_words` en `prompt_translator.py`: `cALVO` → `calvo`
+  antes de traducir; `iPhone` y las MAYÚSCULAS completas no cambian.
+- Verificación: `probe_editor_local_uncover_20261029.py` 14/15 (FAIL sólo por
+  fixture borrado), `probe_editor_compound_uncover_20261030.py` exit 0,
+  py_compile y ruff verdes.
+- Pendiente: repetir en la UI reabierta «la mujer debe ir descalza» y «el
+  hombre debe ser calvo» sobre la misma foto y firmar el PASS visual; sin ese
+  render no se declara cumplido.
+
+## 2026-11-10 — v5.1322: malla 468, restauración única y calibración real
+
+- Máscara de caras por malla de 468 puntos (`_face_mesh_mask`) con caída a la
+  elipse+protector si MediaPipe no encuentra cara; restauración facial única en
+  Modo Calidad (TOP al final, contra la imagen editada).
+- Calibración medida en `diagnostics/out/quality_calibration_20261110/`
+  (`report.md`, `report.json`, `run.log`), 6 fotos reales, 0 FAIL: bandas
+  limpias ≤0,231, q8 ≥0,691, desposterizar gana ≥0,351 por foto; pasos suaves
+  legítimos suben hasta 0,046 → `band_rise_tolerance` 0,06 (antes 0,03).
+  A/B: ratio mín. 5,192 y estructura mín. 0,817 frente a ruido ≤0,007; se
+  mantienen `ai_gain_min_ratio` 1,08 y `ai_gain_min_corr` 0,45.
+- Validación 1080p/4K preparada: `probe_quality_visual_1080_4k_20261110.py` y
+  protocolo en `plans/VALIDACION_modo_calidad_1080_4k_20261110.md`.
+- Pendiente: PASS visual del usuario y render real 1080p/4K (el script mide,
+  no firma PASS); probar la malla en perfiles/oclusiones y con caras pequeñas;
+  confirmar que el A/B rechaza una foto sobreexpandida real (hoy el control
+  negativo es ruido).
+
+## 2026-11-10 — v5.1321: Modo Calidad (bandas, identidad y coste)
+
+- `probe_quality_gate_banding_20261110.py` 10/10 PASS y
+  `probe_quality_checkbox_finish.py` 19/19 PASS; py_compile y ruff crítico
+  verdes en los módulos tocados.
+- Nuevo: métrica de bandas en la puerta de desposterizar; identidad facial
+  verificada también por encima de 2048 px; máscara de caras con protector de
+  bordes; A/B de upscale en 3 zonas con correlación de estructura; tope de
+  afilado por ruido medido; `upscale=False` en las rutas que conservan el
+  exterior; cancelación en upscale; medida final contra la entrada;
+  estimación de resolución en la UI; `use_generative=False` por defecto.
+- Pendiente: PASS visual del usuario y render real 1080p/4K; calibrar la
+  métrica de bandas con fotos reales (no sólo el fixture) y comprobar que el
+  A/B de estructura rechaza en una foto sobreexpandida real.
+
 ## 2026-11-09 — v5.1320: corrección en desvestir/sin ropa y sintagma de sujeto
 
 - `MEMORY.md` actualizado con el diagnóstico y cierre de los incidentes de la jornada:

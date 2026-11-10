@@ -6307,6 +6307,23 @@ class ImgEditorManager:
         covered_px = zone & (np.linalg.norm(photo - fill, axis=2) > 18.0)
         if int(covered_px.sum()) < 48:
             return None
+        # v5.1323 — una superficie «cubierta» de este tamaño no es una
+        # prenda ni pelo: es la pierna o el cuerpo entero. En la ruta de
+        # «la mujer debe ir descalza» (log 2026-11-10 00:10) el placeholder
+        # «objeto» midió el 42 % del recorte y esta vista pintó las piernas
+        # de beige; con el objetivo real ya no llega, pero la guarda impide
+        # que cualquier máscara grande vuelva a destruir la foto.
+        subject_px = int(subject.sum())
+        share_person = float(covered_px.sum()) / max(1, subject_px)
+        share_photo = float(covered_px.sum()) / float(covered_px.size)
+        if share_person > 0.35 or share_photo > 0.15:
+            print(
+                f"[ImgEditor] Cubierta descartada: {int(covered_px.sum())} px "
+                f"({share_person:.0%} de la persona, {share_photo:.0%} de la "
+                "foto) — pintar esa superficie destruiría la foto",
+                flush=True,
+            )
+            return None
         painted = photo.copy()
         painted[covered_px] = fill
         print(
@@ -11804,6 +11821,12 @@ class ImgEditorManager:
                     # está disponible no debe impedir una edición funcional.
                     print(f"[ImgEditor] Integridad visual omitida: {_integrity_exc}", flush=True)
 
+            if result is not None and enhance_faces and quality_enhance:
+                # v5.1322 — una sola restauración de caras: en Modo Calidad la
+                # hace el acabado TOP, sobre la resolución final y con la puerta
+                # de identidad. El manager no vuelve a pasar CodeFormer.
+                print("[ImgEditor] Caras: restauración única en el acabado TOP", flush=True)
+
             if result is not None and enhance_faces and not quality_enhance:
                 skip_cf = False
                 try:
@@ -12020,9 +12043,25 @@ class ImgEditorManager:
                 except Exception:
                     pass
                 try:
-                    from roop.img_editor.instruction_verifier import get_instruction_verifier
+                    from roop.img_editor.instruction_verifier import get_instruction_verifier, measure_change
+                    # Medida objetiva antes del VLM: 0 px = la foto no cambió.
+                    _observed = measure_change(
+                        locals().get("image"), result, locals().get("final_mask")
+                    )
+                    if _observed.get("available"):
+                        _zone = ""
+                        if "inside_px" in _observed:
+                            _zone = (
+                                f" | dentro={_observed['inside_ratio']:.1%}"
+                                f" fuera={_observed['outside_ratio']:.2%}"
+                            )
+                        print(
+                            f"[ImgEditor] Cambio medido: {_observed['changed_px']} px "
+                            f"({_observed['changed_ratio']:.2%}){_zone}",
+                            flush=True,
+                        )
                     verification = get_instruction_verifier().verify(
-                        result, prompt
+                        result, prompt, before=locals().get("image")
                     )
                     # A VLM verdict never replaces an objective failure from
                     # the manual selection or residual-hair measurement.
@@ -12121,12 +12160,22 @@ class ImgEditorManager:
                     if body_score > 0.08 and is_local:
                         return target
 
+            # v5.1323 — sin complemento gramatical NO hay objetivo local.
+            # Antes se devolvía el placeholder «objeto»/«objeto_removido», y
+            # con él se medía una zona con CLIPSeg, se pintaba con el color
+            # de alrededor («Superficie cubierta para Qwen») y se verificaba
+            # un residual que nunca podía pasar. En «la mujer debe ir
+            # descalza» (log 2026-11-10 00:10-00:14) el prompt local salió
+            # «Remove the objeto completely», las piernas se rellenaron de
+            # beige y se reintentó tres veces con la zona crecida. Sin
+            # objetivo nombrado el «quitar» sigue su ruta medida (ropa o
+            # banda inferior), sin cubierta inventada ni residual falso.
             if target_type in ("clothes", "subject", "hair") and is_local:
-                return "objeto"
+                return ""
             if rem_score > 0.08:
-                return "objeto_removido"
+                return ""
             if body_score > 0.08 and is_local:
-                return "objeto"
+                return ""
         except Exception:
             pass
 

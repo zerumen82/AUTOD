@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Post-procesado de calidad para Image Editor: restauración por tiles + upscale ESRGAN + nitidez."""
 
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import copy
 import hashlib
 import json
@@ -59,6 +59,8 @@ DEFAULT_QUALITY_SETTINGS: Dict[str, Any] = {
         "chroma_mean_tolerance": 2.0,
         "chroma_p95_tolerance": 6.0,
         "chroma_max_side": 1024,
+        "band_rise_tolerance": 0.06,
+        "band_max_side": 1024,
     },
     "identity": {
         "verify_after_face_restore": True,
@@ -73,8 +75,10 @@ DEFAULT_QUALITY_SETTINGS: Dict[str, Any] = {
         "min_source_side_8k": 1600,
         "ai_gain_check": True,
         "ai_gain_min_ratio": 1.08,
+        "ai_gain_crops": 3,
+        "ai_gain_min_corr": 0.45,
         "ai_gain_crop": 256,
-        "ai_gain_max_side": 1600,
+        "ai_gain_max_side": 3000,
     },
 }
 _QUALITY_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "config" / "quality_mode.json"
@@ -1068,41 +1072,111 @@ class ImageQualityFinisher:
         y1 = max(0, min(h - side, cy - side // 2))
         return x1, y1, x1 + side, y1 + side
 
+    def _textured_crop_boxes(
+        self, image: Image.Image, size: int, count: int = 3,
+    ) -> List[Tuple[int, int, int, int]]:
+        """Hasta `count` recortes en las celdas con más textura (medida)."""
+        w, h = image.size
+        side = max(64, min(int(size), w, h))
+        try:
+            bgr = self._pil_to_bgr(image)
+            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (96, 96), interpolation=cv2.INTER_AREA).astype(np.float32)
+            gx = cv2.Sobel(small, cv2.CV_32F, 1, 0, ksize=3)
+            gy = cv2.Sobel(small, cv2.CV_32F, 0, 1, ksize=3)
+            energy = gx * gx + gy * gy
+            cells = []
+            for row in range(3):
+                for col in range(3):
+                    value = float(
+                        energy[row * 32:(row + 1) * 32, col * 32:(col + 1) * 32].mean()
+                    )
+                    cells.append((value, row, col))
+            boxes: List[Tuple[int, int, int, int]] = []
+            for _value, row, col in sorted(cells, reverse=True)[:max(1, int(count))]:
+                cx = int((col + 0.5) * w / 3.0)
+                cy = int((row + 0.5) * h / 3.0)
+                x1 = max(0, min(w - side, cx - side // 2))
+                y1 = max(0, min(h - side, cy - side // 2))
+                box = (x1, y1, x1 + side, y1 + side)
+                if box not in boxes:
+                    boxes.append(box)
+            if boxes:
+                return boxes
+        except Exception:
+            pass
+        return [self._textured_crop_box(image, size)]
+
     def _ai_detail_gain(
         self,
         image: Image.Image,
         plan: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, str]:
-        """A/B medido: motor IA del plan frente a Lanczos, sobre la zona con textura.
+        """A/B medido: motor IA del plan frente a Lanczos, en varias zonas.
 
         v5.1245 — si el motor IA no gana nitidez real en ESTA foto, se usa Lanczos
-        (menos VRAM, sin riesgo de rejilla). La medición es local y barata.
+        (menos VRAM, sin riesgo de rejilla).
+        v5.1321 — dos cambios: se mide en hasta tres zonas (antes una sola, y la
+        comprobación se saltaba por encima de 1600 px) y no basta con ganar
+        varianza: el detalle debe seguir la estructura de la foto. La varianza
+        sola premiaba sobre-enfoque y ruido como si fueran detalle.
         """
         cfg = quality_settings().get("upscale", {})
         if not bool(cfg.get("ai_gain_check", True)):
             return True, ""
-        if max(image.size) > int(cfg.get("ai_gain_max_side", 1600) or 1600):
+        if max(image.size) > int(cfg.get("ai_gain_max_side", 3000) or 3000):
             return True, ""
         if not self._upscale_model_available("esrganx2"):
             return True, ""
         try:
-            box = self._textured_crop_box(image, int(cfg.get("ai_gain_crop", 256) or 256))
-            patch = image.crop(box)
-            # Se prueba el MISMO motor del plan, no siempre ESRGAN x2: un LSDIR x4
-            # puede ganar donde el x2 no gana (y al revés).
-            up_ai, note = self.upscale(patch, plan=plan, force=True)
-            if not note or "lanczos" in note.lower() or "omitido" in note.lower():
-                return True, ""
-            up_ref = patch.resize(up_ai.size, Image.LANCZOS)
-            var_ai = float(cv2.Laplacian(np.array(up_ai.convert("L")), cv2.CV_64F).var())
-            var_ref = float(cv2.Laplacian(np.array(up_ref.convert("L")), cv2.CV_64F).var())
-            if var_ref < 25.0:
-                return True, ""
-            ratio = var_ai / var_ref
+            crop = int(cfg.get("ai_gain_crop", 256) or 256)
+            count = int(cfg.get("ai_gain_crops", 3) or 3)
             min_ratio = float(cfg.get("ai_gain_min_ratio", 1.08) or 1.08)
+            min_corr = float(cfg.get("ai_gain_min_corr", 0.45) or 0.0)
+            ratios: List[float] = []
+            corrs: List[float] = []
+            for box in self._textured_crop_boxes(image, crop, count):
+                patch = image.crop(box)
+                # Se prueba el MISMO motor del plan, no siempre ESRGAN x2: un
+                # LSDIR x4 puede ganar donde el x2 no gana (y al revés).
+                up_ai, note = self.upscale(patch, plan=plan, force=True)
+                if not note or "lanczos" in note.lower() or "omitido" in note.lower():
+                    continue
+                up_ref = patch.resize(up_ai.size, Image.LANCZOS)
+                ai_l = np.asarray(up_ai.convert("L"), dtype=np.float32)
+                ref_l = np.asarray(up_ref.convert("L"), dtype=np.float32)
+                var_ai = float(cv2.Laplacian(ai_l, cv2.CV_32F).var())
+                var_ref = float(cv2.Laplacian(ref_l, cv2.CV_32F).var())
+                if var_ref < 25.0:
+                    continue
+                ratios.append(var_ai / var_ref)
+                ai_g = np.hypot(
+                    cv2.Sobel(ai_l, cv2.CV_32F, 1, 0, ksize=3),
+                    cv2.Sobel(ai_l, cv2.CV_32F, 0, 1, ksize=3),
+                ).ravel()
+                ref_g = np.hypot(
+                    cv2.Sobel(ref_l, cv2.CV_32F, 1, 0, ksize=3),
+                    cv2.Sobel(ref_l, cv2.CV_32F, 0, 1, ksize=3),
+                ).ravel()
+                if ai_g.std() > 1e-6 and ref_g.std() > 1e-6:
+                    corr = float(np.corrcoef(ai_g, ref_g)[0, 1])
+                    if np.isfinite(corr):
+                        corrs.append(corr)
+            if not ratios:
+                return True, ""
+            ratio = float(np.median(ratios))
+            corr = float(np.median(corrs)) if corrs else 1.0
             if ratio < min_ratio:
-                return False, f"A/B ESRGAN/Lanczos {ratio:.2f}x < {min_ratio:.2f} → Lanczos"
-            return True, f"A/B ESRGAN/Lanczos {ratio:.2f}x"
+                return False, (
+                    f"A/B ESRGAN/Lanczos {ratio:.2f}x < {min_ratio:.2f} "
+                    f"({len(ratios)} zona(s)) → Lanczos"
+                )
+            if corr < min_corr:
+                return False, (
+                    f"A/B estructura {corr:.2f} < {min_corr:.2f} "
+                    f"({len(ratios)} zona(s)) → Lanczos"
+                )
+            return True, f"A/B ESRGAN/Lanczos {ratio:.2f}x, estructura {corr:.2f}"
         except Exception as exc:
             print(f"[QualityFinisher] A/B de upscale omitido: {exc}", flush=True)
             return True, ""
@@ -1115,6 +1189,7 @@ class ImageQualityFinisher:
         progress_base: float = 0.55,
         progress_span: float = 0.28,
         upscale_plan: Optional[Dict[str, Any]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Tuple[Image.Image, str]:
         tier = (tier or "hd").lower()
         cfg = quality_settings().get("upscale", {})
@@ -1141,6 +1216,9 @@ class ImageQualityFinisher:
         out = image
         notes = []
 
+        if cancel_check and cancel_check():
+            return image, "upscale cancelado"
+
         if plan.get("subtype"):
             worth, gain_note = self._ai_detail_gain(image, plan)
             if not worth:
@@ -1165,6 +1243,8 @@ class ImageQualityFinisher:
         else:
             max_passes = {"hd": 1, "4k": 2, "8k": 3}.get(tier, 1)
             for i in range(max_passes):
+                if cancel_check and cancel_check():
+                    return out, "upscale cancelado"
                 ms = max(out.size)
                 if ms >= int(target_side * 0.92):
                     break

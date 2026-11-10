@@ -178,6 +178,9 @@ def build_img_editor_ui():
                         label="Tamaño si Ampliar está marcado",
                         info="Lado mayor: HD 1920, 4K 3840 o 8K 7680 px. Ampliar no recupera detalle ausente.",
                     )
+                    quality_estimate = gr.Markdown(
+                        "", elem_id="quality-estimate",
+                    )
                     quality_color = gr.Checkbox(
                         label="Color y luz",
                         value=True,
@@ -278,6 +281,7 @@ def build_img_editor_ui():
         "quality_realism": quality_realism,
         "enhance_tier": enhance_tier,
         "quality_preserve_faces": quality_preserve_faces,
+        "quality_estimate": quality_estimate,
         "legacy_api_btn": legacy_api_btn,
         "legacy_options_btn": legacy_options_btn,
         "legacy_select_btn": legacy_select_btn,

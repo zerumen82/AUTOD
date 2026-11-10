@@ -392,10 +392,27 @@ def is_camera_view_request(prompt: str) -> bool:
     if _camera_scorer is None:
         score_camera_pose(prompt)
     scores = _camera_scorer.score_concepts(prompt)
-    return (
-        scores.get("camera_view", 0.0) >= camera_pose_config()["signal_threshold"]
-        and _concept_token_evidence(prompt, "camera_view") >= 2
-    )
+    camera_score = scores.get("camera_view", 0.0)
+    if camera_score < camera_pose_config()["signal_threshold"]:
+        return False
+    evidence = _concept_token_evidence(prompt, "camera_view")
+    if evidence >= 2:
+        return True
+    # v5.1326: una instrucción corta de cámara solo tiene UN token de cámara
+    # («mejora el ANGULO», «improve the angle»); el otro token es el verbo del
+    # cambio. Exigir dos la mandaba a la ruta de región: CLIPSeg devolvía
+    # máscara vacía y se guardaba la foto sin cambios. Se acepta únicamente
+    # cuando el ámbito medido tiene dos tokens de contenido como máximo y
+    # ningún concepto puntúa por encima de cámara; las frases más largas
+    # siguen exigiendo dos tokens.
+    content = _camera_scorer._tokenize(prompt)
+    if evidence >= 1 and len(content) <= 2:
+        return not any(
+            value >= camera_score
+            for name, value in scores.items()
+            if name != "camera_view"
+        )
+    return False
 
 
 def is_camera_only_request(prompt: str) -> bool:
@@ -725,6 +742,14 @@ class LightLocalIntentAnalyzer(_ConceptRouterMixin):
     @staticmethod
     def _tokenize(text: str) -> set:
         raw = re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ0-9]+", (text or "").lower())
+        # v5.1326: la tilde no distingue el token («ANGULO», «angulo» y
+        # «ángulo» son el mismo). Antes «mejora el ANGULO» no casaba con
+        # ninguna ancla de cámara y caía a la ruta de región, que devolvía la
+        # foto sin cambios (log 2026-11-10 01:01).
+        raw = [
+            "".join(c for c in unicodedata.normalize("NFKD", w) if not unicodedata.combining(c))
+            for w in raw
+        ]
         stop = LightLocalIntentAnalyzer._STOPWORDS
         return {w for w in raw if len(w) > 2 and w not in stop}
 

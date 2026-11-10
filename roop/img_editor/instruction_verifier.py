@@ -14,11 +14,51 @@ import os
 import re
 from typing import Any, Dict, Optional
 
+import numpy as np
 from PIL import Image
 
 
 def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def measure_change(before: Optional[Image.Image], after: Optional[Image.Image],
+                   mask: Optional[Image.Image] = None) -> Dict[str, Any]:
+    """Píxeles que cambiaron de verdad dentro y fuera del soporte medido.
+
+    Una muestra generada no es prueba de que la edición ocurriera. Esta medida
+    es objetiva y no depende del VLM: 0 px significa que la foto no cambió,
+    aunque el motor haya respondido. Se usa para informar en vez de afirmar una
+    edición inexistente (log 2026-11-10: «mejora el ANGULO» guardó la foto
+    original sin decirlo).
+    """
+    if before is None or after is None:
+        return {"available": False, "reason": "falta una imagen"}
+    if before.size != after.size:
+        return {"available": False, "reason": "tamaños distintos"}
+    a = np.asarray(before.convert("RGB"), dtype=np.int16)
+    b = np.asarray(after.convert("RGB"), dtype=np.int16)
+    changed = np.abs(a - b).max(axis=2) > 8
+    total = int(changed.size)
+    result: Dict[str, Any] = {
+        "available": True,
+        "changed_px": int(changed.sum()),
+        "total_px": total,
+        "changed_ratio": float(changed.sum()) / max(total, 1),
+    }
+    if mask is not None:
+        inside = np.asarray(
+            mask.convert("L").resize(before.size, Image.Resampling.NEAREST)
+        ) >= 96
+        inside_px = int((changed & inside).sum())
+        outside_px = int((changed & ~inside).sum())
+        result.update({
+            "inside_px": inside_px,
+            "outside_px": outside_px,
+            "inside_ratio": inside_px / max(int(inside.sum()), 1),
+            "outside_ratio": outside_px / max(int((~inside).sum()), 1),
+        })
+    return result
 
 
 class InstructionVerifier:
@@ -116,7 +156,42 @@ class InstructionVerifier:
             "raw": value,
         }
 
-    def verify(self, image: Image.Image, request: str) -> Dict[str, Any]:
+    @staticmethod
+    def _detail_crop(image: Image.Image, before: Optional[Image.Image],
+                     pad: float = 0.12, min_side: int = 384) -> Image.Image:
+        """Recorta lo que cambió antes de preguntar al VLM.
+
+        La miniatura global de 768 px hace invisible un detalle pequeño (pies
+        descalzos en un plano medio). Si se conoce la foto previa, se pregunta
+        por la zona que cambió con margen; sin cambios o sin foto previa se
+        mantiene la imagen completa, como antes.
+        """
+        if before is None or before.size != image.size:
+            return image
+        try:
+            from PIL import ImageChops
+            box = ImageChops.difference(
+                image.convert("RGB"), before.convert("RGB")
+            ).getbbox()
+        except Exception:
+            return image
+        if not box:
+            return image
+        w, h = image.size
+        x0, y0, x1, y1 = box
+        pad_x = int((x1 - x0) * pad)
+        pad_y = int((y1 - y0) * pad)
+        x0, y0 = max(0, x0 - pad_x), max(0, y0 - pad_y)
+        x1, y1 = min(w, x1 + pad_x), min(h, y1 + pad_y)
+        if (x1 - x0) < min_side or (y1 - y0) < min_side:
+            cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+            half = max(min_side // 2, (x1 - x0) // 2, (y1 - y0) // 2)
+            x0, y0 = max(0, cx - half), max(0, cy - half)
+            x1, y1 = min(w, cx + half), min(h, cy + half)
+        return image.crop((x0, y0, x1, y1))
+
+    def verify(self, image: Image.Image, request: str,
+               before: Optional[Image.Image] = None) -> Dict[str, Any]:
         """Return a tri-state verdict: true, false, or None when inconclusive."""
         if not request or not request.strip() or not self._load():
             return {"available": False, "compliant": None, "reason": self._unavailable_reason}
@@ -128,11 +203,12 @@ class InstructionVerifier:
                 "Reply with exactly one word: PASS if every requested change is visibly satisfied; otherwise FAIL.\n\n"
                 f"Edit request: {request.strip()}"
             )
+            focus = self._detail_crop(image, before)
             answer = self._llm.create_chat_completion(
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "image_url", "image_url": {"url": self._image_data_url(image)}},
+                        {"type": "image_url", "image_url": {"url": self._image_data_url(focus)}},
                         {"type": "text", "text": question},
                     ],
                 }],

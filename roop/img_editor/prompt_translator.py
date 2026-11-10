@@ -169,6 +169,22 @@ def _offline_translate(prompt: str):
         if len(cased) >= 8 and uppercase_share >= 0.80:
             source = prompt.lower()
             print("[Translate:Local] Normalizando entrada predominantemente en MAYÚSCULAS", flush=True)
+        mixed_case = _normalize_mixed_case_words(source)
+        if mixed_case != source:
+            print(
+                "[Translate:Local] Normalizada palabra con mayúsculas mezcladas "
+                "antes de traducir",
+                flush=True,
+            )
+            source = mixed_case
+        stray_caps = _normalize_stray_caps_words(source)
+        if stray_caps != source:
+            print(
+                "[Translate:Local] Normalizada palabra suelta en MAYÚSCULAS "
+                "antes de traducir",
+                flush=True,
+            )
+            source = stray_caps
         normalized_punctuation = _normalize_stray_word_punctuation(source)
         if normalized_punctuation != source:
             print("[Translate:Local] Eliminado punto suelto antes de una palabra", flush=True)
@@ -224,12 +240,29 @@ def _offline_translate(prompt: str):
         print(f"[Translate:Local] No disponible en esta petición: {e}; se reintentará", flush=True)
         return None
 
+def _collapse_duplicate_punctuation(text: str) -> str:
+    """Pliega puntuación repetida sin comerse una elipsis.
+
+    Marian añade a veces puntos de más al traducir («Man must be bald....», log
+    2026-11-10 00:5x): el modelo recibe esa repetición y la lee como ruido. Un
+    grupo de tres puntos SÍ es una elipsis y se conserva; dos o cuatro son
+    duplicación ortográfica y se pliegan a uno. No toca palabras ni la orden.
+    """
+    def _fix(match: "re.Match[str]") -> str:
+        run = match.group(0)
+        return run if len(run) == 3 else run[0]
+
+    text = re.sub(r"([.!?])\1{1,}", _fix, text or "")
+    # «bald .» deja un espacio que el prompt no necesita.
+    return re.sub(r"\s+([.,;!?])", r"\1", text)
+
+
 def clean_text(text: str) -> str:
     if not text:
         return ""
     text = re.sub(r'[<>]', '', text)
     text = " ".join(text.split())
-    return text
+    return _collapse_duplicate_punctuation(text)
 
 def _damerau_leven(a: str, b: str) -> int:
     """Distancia de edición con transposición adyacente (typos tipo 'desclaza'
@@ -264,6 +297,48 @@ def _apply_mappings(p: str, data: dict) -> str:
             p = re.sub(re.escape(trigger), replacement, p, flags=re.IGNORECASE)
         p_lower = p.lower()
     return p
+
+
+def _normalize_mixed_case_words(text: str) -> str:
+    """Baja a minúsculas las palabras con mayúsculas mezcladas («cALVO»).
+
+    Es ortografía, no vocabulario. Una palabra que empieza en minúscula y
+    lleva la mitad o más de sus letras en mayúscula es una errata de tecleo,
+    no una marca, y Marian la dejaba intacta: el modelo recibía «cALVO» como
+    nombre y la petición se volvía una edición global (log 2026-11-10 00:19,
+    el calvo acabó reescribiendo el cuerpo entero). Las palabras en MAYÚSCULAS
+    completas se normalizan aparte y «iPhone» (una sola mayúscula) no entra.
+    """
+    def _fix(match: "re.Match[str]") -> str:
+        word = match.group(0)
+        letters = [c for c in word if c.isalpha()]
+        if len(letters) < 3 or not word[:1].islower():
+            return word
+        upper = sum(1 for c in letters if c.isupper())
+        if upper >= 2 and upper / len(letters) >= 0.5:
+            return word.lower()
+        return word
+
+    return re.sub(r"[^\W\d_]+", _fix, text, flags=re.UNICODE)
+
+
+def _normalize_stray_caps_words(text: str) -> str:
+    """Baja a minúsculas una palabra suelta en MAYÚSCULAS dentro de la frase.
+
+    Marian deja intactos los tokens en mayúsculas dentro de una frase en
+    minúsculas («mejora el ANGULO» → «improves the ANGULO»): ese token ni se
+    traduce ni se mide como concepto de cámara, y la petición acababa en la
+    ruta de región con máscara vacía y la foto sin cambios. Es presentación
+    ortográfica, no vocabulario: las siglas de tres letras o menos («POV») y
+    cualquier palabra con dígitos se conservan.
+    """
+    def _fix(match: "re.Match[str]") -> str:
+        word = match.group(0)
+        if not word.isalpha() or len(word) < 4:
+            return word
+        return word.lower()
+
+    return re.sub(r"\b[A-ZÁÉÍÓÚÜÑ]{4,}\b", _fix, text)
 
 
 def _local_translate(prompt: str):

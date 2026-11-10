@@ -351,6 +351,132 @@ def _note_reports_residual_failure(note):
     return bool(note) and TARGET_RESIDUAL_FAIL in str(note)
 
 
+# v5.1325 — límites de la comprobación de destrucción corporal, medidos en
+# `diagnostics/probe_editor_body_destruction_20261110.py`.
+BODY_OUTSIDE_MAX_FRACTION = 0.002
+BODY_FLAT_STD_BEFORE = 4.0
+BODY_FLAT_STD_AFTER = 1.5
+BODY_SKIN_REWRITE_SHARE = 0.15
+BODY_SKIN_BLOCK_SHARE = 0.05
+BODY_SKIN_MIN_FRACTION = 0.002
+
+
+def _body_destruction_metrics(original, edited, zone) -> dict:
+    """Measure whether a pass destroyed the body instead of editing it.
+
+    v5.1325 — el 2026-11-10 el caso «la mujer debe ir descalza» entregó las
+    piernas convertidas en bloques planos y aun así pasó como
+    «Integridad visual OK»: la única comprobación miraba caras e identidad.
+    Aquí se mide el síntoma real, sin vocabulario y sin motores nuevos:
+
+    - **Fuera de la zona**: píxeles que cambiaron lejos de lo medido. La
+      pasada solo puede escribir su zona; el feather y el Poisson viven en
+      un anillo alrededor, que se permite.
+    - **Piel reescrita**: piel que tenía textura en la foto y queda plana
+      (relleno de un color) tras la pasada. Quitar un zapato o una prenda
+      cambia piel por piel o ropa por piel, pero no aplana la piel que ya
+      estaba: eso es taparla con un bloque.
+    """
+    if original is None or edited is None or zone is None:
+        return {}
+    import cv2
+
+    before = np.asarray(original.convert("RGB"))
+    after_img = edited.convert("RGB")
+    if after_img.size != original.size:
+        after_img = after_img.resize(original.size, Image.Resampling.LANCZOS)
+    after = np.asarray(after_img)
+    mask = np.asarray(zone, dtype=bool)
+    if mask.shape != before.shape[:2]:
+        mask = np.asarray(
+            Image.fromarray(mask.astype(np.uint8) * 255, "L").resize(
+                original.size, Image.Resampling.NEAREST)
+        ) > 127
+
+    # Mismo criterio a <=1024 px: coste acotado y medidas comparables.
+    longest = max(before.shape[:2])
+    scale = min(1.0, 1024.0 / float(longest))
+    if scale < 1.0:
+        size = (max(1, int(round(before.shape[1] * scale))),
+                max(1, int(round(before.shape[0] * scale))))
+        before_s = cv2.resize(before, size, interpolation=cv2.INTER_AREA)
+        after_s = cv2.resize(after, size, interpolation=cv2.INTER_AREA)
+        mask_s = cv2.resize(mask.astype(np.uint8), size,
+                            interpolation=cv2.INTER_NEAREST) > 0
+    else:
+        before_s, after_s, mask_s = before, after, mask
+    if mask_s.shape != before_s.shape[:2]:
+        return {}
+
+    total = float(before_s.shape[0] * before_s.shape[1])
+    diff = np.abs(after_s.astype(np.int16) - before_s.astype(np.int16)).max(axis=2)
+    radius = max(8, int(round(min(before_s.shape[:2]) * 0.03)))
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1),
+    )
+    allowed = cv2.dilate(mask_s.astype(np.uint8), kernel) > 0
+    outside = (~allowed) & (diff > 12)
+
+    from roop.img_editor.img_editor_manager import _skin_pixels
+    skin = _skin_pixels(before_s) & mask_s
+    skin_px = int(skin.sum())
+    rewritten_px = 0
+    rewritten_largest = 0
+    if skin_px >= max(400, int(BODY_SKIN_MIN_FRACTION * total)):
+        gray_before = cv2.cvtColor(before_s, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        gray_after = cv2.cvtColor(after_s, cv2.COLOR_RGB2GRAY).astype(np.float32)
+
+        def _local_std(gray):
+            mean = cv2.blur(gray, (9, 9))
+            square = cv2.blur(gray * gray, (9, 9))
+            return np.sqrt(np.maximum(square - mean * mean, 0.0))
+
+        textured = _local_std(gray_before) >= BODY_FLAT_STD_BEFORE
+        flattened = _local_std(gray_after) <= BODY_FLAT_STD_AFTER
+        rewritten = skin & textured & flattened & (diff > 12)
+        rewritten_px = int(rewritten.sum())
+        if rewritten_px:
+            # v5.1325 — un bloque tapado es CONTIGUO; un cuerpo regenerado
+            # suaviza la piel de forma difusa. Exigir un componente grande
+            # evita rechazar un «desnudo» legítimo por pérdida de grano.
+            count, _, stats, _ = cv2.connectedComponentsWithStats(
+                rewritten.astype(np.uint8), connectivity=8,
+            )
+            if count > 1:
+                rewritten_largest = int(stats[1:, cv2.CC_STAT_AREA].max())
+
+    return {
+        "outside_px": int(outside.sum()),
+        "outside_fraction": float(outside.sum()) / max(1.0, total),
+        "skin_px": skin_px,
+        "rewritten_px": rewritten_px,
+        "rewritten_fraction": float(rewritten_px) / max(1, skin_px),
+        "rewritten_largest": rewritten_largest,
+        "rewritten_largest_fraction": float(rewritten_largest) / max(1, skin_px),
+    }
+
+
+def _body_destruction_reason(original, edited, zone) -> str:
+    """Empty when the pass kept the body; the measured reason when it did not."""
+    metrics = _body_destruction_metrics(original, edited, zone)
+    if not metrics:
+        return ""
+    if metrics["outside_fraction"] > BODY_OUTSIDE_MAX_FRACTION:
+        return (
+            f"escribió {metrics['outside_px']} px fuera de la zona medida "
+            f"({metrics['outside_fraction']:.1%} de la foto)"
+        )
+    if (metrics["rewritten_fraction"] >= BODY_SKIN_REWRITE_SHARE
+            and metrics["rewritten_largest_fraction"] >= BODY_SKIN_BLOCK_SHARE):
+        return (
+            f"la piel con textura quedó plana en {metrics['rewritten_px']} px "
+            f"({metrics['rewritten_fraction']:.0%} de la piel de la zona, "
+            f"bloque contiguo de {metrics['rewritten_largest_fraction']:.0%}): "
+            "el cuerpo se tapó en vez de editarse"
+        )
+    return ""
+
+
 def _expand_zone_within_support(zone, support, grow_frac=None):
     """Grow a measured target inside its support without naming garments.
 
@@ -389,7 +515,7 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
                       analysis=None, faces=None, is_vision_zone=True,
                       target_query="", verify_zone=None,
                       check_clothing_residual=False, reference_image=None,
-                      no_hole=False, auto_cover=True):
+                      no_hole=False, auto_cover=True, write_mask=None):
     """Measured zone on the vision engine, at the person's own resolution.
 
     Measured on the user's photo (2026-10-26, nine real renders, seed
@@ -562,6 +688,15 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
         write_zone = zone
     else:
         write_zone = (zone & ~skin) if (skin is not None and skin.any() and int(garment.sum()) >= 400) else zone
+    if write_mask is not None:
+        # v5.1323 — un reintento con la zona ampliada solo puede ESCRIBIR lo
+        # que el segmentador midió al principio. El recorte mayor le da al
+        # motor contexto y resolución, pero los píxeles nuevos no son el
+        # objeto: escribirlos inventa contenido en la pierna o en el fondo
+        # (log 2026-11-10: 18848 → 81345 px y el cuerpo reescrito).
+        measured_write = np.asarray(write_mask, dtype=bool)
+        if measured_write.shape == write_zone.shape:
+            write_zone = write_zone & measured_write
     print(
         f"[ImgEditor] Sin selección: {label} en el recorte de la "
         f"zona medida {crop.size} → {size}, denoise="
@@ -673,6 +808,12 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
         Image.fromarray((write_limit & original_zone).astype(np.uint8) * 255, "L"),
     )
     del soft_zone
+    destroyed = _body_destruction_reason(
+        image, composed, write_limit & original_zone,
+    )
+    if destroyed:
+        print(f"[ImgEditor] Resultado rechazado: {destroyed}", flush=True)
+        return None, f"resultado rechazado: {destroyed}"
     if target_query:
         # v5.1285 — «no cambia bien ropa» no se veía en ninguna parte: el guard
         # de la ruta descrita solo exige que ALGO haya cambiado, así que un
@@ -871,6 +1012,12 @@ def _kontext_zone_pass(manager, client, image, zone, support, prompt,
     except cv2.error as blend_error:
         print(f"[ImgEditor] Ajuste de borde omitido: {blend_error}", flush=True)
     del soft_zone
+    written = np.zeros((image.height, image.width), dtype=bool)
+    written[box[1]:box[3], box[0]:box[2]] = write_crop
+    destroyed = _body_destruction_reason(image, composed, written)
+    if destroyed:
+        print(f"[ImgEditor] Resultado rechazado: {destroyed}", flush=True)
+        return None, f"resultado rechazado: {destroyed}"
     return composed, note
 
 
@@ -1970,9 +2117,13 @@ def edit_selected_region(
         finish_note = ""
         if quality_mode or auto_upscale:
             from roop.img_editor.top_tier_finish import run_top_tier_quality
+            # v5.1321 — el exterior de una selección conserva píxeles y tamaño:
+            # ampliar aquí se pagaba y se tiraba en el resize de abajo.
+            selection_steps = dict(quality_steps or {})
+            selection_steps["upscale"] = False
             result, finish_note, quality_analysis = run_top_tier_quality(
                 result, enhance_tier=enhance_tier, use_generative=False,
-                preserve_faces=quality_preserve_faces, quality_steps=quality_steps,
+                preserve_faces=quality_preserve_faces, quality_steps=selection_steps,
                 progress_callback=progress_callback, cancel_check=cancel_check,
             )
             manager._last_quality_analysis = quality_analysis
@@ -2436,6 +2587,7 @@ def edit_described_subject(
                     recipe=vision_recipe, label="motor con visión (LongCat, residual)",
                     is_vision_zone=True, target_query=target_query,
                     verify_zone=initial_target_zone,
+                    write_mask=initial_target_zone,
                 )
                 if result2 is not None:
                     result, note = result2, note2
@@ -2462,6 +2614,7 @@ def edit_described_subject(
                     recipe=vision_recipe, label="motor con visión (LongCat, residual 2)",
                     is_vision_zone=True, target_query=target_query,
                     verify_zone=initial_target_zone,
+                    write_mask=initial_target_zone,
                 )
                 if result3 is not None:
                     result, note = result3, note3
@@ -2508,9 +2661,13 @@ def edit_described_subject(
             return None, "Cancelado", None
         if finish_allowed:
             from roop.img_editor.top_tier_finish import run_top_tier_quality
+            # v5.1321 — esta ruta conserva el resto de la foto: ampliar el
+            # lienzo no aporta y costaba el paso más caro del acabado.
+            selection_steps = dict(quality_steps or {})
+            selection_steps["upscale"] = False
             result, finish_note, quality_analysis = run_top_tier_quality(
                 result, enhance_tier=enhance_tier, use_generative=False,
-                preserve_faces=quality_preserve_faces, quality_steps=quality_steps,
+                preserve_faces=quality_preserve_faces, quality_steps=selection_steps,
                 progress_callback=progress_callback, cancel_check=cancel_check,
             )
             manager._last_quality_analysis = quality_analysis

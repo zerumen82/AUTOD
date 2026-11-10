@@ -53,9 +53,9 @@ def build_animate_ui():
                     lora_list = ["None"] + animator.get_available_loras()
                     engine = gr.Dropdown(
                         label="Motor de animación",
-                        choices=["framepack", "wan_video"],
+                        choices=["framepack", "wan_video", "ltx2_audio"],
                         value="framepack",
-                        info="FramePack: único con modelo instalado (~5GB). wan_video requiere descargar Wan2.2 (scripts/download_animate_models).",
+                        info="ltx2_audio: LTX-2 destilado Q4 con audio nativo (960x544, 25 fps, 8 pasos). FramePack/Wan no generan audio nativo.",
                     )
                     with gr.Row():
                         autoregressive_chunks = gr.Slider(
@@ -66,8 +66,25 @@ def build_animate_ui():
                         add_audio = gr.Checkbox(
                             label="🔊 Generar Audio (MMAudio + Voz Español)",
                             value=True,
-                            info="Añade automáticamente sonido ambiente y voz si hay diálogo en el prompt."
+                            info="Añade sonido ambiente y voz si hay diálogo. ltx2_audio lo genera nativo: el checkbox no cambia esa ruta."
                         )
+                    with gr.Row():
+                        frames = gr.Slider(
+                            label="Fotogramas por bloque",
+                            minimum=25, maximum=97, step=4, value=37,
+                            info="ltx2_audio usa hasta 97 (múltiplo de 8 + 1); FramePack 49 y wan_video 33. Más fotogramas = más movimiento y más tiempo.",
+                        )
+                        steps = gr.Slider(
+                            label="Pasos por bloque",
+                            minimum=10, maximum=40, step=1, value=24,
+                            info="Más pasos = más detalle y más tiempo por bloque."
+                        )
+                    audio_prompt = gr.Textbox(
+                        label="Sonido deseado (opcional)",
+                        placeholder="Ej: viento suave, pasos en la hierba",
+                        lines=1,
+                        info="Vacío = MMAudio usa el prompt de movimiento.",
+                    )
                     lora_name = gr.Dropdown(
                         label="LoRA WanVideo",
                         choices=lora_list,
@@ -101,6 +118,9 @@ def build_animate_ui():
         "engine": engine,
         "autoregressive_chunks": autoregressive_chunks,
         "add_audio": add_audio,
+        "frames": frames,
+        "steps": steps,
+        "audio_prompt": audio_prompt,
         "btn_animate": btn_animate,
         "btn_cancel": btn_cancel,
         "video_output": video_output,

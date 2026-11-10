@@ -1,5 +1,358 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-10 — revisión de Animate Image y limpieza de evidencia LTX-2 (v5.1328)
+
+- **Petición**: «revisa memory y pendientes y el estado de animate image» y,
+  tras el informe, «documentar y corregir inconsistencias», «arreglar el script
+  de matriz y reejecutarla» y «commit/push del lote v5.1328».
+- **Probes re-ejecutados hoy (CPU)**: contrato LTX-2 **16/16 PASS** y cableado
+  en Animate **14/14 PASS**. Los 5 ficheros de modelo presentes con el tamaño
+  publicado.
+- **720p medido y antes no registrado**: `97f_720p` (1280×704, 97f, 25 fps) →
+  **815,8 s**, pico VRAM **6916 MB**, pico RSS ComfyUI **25,7 GB**, MP4 de
+  825 KB con AAC 24 kHz estéreo y 3,88 s. Evidencia en
+  `diagnostics/out/ltx2_matrix_20261110/matrix.json` y `97f_720p.mp4`. El
+  último fotograma sale limpio (verificado extrayéndolo).
+- **49f**: el MP4 es válido (1,96 s, AAC) pero el **último fotograma sale
+  fundido e ilegible** (verificado extrayendo el fotograma final; `f49_04.png`
+  ya lo mostraba). 97f no presenta el defecto. Sigue pendiente decidir recortar
+  el último fotograma o usar 97f.
+- **Matriz arreglada** (`diagnostics/ltx2_matrix_20261110.py`): (1) el
+  `shutil.copy2` a la misma ruta daba `SameFileError` tras cada trabajo bueno
+  (el script moría con exit 1 aun con el render correcto); (2) `matrix.json`
+  ahora conserva las filas anteriores por trabajo en vez de sobrescribirse (la
+  corrida 720p había borrado la fila de 49f); (3) el timeout por defecto sube
+  de 1800 s a 3600 s porque la carga fría medida es 1790 s (`Prompt executed in
+  00:29:50`) y el cliente anterior se rendía a los 1772 s.
+- **Documentación corregida**: los docstrings de `roop/animate/ltx2_audio.py` y
+  `diagnostics/real_animate_ltx2_audio_20261110.py` ya no dicen que el motor no
+  está expuesto (desde v5.1328 sí está en el desplegable); el comentario muerto
+  de `ui/tabs/animate/logic.py` que citaba `resolve_autoregressive_plan`
+  (inexistente) apunta a la lógica real. Historia nueva `H-ANIM-LTX2-AUDIO` en
+  `spec/02-REQUISITOS.md`.
+- **Límites**: sin validación visual con retrato real (cara, boca y diálogo).
+  El tercer trabajo de la matriz (`97f_540p_retrato`) necesita `--portrait` y
+  no hay esa foto en el proyecto. La UI y ComfyUI estaban apagados al revisar;
+  el último log de UI (v5.1325) termina con un aborto Fortran de ComfyUI tras un
+  lote FaceSwap de 14 vídeos. La UI viva nunca cargó v5.1328.
+
+## 2026-11-10 — LTX-2 Q4 con audio nativo medido en 8 GB (v5.1328)
+
+- **Qué se probó**: ruta de Animate con LTX-2 destilado Q4 y audio nativo en un
+  solo pase, a 960×544 (540p), 97 fotogramas (3,88 s a 25 fps), 8 pasos
+  destilados, CFG 1,0, sampler euler. Constructor del grafo en
+  `roop/animate/ltx2_audio.py`; probe CPU
+  `diagnostics/probe_ltx2_audio_contract_20261110.py` (**16/16**) y runner real
+  `diagnostics/real_animate_ltx2_audio_20261110.py`.
+- **Modelos (24,6 GB, descargados)**: `diffusion_models/ltx-2-19b-distilled_Q4_K_M.gguf`
+  12,65 GB; `text_encoders/gemma-3-12b-it-Q4_K_M.gguf` 7,30 GB; connector
+  distill bf16 2,86 GB; VAE vídeo bf16 2,45 GB (`vae/`); VAE audio bf16 0,22 GB
+  (`checkpoints/`, única carpeta que lista `LTXVAudioVAELoader`). El GGUF de
+  Gemma y el connector se enlazan (hardlink) en `models/clip` porque
+  `DualCLIPLoaderGGUF` solo mira ahí.
+- **Requisito real medido** (`summary.json` de la pasada limpia): **RTX 3060 Ti
+  8 GB al 92 %** (pico
+  7 535 MB de 8 192) y **RAM del sistema al límite** (mínimo 1,8 GB libres de
+  34,3 GB; ComfyUI midió **20,6 GB de RSS** al cargar transformer y Gemma).
+  Funciona porque el **pagefile de 78 GB** (75 GB libres) absorbe el offload:
+  sin él la ruta no cabe. Tiempo total **12 min 28 s** en frío, de los cuales 2 min 41 s
+  son el muestreo (8 pasos, ~20 s/it); con los modelos ya en page cache baja a
+  **1 min 58 s** (muestreo 1 min 44 s, 13 s/it). La
+  VRAM nunca llega a 8 GB; el cuello de botella es RAM más pagefile.
+- **Salida válida con audio**: MP4 h264 960×544 a 25 fps, 3,88 s, y pista AAC
+  24 kHz estéreo 121 kb/s (no muda: media −27,3 dB, pico −13,6 dB).
+  `CreateVideo` recibe `audio` de `LTXVAudioVAEDecode`; sin ese enlace el MP4
+  sale mudo aunque el VAE de audio esté cargado.
+- **Dos trampas resueltas**: (1) `hf_hub_download` conserva la ruta del repo
+  dentro de `local_dir` y dejaba los ficheros en
+  `models/<carpeta>/<carpeta>/…`; `download_ltx2_audio_q4.py` ahora los sube.
+  (2) Los conectores de embeddings **no van en el UNet**: `comfy/text_encoders/lt.py:213`
+  los carga dentro del text encoder LTXAV, así que el aviso `unet missing:
+  audio_embeddings_connector…` del GGUF es esperado. ComfyUI además cachea las
+  listas de modelos al arrancar: hay que iniciarlo **después** de descargar.
+- **Motor en Animate**: el desplegable ya ofrece `ltx2_audio`; `resolve_params`
+  lo fija en 8 pasos, CFG 1,0 y 25 fps, ajusta los fotogramas al múltiplo de 8 + 1
+  más cercano (48 → 49) y a 8 GB no lo recorta a 33. Probe de cableado
+  `probe_ltx2_animate_wiring_20261110.py` **14/14** (prompt, params, modelos, UI).
+- **Prompt de LTX-2**: `compose_prompt` une acción, escena y sonidos en un
+  párrafo de ≤200 palabras («Audio: …» al final); el wrapper «Instruction:
+  Animate this exact photograph» no se usa en esta ruta.
+- **Coste a 49 fotogramas** (`diagnostics/out/ltx2_matrix_20261110/`): 960×544,
+  49 frames → 1,96 s de vídeo, MP4 de 273 KB, muestreo 3 min 07 s y carga en
+  frío ~25 min (log `Prompt executed in 00:29:50`). Audio AAC intacto (media
+  −34,9 dB, pico −14,7 dB). **Defecto**: el último fotograma sale fundido e
+  ilegible; conviene recortarlo o quedarse en 97 frames, que no lo mostraba.
+- **Fallo de robustez corregido**: un `/history` que tarda más de 30 s (el VAE
+  decodifica en el mismo proceso) abortaba una ejecución de 30 min; ahora el
+  sondeo reintenta en vez de lanzar excepción.
+- **Límite**: falta la validación visual con un retrato real (cara, boca y
+  diálogo): no hay una foto así en el proyecto y lo medido es una escena de
+  coche. A 540p se descartó el upscaler 2x: 1920×1088 no cabe en 8 GB. Evidencia:
+  `diagnostics/out/ltx2_audio_20261110/` y `logs/ltx2_audio_run.log`.
+
+## 2026-11-10 — obediencia medible del Editor y controles de Animate (v5.1327)
+
+- **No-op silencioso, corregido en la raíz**: «mejora el ANGULO» guardó una
+  copia idéntica de la foto (log 01:01, CLIPSeg 0,00 %). Ahora cada iteración
+  mide píxeles cambiados contra la foto de entrada; con **0 px** se devuelve
+  «Edición sin cambios: … (no se guardó copia)» y no se gasta otra iteración ni
+  se escribe un archivo falso. La etiqueta de éxito incluye el cambio medido
+  (`Cambio: x % (N px)`). Probe `probe_editor_change_metrics_20261110.py`: 6/6.
+- **La medida distingue dentro/fuera del soporte**: `measure_change(before,
+  after, mask)` devuelve px y ratios dentro y fuera de la máscara; un cambio
+  fuera se reporta como fuga, no como éxito. Es objetivo, sin VLM.
+- **Verificador sobre el recorte que cambió**: `verify(..., before=)` pregunta
+  por la zona modificada (margen 12 %, lado mínimo 384 px) en vez de una
+  miniatura global de 768 px, donde unos pies descalzos en plano medio son
+  invisibles. Sin cambios o sin foto previa conserva la imagen completa.
+- **Puntuación duplicada de Marian**: «Man must be bald....» llegaba al prompt;
+  `clean_text` pliega grupos de 2 o 4+ signos iguales y **conserva la elipsis
+  de tres puntos**. Probe `probe_editor_prompt_punctuation_20261110.py`: 8/8.
+- **Animate Image**: la pestaña ya expone fotogramas por bloque (25-49, def. 37),
+  pasos (10-40, def. 24) y sonido deseado opcional; los valores por defecto
+  (37/12 fps/24) no cambian el comportamiento previo. Sigue sin audio nativo
+  ni lip-sync: MMAudio es posterior y XTTS solo con diálogo entre comillas.
+- **Validación real (2026-11-10 11:11-11:15)**: «mejora el ANGULO» → `[QwenCamera]
+  <sks> front-right quarter view elevated shot medium shot. improves angle`
+  y 199 s de sampler. **El enrutado está corregido**: 361 877 px cambiados
+  (93,3 %) frente a la copia idéntica del log 01:01. **Pero FAIL visual**: el
+  ángulo cambia y a la vez la anatomía se funde y las dos caras se sustituyen;
+  la ruta omite FaceAnalysis por diseño («FaceAnalysis omitido para cambio de
+  cámara»), así que nada mide ese deterioro. Causa candidata: Q2 + 4 pasos
+  regenerando el fotograma completo a 800×485. Evidencia:
+  `diagnostics/out/editor_camera_real_20261110/` y
+  `diagnostics/real_editor_camera_20261110.py`. No repetir renders sobre
+  referencias explícitas (regla de la bitácora): la próxima prueba, con foto
+  neutra.
+
+- **Segunda validación real (11:21), retrato neutro (astronauta)**: Qwen
+  Cámara 59 s, 512×512, 89,9 % de píxeles cambiados; **PASS visual acotado**:
+  el ángulo cambia y la cara/identidad y el traje siguen coherentes (fondo
+  reinterpretado y una mano algo torpe). La ruta funciona en un retrato
+  normal; el FAIL del caso de dos cuerpos en contacto es una composición
+  difícil, no la ruta entera. Evidencia
+  `diagnostics/out/editor_camera_neutral_20261110/`.
+- Límite: pruebas CPU verdes; los dos renders reales están descritos arriba,
+  no cubren más composiciones ni sustituyen la validación del usuario.
+
+## 2026-11-10 — búferes de fundido y cámara sin tildes (v5.1326)
+
+- **MemoryError de FaceSwap**: `_prime_warp_edges` creaba ~35 MB de temporales
+  float32 por frame a 720×720 (c3 de 3 canales + astype del frame + dos
+  productos + suma). Con `batch_size=4` y 4 workers, hasta una reserva de
+  1,98 MiB falló (log 09:04) y ese frame quedó sin swap. Ahora la mezcla es
+  in-place por canal: **pico 33,6 → 11,4 MB** por llamada. `_soothe_swap_ring`
+  tenía el mismo patrón: **27,7 → 13,4 MB**. Probe
+  `probe_warp_edges_buffers_20261110.py`: 12 casos, **salida idéntica bit a
+  bit**, TOTAL FAIL=0. No cambia el resultado visual: no hay PASS visual
+  nuevo, solo equivalencia y memoria.
+- **Cámara con mayúsculas o sin tildes**: «mejora el ANGULO» se traducía a
+  «improves the ANGULO» y no casaba con ninguna ancla; caía a la ruta de
+  región, CLIPSeg devolvía máscara vacía y se guardaba la foto sin cambios
+  (log 2026-11-10 01:01). Tres cambios estructurales: `_tokenize` pliega
+  tildes («ANGULO» ≡ «ángulo»), una instrucción corta de cámara (≤2 tokens de
+  contenido, con el concepto de cámara por delante) se acepta con un solo
+  token, y el traductor baja las palabras sueltas en MAYÚSCULAS de ≥4 letras
+  antes de Marian. Probe `probe_editor_camera_caps_20261110.py`: **12/12**.
+- Sin render: la UI no estaba corriendo; ambos probes son de CPU.
+
+## 2026-11-10 — comprobación de destrucción corporal (v5.1325)
+
+- Petición: «añade una comprobación de destrucción de cuerpo (píxeles fuera de
+  la zona o piel reescrita) que rechace resultados como el de las piernas
+  tapadas».
+- **Dónde**: `_body_destruction_metrics` / `_body_destruction_reason` en
+  `selected_region_edit.py`, llamadas dentro de `_vision_zone_pass` y
+  `_kontext_zone_pass`, las dos pasadas que escriben cuerpo/ropa. Si detecta
+  destrucción, la pasada devuelve `None` con el motivo y el llamador conserva
+  la foto original (`kept`); en un reintento, el intento destructivo no
+  sustituye al anterior.
+- **Qué mide** (sin vocabulario, sin modelos nuevos, a ≤1024 px):
+  1. Píxeles cambiados fuera de la zona escrita, con un anillo de tolerancia
+     para feather y Poisson: rechaza si supera el **0,2 %** de la foto.
+  2. Piel que tenía textura (std local 9×9 ≥ 4) y queda plana (std ≤ 1,5)
+     con cambio de color: rechaza si cubre ≥15 % de la piel de la zona **y**
+     forma un bloque contiguo ≥5 %. El segundo requisito evita rechazar una
+     regeneración legítima de cuerpo entero, que suaviza de forma difusa.
+- **Calibración medida** (`probe_editor_body_destruction_20261110.py`, 0 FAIL):
+  cambio de tono legítimo 0 % de piel aplanada (no se rechaza); relleno plano
+  del 90 % con bloque del 78 % (se rechaza); tres parches planos del 20 % con
+  bloque del 8 % (se rechaza); escritura de 1600 px fuera de la zona (se
+  rechaza); sin cambios (no se rechaza). Par real `edit_1794265715` →
+  `edit_1794266098` rechazado por 39 546 px fuera de la zona (9,3 %), aunque
+  esa comparación usa una banda sintética, no la zona medida del render.
+- **Límite**: sin render nuevo ni PASS visual; el probe no sustituye la
+  validación real. La comprobación vive en las pasadas de quitar/cuerpo: una
+  estilización que aplaste piel a propósito por esas rutas también se
+  rechazaría (se prefiere conservar la foto a entregar un bloque).
+
+## 2026-11-10 — auditoría de uncover y banda inferior (v5.1324)
+
+- Petición: «revisa el resto de rutas uncover y la banda inferior buscando
+  patrones de zona inventada o cobertura que destruyan píxeles». Revisados
+  `_vision_zone_pass`, `_kontext_zone_pass`, `_measured_target_zone`,
+  `_measured_clothing_zone`, `_measured_scene_zone`,
+  `_expand_zone_within_support`, `_covered_surface_view`,
+  `_with_covered_reference`, la banda inferior de `selected_region_edit` y la
+  aceptación de residual en `img_editor_manager`.
+- **Arreglado 1 — reintentos escribían fuera del objeto medido**: los dos
+  reintentos de residual pasaban la zona AMPLIADA y `_vision_zone_pass`
+  escribía toda ella (log real: 18 848 → 63 867 → 81 345 px, cuerpo
+  reescrito). Nueva `write_mask` en la pasada con visión: el motor ve el
+  recorte ampliado, pero solo se escribe la intersección con la zona medida
+  al principio. Las rutas sin reintento no cambian.
+- **Arreglado 2 — cubierta sin tope**: `_covered_surface_view` pintaba con el
+  color de alrededor cualquier máscara. En «descalza» el placeholder midió el
+  42 % del recorte y pintó las piernas. Ahora se descarta si la superficie
+  cubierta pasa del 35 % de la persona o del 15 % de la foto, con log; el pelo
+  y el calzado medidos quedan muy por debajo. Probe sintético: cubierta
+  pequeña 144 px → se aplica; 8015 px (80 %) → descartada.
+- **Sin tocar, documentado**: (a) la banda inferior sigue siendo una zona
+  geométrica inventada cuando no hay ropa ni objetivo medido, pero tras el
+  arreglo del placeholder `write_zone` excluye piel, así que solo se
+  reescriben calzado/sombra; (b) el residual fallido sigue aceptando el
+  intento del modelo en la ruta descrita (decisión del 2026-11-06), ahora
+  acotado a la zona medida por el punto anterior; (c) la banda sin objetivo no
+  tiene verificación de cumplimiento; (d) `_measured_target_zone` exige ≥400
+  px y ≤50 % de la persona, y `_measured_scene_zone` usa `max_ratio` 0,5: las
+  zonas que nacen del segmentador están acotadas.
+- **Verificación CPU**: `probe_editor_local_uncover_20261029.py` 14/15 (FAIL
+  solo por el fixture `img_editor/edit_1793292876.png`, borrado);
+  `probe_editor_compound_uncover_20261030.py` 13 PASS exit 0; py_compile y
+  ruff (E9,F63,F7,F82) verdes; probe sintético de la cubierta verde. Logs en
+  `diagnostics/out/editor_uncover_fix_20261110/`.
+- **Límite**: sin render nuevo ni PASS visual; la UI abierta es v5.1320 y no
+  carga estos cambios hasta reabrir.
+
+## 2026-11-10 — «descalza»/«cALVO» no cumplían: target placeholder y casing (v5.1323)
+
+- Petición: «revisa porque sin romper nada, no está cumpliendo con el prompt»,
+  con el log real de dos ediciones (`la mujer debe ir descalza`, `el hombre
+  debe ser cALVO`) y las salidas rotas (`img_editor/edit_1794266098.png`,
+  `edit_1794266288.png`, `edit_1794266935.png`).
+- **Causa 1 — objetivo inventado en un quitar sin complemento**:
+  `_requested_removal_target` devolvía los placeholders `"objeto"` /
+  `"objeto_removido"` cuando el analizador medía `uncover` local pero la
+  gramática no extraía un objeto. Ese texto entraba en
+  `_compose_local_target_prompt` («Remove the objeto completely»), en
+  `_measured_target_zone` (CLIPSeg sobre «objeto», 42 % del recorte) y en
+  `_vision_zone_pass`, que enseñaba al motor la zona pintada con el color de
+  alrededor y verificaba un residual imposible. Resultado medido en el log:
+  tres pases LongCat con la zona crecida (18848 → 63867 → 81345 px), piernas
+  tapadas de beige y el último intento aceptado pese al residual
+  («se conserva el resultado del modelo»). Ahora sin objeto gramatical el
+  objetivo es vacío: el quitar sigue su ruta medida (ropa o banda inferior),
+  sin prompt «objeto», sin cubierta inventada y sin reintentos de residual.
+  «sin zapatos» sigue devolviendo `shoes`.
+- **Causa 2 — casing mixto sin normalizar**: `cALVO` no se bajaba a minúsculas
+  (la normalización sólo actuaba con ≥80 % de mayúsculas) y Marian lo dejó
+  como «cALVO», así que la petición se volvió edición global (log 00:24,
+  `Compound prompt detected`, sin máscara focal, cuerpo reescrito). Nueva
+  `_normalize_mixed_case_words`: palabra que empieza en minúscula con ≥2
+  mayúsculas y ≥50 % de letras en mayúscula se baja entera; `iPhone` no entra.
+- **Verificación CPU**: `probe_editor_local_uncover_20261029.py` 14/15 PASS
+  (el único FAIL es el fixture `img_editor/edit_1793292876.png`, borrado, no
+  una ruta); `probe_editor_compound_uncover_20261030.py` exit 0; py_compile y
+  ruff (E9,F63,F7,F82) verdes. Logs en
+  `diagnostics/out/editor_uncover_fix_20261110/`.
+- **Límite**: no se ha repetido la edición real (la UI abierta es v5.1320 y no
+  carga el cambio hasta reabrir); el cumplimiento visual de «descalza» y
+  «calvo» sigue pendiente de muestra real del usuario. No se estrecha ninguna
+  ruta: los objetivos nombrados y las rutas de ropa/cuerpo no cambian.
+
+## 2026-11-10 — Modo Calidad: malla 468, restauración única y calibración real (v5.1322)
+
+- Petición: «Calibra la métrica de bandas y el A/B de upscale con fotos reales
+  y deja el informe medido», más «unifica la restauración de caras en Modo
+  Calidad», «sustituye la máscara elíptica por la malla de 468 puntos» y
+  «prepara la validación visual 1080p y 4K».
+- **Máscara de caras con malla 468**: `_face_mesh_mask` (MediaPipe Face Mesh)
+  sustituye la elipse de CodeFormer multiplicada por Sobel. Si no hay malla,
+  cae a la elipse+protector anterior (`_face_restore_mask(use_mesh=True)`).
+  Medido sobre 3 retratos reales: esquinas malla 0,000 frente a elipse
+  ≈0,030 (halo fuera de cara) y centro malla 0,78–0,79 frente a elipse
+  0,774–0,786: cubre la cara sin pintar el fondo.
+- **Restauración facial única**: en Modo Calidad el manager ya no repite
+  CodeFormer; el acabado TOP la hace una sola vez al final, tras
+  upscale/color/realismo y midiendo contra la imagen editada (no contra la
+  foto previa al edit). Antes había cascada manager→TOP sobre píxeles
+  distintos y el gate final comparaba cosas que no eran.
+- **Calibración real (6 fotos, ESRGAN x2 forzado a CPU,**
+  `diagnostics/out/quality_calibration_20261110/`**)** — 0 FAIL:
+  - Bandas: foto limpia ≤0,231; posterizado a 8 niveles ≥0,691 (16 niveles
+    ≈0,58–0,67; 32 ≈0,40–0,52). Desposterizar baja 0,35 como mínimo por foto;
+    naturalizar (blend 0,35) sólo baja 0,04–0,06, así que la segunda pasada
+    debe seguir decidiéndose por poster medido o bandas >0,32.
+  - Pasos suaves legítimos del acabado suben la medida hasta 0,046, por eso
+    `band_rise_tolerance` pasa de 0,03 a 0,06: con 0,03 la puerta revertiría
+    pasos válidos. Sigue muy lejos de q8 (0,69).
+  - A/B upscale: ratio real mediana 5,611 (mín. 5,192) frente a umbral 1,08;
+    estructura real mediana 0,887 (mín. 0,817) frente a umbral 0,45; control
+    negativo de ruido 0,001 (máx. 0,007). Umbrales actuales validados: no
+    rechazan ESRGAN real y sí separan ruido. Coste ≈10 s por zona 256→512 en
+    CPU (4 tiles), GPU/UI intactas.
+- **Validación visual 1080p/4K**: `diagnostics/probe_quality_visual_1080_4k_20261110.py`
+  (`--dry-run`, `--photo`, `--tier`, `--no-faces`) mide nitidez, recorte,
+  bandas y tiempo por tier; protocolo y criterios en
+  `plans/VALIDACION_modo_calidad_1080_4k_20261110.md`. El script no firma
+  PASS: el veredicto es del usuario sobre la muestra real.
+- **Verificación CPU**: `probe_quality_calibration_20261110.py` 0 FAIL (con
+  `report.md`/`report.json` generados), `probe_quality_gate_banding_20261110.py`
+  10/10 PASS y `probe_quality_checkbox_finish.py` 19/19 PASS; py_compile,
+  JSON de `config/quality_mode.json` y ruff (E9,F63,F7,F82) verdes.
+- **Límites**: la degradación por bandas es cuantización sintética sobre
+  contenido real, no una foto con bandas nativas; el control negativo es ruido,
+  no una alucinación de modelo. Sigue sin PASS visual ni render 1080p/4K real;
+  la malla sólo se probó en 3 retratos (sin malla cae a la elipse). La UI
+  abierta es v5.1320/PID 10128 y no carga estos cambios hasta reabrir.
+
+## 2026-11-10 — Modo Calidad: bandas medidas, identidad sin saltos y coste (v5.1321)
+
+- Petición: «revísame el modo calidad… indícame mejoras» y después «hazlo».
+  Revisión de `config/quality_mode.json`, `top_tier_finish.py`,
+  `image_quality_pipeline.py`, las rutas del manager/`selected_region_edit`,
+  la UI y las deudas de `spec/03`. Sin motores nuevos, sin listas de palabras
+  y sin reducir rutas de versatilidad.
+- **Bandas**: `_gate_banding` mide bloques planos con pocos niveles de gris.
+  La puerta de desposterizar compara poster Y bandas
+  (`band_rise_tolerance` 0,03, `band_max_side` 1024) y la segunda pasada se
+  decide por poster medido o bandas > 0,32. Motivo: el 23/10 el fixture con
+  bandas quedó 0,837→0,836 y la puerta no podía juzgarlo. Medido hoy:
+  posterizado 0,900 frente a degradado limpio 0,000.
+- **Identidad en fotos grandes**: `_faces_keep_identity` ya no devuelve sin
+  medir por encima de 2048 px; compara sobre la versión reducida (las tres
+  imágenes a la misma escala). Probe: 2400 px → mide a 512, detecta caída
+  1,00→0,00 y revierte.
+- **Máscara facial**: la elipse de CodeFormer se multiplica por un protector
+  de bordes Sobel (`_face_restore_mask`) para no mezclar pelo, montura o
+  mandíbula. Probe sintético: centro 0,982 > borde 0,791.
+- **Upscale**: A/B en hasta 3 zonas y con correlación de bordes
+  (`ai_gain_crops` 3, `ai_gain_min_corr` 0,45); ya no se salta por encima de
+  1600 px (`ai_gain_max_side` 3000). La varianza sola premiaba ruido.
+- **Ruido**: `_classical_finish_strengths` topa nitidez/luz/color con
+  `scores["noise"]` alto (≥0,42 → nitidez ≤1,04). Probe: 1,04 frente a 1,08.
+- **Coste y contrato**: selección explícita y sujeto descrito fuerzan
+  `upscale=False` (el exterior conserva tamaño; antes se ampliaba y se
+  tiraba). `upscale_to_tier` acepta `cancel_check` (probe: corta antes de
+  ONNX). Progreso híbrido corregido a 0,80/0,82/0,84/0,85.
+- **Medida final**: `_final_quality_report`/`_append_final_report` comparan
+  salida con entrada (nitidez, recorte, bandas) y sólo avisan si empeora; no
+  revierten el color pedido. Log del contrato: nitidez 2944,4→2985,6.
+- **UI**: `on_quality_estimate` publica la resolución máxima prevista bajo el
+  selector de tier, con el tope aplicado, sin ejecutar el acabado.
+- **Default seguro**: `run_top_tier_quality(use_generative=False)`; la promesa
+  de la UI («no lanza otra generación») ya no depende del llamador.
+- **Verificación CPU**: `diagnostics/probe_quality_gate_banding_20261110.py`
+  10/10 PASS; `probe_quality_checkbox_finish.py` 19/19 PASS (incluye
+  desposterizar, bandas 0,74→0,65 y la medida final); py_compile y ruff
+  (E9,F63,F7,F82) verdes en los seis archivos tocados.
+- **Límites**: sin PASS visual ni render real nuevo; el Modo Calidad 1080p/4K
+  sigue abierto y la métrica de bandas es nueva (calibración con fotos reales
+  pendiente). La UI abierta v5.1320 no carga estos cambios hasta reabrir
+  AutoAuto.
+- Incremento v5.1320 → v5.1321 en `run.py`, `roop/core.py`, `AGENTS.md`,
+  `spec/00-PRINCIPIOS.md`, `MEMORY.md` y `spec/03-PENDIENTES.md`.
+
 ## 2026-11-09 — corrección en desvestir/sin ropa y extracción de sujeto en participios/adjetivos (v5.1320)
 
 - **Diagnóstico en logs de edición (09/11)**:

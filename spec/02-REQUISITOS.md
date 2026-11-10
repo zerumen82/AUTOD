@@ -1223,3 +1223,27 @@ Límite declarado: el vídeo 3 (peor caso) ya no existe en `.autodeep_temp`; la
 verificación se hace sobre el vídeo 9 y probes con sus datos reales. En fix B
 el fade del hold dura ~4 frames por diseño (v5.1074c): un episodio largo de
 máscara insuficiente sigue saltando frames cuando se agota el fade.
+
+## H-ANIM-LTX2-AUDIO — Animate con LTX-2 Q4 y audio nativo (2026-11-10)
+
+**Como** usuario **quiero** animar una foto con LTX-2 destilado Q4 y que el
+vídeo lleve audio nativo generado a la vez **para** tener movimiento y sonido
+en un solo pase, sin postprocesado.
+
+- [x] Grafo en `roop/animate/ltx2_audio.py`: imagen → latente AV → 8 pasos
+  destilados, CFG 1,0, euler, 25 fps, fotogramas 8n+1; `CreateVideo` recibe el
+  audio de `LTXVAudioVAEDecode` (sin ese enlace el MP4 sale mudo).
+- [x] Modelos Q4 (24,6 GB) presentes y enlazados en `models/clip` para
+  `DualCLIPLoaderGGUF`; 5/5 con el tamaño publicado.
+- [x] Cableado en Animate: desplegable `ltx2_audio`, 8 pasos, CFG 1,0, 25 fps,
+  fotogramas ajustados a 8n+1; a 8 GB no se recorta a 33. Probe de cableado
+  14/14.
+- [x] Contrato del grafo 16/16 (nodos, enlaces, resolución múltiplo de 32,
+  fotogramas 8n+1, audio en `CreateVideo`, prompt e imagen).
+- [x] Prueba real en 8 GB: 97f/540p (118 s de muestreo, pico 7535 MB, AAC) y
+  97f/720p (815,8 s, pico 6916 MB, AAC). La ruta cabe por pagefile, no por
+  VRAM (RAM + pagefile es el requisito).
+- [ ] Validación visual con retrato real (cara, boca y diálogo): no hay foto
+  así en el proyecto; el trabajo `97f_540p_retrato` de la matriz requiere
+  `--portrait`. Sin ese PASS no se declara el motor validado.
+- [ ] Decidir el último fotograma a 49f (sale fundido; 97f no).

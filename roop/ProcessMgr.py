@@ -4886,25 +4886,47 @@ class ProcessMgr:
         warp≈negro → composite los multiplica = borde oscuro visible."""
         if warped_face is None or original_frame is None or mask is None:
             return warped_face
-        m = np.clip(mask.astype(np.float32), 0, 1)
+        # v5.1326: misma mezcla con búferes in-place. Antes cada paso creaba una
+        # copia float32 nueva del frame (c3 + dos astype + dos productos + suma,
+        # ~35 MB por llamada a 720x720); con batch_size=4 y 4 workers eso agotaba
+        # la RAM y hacía fallar incluso reservas de 2 MB. El orden de operaciones
+        # por canal es el mismo, así que el resultado sigue siendo idéntico.
+        m = mask.astype(np.float32, copy=True)
+        np.clip(m, 0, 1, out=m)
         # Mezcla original en zona de borde según máscara (lógica anterior)
-        edge = np.clip((0.72 - m) / 0.70, 0, 1).astype(np.float32)
+        edge = np.subtract(np.float32(0.72), m)
+        edge /= np.float32(0.70)
+        np.clip(edge, 0, 1, out=edge)
+        del m
         blur = max(11, (min(face_w, face_h) // 10) | 1)
-        edge = cv2.GaussianBlur(edge, (blur, blur), 0) * 0.80
+        edge = cv2.GaussianBlur(edge, (blur, blur), 0)
+        edge *= np.float32(0.80)
         # v5.1070g: NUEVO — detectar píxeles OSCUROS del warp (borderValue=0 residual)
         # y reemplazarlos con original. Esto elimina el border fino que la máscara
         # no puede cubrir porque mask>0 donde warp≈negro.
-        dark_map = np.max(warped_face.astype(np.float32), axis=2)  # max canal RGB
+        # El máximo se toma sobre uint8: evita convertir el frame entero (HxWx3) a float32
+        dark_map = warped_face.max(axis=2).astype(np.float32)  # max canal RGB
         dark_threshold = 15.0  # píxeles con intensidad <15 son "negro del warp"
-        dark_mask = np.clip((dark_threshold - dark_map) / dark_threshold, 0, 1).astype(np.float32)
+        dark_mask = np.subtract(np.float32(dark_threshold), dark_map)
+        dark_mask /= np.float32(dark_threshold)
+        np.clip(dark_mask, 0, 1, out=dark_mask)
+        del dark_map
         dark_mask = cv2.GaussianBlur(dark_mask, ((blur * 2) | 1, (blur * 2) | 1), 0)
         # Combinar: usar el MAYOR de edge (máscara) y dark_mask (oscuridad real)
-        combined = np.maximum(edge, dark_mask)
-        if float(combined.max()) < 0.02:
+        np.maximum(edge, dark_mask, out=edge)
+        del dark_mask
+        if float(edge.max()) < 0.02:
             return warped_face
-        c3 = cv2.merge([combined, combined, combined])
-        out = warped_face.astype(np.float32) * (1.0 - c3) + original_frame.astype(np.float32) * c3
-        return np.clip(out, 0, 255).astype(np.uint8)
+        # Mezcla por canal en un solo plano float32 reutilizado (sin c3 de 3 canales)
+        inv = np.subtract(np.float32(1.0), edge)
+        out = warped_face.copy()
+        for ch in range(3):
+            channel = warped_face[:, :, ch].astype(np.float32)
+            channel *= inv
+            channel += original_frame[:, :, ch].astype(np.float32) * edge
+            np.clip(channel, 0, 255, out=channel)
+            out[:, :, ch] = channel.astype(np.uint8)
+        return out
 
     @staticmethod
     def _soothe_swap_ring(result_frame, original_frame, mask, face_w, face_h):
@@ -4913,22 +4935,30 @@ class ProcessMgr:
             return result_frame
         if result_frame.shape != original_frame.shape:
             return result_frame
-        m = np.clip(mask.astype(np.float32), 0, 1)
+        # v5.1326: mismo fundido sin s3 ni copias float32 por frame (ver _prime_warp_edges)
+        m = mask.astype(np.float32, copy=True)
+        np.clip(m, 0, 1, out=m)
         if float(m.max()) < 0.05:
             return result_frame
-        soothe = np.clip((0.97 - m) / 0.94, 0, 1).astype(np.float32)
-        soothe *= (m > 0.01).astype(np.float32) * (m < 0.90).astype(np.float32)
+        soothe = np.subtract(np.float32(0.97), m)
+        soothe /= np.float32(0.94)
+        np.clip(soothe, 0, 1, out=soothe)
+        # (m > 0.01) & (m < 0.90) en una sola máscara booleana; bool se castea a float32
+        soothe *= np.logical_and(m > 0.01, m < 0.90)
         blur = max(17, (min(face_w, face_h) // 6) | 1)
         soothe = cv2.GaussianBlur(soothe, (blur, blur), 0)
         if float(soothe.max()) < 0.02:
             return result_frame
-        soothe *= 0.95
-        s3 = cv2.merge([soothe, soothe, soothe])
-        blended = (
-            result_frame.astype(np.float32) * (1.0 - s3)
-            + original_frame.astype(np.float32) * s3
-        )
-        return np.clip(blended, 0, 255).astype(np.uint8)
+        soothe *= np.float32(0.95)
+        inv = np.subtract(np.float32(1.0), soothe)
+        blended = result_frame.copy()
+        for ch in range(3):
+            channel = result_frame[:, :, ch].astype(np.float32)
+            channel *= inv
+            channel += original_frame[:, :, ch].astype(np.float32) * soothe
+            np.clip(channel, 0, 255, out=channel)
+            blended[:, :, ch] = channel.astype(np.uint8)
+        return blended
 
     @staticmethod
     def _mouth_mask_full_frame(frame, mouth_region, crop_origin=(0, 0), crop_size=None):

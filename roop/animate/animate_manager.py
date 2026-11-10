@@ -52,6 +52,9 @@ class AnimateManager:
             needed = ["wan2.2", "wan2_2", "wan2.1", "wan2_1"]
         elif engine == "svd_turbo":
             needed = ["svd", "stablevideo"]
+        elif engine == "ltx2_audio":
+            from roop.animate import ltx2_audio
+            return [f"LTX-2: {name}" for name in ltx2_audio.missing_models()]
         elif engine == "ltx_video":
             needed = ["ltx"]
         else:
@@ -106,6 +109,16 @@ class AnimateManager:
                 base["steps"] = int(4 + (magnitude * 4))
             if cfg is None:
                 base["cfg"] = 1.5 + (magnitude * 1.5)
+        elif engine == "ltx2_audio":
+            # Destilado: 8 pasos y CFG 1,0 medidos; 25 fps es la tasa nativa del
+            # audio de LTX-2 y los fotogramas deben ser múltiplo de 8 más 1.
+            if steps is None:
+                base["steps"] = 8
+            if cfg is None:
+                base["cfg"] = 1.0
+            base["fps"] = 25
+            from roop.animate import ltx2_audio
+            base["frames"] = ltx2_audio.fit_frames(frames)
 
         vram_gb = get_vram_gb()
         if vram_gb > 0 and vram_gb <= 8:
@@ -125,6 +138,11 @@ class AnimateManager:
                     base["frames"] = 49
                 if base["steps"] > 25:
                     base["steps"] = 25
+            elif engine == "ltx2_audio":
+                # 540p/97 fotogramas es la ruta medida en 8 GB; no se recorta
+                # a 33 como los motores genéricos.
+                if base["frames"] > 97:
+                    base["frames"] = 97
             else:
                 if base["frames"] > 33:
                     base["frames"] = 33
@@ -380,6 +398,23 @@ class AnimateManager:
         image.save(img_path)
 
         output_path = os.path.join(get_animate_output_dir(), f"video_{int(t0)}.mp4")
+
+        if engine == "ltx2_audio":
+            from roop.animate import ltx2_audio
+            spec = ltx2_audio.resolve_generation(get_vram_gb(), p["frames"])
+            prompt_ltx = ltx2_audio.compose_prompt(
+                getattr(self, "_last_user_motion_prompt", "") or prompt,
+                audio_prompt,
+            )
+            print(f"[AnimateManager] LTX-2: {spec['width']}x{spec['height']}, {p['frames']} frames, {spec['fps']} fps")
+            self._emit_progress(progress_callback, "Generando con LTX-2 (vídeo + audio nativo)...")
+            path, message = ltx2_audio.generate(
+                img_path, prompt_ltx, output_path,
+                width=spec["width"], height=spec["height"],
+                frames=p["frames"], fps=spec["fps"],
+                progress=progress_callback,
+            )
+            return path, message
 
         try:
             from animate_photo import AnimatePhoto

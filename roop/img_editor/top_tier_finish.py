@@ -6,6 +6,7 @@ Híbrido: prep clásico → Kontext (realismo) → Lanczos 8K (sin tiles ONNX / 
 """
 
 from typing import Any, Callable, Dict, Optional, Tuple
+import threading
 
 import numpy as np
 from PIL import Image
@@ -109,6 +110,7 @@ def _generative_polish_pass(
     mode: str = "quality",
     progress_callback: Optional[ProgressCallback] = None,
     cancel_check: Optional[CancelCheck] = None,
+    progress_base: Optional[float] = None,
 ) -> Tuple[Optional[Image.Image], str]:
     scores = analysis.get("scores", {})
     poster = float(scores.get("poster", 0.0))
@@ -182,9 +184,10 @@ def _generative_polish_pass(
         flush=True,
     )
     if progress_callback:
+        default_progress = 0.88 if mode == "edit" else 0.22
         progress_callback({
             "phase": "Realismo generativo" if mode == "quality" else "Pulido TOP post-edit",
-            "progress": 0.88 if mode == "edit" else 0.22,
+            "progress": float(default_progress if progress_base is None else progress_base),
             "detail": f"Kontext d={denoise:.2f}",
         })
     if cancel_check and cancel_check():
@@ -276,10 +279,9 @@ def _preserve_faces(original: Image.Image, edited: Image.Image) -> Image.Image:
                 enhanced = _cv2.resize(enhanced, (crop.shape[1], crop.shape[0]), interpolation=_cv2.INTER_LANCZOS4)
             det = float(getattr(face_obj, "det_score", 0.9) or 0.9)
             blend = float(np.clip(det * 0.18, 0.06, 0.30))
-            fh, fw = crop.shape[:2]
-            mask = np.zeros((fh, fw), dtype=np.float32)
-            _cv2.ellipse(mask, (fw // 2, fh // 2), (max(8, int(fw * 0.46)), max(8, int(fh * 0.52))), 0, 0, 360, 1.0, -1)
-            mask = _cv2.GaussianBlur(mask, (0, 0), max(6.0, min(fh, fw) * 0.08)) * blend
+            mask = _face_restore_mask(crop, blend)
+            if mask is None:
+                continue
             m3 = mask[..., None]
             roi = result[y1:y2, x1:x2].astype(np.float32)
             result[y1:y2, x1:x2] = (roi * (1.0 - m3) + enhanced.astype(np.float32) * m3).astype(np.uint8)
@@ -335,6 +337,183 @@ def _gate_clipping(image: Image.Image) -> float:
         return 0.0
 
 
+def _gate_banding(image: Image.Image, max_side: int = 1024) -> float:
+    """Escalones de color en zonas planas (banding visible).
+
+    v5.1321 — la métrica de posterización compara bloques y planos, pero no
+    distingue bandas: en el fixture con bandas duras quedó 0,837→0,836 y la
+    puerta no podía juzgar «desposterizar». Aquí se mide el síntoma real:
+    bloques planos con pocos niveles de gris. Alto = escalones anchos.
+    """
+    import cv2 as _cv2
+
+    try:
+        probe = image.convert("L")
+        size = probe.size
+        scale = min(1.0, float(max_side) / float(max(size) or 1))
+        if scale < 1.0:
+            probe = probe.resize(
+                (max(1, int(size[0] * scale)), max(1, int(size[1] * scale))),
+                Image.BOX,
+            )
+        gray = np.asarray(probe, dtype=np.float32)
+        h, w = gray.shape[:2]
+        block = 24
+        rows, cols = h // block, w // block
+        if rows < 1 or cols < 1:
+            return 0.0
+        local = _cv2.blur(gray, (7, 7))
+        flat = _cv2.blur((gray - local) ** 2, (7, 7)) < 3.0
+        grid = gray[: rows * block, : cols * block].reshape(rows, block, cols, block)
+        flat_grid = flat[: rows * block, : cols * block].reshape(rows, block, cols, block)
+        cells = grid.transpose(0, 2, 1, 3).reshape(rows, cols, block * block)
+        flat_share = flat_grid.transpose(0, 2, 1, 3).reshape(
+            rows, cols, block * block
+        ).mean(axis=-1)
+        # 192 muestras por bloque: distinguen 2-6 niveles de un plano
+        # posterizado y decenas de niveles de ruido de sensor.
+        sample = cells[:, :, ::3].astype(np.uint8)
+        levels = np.array(
+            [[np.unique(cell).size for cell in row] for row in sample],
+            dtype=np.float32,
+        )
+        plateau = np.clip(1.0 - (levels - 2.0) / 10.0, 0.0, 1.0)
+        total = float(flat_share.sum())
+        if total <= 1e-6:
+            return 0.0
+        return float((plateau * flat_share).sum() / total)
+    except Exception as exc:
+        print(f"[TopTier] Bandas no medibles: {exc}", flush=True)
+        return 0.0
+
+
+# Malla facial de 468 puntos (MediaPipe). El óvalo son los índices del contorno
+# de cara; la máscara sigue ese contorno en vez de una elipse fija.
+_FACE_OVAL_INDICES = (
+    10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365,
+    379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234,
+    127, 162, 21, 54, 103, 67, 109, 151, 9, 8,
+)
+_MESH_STATE: Dict[str, Any] = {"app": None, "failed": False, "lock": threading.Lock()}
+
+
+def _get_face_mesh():
+    """FaceMesh de MediaPipe, una sola vez por proceso (None si no está)."""
+    with _MESH_STATE["lock"]:
+        if _MESH_STATE["app"] is not None:
+            return _MESH_STATE["app"]
+        if _MESH_STATE["failed"]:
+            return None
+        try:
+            import mediapipe as mp
+
+            if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "face_mesh"):
+                raise RuntimeError("mediapipe sin solutions.face_mesh")
+            _MESH_STATE["app"] = mp.solutions.face_mesh.FaceMesh(
+                static_image_mode=True,
+                max_num_faces=1,
+                refine_landmarks=False,
+                min_detection_confidence=0.4,
+            )
+            print("[TopTier] Malla facial 468 puntos inicializada", flush=True)
+        except Exception as exc:
+            _MESH_STATE["failed"] = True
+            print(f"[TopTier] Malla facial no disponible ({exc}) — elipse con bordes protegidos", flush=True)
+            return None
+        return _MESH_STATE["app"]
+
+
+def _face_mesh_mask(crop_bgr: np.ndarray, blend: float) -> Optional[np.ndarray]:
+    """Máscara de la cara según el óvalo de 468 puntos, no una elipse.
+
+    v5.1322 — la elipse difuminaba también fuera de la cara (pelo, orejas,
+    fondo) y dejaba un óvalo suave en perfiles. El contorno medido de la malla
+    sigue mandíbula, sienes y frente. Se conserva el protector de bordes para
+    no cruzar montura, pelo o gafas que caigan dentro del óvalo.
+    Devuelve None si no hay malla fiable para esta cara (se usa el fallback).
+    """
+    import cv2 as _cv2
+
+    app = _get_face_mesh()
+    if app is None:
+        return None
+    fh, fw = crop_bgr.shape[:2]
+    if min(fh, fw) < 64:
+        return None
+    try:
+        rgb = np.ascontiguousarray(_cv2.cvtColor(crop_bgr, _cv2.COLOR_BGR2RGB))
+        result = app.process(rgb)
+        faces = getattr(result, "multi_face_landmarks", None) if result else None
+        if not faces:
+            return None
+        mesh = faces[0].landmark
+        points = np.array(
+            [
+                [mesh[idx].x * (fw - 1), mesh[idx].y * (fh - 1)]
+                for idx in _FACE_OVAL_INDICES
+                if idx < len(mesh)
+            ],
+            dtype=np.float32,
+        )
+        if points.shape[0] < 8 or not np.isfinite(points).all():
+            return None
+        hull = _cv2.convexHull(points.astype(np.int32))
+        if hull.shape[0] < 3:
+            return None
+        mask = np.zeros((fh, fw), dtype=np.uint8)
+        _cv2.fillConvexPoly(mask, hull, 255, lineType=_cv2.LINE_AA)
+        coverage = float((mask > 0).mean())
+        # Una cara real ocupa una fracción razonable del recorte con margen 30%.
+        if coverage < 0.03 or coverage > 0.92:
+            return None
+        soft = _cv2.GaussianBlur(
+            mask.astype(np.float32) / 255.0, (0, 0),
+            max(3.0, min(fh, fw) * 0.02),
+        )
+        gray = _cv2.cvtColor(crop_bgr, _cv2.COLOR_BGR2GRAY).astype(np.float32)
+        gx = _cv2.Sobel(gray, _cv2.CV_32F, 1, 0, ksize=3)
+        gy = _cv2.Sobel(gray, _cv2.CV_32F, 0, 1, ksize=3)
+        edge = np.clip((np.sqrt(gx * gx + gy * gy) - 40.0) / 140.0, 0.0, 1.0)
+        edge = _cv2.GaussianBlur(edge, (0, 0), 1.6)
+        return (soft * (1.0 - 0.70 * edge) * float(blend)).astype(np.float32)
+    except Exception as exc:
+        print(f"[TopTier] Malla facial no usable ({exc}) — se usa elipse", flush=True)
+        return None
+
+
+def _face_restore_mask(
+    crop_bgr: np.ndarray, blend: float, *, use_mesh: bool = True,
+) -> Optional[np.ndarray]:
+    """Máscara suave de restauración facial.
+
+    v5.1321 — la elipse se atenúa en bordes fuertes (pelo, montura, mandíbula).
+    v5.1322 — primero se intenta el óvalo de 468 puntos; la elipse queda como
+    fallback para caras pequeñas, perfiles no detectados o sin MediaPipe.
+    """
+    import cv2 as _cv2
+
+    if use_mesh:
+        mesh_mask = _face_mesh_mask(crop_bgr, blend)
+        if mesh_mask is not None:
+            return mesh_mask
+
+    fh, fw = crop_bgr.shape[:2]
+    if fh < 8 or fw < 8:
+        return None
+    mask = np.zeros((fh, fw), dtype=np.float32)
+    _cv2.ellipse(
+        mask, (fw // 2, fh // 2),
+        (max(8, int(fw * 0.46)), max(8, int(fh * 0.52))), 0, 0, 360, 1.0, -1,
+    )
+    mask = _cv2.GaussianBlur(mask, (0, 0), max(6.0, min(fh, fw) * 0.08))
+    gray = _cv2.cvtColor(crop_bgr, _cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gx = _cv2.Sobel(gray, _cv2.CV_32F, 1, 0, ksize=3)
+    gy = _cv2.Sobel(gray, _cv2.CV_32F, 0, 1, ksize=3)
+    edge = np.clip((np.sqrt(gx * gx + gy * gy) - 40.0) / 140.0, 0.0, 1.0)
+    edge = _cv2.GaussianBlur(edge, (0, 0), 1.6)
+    return (mask * (1.0 - 0.85 * edge) * float(blend)).astype(np.float32)
+
+
 def _gate_chroma_shift(before: Image.Image, after: Image.Image, max_side: int) -> Tuple[float, float]:
     """Mean/p95 Lab a,b distance on paired pixels; L changes remain allowed.
 
@@ -381,6 +560,8 @@ class _StepGate:
         self.tol_sharp = float(gate.get("sharpness_drop_tolerance", 0.06))
         self.tol_poster = float(gate.get("poster_rise_tolerance", 0.04))
         self.tol_clip = float(gate.get("clip_rise_tolerance", 0.008))
+        self.tol_band = float(gate.get("band_rise_tolerance", 0.06))
+        self.band_max_side = int(gate.get("band_max_side", 1024) or 1024)
         self.full_max = int(gate.get("full_metrics_max_side", 3600))
         self.chroma_policy = gate
 
@@ -390,6 +571,7 @@ class _StepGate:
         *,
         poster: Optional[float] = None,
         include_poster: bool = False,
+        include_band: bool = False,
     ) -> Dict[str, float]:
         metrics = {"sharp": _gate_sharpness(image), "clip": _gate_clipping(image)}
         if poster is not None:
@@ -405,6 +587,8 @@ class _StepGate:
                     Image.LANCZOS,
                 )
             metrics["poster"] = _measured_poster(self.finisher, probe, self.tier)
+        if include_band:
+            metrics["band"] = _gate_banding(image, self.band_max_side)
         return metrics
 
     def check(
@@ -419,6 +603,15 @@ class _StepGate:
     ) -> Tuple[Image.Image, str]:
         if not self.enabled:
             return after_img, ""
+        if "band" in checks and "band" in before_m and "band" in after_m:
+            rise = after_m["band"] - before_m["band"]
+            if rise > self.tol_band:
+                msg = (
+                    f"{name} revertido (bandas {before_m['band']:.2f}→"
+                    f"{after_m['band']:.2f})"
+                )
+                print(f"[TopTier] {msg}", flush=True)
+                return before_img, msg
         if "poster" in checks and "poster" in before_m and "poster" in after_m:
             if after_m["poster"] > before_m["poster"] + self.tol_poster:
                 msg = f"{name} revertido (poster {before_m['poster']:.2f}→{after_m['poster']:.2f})"
@@ -520,12 +713,23 @@ def _faces_keep_identity(
     cfg = settings.get("identity") or {}
     if not bool(cfg.get("verify_after_face_restore", True)):
         return after, ""
-    if max(after.size) > int(cfg.get("max_side", 2048) or 2048):
-        return after, ""
+    limit = int(cfg.get("max_side", 2048) or 2048)
+
+    def _bounded(img: Image.Image) -> Image.Image:
+        """v5.1321 — no saltar la verificación en fotos grandes: se mide el
+        parecido sobre la misma versión reducida (la identidad no cambia)."""
+        if limit <= 0 or max(img.size) <= limit:
+            return img
+        scale = limit / float(max(img.size))
+        return img.resize(
+            (max(1, int(img.size[0] * scale)), max(1, int(img.size[1] * scale))),
+            Image.LANCZOS,
+        )
+
     try:
-        ref = _face_embeddings(original)
-        pre = _face_embeddings(before)
-        post = _face_embeddings(after)
+        ref = _face_embeddings(_bounded(original))
+        pre = _face_embeddings(_bounded(before))
+        post = _face_embeddings(_bounded(after))
         sim_pre = _matched_face_cosines(ref, pre)
         sim_post = _matched_face_cosines(ref, post)
         max_drop = float(cfg.get("max_drop", 0.02))
@@ -635,6 +839,16 @@ def _classical_finish_strengths(
         asked_sharp = float(profile.get("sharpen", 1.08) or 1.08)
         sharpen = float(np.clip(min(1.12, asked_sharp), 1.05, 1.12))
 
+    # v5.1321 — el unsharp amplifica el grano: en fotos ruidosas el acabado
+    # subía el ruido visible. El tope sale de la medida, no del prompt.
+    noise = float(scores.get("noise", 0.0) or 0.0)
+    if noise >= 0.42:
+        sharpen = min(sharpen, 1.04)
+        light = min(light, 0.14)
+        color = min(color, 0.18)
+    elif noise >= 0.28:
+        sharpen = min(sharpen, 1.07)
+
     return {
         "depixelize": dep,
         "color": color,
@@ -682,11 +896,68 @@ def _apply_quality_realism(finisher, image, moves, poster, *, heavy_tier=False):
     return out, note
 
 
+def _final_quality_report(
+    before: Image.Image,
+    after: Image.Image,
+    *,
+    band_max_side: int = 1024,
+) -> Dict[str, float]:
+    """Medida final contra la entrada, a la misma escala de análisis.
+
+    v5.1321 — las puertas comparan cada paso con el anterior; una cadena de
+    pasos correctos puede dejar el conjunto peor que la entrada. Esto no
+    revierte por sí solo (el color pedido debe poder cambiar L y croma):
+    informa y avisa cuando pierde nitidez o gana bandas/recorte.
+    """
+    before_view = before
+    after_view = after
+    if after_view.size != before_view.size:
+        before_view = before_view.resize(after_view.size, Image.LANCZOS)
+    return {
+        "sharp_before": _gate_sharpness(before_view),
+        "sharp_after": _gate_sharpness(after_view),
+        "clip_before": _gate_clipping(before_view),
+        "clip_after": _gate_clipping(after_view),
+        "band_before": _gate_banding(before_view, band_max_side),
+        "band_after": _gate_banding(after_view, band_max_side),
+    }
+
+
+def _append_final_report(
+    notes: list,
+    analysis: Dict[str, Any],
+    before: Image.Image,
+    out: Image.Image,
+    gate: "_StepGate",
+) -> Dict[str, Any]:
+    """Añade la medida final al análisis y avisa sólo si el conjunto empeora."""
+    final_check = _final_quality_report(
+        before, out, band_max_side=gate.band_max_side,
+    )
+    print(
+        f"[TopTier] Final medido — nitidez {final_check['sharp_before']:.1f}→"
+        f"{final_check['sharp_after']:.1f}, recorte "
+        f"{final_check['clip_before']:.2%}→{final_check['clip_after']:.2%}, "
+        f"bandas {final_check['band_before']:.2f}→{final_check['band_after']:.2f}",
+        flush=True,
+    )
+    warnings = []
+    if final_check["sharp_before"] > 25.0:
+        drop = 1.0 - (final_check["sharp_after"] / final_check["sharp_before"])
+        if drop > gate.tol_sharp:
+            warnings.append(f"nitidez final -{drop:.0%} vs entrada")
+    if final_check["band_after"] - final_check["band_before"] > gate.tol_band:
+        warnings.append("bandas finales +")
+    if warnings:
+        notes.append("aviso final: " + ", ".join(warnings))
+    return {**analysis, "final_check": final_check}
+
+
 def run_top_tier_quality(
     image: Image.Image,
     *,
     enhance_tier: str = "hd",
-    use_generative: bool = True,
+    use_generative: bool = False,
     preserve_faces: bool = True,
     progress_callback: Optional[ProgressCallback] = None,
     cancel_check: Optional[CancelCheck] = None,
@@ -720,24 +991,31 @@ def run_top_tier_quality(
     if steps["deposter"]:
         dep = float(moves["depixelize"])
         dep_before = out
-        dep_before_m = gate.snapshot(out, poster=float(scores.get("poster", 0.0)))
+        dep_before_m = gate.snapshot(
+            out, poster=float(scores.get("poster", 0.0)), include_band=True,
+        )
         if progress_callback:
             progress_callback({"phase": "Desposterizar", "progress": 0.08, "detail": f"{dep:.0%}"})
         out = finisher.depixelize(out, blend_strength=dep, tier=tier)
         notes.append(f"desposterizar {dep:.0%}")
-        # Segunda pasada solo si la foto está blanda y el poster medido sigue alto.
-        # En una foto ya nítida ese segundo bilateral dejó grano.
+        # Segunda pasada si sigue blanda y el poster MEDIDO o las bandas
+        # siguen altos. En una foto ya nítida ese segundo bilateral dejó grano.
         if not moves["gentle"]:
             _p_now = _measured_poster(finisher, out, tier)
-            if _p_now > 0.22 and float(scores.get("sharpness", 0.0)) < 0.30:
-                dep2 = min(0.18, _clip01(_lerp(0.12, 0.22, _p_now)))
+            _b_now = _gate_banding(out, gate.band_max_side)
+            if (
+                (_p_now > 0.22 and float(scores.get("sharpness", 0.0)) < 0.30)
+                or _b_now > 0.32
+            ):
+                dep2 = min(0.18, _clip01(_lerp(0.12, 0.22, max(_p_now, _b_now))))
                 if progress_callback:
-                    progress_callback({"phase": "Desposterizar (2ª pasada)", "progress": 0.14, "detail": f"poster={_p_now:.2f} → {dep2:.0%}"})
+                    progress_callback({"phase": "Desposterizar (2ª pasada)", "progress": 0.14, "detail": f"poster={_p_now:.2f} bandas={_b_now:.2f} → {dep2:.0%}"})
                 out = finisher.depixelize(out, blend_strength=dep2, tier=tier)
-                notes.append(f"desposterizar x2 {dep2:.0%} (poster={_p_now:.2f})")
+                notes.append(f"desposterizar x2 {dep2:.0%} (poster={_p_now:.2f}, bandas={_b_now:.2f})")
         out, dep_revert = gate.check(
             "desposterizar", dep_before, out, dep_before_m,
-            gate.snapshot(out, include_poster=True), checks=("poster",),
+            gate.snapshot(out, include_poster=True, include_band=True),
+            checks=("band", "poster"),
         )
         if dep_revert:
             notes.append(dep_revert)
@@ -773,16 +1051,6 @@ def run_top_tier_quality(
     if cancel_check and cancel_check():
         return out, " + ".join(notes), analysis
 
-    if preserve_faces:
-        if progress_callback:
-            progress_callback({"phase": "Preservar caras", "progress": 0.58, "detail": "identidad original"})
-        faces_before = out
-        restored = _preserve_faces(image, out)
-        out, faces_revert = _faces_keep_identity(image, faces_before, restored, settings)
-        notes.append("caras preservadas")
-        if faces_revert:
-            notes.append(faces_revert)
-
     if cancel_check and cancel_check():
         return out, " + ".join(notes), analysis
 
@@ -801,6 +1069,7 @@ def run_top_tier_quality(
             out, tier, progress_callback=progress_callback,
             progress_base=0.55, progress_span=0.20,
             upscale_plan=profile.get("upscale_plan"),
+            cancel_check=cancel_check,
         )
         if up_note:
             notes.append(up_note)
@@ -868,6 +1137,20 @@ def run_top_tier_quality(
         if realism_revert:
             notes.append(realism_revert)
 
+    if cancel_check and cancel_check():
+        return out, "cancelado", analysis
+
+    if preserve_faces:
+        if progress_callback:
+            progress_callback({"phase": "Preservar caras", "progress": 0.95, "detail": "identidad tras el acabado"})
+        faces_before = out
+        restored = _preserve_faces(image, out)
+        out, faces_revert = _faces_keep_identity(image, faces_before, restored, settings)
+        notes.append("caras preservadas")
+        if faces_revert:
+            notes.append(faces_revert)
+
+    analysis = _append_final_report(notes, analysis, image, out, gate)
     note_str = " + ".join(notes) if notes else "top tier"
     print(f"[TopTier] Listo — {note_str}", flush=True)
     return out, note_str, analysis
@@ -1006,14 +1289,15 @@ def run_quality_enhance_after_edit(
     if steps["deposter"]:
         dep = float(moves["depixelize"])
         dep_before = out
-        dep_before_m = gate.snapshot(out, poster=poster)
+        dep_before_m = gate.snapshot(out, poster=poster, include_band=True)
         if progress_callback:
-            progress_callback({"phase": "Desposterizar", "progress": 0.90, "detail": f"{dep:.0%}"})
+            progress_callback({"phase": "Desposterizar", "progress": 0.80, "detail": f"{dep:.0%}"})
         out = finisher.depixelize(out, blend_strength=dep, tier=tier)
         notes.append(f"desposterizar {dep:.0%}")
         out, dep_revert = gate.check(
             "desposterizar", dep_before, out, dep_before_m,
-            gate.snapshot(out, include_poster=True), checks=("poster",),
+            gate.snapshot(out, include_poster=True, include_band=True),
+            checks=("band", "poster"),
         )
         if dep_revert:
             notes.append(dep_revert)
@@ -1026,7 +1310,7 @@ def run_quality_enhance_after_edit(
     if use_generative:
         merged = {"magnitude": 0.55, "scores": scores, "profile": profile}
         gen_img, gen_note = _generative_polish_pass(
-            out, merged, tier, mode="edit",
+            out, merged, tier, mode="edit", progress_base=0.82,
             progress_callback=progress_callback, cancel_check=cancel_check,
         )
         if gen_img is not None:
@@ -1036,16 +1320,6 @@ def run_quality_enhance_after_edit(
     if cancel_check and cancel_check():
         return out, "cancelado", analysis
 
-    if preserve_faces:
-        faces_before = out
-        restored = _preserve_faces(original.convert("RGB"), out)
-        out, faces_revert = _faces_keep_identity(
-            original.convert("RGB"), faces_before, restored, settings,
-        )
-        notes.append("caras preservadas")
-        if faces_revert:
-            notes.append(faces_revert)
-
     if cancel_check and cancel_check():
         return out, "cancelado", analysis
 
@@ -1054,6 +1328,7 @@ def run_quality_enhance_after_edit(
             out, tier, progress_callback=progress_callback,
             progress_base=0.85, progress_span=0.10,
             upscale_plan=profile.get("upscale_plan"),  # v5.1145: era cv_analysis (NameError — analysis es el nombre en esta función)
+            cancel_check=cancel_check,
         )
         if up_note:
             notes.append(up_note)
@@ -1112,6 +1387,20 @@ def run_quality_enhance_after_edit(
         if realism_revert:
             notes.append(realism_revert)
 
+    if cancel_check and cancel_check():
+        return out, "cancelado", analysis
+
+    if preserve_faces:
+        if progress_callback:
+            progress_callback({"phase": "Preservar caras", "progress": 0.95, "detail": "identidad tras el acabado"})
+        faces_before = out
+        restored = _preserve_faces(image, out)
+        out, faces_revert = _faces_keep_identity(image, faces_before, restored, settings)
+        notes.append("caras preservadas")
+        if faces_revert:
+            notes.append(faces_revert)
+
+    analysis = _append_final_report(notes, analysis, image, out, gate)
     note_str = "mejora TOP post-edit (" + ", ".join(notes) + ")"
     print(f"[TopTier] {note_str}", flush=True)
     return out, note_str, analysis

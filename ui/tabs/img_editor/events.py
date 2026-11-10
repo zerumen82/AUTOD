@@ -413,6 +413,25 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             last_msg = msg
             current_img = res_img
 
+            # v5.1327: una iteración sin un solo píxel cambiado no es una
+            # edición. Antes se guardaba una copia idéntica y el usuario veía
+            # «guardado» sin cambio (log 2026-11-10 01:01: CLIPSeg devolvió
+            # máscara vacía y se guardó la foto original). Se mide aquí, antes
+            # de gastar otra iteración o de escribir el archivo.
+            try:
+                from roop.img_editor.instruction_verifier import measure_change
+                _iter_change = measure_change(img, current_img, final_mask)
+            except Exception as _measure_error:
+                _iter_change = {"available": False}
+                print(f"[ImgEditor] Medición de cambio omitida: {_measure_error}", flush=True)
+            if _iter_change.get("available") and _iter_change.get("changed_px") == 0:
+                print(
+                    "[ImgEditor] Sin cambios medidos; no se guarda una copia idéntica",
+                    flush=True,
+                )
+                note = last_msg or "la petición no produjo cambios"
+                return current_img, f"Edición sin cambios: {note} (no se guardó copia)", final_mask
+
             _cleanup_vram()
             if str(msg).startswith(NOT_APPLIED_PREFIXES):
                 # La imagen sin cambios es una advertencia, no una edición
@@ -444,6 +463,11 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
             print(f"[ImgEditor] Release post-petición omitido: {_e}", flush=True)
 
         label = f"{last_msg}"
+        if _iter_change.get("available"):
+            label += (
+                f" | Cambio: {_iter_change['changed_ratio']:.1%}"
+                f" ({_iter_change['changed_px']} px)"
+            )
         execution_status = format_execution_status(
             execution, getattr(manager, "_last_instruction_compliance", None),
             has_instruction=bool(p_text),
@@ -507,6 +531,31 @@ def _on_generate_api_legacy(*args, **kwargs):
     """Endpoint /edit (apps antiguas instaladas)."""
     kwargs.setdefault("source", "api/edit")
     return on_generate(*args, **kwargs)
+
+
+def on_quality_estimate(image, tier):
+    """Resolución efectiva que puede alcanzar el Modo Calidad, sin ejecutarlo."""
+    try:
+        if image is None:
+            return ""
+        img = normalize_image(image)
+        if img is None:
+            return ""
+        from roop.img_editor.image_quality_pipeline import limit_quality_tier
+
+        effective, note = limit_quality_tier(img, (tier or "hd").lower())
+        target = {"hd": "HD 1920", "4k": "4K 3840", "8k": "8K 7680"}[effective]
+        text = (
+            f"Resultado máximo previsto: **{target} px** de lado mayor "
+            f"(parte de {img.size[0]}×{img.size[1]})."
+        )
+        if note:
+            text += f" Tope aplicado: {note}."
+        text += " Ampliar no inventa detalle."
+        return text
+    except Exception as exc:
+        print(f"[ImgEditor] Estimación de calidad no disponible: {exc}", flush=True)
+        return ""
 
 
 def wire_events(ui_comp):
@@ -577,6 +626,16 @@ def wire_events(ui_comp):
         inputs=[ui_comp["quality_mode"]],
         outputs=[ui_comp["quality_options"]],
     )
+    if "quality_estimate" in ui_comp:
+        for _trigger in (
+            ui_comp["quality_mode"], ui_comp["enhance_tier"], ui_comp["input_img"],
+        ):
+            _trigger.change(
+                fn=on_quality_estimate,
+                inputs=[ui_comp["input_img"], ui_comp["enhance_tier"]],
+                outputs=[ui_comp["quality_estimate"]],
+                queue=False, api_name=False,
+            )
 
     _use_outputs = [ui_comp["input_img"]]
     if "overlay_img" in ui_comp:

@@ -27,7 +27,8 @@ def on_cancel_animate():
 
 
 def wire_animate_events(ui):
-    def on_animate_click(img_data, p, engine, l_name, l_strength, stabilize_face, ar_chunks, add_audio):
+    def on_animate_click(img_data, p, engine, l_name, l_strength, stabilize_face, ar_chunks, add_audio,
+                         frames, steps, audio_prompt):
         # El guard va ANTES de clear_cancel: mientras un worker cancelado
         # todavía frena, limpiar primero reviviría su bandera de cancelación.
         if state.is_animating:
@@ -67,6 +68,9 @@ def wire_animate_events(ui):
                     lora_strength=l_strength,
                     add_mmaudio=add_audio,
                     autoregressive_chunks=ar_chunks,
+                    audio_prompt=audio_prompt or "",
+                    frames=frames,
+                    steps=steps,
                     cancel_check=lambda: is_cancelled(SCOPE_ANIMATE),
                 )
                 result["video"] = video
@@ -114,6 +118,9 @@ def wire_animate_events(ui):
             ui["face_stabilize"],
             ui["autoregressive_chunks"],
             ui["add_audio"],
+            ui["frames"],
+            ui["steps"],
+            ui["audio_prompt"],
         ],
         outputs=[ui["video_output"], ui["progress_html"], ui["btn_animate"], ui["btn_cancel"]],
     )

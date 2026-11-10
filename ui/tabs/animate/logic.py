@@ -1,7 +1,8 @@
 import os
 from roop.animate.animate_manager import get_animate_manager
 
-# AR automático estilo Imagine: bloques/decisión en animate_manager.resolve_autoregressive_plan
+# AR automático estilo Imagine: bloques y continuidad en animate_manager.generate_video
+# (_build_autoregressive_chunk_prompt + _concat_video_chunks).
 PRESET = {
     "frames": 37,
     "fps": 12,
@@ -17,8 +18,18 @@ def suggest_motion_prompt(image):
     return "gentle natural movement, subtle camera motion, realistic flow"
 
 
+def _bounded_int(value, default, low, high):
+    """Entero dentro del rango que el motor instalado acepta; default si no."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
 def generate_grok_animation(image, prompt, engine="wan_video", stabilize=False, progress_callback=None, lora_name=None, lora_strength=1.0,
-                            add_mmaudio=True, autoregressive_chunks=2, audio_prompt="", cancel_check=None):
+                            add_mmaudio=True, autoregressive_chunks=2, audio_prompt="", cancel_check=None,
+                            frames=None, steps=None, fps=None):
     try:
         manager = get_animate_manager()
 
@@ -26,10 +37,10 @@ def generate_grok_animation(image, prompt, engine="wan_video", stabilize=False, 
             image=image,
             prompt=prompt if prompt else "natural motion",
             engine=engine,
-            frames=PRESET["frames"],
-            fps=PRESET["fps"],
+            frames=_bounded_int(frames, PRESET["frames"], 17, 201 if engine == "ltx2_audio" else 49),
+            fps=_bounded_int(fps, PRESET["fps"], 8, 30),
             face_stabilize=stabilize,
-            steps=PRESET["steps"],
+            steps=_bounded_int(steps, PRESET["steps"], 4, 40),
             cfg=PRESET["cfg"],
             autoregressive_chunks=autoregressive_chunks,
             mask_image=None,
