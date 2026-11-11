@@ -4185,13 +4185,22 @@ class ProcessMgr:
         Aplica aquí la misma receta ya validada del Editor
         (img_editor_manager._integrate_local_generation) sobre el resultado
         compuesto, midiendo contra el original EN MARCO (misma escala, sin
-        asimetría de resample): gate <0.80×, objetivo 0.70×, bandas sigma
-        1.0/2.0/4.0 con topes 0.6/0.6/0.5, 2 rondas, retroceso hacia el
-        objetivo desde abajo. La corrección entra multiplicada por la
-        máscara de pegado, así que fuera de la región pastada no se escribe
+        asimetría de resample): bandas sigma 1.0/2.0/4.0 con topes 0.6/0.6/0.5,
+        retroceso hacia el objetivo desde abajo. La corrección entra multiplicada
+        por la máscara de pegado, así que fuera de la región pastada no se escribe
         ni un píxel (los bordes de la ventana quedan intactos). Solo fotos:
         el vídeo no variará nitidez frame a frame sin validación de vídeo
         completo. Devuelve (resultado, nota); sin déficit devuelve intacto.
+
+        v5.1334: el objetivo sube de 0.70× a 0.85× de la nitidez del original y
+        las rondas de 2 a 4. El objetivo viejo (0.70×) era MENOR que el gate de
+        entrada (0.80×): cualquier cara que cayera en la banda 70-80% entraba
+        al bloque, pero el bucle se detenía en la primera comprobación ("0
+        pasadas") y salía sin compensar — el log lo delata ("pegada 853 -> 853,
+        70% de fuente, 0 pasadas"). Con 0.85× la cara pegada termina al nivel
+        del original, que es lo que evita el "blur" visible de la cara
+        pegada frente al resto de la foto. El techo de 0.90× del probe
+        (U5) se mantiene por el retroceso desde arriba.
         """
         region = np.asarray(mask) >= 0.90
         if not region.any():
@@ -4215,13 +4224,13 @@ class ProcessMgr:
                 f"{cur_sharp / src_sharp:.0%}); resultado intacto"
             )
         initial = cur_sharp
-        target = src_sharp * 0.70
+        target = src_sharp * 0.85
         w3 = np.asarray(mask, dtype=np.float32)
         if w3.ndim == 2:
             w3 = w3[:, :, None]
         arr = result_frame.astype(np.float32)
         passes = 0
-        for _ in range(2):
+        for _ in range(4):
             if cur_sharp >= target:
                 break
             for sigma, cap in ((1.0, 0.6), (2.0, 0.6), (4.0, 0.5)):
@@ -5684,6 +5693,17 @@ class ProcessMgr:
                         else:
                             thresh = 0.17 if prev_state else 0.22
                     mouth_open = mouth_open_ratio_smooth > thresh
+                    # v5.1334: el umbral con el que se decidió "boca abierta"
+                    # se guarda para que la ruta de blend use EXACTAMENTE el
+                    # mismo criterio. Antes el blend en foto usaba un 0.22 fijo
+                    # mientras la detección usaba 0.16/0.17/0.20/0.22 según
+                    # closeup/perfil/estado: una boca medida como ABIERTA con
+                    # ratio 0.21 salía con blend_factor 0.054 (5%), es decir
+                    # la expresión se perdía casi entera (log: "open=True ...
+                    # blend_factor=0.054"). Detección y preservación ahora
+                    # comparten un único umbral.
+                    mouth_open_threshold = float(thresh)
+                    self._mouth_open_threshold = float(thresh)
                     if use_mouth_temporal_state:
                         # v5.1024: Hold sostenido — evita parpadeo al cerrar boca
                         if not hasattr(self, '_mouth_hold_count'):
@@ -5794,12 +5814,13 @@ class ProcessMgr:
                         if call_num % 10 == 1:
                             print(f"[SKIP_HOLD] Frame {call_num}: hold #{skip_hold_count+1} (det_score={det_score:.2f})")
                         # v5.1001: usar bbox actual (la cara se movió, last_bbox está desfasada)
+                        # NUEVA LÓGICA: reusar bbox anterior para mantener tracking continuity en video
                         if not hasattr(self, '_last_swap_bbox'):
                             self._last_swap_bbox = {}
-                        self._last_swap_bbox[video_basename] = (x1, y1, x2, y2)
+                        self._last_swap_bbox[video_basename] = last_bbox  # Reusar bbox anterior (NO actualizar)
                         # Sin máscara actual válida, el hold conserva el fotograma original.
                         return self._hold_previous_face_region(
-                            original_frame, prev_frame_result, (x1, y1, x2, y2), blend=0.82, prev_mask=None,
+                            original_frame, prev_frame_result, last_bbox, blend=0.82, prev_mask=None,
                         )
                     if call_num % 10 == 1:
                         print(f"[SKIP] Frame {call_num}: swap saltado (det_score={det_score:.2f}, vel={velocity:.0f}px)")
@@ -6346,7 +6367,13 @@ class ProcessMgr:
                 # Foto: costura mínima con boca cerrada; base de expresión
                 # con apertura actual. Los objetos se evalúan después.
                 if is_single_photo:
-                    if mouth_open_ratio <= 0.22:
+                    # v5.1334: el corte usa el MISMO umbral con el que la
+                    # detección decidió boca abierta, no un 0.22 fijo. Con
+                    # umbrales de detección 0.16-0.22, una boca real abierta
+                    # medida en 0.21 quedaba en la rama "cerrada" (blend 6%)
+                    # y su expresión se perdía al pegar la cara.
+                    _open_cut = float(getattr(self, '_mouth_open_threshold', 0.22))
+                    if not mouth_open and mouth_open_ratio <= _open_cut:
                         # Boca CERRADA en foto: nada que preservar (sin expresión
                         # ni objeto) — conservar 18% seguía dejando visibles los
                         # labios/dientes del destino en una FOTO estática. Solo un
@@ -6373,6 +6400,16 @@ class ProcessMgr:
                 if mouth_open_ratio > 0.22:
                     oral_strength = min(1.0, (mouth_open_ratio - 0.22) / 0.35)
                     m_blend = min(0.65, m_blend * (1.0 + oral_strength * 0.80))
+                elif mouth_open:
+                    # v5.1334: boca abierta por encima del umbral de
+                    # DETECCIÓN pero por debajo de 0.22 no recibía ninguna
+                    # refuerzo de apertura. Ahora la curva arranca en el
+                    # umbral con el que se decidió "abierta", para que el
+                    # restore suba de forma continua con la apertura real.
+                    _open_cut = float(getattr(self, '_mouth_open_threshold', 0.22))
+                    if _open_cut < mouth_open_ratio:
+                        oral_strength = min(1.0, (mouth_open_ratio - _open_cut) / 0.35)
+                        m_blend = min(0.65, m_blend * (1.0 + oral_strength * 0.80))
                 if is_small_face:
                     m_blend *= 0.92
                 if mask_before_mouth.mean() < 0.04:
@@ -7319,22 +7356,58 @@ class ProcessMgr:
             pass
 
     def _cleanup_vram(self):
-        """Limpia caché CUDA y libera VRAM después del procesamiento"""
+        """Limpia caché CUDA y libera VRAM después del procesamiento.
+
+        v5.1334: el ORDEN estaba invertido. Se llamaba a
+        `torch.cuda.empty_cache()` ANTES de `gc.collect()`: los tensores que
+        el recolector liberaba después NUNCA se devolvían a CUDA en esa
+        llamada, así que la VRAM reservada se quedaba hostage entre lotes
+        (con 189 facesets + GPU de 8 GB eso acaba en OOM). Ahora:
+        1) gc.collect() para soltar las referencias Python,
+        2) empty_cache() + ipc_collect() para devolver el bloque a CUDA,
+        3) medición HONESTA: se informa de `memory_reserved()` (la VRAM
+        realmente ocupada por el allocator), no solo de `memory_allocated()`,
+        que siempre salía 0.00 GB porque los modelos ONNX (inswapper, XSeg,
+        GFPGAN) viven en su propio runtime y no en el allocator de torch.
+        """
         import gc
         import tempfile
         import os
-        
-        # 1. Limpiar caché CUDA
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            allocated = torch.cuda.memory_allocated() / 1024**3
-            print(f"[ProcessMgr] VRAM después de limpiar: {allocated:.2f} GB")
-        
-        # 2. Forzar garbage collector
+
+        # 1. Forzar garbage collector ANTES de liberar la caché CUDA: al revés,
+        #    los tensores liberados por el GC no se devolvían a la GPU.
         gc.collect()
-        
-        # 3. Limpiar temporales
+
+        # 2. Liberar la caché CUDA y los buffers IPC.
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(
+                f"[ProcessMgr] VRAM después de limpiar: {allocated:.2f} GB "
+                f"asignada, {reserved:.2f} GB reservada"
+            )
+
+        # 3. Segundo pase de GC: los ciclos de referencias con los modelos
+        #    ONNX solo se rompen en una segunda vuelta.
+        gc.collect()
+
+        # 4. Limpiar temporales
         temp_dir = tempfile.gettempdir()
         try:
             for f in os.listdir(temp_dir):

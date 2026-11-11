@@ -340,7 +340,7 @@ def detect_faces_robust(img_rgb, analyser, thresh_override=None):
         return []
 
 
-def _has_face_geometry(face, max_tilt=None):
+def _has_face_geometry(face, max_tilt=None, relaxed=False):
     """v5.1050+1052: Valida geometría real de kps (5 landmarks: ojos, nariz, boca).
 
     Rechaza falsos positivos de RetinaFace en caras de origen (texto, manos, objetos,
@@ -352,6 +352,12 @@ def _has_face_geometry(face, max_tilt=None):
     real es "ojos arriba de la boca + nariz entre ojos y boca" (universal en caras),
     con tolerancias para cabeza inclinada. El orden horizontal solo se exige si hay
     separación real (>2% del ancho); en perfiles casi-verticales no penaliza.
+
+    v5.1334: `relaxed=True` (solo para det>=0.50) ensancha las tolerancias de
+    separación ocular y banda vertical. Medido: caras con det 0.60-0.78 (confianza
+    ALTA = detector seguro) se rechazaban como "kps no anatómicos" por perfiles
+    extremos o cabezas muy inclinadas. Se mantienen los invariantes universales
+    (ojos sobre boca, nariz entre ojos y boca, kps dentro del bbox).
     """
     try:
         kps = getattr(face, 'kps', None)
@@ -390,7 +396,10 @@ def _has_face_geometry(face, max_tilt=None):
         # 4. Distancia interocular razonable — perfil casi de canto: ojos a <1% del ancho.
         #    Piso 0.005 (0.5px en cara de 100px): rechaza "ojos en el mismo píxel",
         #    acepta perfiles extremos. Techo 1.5: rechaza bboxes mal alineados.
-        if not (0.005 < eye_sep_x / max(1.0, fw) < 1.5):
+        #    v5.1334: en modo relajado el piso baja a 0 (ojos superpuestos en
+        #    perfil total NO son un falso positivo).
+        _eye_floor = 0.0 if relaxed else 0.005
+        if not (_eye_floor < eye_sep_x / max(1.0, fw) < 1.5):
             return False
         # v5.1138: 5. (OPCIONAL, solo source) Línea de ojos con inclinación
         # <= max_tilt grados. Invariante al yaw (los perfiles no penalizan) pero
@@ -402,11 +411,18 @@ def _has_face_geometry(face, max_tilt=None):
         # Un falso positivo (texto/patrón/mano marcado como "cara") suele tener los
         # kps FUERA del bbox: el head predictor regresó landmarks coherentes para
         # otra región. Margen 2% del lado mayor (1-2px) por imprecisión de regresión.
-        if not landmarks_fit_bbox(kpsf, face.bbox):
+        if not landmarks_fit_bbox(kpsf, face.bbox, relaxed=relaxed):
             return False
         if max_tilt is not None:
             _tilt = abs(np.degrees(np.arctan2(float(re[1] - le[1]), float(re[0] - le[0]))))
-            if _tilt > float(max_tilt):
+            # v5.1334: en modo relajado el tope de inclinación sube a 90°
+            # (cabeza de lado). En un PERFIL de canto los dos ojos caen en la
+            # misma columna y la línea de ojos queda casi VERTICAL (78°), así
+            # que el tope de 45° rechazaba perfiles reales de det alta. Con
+            # det>=0.50 el detector está seguro de que hay una cara; la
+            # geometría sigue exigiendo ojos sobre boca y nariz en el grupo.
+            _tilt_limit = 90.0 if relaxed else float(max_tilt)
+            if _tilt > _tilt_limit:
                 return False
             # En una cara real la nariz cae entre los ojos y la boca. En un
             # falso positivo (mano, texto, patrón) queda fuera de ese grupo.
@@ -417,22 +433,31 @@ def _has_face_geometry(face, max_tilt=None):
         # 6. Ojos dentro de la banda vertical razonable del bbox (15%-80% de la
         # altura): falsos positivos de cuerpo/texto sitúan los "ojos" fuera de
         # esa banda. Caras reales (frontal o perfil) la cumplen siempre.
+        # v5.1334: en modo relajado la banda se ensancha (5%-92%) porque una
+        # cabeza muy inclinada o un rostro mirando hacia arriba sacan los ojos
+        # de la banda central siendo perfectamente legítimos.
         _eye_y = (float(le[1]) + float(re[1])) / 2.0
         _eye_rel = (_eye_y - float(face.bbox[1])) / max(1.0, float(fh))
-        if not (0.15 < _eye_rel < 0.80):
+        _band_lo, _band_hi = (0.05, 0.92) if relaxed else (0.15, 0.80)
+        if not (_band_lo < _eye_rel < _band_hi):
             return False
         return True
     except Exception:
         return False
 
 
-def _is_face_complete(face, img_w, img_h):
+def _is_face_complete(face, img_w, img_h, relaxed=False):
     """v5.1055: Rechaza caras de source INCOMPLETAS.
 
     El usuario exige que las caras de origen sean COMPLETAS (de frente o de
     perfil, pero enteras). RetinaFace a veces detecta MEDIA cara cortada por el
     borde de la foto (bbox pegado al borde) o un recorte donde la cara sobresale
     (kps tocando los bordes del bbox). Ambas producen swaps de baja calidad.
+
+    v5.1334: `relaxed=True` (det>=0.50) usa los márgenes de landmark del config
+    (5% / 5px) en vez de 1-2% estrictos, porque el detector deja los kps
+    marginalmente fuera del bbox en caras legítimas grandes (una cara real no es
+    un "recorte que sobresale" solo porque un landmark caiga 3px fuera).
     """
     try:
         bbox = getattr(face, 'bbox', None)
@@ -465,14 +490,23 @@ def _is_face_complete(face, img_w, img_h):
         min_top = max(1.0, 0.01 * fh)
         min_bottom = max(1.0, 0.02 * fh)
         min_side = max(1.0, 0.01 * fw)
+        # v5.1334: en modo RELAJADO el objetivo NO es "kps más dentro" (exigencia
+        # mayor) sino "kps que NO se salen del recorte". Se permite que un
+        # landmark caiga hasta `outside` px FUERA del bbox, igual que la
+        # contención con margen del config. El modo estricto sigue exigiendo
+        # los kps DENTRO. (Poner un margen interno más grande era al revés:
+        # rechazaba MÁS caras, no menos.)
+        outside = 0.0
+        if relaxed:
+            outside = max(5.0, 0.05 * max(fw, fh))
         eyes_y = min(float(kps[0][1]), float(kps[1][1]))
-        if eyes_y < y1 + min_top:
+        if eyes_y < y1 + min_top - outside:
             return False
         mouth_y = max(float(kps[3][1]), float(kps[4][1]))
-        if mouth_y > y2 - min_bottom:
+        if mouth_y > y2 - min_bottom + outside:
             return False
         for p in kps:
-            if p[0] < x1 + min_side or p[0] > x2 - min_side:
+            if p[0] < x1 + min_side - outside or p[0] > x2 - min_side + outside:
                 return False
         return True
     except Exception:
@@ -728,16 +762,38 @@ def extract_face_images(
                 # cazador de falsos positivos: un FP con det 0.14-0.22 no supera sim 0.50.
                 _SRC_DET_MIN = 0.14
                 valid_source_faces = []
+                # v5.1334: copia PRE-filtro para el residual de alta confianza.
+                # Si el filtro acaba vaciando la lista, se recuperan las caras
+                # con det>=0.50 y geometría válida que solo fallaron en
+                # tolerancias menores (tamaño/aspecto/completitud).
+                _faces_prefilter = list(faces)
                 for f in faces:
                     fw = f.bbox[2] - f.bbox[0]
                     fh = f.bbox[3] - f.bbox[1]
                     aspect = fw / fh if fh > 0 else 0
                     det = getattr(f, 'det_score', 0.0) or 0.0
-                    if not (fw >= 40 and fh >= 40 and 0.25 < aspect < 3.5 and det >= _SRC_DET_MIN):
-                        if det < _SRC_DET_MIN:
-                            print(f"[SOURCE_DETECT] ⚠️ det={det:.2f} < {_SRC_DET_MIN} — cara descartada ({fw}x{fh}px)")
+                    # v5.1334: el umbral de confianza escala con el TAMAÑO de la
+                    # cara. Un det 0.11 en un recorte de 9x11px es basura (ruido),
+                    # pero el mismo det 0.11 en una cara de 227x323px es una cara
+                    # real difícil (luz dura, oclusión, perfil). Antes el umbral
+                    # fijo 0.14 descartaba esas caras REALES y el usuario perdía
+                    # Portraites ("Caras filtradas ... ninguna válida"). La
+                    # geometría de kps sigue siendo la guardia contra falsos
+                    # positivos: un FP de 227px con kps no anatómicos se rechaza.
+                    _max_dim = max(fw, fh)
+                    if _max_dim >= 120:
+                        _min_det = 0.06
+                    elif _max_dim >= 80:
+                        _min_det = 0.09
+                    elif _max_dim >= 60:
+                        _min_det = 0.12
+                    else:
+                        _min_det = _SRC_DET_MIN
+                    if not (fw >= 40 and fh >= 40 and 0.25 < aspect < 3.5 and det >= _min_det):
+                        if det < _min_det:
+                            print(f"[SOURCE_DETECT] ⚠️ det={det:.2f} < {_min_det:.2f} — cara descartada ({fw:.0f}x{fh:.0f}px)")
                         continue
-                    if not _has_face_geometry(f, max_tilt=45.0):
+                    if not _has_face_geometry(f, max_tilt=45.0, relaxed=(det >= 0.50)):
                         print(
                             f"[SOURCE_DETECT] ❌ Sin geometría de cara (kps no anatómicos) "
                             f"det={det:.2f}. Omitiendo."
@@ -745,7 +801,7 @@ def extract_face_images(
                         continue
                     # v5.1055: cara debe estar COMPLETA (no cortada por borde de foto,
                     # no sobresaliendo del bbox). De frente o perfil, pero entera.
-                    if not _is_face_complete(f, w, h):
+                    if not _is_face_complete(f, w, h, relaxed=(det >= 0.50)):
                         print(
                             f"[SOURCE_DETECT] ❌ Cara INCOMPLETA (cortada/saliendo del recorte) "
                             f"bbox=({f.bbox[0]:.0f},{f.bbox[1]:.0f},{f.bbox[2]:.0f},{f.bbox[3]:.0f}) "
@@ -928,6 +984,27 @@ def extract_face_images(
                 except Exception:
                     pass
                 faces = valid_source_faces
+                if not faces:
+                    # v5.1334 RESIDUAL ACCEPTANCE: el filtro vació la lista.
+                    # Antes se perdía la foto entera con "Caras filtradas por
+                    # tamaño/aspecto/confianza/geometría (ninguna válida)".
+                    # Se recuperan las caras de ALTA confianza (det>=0.50) con
+                    # geometría válida que solo fallaron en tolerancias
+                    # menores. La segunda pasada (re-detección del crop con
+                    # sim>=0.50) sigue actuating como cazador de falsos
+                    # positivos sobre estas caras: un FP no se re-detecta.
+                    _residual = [
+                        f for f in _faces_prefilter
+                        if float(getattr(f, 'det_score', 0.0) or 0.0) >= 0.50
+                        and _has_face_geometry(f, max_tilt=45.0, relaxed=True)
+                    ]
+                    if _residual:
+                        print(
+                            f"[SOURCE_DETECT] Recovery residual: {len(_residual)} "
+                            f"cara(s) de alta confianza con geometría válida "
+                            f"aceptadas pese al filtro"
+                        )
+                        faces = _residual
                 if not faces:
                     print("[SOURCE_DETECT] Caras filtradas por tamaño/aspecto/confianza/geometría (ninguna válida)")
 

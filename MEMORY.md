@@ -1,5 +1,129 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — FaceSwap: 7 fallos del log de producción reparados (v5.1335)
+
+- **Origen**: revisión a fondo del log de FaceSwap del 2026-11-11 (4 lotes de
+  fotos: 189/22/16/52 facesets). El usuario pidió reparar los puntos 3, 4, 5, 6
+  y 7 del diagnóstico. Cada fallo se localizó en código y se corrigió con un
+  contrato medido; nada se declara resuelto sin probe en verde.
+- **Incremento v5.1334 → v5.1335**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### Punto 3 — el filtro de caras de origen rechazaba caras REALES
+
+- **Causa raíz**: el umbral de confianza era fijo (`_SRC_DET_MIN = 0.14`) para
+  cualquier tamaño. Un det 0.11 en un recorte de 9×11px es ruido, pero el mismo
+  det 0.11 en una cara de 227×323px es una cara real difícil (luz dura,
+  oclusión, perfil). El log lo delata: «⚠️ det=0.11 < 0.14 — cara descartada
+  (227.77x323.96px)» y «(390x465px)». Resultado: «Caras filtradas por
+  tamaño/aspecto/confianza/geometría (ninguna válida)» y retratos perdidos.
+- **Fix** (`roop/face_util.py`): el umbral escala con el tamaño de la cara —
+  0.06 para ≥120px, 0.09 para ≥80px, 0.12 para ≥60px, 0.14 para el resto. La
+  geometría de kps sigue siendo la guardia real contra falsos positivos: un FP
+  de 227px con kps no anatómicos se sigue rechazando.
+- **Geometría relajada para det alta** (`_has_face_geometry(..., relaxed=True)`,
+  aplicado a det≥0.50): piso de separación ocular a 0 (en un perfil de canto los
+  dos ojos caen en la misma columna), banda vertical de ojos de 15-80% a 5-92%
+  (cabeza inclinada o rostro mirando arriba) y tope de inclinación de 45° a 90°
+  (el perfil de canto da ~78° y era rechazado). Se conservan los invariantes
+  universales: ojos sobre boca, nariz entre ojos y boca, kps dentro del bbox.
+- **Completitud relajada** (`_is_face_complete(..., relaxed=True)`): en modo
+  relajado se permite que un landmark caiga hasta `max(5px, 5%)` FUERA del bbox
+  (el modo estricto sigue exigiéndolos dentro). El log mostraba caras con det
+  0.37-0.84 rechazadas como «INCOMPLETA» sin tocar el borde de la foto.
+- **Verificación independiente con umbral por tamaño**
+  (`roop/source_face_validator.py`): MediaPipe con `min_detection_confidence`
+  0.30 para caras ≥120px, 0.40 para ≥80px, 0.50 para el resto, más un reintento
+  con detector laxo cuando la IoU sale 0.00. Antes una cara real de 200px con
+  pose difícil se descartaba como «Región dudosa descartada (det=0.21;
+  independent face IoU=0.00)».
+- **Aceptación residual de alta confianza** (`roop/face_util.py`, rama de
+  padding): si la cara tiene det≥0.50 y geometría válida, se acepta aunque
+  falle en tolerancias menores.
+
+### Punto 4 — «Landmarks fuera del bbox» mataba detecciones de alta confianza
+
+- **Causa raíz**: la contención exigía el landmark DENTRO del bbox con margen
+  de 2%/2px. El log mostraba «[FACE] Landmarks fuera del bbox (det=0.79);
+  detección descartada» — detecciones de 0.75-0.91 descartadas por un landmark
+  3px fuera, en bboxes que el detector ajustó en caras de perfil o muy
+  inclinadas.
+- **Fix**: `landmarks_fit_bbox(kps, bbox, relaxed=True)` en
+  `roop/faceswap_config.py` con margen 5%/5px, usado SOLO por los filtros de
+  DETECCIÓN con det≥0.50. El margen ESTRICTO global NO se toca: los gates de
+  alineación de `ProcessMgr` siguen exigiendo la contención estricta.
+
+### Punto 5 — la compensación de nitidez pegada no compensaba
+
+- **Causa raíz**: el gate de entrada era 0.80× pero el objetivo 0.70×. Toda
+  cara en la banda 70-80% entraba al bloque y salía con «0 pasadas» sin tocar:
+  el log lo muestra, «nitidez pegada: pegada 853 -> 853 (original 1214, 70% de
+  fuente, 0 pasadas)». La cara pegada quedaba visiblemente más blanda que el
+  resto de la foto.
+- **Fix** (`roop/ProcessMgr.py::_compensate_pasted_sharpness`): objetivo 0.85×
+  de la nitidez del original y 4 rondas en vez de 2. El techo de 0.90× (contrato
+  U5 del probe) se mantiene por el retroceso desde arriba, así que no hay
+  sobre-nitidez. Los píxeles fuera de la máscara siguen intactos (0 px
+  distintos).
+
+### Punto 6 — la detección de boca y el restore usaban umbrales distintos
+
+- **Causa raíz**: la detección decidía «boca abierta» con umbrales 0.16/0.17/
+  0.20/0.22 según closeup/perfil/estado, pero la ruta de blend en foto usaba
+  un 0.22 FIJO. Una boca medida como abierta con ratio 0.21 caía en la rama
+  «cerrada» (blend 6%): el log lo delata con «open=True … blend_factor=0.054»
+  y «open=True … blend_factor=0.050» — la expresión se perdía casi entera al
+  pegar la cara.
+- **Fix** (`roop/ProcessMgr.py`): el umbral con el que se decidió «abierta» se
+  guarda en `self._mouth_open_threshold` y la ruta de blend usa EXACTAMENTE ese
+  valor (`_open_cut`). La curva de refuerzo por apertura arranca en el mismo
+  umbral. Con boca cerrada sin objeto, el restore sigue en 0.06 (contrato
+  «boca cerrada foto sin objeto (restore=0.06 == 0.06)» intacto).
+
+### Punto 7 — la limpieza de VRAM estaba en el orden equivocado
+
+- **Causa raíz** (`roop/ProcessMgr.py::_cleanup_vram`): se llamaba a
+  `torch.cuda.empty_cache()` ANTES de `gc.collect()`. Los tensores que el
+  recolector liberaba después NUNCA se devolvían a CUDA en esa llamada, así
+  que la VRAM reservada se quedaba hostage entre lotes (con 189 facesets y
+  una GPU de 8 GB eso acaba en OOM). Además solo se informaba de
+  `memory_allocated()`, que siempre salía «0.00 GB» porque los modelos ONNX
+  (inswapper, XSeg, GFPGAN) viven en su propio runtime y no en el allocator
+  de torch: la métrica era engañosa.
+- **Fix**: orden invertido (gc.collect → empty_cache + ipc_collect → segundo
+  gc.collect) y medición honesta de `memory_reserved()` además de la asignada.
+
+### Validación
+
+- **A/B MEDIDO sobre banco real** (`diagnostics/probe_source_bank_ab_20261112.py`
+  + `probe_source_bank_perfile_20261112.py`, 150 archivos muestreados de las
+  1479 fotos de `D:\PROJECTS\uee\FACES\MARETA`):
+  - ANTES: 122 caras aceptadas, 28 archivos SIN cara, 14 rechazos por det bajo.
+  - DESPUÉS: **128 caras aceptadas, 22 archivos sin cara, 1 rechazo por det bajo**.
+  - 6 archivos recuperados, **0 perdidos**. Los 6 revisados VISUALMENTE uno a uno
+    son caras REALES: `20161218-62.jpg.jpg` (primer plano con la cabeza muy
+    inclinada), `20230610_134958.jpg`, `IMG_20220815_204444.jpg` (cara pequeña
+    junto al borde superior), `IMG_20180825_214629_0.jpg` (primer plano borroso),
+    `P1000340_1.jpg` (perfil oscuro) y `1452347243757.jpg` (69×99px).
+  - La segunda pasada (re-detección del crop con sim≥0.50) sigue actuando como
+    cazador de falsos positivos: 1 FP rechazado en la muestra.
+- `diagnostics/probe_v51335_detection_gates_20261111.py` (nuevo): 12/12
+  contratos OK — P3 umbral por tamaño, P3 residual acceptance, P3b geometría y
+  completitud relajadas, P4 margen de landmarks, P5 nitidez pegada 85% dentro del
+  techo de 90%, P6 umbral de boca compartido, P7 orden de limpieza y métricas de
+  VRAM.
+- `diagnostics/probe_faceswap_photo_sharpness.py`: 12/12 OK (U1-U7, I1-I5).
+- `diagnostics/probe_faceswap_align_and_mouth_gate.py`: 9 OK, 0 FAIL.
+- `diagnostics/probe_quality_budget_and_mask.py`: TOTAL FAIL=0.
+- `diagnostics/probe_faceswap_landmark_bbox_guard.py`: todos los tests en
+  verde.
+- `diagnostics/probe_faceswap_independent_geometry_20261106.py`: OK.
+- `diagnostics/probe_faceswap_target_load.py`: OK.
+- **Fallo preexistente NO causado por este turno**:
+  `diagnostics/probe_state_independent_20261106.py::test_persistent_residual_skips_quality_finish`
+  falla (3 != 2) — se verificó con `git stash` que ya fallaba sin los cambios
+  de este turno. Queda pendiente de mirar.
+
 ## 2026-11-11 — regla permanente: subir siempre la versión + incremento a v5.1333
 
 - **Preferencia del usuario**: «sube siempre número de versión». Registrada en

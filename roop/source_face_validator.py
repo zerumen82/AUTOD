@@ -39,6 +39,17 @@ def confirm_source_region(image_bgr, face):
         best_iou = 0.0
         detector_ran = False
         mesh_ran = False
+        # v5.1334: la confianza de MediaPipe escala con el TAMAÑO de la cara.
+        # Una cara grande y clara (>=120px) la detecta con 0.5 de confianza, pero
+        # una con luz dura/oclusión lateral necesita un umbral más bajo. Con
+        # 0.5 fijo se descartaban caras REALES ("independent face IoU=0.00").
+        _box_px = max(float(x2 - x1), float(y2 - y1))
+        if _box_px >= 120:
+            _mp_conf = 0.30
+        elif _box_px >= 80:
+            _mp_conf = 0.40
+        else:
+            _mp_conf = 0.50
         with _lock:
             import mediapipe as mp
             if _detector is None:
@@ -71,6 +82,20 @@ def confirm_source_region(image_bgr, face):
                 lo = origin + points.min(axis=0)*extent
                 hi = origin + points.max(axis=0)*extent
                 best_iou = max(best_iou, _box_iou(box, [*lo, *hi]))
+            # v5.1334: reintento con umbral laxo para caras grandes. Antes una
+            # cara real de 200px con pose difícil se descartaba con IoU=0.00.
+            if best_iou < .40 and _mp_conf < .50:
+                relaxed_detector = mp.solutions.face_detection.FaceDetection(
+                    model_selection=1, min_detection_confidence=_mp_conf,
+                )
+                relaxed_result = relaxed_detector.process(rgb)
+                relaxed_detections = [] if relaxed_result is None else (
+                    getattr(relaxed_result, 'detections', None) or [])
+                for candidate in relaxed_detections:
+                    rect = candidate.location_data.relative_bounding_box
+                    lo = origin + [rect.xmin, rect.ymin] * extent
+                    hi = origin + [rect.xmin+rect.width, rect.ymin+rect.height] * extent
+                    best_iou = max(best_iou, _box_iou(box, [*lo, *hi]))
         if not detector_ran and not mesh_ran:
             return True, 'independent verification skipped: no detection result'
         return best_iou >= .40, f'independent face IoU={best_iou:.2f}'

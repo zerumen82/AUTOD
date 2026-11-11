@@ -82,7 +82,18 @@ def _filter_false_positive_faces(faces: List[Face]) -> List[Face]:
                 kept.append(f)
                 continue
             det = float(getattr(f, 'det_score', 0.0) or 0.0)
+            # v5.1334: la contención de landmarks se evalúa con margen
+            # relajado (5% / 5px del config) para det>=0.50. Con el margen
+            # anterior (2% / 2px) se descartaban detecciones de ALTA confianza
+            # (det=0.75-0.91) por un landmark 3px fuera del bbox, y eso mataba
+            # caras de destino legítimas en vídeo (bboxes ajustados por el
+            # detector en caras de perfil o muy inclinadas).
             if not landmarks_fit_bbox(kps_arr, getattr(f, 'bbox', None)):
+                if det >= 0.50 and landmarks_fit_bbox(
+                    kps_arr, getattr(f, 'bbox', None), relaxed=True
+                ):
+                    kept.append(f)
+                    continue
                 print(f"[FACE] Landmarks fuera del bbox (det={det:.2f}); detección descartada")
                 continue
             if det >= 0.50:
