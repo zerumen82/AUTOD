@@ -18,6 +18,18 @@ from roop.img_editor.gen_prompt_config import (
 from roop.utilities import resolve_relative_path
 
 
+def _strip_possessive(text: str) -> str:
+    """Drop possessive markers so token projection stays real words.
+
+    `re.findall(r"\\w+")` splits "woman's" into "woman" + "s". The orphan
+    "s" then survives the projection (an instruction with another
+    possessive contributes the token "s" itself), and CLIPSeg receives
+    broken queries like 'man s' (log 2026-11-11: «el hombre debe ir con
+    un top de mujer» midió 'man s' 3,2 % y no editó nada).
+    """
+    return re.sub(r"['\u2019\u02bc\u00b4`]s\b", "", text or "")
+
+
 def _otsu_threshold(values: np.ndarray) -> float:
     """Level that splits a response histogram into its two measured groups.
 
@@ -740,7 +752,7 @@ class ImgEditorManager:
             # Forzar régimen fuerte: mag alta + subject global, sin depender del LLM 0.5B
             mag = 0.90
             analysis["forced_strong_regime"] = True
-            print(f"[ImgEditor] Señal cero detectada: mag forzado a 0.90 (regimen fuerte)", flush=True)
+            print("[ImgEditor] Señal cero detectada: mag forzado a 0.90 (regimen fuerte)", flush=True)
         high_structural = bool(analysis.get("high_structural", False))
         structural_bias = str(analysis.get("structural_bias", "neutral"))
         quality_only = bool(analysis.get("quality_only", False))
@@ -4877,12 +4889,20 @@ class ImgEditorManager:
             if not 0.0 < max_coverage < 1.0:
                 raise ValueError("region_proposal.max_coverage debe estar entre 0 y 1")
             proposals = self._region_proposals(instruction, config)
-            tokens = set(re.findall(r"\w+", instruction.casefold()))
+            tokens = set(re.findall(
+                r"\w+", _strip_possessive(instruction.casefold())
+            ))
             grounded = []
             seen_queries = set()
             for query in proposals:
-                words = re.findall(r"\w+", query.casefold())
-                projected = " ".join(dict.fromkeys(word for word in words if word in tokens))
+                words = re.findall(
+                    r"\w+", _strip_possessive(query.casefold())
+                )
+                projected = " ".join(
+                    word for word in dict.fromkeys(
+                        word for word in words if word in tokens
+                    ) if len(word) > 1
+                )
                 if projected and projected not in seen_queries:
                     grounded.append(projected)
                     seen_queries.add(projected)
@@ -7700,12 +7720,18 @@ class ImgEditorManager:
                     _note_reports_residual_failure,
                 )
                 if _note_reports_residual_failure(out_note):
+                    # v5.1334 — el resultado mide residual del objetivo: NO se
+                    # entrega como hecho (log 2026-11-11: «sin camiseta, sin
+                    # pantalón» salió con el 90 % de la ropa y se guardó).
+                    # El pase de zona cambió píxeles pero no obedeció; caer a
+                    # la ruta directa de LongCat, que envía la instrucción
+                    # completa a una pasada fuerte de la foto.
                     print(
                         "[ImgEditor] Objetivo residual tras ruta descrita: "
-                        "se conserva el resultado del modelo",
+                        "se reintenta con la ruta directa",
                         flush=True,
                     )
-                    return described
+                    described = None
                 else:
                     ok, reason = self._validate_visual_edit(img, out_img, prompt)
                     if not ok:
@@ -8403,6 +8429,26 @@ class ImgEditorManager:
                                 flush=True,
                             )
                 body_edit = bool(authority_facts["body"] and not authority_facts["pose"])
+                # v5.1334 — un cambio anclado a una persona (ropa/cuerpo,
+                # apariencia o añadido sobre alguien) con la zona de soporte
+                # sin medir no termina en «sin cambios»: recae en el sujeto
+                # que la instrucción nombra, medido sobre la foto (patrón
+                # v5.1257). Log 2026-11-11: «el hombre debe ir con un top de
+                # mujer» midió 'man s' 3,2 % y salió sin editar. Las ediciones
+                # de región pura (paredes, cuadros) conservan su bail conservador.
+                if (not subject_passes and subject_mask is None
+                        and (appearance_edit or body_edit
+                             or authority_facts.get("structural_add"))):
+                    subject_passes = self._measured_subject_passes(
+                        img, score_raw, prompt, source_faces,
+                        detected_faces=detected_faces,
+                    )
+                    if subject_passes:
+                        print(
+                            "[ImgEditor] Zona de soporte sin medida: la edición "
+                            "recae en el sujeto medido de la instrucción",
+                            flush=True,
+                        )
                 if scenario_edit:
                     frame_note = "escenario nuevo, la escena completa sale del modelo"
                 elif appearance_edit and len(subject_passes) > 1:

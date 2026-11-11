@@ -12,6 +12,15 @@
   `diagnostics/probe_version_1332_20261111.py` adaptado a v5.1333 (sincronía
   de banner/APP_VERSION/título/docs) y `py_compile` de `run.py`/`core.py`.
 
+## 2026-11-11 — FaceSwap: fix residual acceptance and fallback for no-measured-zone edits (sanitized queries)
+
+- **Preferencia del usuario**: «sube siempre la versión + fix de residual y fallback de zona de persona sin medida». Registrado en `AGENTS.md` (Criterios de trabajo) y `spec/00-PRINCIPIOS.md` (listo).
+- **Incremento v5.1333 → v5.1334**: actualizados `run.py` (banner), `roop/core.py` (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y entrada en esta memoria.
+- **Fix residual**: en `roop/img_editor/img_editor_manager.py` líneas 7702-7708, se rechaza el resultado con residual y se cae a la ruta fuerte de LongCat en vez de devolverlo como correcto.
+- **Fallback zona de persona**: cuando `body_edit` es verdadero y `subject_mask is None and not subject_passes`, se recurre a `_measured_subject_passes` en vez de salir en silencio.
+- **Saneado de posesivos**: `roop/img_editor/img_editor_manager.py` línea 4881 usa `_strip_possessive()` para que `man's neck` → `man`, `woman's shoulder` → `woman`, evitando que CLIPSeg reciba consultas rotas como `'man s'` / `'woman s'`.
+- **Verificación**: los cambios se validaron con el probe `diagnostics/probe_v51334_20261111.py` (dos prompts reales, imágenes antes/después, máscara y métricas). Los archivos `summary.json` no reportan errores y los logs muestran que la ruta fuerte (LongCat) se ejecutó correctamente.
+
 ## 2026-11-11 — FaceSwap cargaba 0 caras: quality_enhancements.py sin imports (v5.1332)
 
 - **Síntoma** (log `ui_start_20261111_160541`, arranque v5.1332): «Error

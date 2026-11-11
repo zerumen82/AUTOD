@@ -1,7 +1,7 @@
 # AGENTS.md — AutoAuto
 
 ## Versión vigente
-- **v5.1333 (2026-11-11)**
+- **v5.1334 (2026-11-11)**
 
 ## Objetivo
 - Mejorar FaceSwap: eliminar el halo o blur elíptico fuera de la cara, seguir perfiles y oclusiones con estabilidad y aumentar nitidez y parecido con la fuente.
