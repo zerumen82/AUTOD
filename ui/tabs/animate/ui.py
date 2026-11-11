@@ -56,6 +56,7 @@ def build_animate_ui():
                         choices=["framepack", "wan_video", "ltx2_audio"],
                         value="framepack",
                         info="ltx2_audio: LTX-2 destilado Q4 con audio nativo (960x544, 25 fps, 8 pasos). FramePack/Wan no generan audio nativo.",
+                        # "ltx2_audio"  # prueba en el probe del cableado
                     )
                     with gr.Row():
                         autoregressive_chunks = gr.Slider(
@@ -71,13 +72,13 @@ def build_animate_ui():
                     with gr.Row():
                         frames = gr.Slider(
                             label="Fotogramas por bloque",
-                            minimum=25, maximum=97, step=4, value=37,
-                            info="ltx2_audio usa hasta 97 (múltiplo de 8 + 1); FramePack 49 y wan_video 33. Más fotogramas = más movimiento y más tiempo.",
+                            minimum=25, maximum=97, step=4, value=97,
+                            info="**720p: 1280×704** (1280×704, 97 fotogramas, 25 fps). ltx2_audio usa 97 (múltiplo de 8 + 1) para 720p; FramePack 49 y wan_video 33. Más fotogramas = más movimiento y más tiempo.",
                         )
                         steps = gr.Slider(
                             label="Pasos por bloque",
-                            minimum=10, maximum=40, step=1, value=24,
-                            info="Más pasos = más detalle y más tiempo por bloque."
+                            minimum=1, maximum=40, step=1, value=8,
+                            info="**LTX-2 destilado fija 8 pasos** (CFG 1,0, euler). Este control no afecta al motor ltx2_audio; el valor se ignora y siempre usa 8 pasos. FramePack/Wan sí respetan este slider."
                         )
                     audio_prompt = gr.Textbox(
                         label="Sonido deseado (opcional)",

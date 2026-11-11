@@ -122,6 +122,47 @@ def fit_frames(frames):
     return lower if (frames - lower) <= (upper - frames) else upper
 
 
+def _trim_last_frame(video_path, output_path):
+    """Extrae todos los fotogramas excepto el último para evitar el defecto de fundido en 49f.
+
+    Solo se usa cuando frames < 97 (caso defectuoso). El último fotograma a 49f sale
+    fundido e ilegible (confirmado con la misma semilla 1234). Recortar el último
+    frame asegura el fotograma final visible, o el usuario puede elegir 97f.
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Contar fotogramas
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_frames <= 1:
+        cap.release()
+        return False
+
+    # Escribir todos excepto el último
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    if not out.isOpened():
+        print(f"[LTX2] OpenCV no puede reescribir {os.path.basename(output_path)}")
+        cap.release()
+        return False
+
+    written = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if written < total_frames - 1:
+            out.write(frame)
+        written += 1
+
+    cap.release()
+    out.release()
+    return True
+
+
 def compose_prompt(action, sounds="", max_words=200):
     """Prompt de LTX-2: un solo párrafo con acción, escena y sonidos.
 
@@ -271,7 +312,22 @@ def generate(image_path, prompt, output_path, width=DEFAULT_WIDTH, height=DEFAUL
     source = os.path.join(PROJECT_ROOT, "ui", "tob", "ComfyUI", "output",
                           mp4.get("subfolder", ""), mp4["filename"])
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    shutil.copy2(source, output_path)
+    # Recorte del último fotograma si frames < 97: el frame 49 fundido e
+    # ilegible (misma semilla 1234 da el mismo defecto). Se recorta el último
+    # fotograma para conservar el anterior visible; o elegir 97f para calidad.
+    trim_output = None
+    if frames < 97:
+        trim_output = output_path + ".trim"
+        if _trim_last_frame(source, trim_output):
+            shutil.copy2(trim_output, output_path)
+            os.unlink(trim_output)
+            elapsed = time.time() - started
+            _say(f"Listo en {elapsed:.0f}s: {os.path.basename(output_path)} (último frame recortado para evitar fundido)")
+        else:
+            shutil.copy2(source, output_path)
+    else:
+        shutil.copy2(source, output_path)
+
     elapsed = time.time() - started
     _say(f"Listo en {elapsed:.0f}s: {os.path.basename(output_path)}")
     return output_path, f"OK ({elapsed:.0f}s, vídeo + audio nativo LTX-2)"

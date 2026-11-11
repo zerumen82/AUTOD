@@ -1,5 +1,165 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-11 — regla permanente: subir siempre la versión + incremento a v5.1333
+
+- **Preferencia del usuario**: «sube siempre número de versión». Registrada en
+  `AGENTS.md` (Criterios de trabajo): todo turno con cambios de código o de
+  procesamiento incrementa v5.X en `run.py`, `roop/core.py` (APP_VERSION y
+  título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y entrada en esta memoria.
+- **Incremento v5.1332 → v5.1333**: etiqueta el turno del fix de
+  `quality_enhancements.py` (FaceSwap cargaba 0 caras por la escritura
+  truncada del commit `a8669ca`). Verificado con
+  `diagnostics/probe_version_1332_20261111.py` adaptado a v5.1333 (sincronía
+  de banner/APP_VERSION/título/docs) y `py_compile` de `run.py`/`core.py`.
+
+## 2026-11-11 — FaceSwap cargaba 0 caras: quality_enhancements.py sin imports (v5.1332)
+
+- **Síntoma** (log `ui_start_20261111_160541`, arranque v5.1332): «Error
+  extrayendo caras: name 'np' is not defined» en TODAS las fotos de origen y
+  «Fuentes: 0 caras cargadas de 77 archivos». Ruptura en la carga de fuentes
+  de FaceSwap.
+- **Causa raíz**: el commit `a8669ca` (2026-11-10 22:30, «Quality enhancements
+  and pending items») reescribió `roop/quality_enhancements.py` con una
+  escritura TRUNCADA: el fichero quedó sin las cabeceras de import (línea 1
+  entraba en `def` usando `np`/`cv2`/`Tuple`) y sin las funciones
+  `match_color_histogram`, `detect_foreground_occlusion` y
+  `blend_with_poisson`, que `roop/ProcessMgr.py` y
+  `roop/processors/FaceSwap.py` importan. El árbol quedó internamente
+  inconsistente: el import de `ProcessMgr` fallaba en diferido en cada
+  extracción (`from roop.ProcessMgr import get_gender` dentro del bucle de
+  `ui/tabs/faceswap/logic.py:179`), con el `except` tragándose el
+  NameError/ImportError y devolviendo 0 caras por foto.
+- **Fix**: restaurado `roop/quality_enhancements.py` a la última versión
+  buena (`git show a55acbe:roop/quality_enhancements.py`), la misma que pasó
+  las baterías de FaceSwap v5.1319. Ninguna función del rewrite truncado
+  estaba cableada fuera del propio módulo (verificado por grep: los
+  llamadores externos solo usan las tres funciones restauradas).
+- **Verificación**: reproducción con traceback real
+  (`diagnostics/repro_np_error_20261111.py`: 2/2 caras extraídas y
+  enriquecidas, sin excepciones); `probe_source_extraction_import_real.py`
+  **exit 0** (analizador CPU, raw=ui=2 caras, embedding finito, sin «Error
+  extrayendo caras» en el log); `probe_faceswap_pipeline_controls_20261017`
+  exit 0 y `probe_faceswap_profile_mouth_occlusion` exit 0; py_compile de
+  quality_enhancements/ProcessMgr/logic verde. La UI abierta (v5.1332) debe
+  reabrirse para recargar el módulo.
+- **Residuo sin tocar**: `roop/quality_enhancements_new.py` (otra copia
+  truncada sin imports, sin uso) queda en el árbol; borrarla requiere
+  aprobación. El commit dañado `a8669ca` queda en el historial; la
+  restauración vive sin commit hasta que el usuario lo pida.
+
+## 2026-11-11 — incremento de versión v5.1331 → v5.1332
+
+- Incremento en los cinco sitios de versión vigente: `run.py` (banner),
+  `roop/core.py` (`APP_VERSION` y título de la ventana webview),
+  `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta memoria. Referencias históricas
+  (comentarios de código v5.1331, entradas previas, `logs/active_server.json`
+  de la sesión viva) no se reetiquetan.
+- Contenido del incremento: tab Animate Image operativa (import + lambda en
+  inputs), ruta focal conservada en Modo Calidad, verificador con VRAM,
+  desposterizar con la fuerza de la medida y medición de pelo en Kontext.
+- Verificación del incremento: `py_compile` de `run.py` y `roop/core.py`,
+  sincronía APP_VERSION/banner/título comprobada abajo y probe de build de UI
+  exit 0.
+
+## 2026-11-11 — tab Animate Image rota por import antiguo en ui/main.py (v5.1331)
+
+- **Segundo defecto de la misma pestaña (exposto al arreglar el import)**:
+  `wire_animate_events` tenía una **lambda dentro de `inputs`** (comentario
+  «AN-4», pretensía deshabilitar el slider de pasos con `ltx2_audio`). Gradio
+  serializa componentes, no funciones: al salir del `with gr.Blocks` el
+  `get_config_file` crasheaba con `AttributeError: 'function' object has no
+  attribute '_id'` y el hilo GradioServer moría. Era latente porque la pestaña
+  nunca llegó a cablearse (import roto).
+- **Fix**: `inputs` lleva el componente real `ui["steps"]`; el efecto visual
+  AN-4 va en `ui["engine"].change(...)` (deshabilita el slider con
+  `ltx2_audio`). El valor de steps no afecta a esa ruta: `resolve_params` fija
+  8 pasos (medido en el probe de cableado).
+- **Verificación real del punto de fallo**: probe nuevo
+  `diagnostics/probe_ui_build_animate_tab_20261111.py` construye la UI COMPLETA
+  y serializa el config — **110 dependencias, exit 0** (antes moría justo ahí).
+  py_compile y ruff (E9,F63,F7,F82) verdes; `probe_ltx2_animate_wiring`
+  PASS. La UI viva del usuario debe reabrirse para cargar ambos arreglos.
+
+- **Tres mejoras del Modo Calidad (aprobadas por el usuario, implementadas)**:
+  1. **Verificador con VRAM**: el bloque de verificación FINAL
+     (`img_editor_manager.py`, tras el acabado TOP) ahora libera las sesiones
+     ONNX locales (ESRGAN del finisher vía `release_gpu_caches()`, CodeFormer
+     vía `_preserve_faces._cf = None`) antes de cargar Moondream, mismo patrón
+     que `top_tier_finish` usa antes de cargar Kontext. En híbrido 8K la
+     verificación se saltaba (277 MiB libres de 1891 necesarios, log 14:45).
+  2. **Desposterizar con la fuerza de la medida**: en `_classical_finish_strengths`
+     (`top_tier_finish.py`), con poster ≥0,50 el desposterizar sube con la
+     medida hasta 0,30 en vez de quedar aplastado por el tope de heavy_tier
+     (0,18); log 14:45: poster 0,72 con dep 0,18 no bajó la medida. La puerta
+     (band/poster) sigue revirtiendo si empeora; fotos grandes limpias
+     conservan el tope (0,20 → dep 0,18) y el caso gentle no cambia (0,12).
+  3. **Medir pelo residual en la ruta Kontext focal**: la medición de aviso
+     («el pelo de la persona solicitada sigue visible») ya no excluye
+     `engine != "kontext"`; la zona es `final_mask` o, en la ruta Kontext
+     focal, `_longcat_focal_mask` (allí `final_mask` pasa a None en 10424 y el
+     composite usa esa región en 11304). La medición solo añade aviso, nunca
+     descarta. La selección PRE-resultado de qué cabeza editar (10186)
+     conserva su exclusión: eso cambia la ruta, no la medición.
+- **Verificación**: probe nuevo
+  `diagnostics/probe_editor_quality_fixes_20261111.py` **13/13 PASS**
+  (`_classical_finish_strengths` ejecutada de verdad: poster 0,72 → dep
+  0,246; poster 0,20 → 0,18; frontera 0,50 → 0,18; gentle → 0,12; AST del
+  manager para liberaciones y zona de pelo), py_compile y ruff
+  (E9,F63,F7,F82) verdes, regresiones `probe_quality_gate_banding_20261110`
+  TOTAL FAIL=0, `probe_quality_checkbox_finish` TOTAL FAIL=0 y
+  `probe_editor_versatility_integrity_20261105` exit 0.
+- **Límite**: sin render nuevo ni PASS visual; la validación corresponde al
+  usuario en la UI (la sesión viva PID 1512 no carga los cambios hasta
+  reabrir). La ruta compuesta (~9622) tiene otra llamada del verificador sin
+  acabado TOP delante; no se tocó.
+
+- **Petición**: «hay un error en la tab de animate image, no module name
+  animate_photo_image» y «revisa los logs de image edit».
+- **Causa**: la refactorización del 2026-10 (commit `7ceec08`) movió la pestaña
+  a `ui/tabs/animate/` y borró `ui/tabs/animate_photo_tab.py`, pero los dos
+  bloques de `create_ui` en `ui/main.py` (líneas ~302 y ~459) seguían importando
+  `ui.tabs.animate_photo_tab`; el try/except lo convertía en
+  «No module named ui.tabs.animate_photo_tab» renderizado dentro de la pestaña.
+  La segunda `create_ui` (línea 387) sombreada a la primera, así que el bloque
+  activo era el de la línea 459.
+- **Fix**: ambos bloques ahora usan `build_animate_ui()` + `wire_animate_events`
+  de `ui.tabs.animate`. Verificación: `py_compile` OK, `import ui.main` real OK
+  (0 referencias a `animate_photo_tab`, 4 a `build_animate_ui`), ruff crítico
+  (E9,F63,F7,F82) verde, y `probe_ltx2_animate_wiring_20261110.py` **14/14
+  PASS**. La UI viva (PID 1512, v5.1331) no carga el cambio hasta reabrir.
+- **Revisión de logs de Image Edit** (`logs/ui_start_20261111_144534.log`,
+  2 ediciones de «el hombre debe ser calvo»):
+  1. Sin Modo Calidad: ruta focal Kontext correcta (máscara de cabeza, recorte
+     31 %, exterior intacto, fuera=0,46 %, identidad 0,92, Moondream PASS).
+     Visual: el hombre conserva pelo — cumplimiento parcial del «calvo».
+  2. Con Modo Calidad: «Compound prompt detected» mandó la MISMA instrucción a
+     edición GLOBAL (sin máscara focal, modelo 768x576, salida 5586x4263).
+     Cumple el calvo pero identidad mínima 0,92→0,81 y cambio 19,95 %. Además
+     el verificador Moondream no llegó a ejecutarse (277 MiB libres, necesita
+     1891 MiB; el acabado TOP había cargado ESRGAN): se guardó
+     `edit_1794406227.png` sin verificación visual local.
+  3. Posterización medida 0,72 en la salida final; la limpieza se descartó
+     («poster 0,72→0,73»).
+- **Fix aprobado por el usuario (conservar ruta focal)**: en
+  `img_editor_manager.py`, `has_quality_request` se contaminaba en el análisis
+  con `has_quality_request or quality_enhance` (línea ~9755) y ese valor
+  contaminado entraba en `force_global` (~9996): con Modo Calidad activo,
+  CUALQUIER instrucción se forzaba a edición global. Nuevo
+  `_measured_quality_request` guarda la medida del texto y solo el ENRUTADO
+  la usa (force_global + print «Compound prompt detected»); las cláusulas de
+  prompt del híbrido conservan el valor amplio, que es deliberado.
+  Verificación: probe nuevo
+  `diagnostics/probe_editor_hybrid_focal_route_20261111.py` **9/9 PASS**
+  (AST del manager + `_light_score` ejecutada con los anchors reales:
+  «man must be bald..» 0,000; «mejorar calidad nitidez detalle» 0,720),
+  py_compile y ruff (E9,F63,F7,F82) verdes, regresiones
+  `probe_editor_versatility_integrity_20261105.py` exit 0 y
+  `probe_quality_checkbox_finish.py` TOTAL FAIL=0. Límite: sin render real;
+  el PASS visual del caso híbrido corresponde al usuario en la UI.
+- **Pendiente de decisión del usuario: si en Modo Calidad la edición debe
+  mantener la ruta focal (protección de identidad) en vez de derivar a
+  global por «compound prompt»» → RESUELTO por el fix de arriba (aprobado).
+
 ## 2026-11-10 — revisión de Animate Image y limpieza de evidencia LTX-2 (v5.1328)
 
 - **Petición**: «revisa memory y pendientes y el estado de animate image» y,

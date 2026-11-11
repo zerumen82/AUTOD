@@ -302,8 +302,10 @@ def create_ui():
             # Tab 4: Animate Image
             with gr.Tab("Animate Image"):
                 try:
-                    from ui.tabs.animate_photo_tab import animate_photo_tab
-                    animate_photo_tab()
+                    from ui.tabs.animate.ui import build_animate_ui
+                    from ui.tabs.animate.events import wire_animate_events
+                    animate_components = build_animate_ui()
+                    wire_animate_events(animate_components)
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
             
@@ -459,8 +461,10 @@ def create_ui():
             # Tab 4: Animate Image
             with gr.Tab("Animate Image"):
                 try:
-                    from ui.tabs.animate_photo_tab import animate_photo_tab
-                    animate_photo_tab()
+                    from ui.tabs.animate.ui import build_animate_ui
+                    from ui.tabs.animate.events import wire_animate_events
+                    animate_components = build_animate_ui()
+                    wire_animate_events(animate_components)
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
             

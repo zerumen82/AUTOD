@@ -54,6 +54,17 @@ def wire_animate_events(ui):
         updates = queue.Queue()
         result = {"video": None, "msg": "Error desconocido"}
 
+        # AN-3 (MEDIO): Calcular resolución sugerida según VRAM
+        try:
+            from roop.animate.animate_photo import get_vram_gb, suggest_resolution
+            vram_gb = get_vram_gb()
+            current_res, _ = suggest_resolution(frames, vram_gb)
+            res_status = f'<div style="text-align:center; color:#22c55e; font-size:13px; padding:6px; background:#0f172a; border-radius:8px;">'
+            res_status += f'🖼 <strong>Resolución sugerida:</strong> {current_res} '
+            res_status += f'(<strong>{vram_gb} GB</strong> VRAM)</div>'
+        except Exception:
+            res_status = ""
+
         def progress_callback(message):
             updates.put(message)
 
@@ -107,6 +118,12 @@ def wire_animate_events(ui):
 
         yield result["video"], _status(result["msg"]), *btn_idle()
 
+    # AN-4 corregido (v5.1331): un lambda no puede vivir en `inputs` — Gradio
+    # serializa componentes y al generar el config del Blocks crashea con
+    # 'function' object has no attribute '_id'. El bug era latente: esta pestaña
+    # nunca llegó a cablearse porque el import en ui/main.py estaba roto. El
+    # valor de steps no afecta a ltx2_audio (resolve_params fija 8 pasos), así
+    # que se pasa el slider real y el efecto visual va en el evento de abajo.
     animate_event = ui["btn_animate"].click(
         fn=on_animate_click,
         inputs=[
@@ -123,6 +140,13 @@ def wire_animate_events(ui):
             ui["audio_prompt"],
         ],
         outputs=[ui["video_output"], ui["progress_html"], ui["btn_animate"], ui["btn_cancel"]],
+    )
+
+    ui["engine"].change(
+        fn=lambda eng: gr.Slider(interactive=(eng != "ltx2_audio")),
+        inputs=ui["engine"],
+        outputs=ui["steps"],
+        queue=False,
     )
 
     ui["btn_cancel"].click(

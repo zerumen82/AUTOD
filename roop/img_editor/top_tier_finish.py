@@ -514,6 +514,54 @@ def _face_restore_mask(
     return (mask * (1.0 - 0.85 * edge) * float(blend)).astype(np.float32)
 
 
+def _get_face_landmarks(image: Image.Image) -> Optional[np.ndarray]:
+    """Obtener landmarks faciales MediaPipe 468 de una imagen PIL.
+    
+    Devuelve array (468, 2) normalizado 0..1 o None si no hay cara detectable.
+    """
+    try:
+        import cv2 as _cv2
+        app = _get_face_mesh()
+        if app is None:
+            return None
+        bgr = _cv2.cvtColor(np.array(image.convert("RGB")), _cv2.COLOR_RGB2BGR)
+        fh, fw = bgr.shape[:2]
+        if min(fh, fw) < 64:
+            return None
+        rgb = np.ascontiguousarray(_cv2.cvtColor(bgr, _cv2.COLOR_BGR2RGB))
+        result = app.process(rgb)
+        faces = getattr(result, "multi_face_landmarks", None) if result else None
+        if not faces:
+            return None
+        mesh = faces[0].landmark
+        points = np.array(
+            [[lm.x, lm.y] for lm in mesh],
+            dtype=np.float32,
+        )
+        if points.shape[0] != 468 or not np.isfinite(points).all():
+            return None
+        return points
+    except Exception:
+        return None
+
+
+def _camera_change_score(before: Image.Image, after: Image.Image) -> float:
+    """Medir si cambió la pose de cámara comparando landmarks faciales.
+    
+    Devuelve score 0..1: 0 = misma pose, 1 = pose muy distinta.
+    Usa distancia media normalizada entre landmarks correspondientes.
+    """
+    lm_before = _get_face_landmarks(before)
+    lm_after = _get_face_landmarks(after)
+    if lm_before is None or lm_after is None:
+        return 0.0  # No se puede medir
+    # Distancia euclidiana media normalizada por tamaño de imagen
+    diff = np.linalg.norm(lm_before - lm_after, axis=1).mean()
+    # Normalizar: landmarks en 0..1, max diff teórico ~1.4 (diagonal)
+    # En práctica, cambio de cámara real da >0.05, sin cambio <0.02
+    return float(np.clip(diff / 0.1, 0.0, 1.0))
+
+
 def _gate_chroma_shift(before: Image.Image, after: Image.Image, max_side: int) -> Tuple[float, float]:
     """Mean/p95 Lab a,b distance on paired pixels; L changes remain allowed.
 
@@ -832,6 +880,14 @@ def _classical_finish_strengths(
             dep = min(dep, 0.22)
         if heavy_tier:
             dep = min(dep, 0.18)
+        # v5.1331 — posterización ALTA medida: el problema real es la limpieza,
+        # no el invento de detalle. El tope de heavy_tier protegía fotos
+        # grandes limpias (2026-09-28, grano en piel); con poster ≥0.50 el
+        # desposterizar sube con la medida (tope 0.30) y la puerta
+        # (band/poster) revierte si empeora. Log 2026-11-11: poster 0.72 con
+        # dep 0.18 no bajó la medida y la limpieza tardía se descartó.
+        if poster >= 0.50:
+            dep = max(dep, float(np.clip(_lerp(0.18, 0.30, (poster - 0.50) / 0.40), 0.18, 0.30)))
         drive = max(poster, restore)
         color = float(np.clip(_lerp(0.16, 0.22, drive), 0.16, 0.22))
         asked_light = float(profile.get("detail_boost_blend", 0.16) or 0.16)

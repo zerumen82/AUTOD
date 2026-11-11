@@ -725,6 +725,22 @@ class ImgEditorManager:
         body_direction = str(analysis.get("body_direction", "change")).lower()
         body_intensity = float(analysis.get("body_transform_intensity", 0.0))
         mag = float(analysis.get("magnitude", 0.5))
+
+        # NUEVA LÓGICA: Detector de señal cero determinista
+        # Si el analyzer no encuentra conceptos medibles (all scores ~0), forzar régimen fuerte
+        # Esto previene routing inconsistente cuando el prompt no contiene conceptos reconocidos
+        all_scores_zero = (
+            float(analysis.get("body_exposure_full", 0.0)) == 0.0
+            and float(analysis.get("body_exposure_local", 0.0)) == 0.0
+            and float(analysis.get("pose", 0.0)) == 0.0
+            and float(analysis.get("camera_view", 0.0)) == 0.0
+            and float(analysis.get("structural", 0.0)) == 0.0
+        )
+        if mag <= 0.55 and all_scores_zero:
+            # Forzar régimen fuerte: mag alta + subject global, sin depender del LLM 0.5B
+            mag = 0.90
+            analysis["forced_strong_regime"] = True
+            print(f"[ImgEditor] Señal cero detectada: mag forzado a 0.90 (regimen fuerte)", flush=True)
         high_structural = bool(analysis.get("high_structural", False))
         structural_bias = str(analysis.get("structural_bias", "neutral"))
         quality_only = bool(analysis.get("quality_only", False))
@@ -863,7 +879,16 @@ class ImgEditorManager:
             # SAFETY semántico: solo forzar subject + global si hay exposición
             # corporal total medida (desnudez real, no cambios de entorno).
             # Según PROJECT_LOG_2026-09-29.md: mag>=0.80 + términos corporales.
-            if (mask_target == "background" and new_mag >= 0.80
+            # Usar umbral de la configuración en lugar de hardcode
+            # config/editor_selection.json tiene full_exposure_min_score: 0.3
+            # antes el código usaba 0.9 causando discrepancias en el comportamiento
+            try:
+                _policy = self._body_scope_policy()
+                exposure_threshold = _policy.get("full_exposure_min_score", 0.3)
+            except Exception:
+                exposure_threshold = 0.3
+
+            if (mask_target == "background" and new_mag >= exposure_threshold
                     and self.is_true_full_body_exposure(new_prompt or prompt)):
                 print(f"[ImgEditor] Rewriter target=background IGNORADO (mag sem={magnitude:.2f}, rw={new_mag:.2f}) body_exposure=True → subject + global", flush=True)
                 mask_target = "subject"
@@ -7606,21 +7631,30 @@ class ImgEditorManager:
                             ), None
                         output = follow_result.convert("RGB")
                         route_note += " + cambios restantes sobre regiones medidas"
+                    # v5.1330: no aplicar acabado TOP post-edit en cambios de cámara.
+                    # Qwen Cámara ya genera a ~1 MP con la LoRA de ángulos; el
+                    # upscale + preservación facial + color/luz re-escribe píxeles
+                    # y puede revertir el reencuadre. Si el usuario quiere calidad,
+                    # puede pedirla en una pasada separada sin cambio de cámara.
                     if quality_hybrid:
-                        from roop.img_editor.top_tier_finish import run_quality_enhance_after_edit
-                        output, finish_note, quality_analysis = run_quality_enhance_after_edit(
-                            output, img, enhance_tier=enhance_tier,
-                            use_generative=False,
-                            preserve_faces=bool(quality_preserve_faces),
-                            progress_callback=progress_callback,
-                            cancel_check=cancel_check,
-                            quality_steps=quality_steps,
-                        )
-                        self._last_quality_analysis = quality_analysis
-                        route_note += f" + {finish_note}"
+                        route_note += " | calidad híbrida omitida en cambio de cámara"
                     elif output.size != img.size:
                         output = output.resize(img.size, Image.Resampling.LANCZOS)
                         route_note += " | tamaño original por interpolación"
+                    # v5.1330: validar cumplimiento visual del cambio de cámara
+                    # usando landmarks MediaPipe 468. Si no hay cambio significativo,
+                    # marcar como fallo y no reportar éxito.
+                    try:
+                        from roop.img_editor.top_tier_finish import _camera_change_score
+                        cam_score = _camera_change_score(img, output)
+                        if cam_score < 0.15:  # Umbral: cambio de cámara real >0.15
+                            route_note += f" | ADVERTENCIA: cambio de cámara no detectado (score={cam_score:.2f})"
+                            print(f"[ImgEditor] Cambio de cámara no verificado: score={cam_score:.2f}", flush=True)
+                        else:
+                            route_note += f" | cambio de cámara verificado (score={cam_score:.2f})"
+                            print(f"[ImgEditor] Cambio de cámara verificado: score={cam_score:.2f}", flush=True)
+                    except Exception as cam_val_error:
+                        print(f"[ImgEditor] Validación de cámara no disponible: {cam_val_error}", flush=True)
                     if cancel_check and cancel_check():
                         return None, "Cancelado", None
                     route_note += " | resultado visual no verificado"
@@ -9374,6 +9408,13 @@ class ImgEditorManager:
         ]
         prompt_lower = prompt.lower()
         has_quality_request = self._light_score(prompt_lower, quality_anchors) > 0.03
+        # La petición de calidad MEDIDA en el texto. `has_quality_request` se
+        # contamina después (análisis: `has_quality_request or quality_enhance`)
+        # para las cláusulas de prompt del híbrido; el ENRUTADO (force_global)
+        # no debe derivar a global toda instrucción solo porque el Modo
+        # Calidad está activo (log 2026-11-11: «el hombre debe ser calvo» con
+        # híbrido fue a global, identidad 0,92→0,81, en vez de su ruta focal).
+        _measured_quality_request = has_quality_request
 
         env_anchors = [
             "entorno", "environment", "fondo", "background", "escena", "scenery",
@@ -9825,7 +9866,7 @@ class ImgEditorManager:
                 f"[ImgEditor] Pipeline TOP: desposterizar + restaurar caras + "
                 f"upscale adaptativo tier={enhance_tier} (sin LongCat)"
             )
-        elif has_quality_request and mag_suggested > 0.6:
+        elif _measured_quality_request and mag_suggested > 0.6:
             print("[ImgEditor] Compound prompt detected (main change + quality/color polish)")
         elif body_transform:
             print(
@@ -9959,7 +10000,10 @@ class ImgEditorManager:
         # como inpaint: solo la ropa se repinta, el resto de la foto queda intacto.
         force_global = final_mask is None and not background_focus and (
             high_structural
-            or (quality_hybrid and has_quality_request and not quality_primary)
+            # Solo una petición de calidad MEDIDA en el texto fuerza global
+            # (p.ej. «mejora la nitidez y detalles»); el Modo Calidad activo
+            # por sí solo no reescribe el enrutado de la instrucción.
+            or (quality_hybrid and _measured_quality_request and not quality_primary)
         )
 
         use_flux_structural_inpaint = bool(
@@ -11991,11 +12035,18 @@ class ImgEditorManager:
             # cubre ambas rutas y el reintento mide cuánto queda.
             _hair_plan_zone = None
             if result is not None and locals().get("_focal_head_plan", False):
-                _hair_plan_zone = final_mask
+                # En la ruta Kontext focal la máscara de cabeza vive en
+                # _longcat_focal_mask (final_mask pasa a None en 10424); el
+                # composite usa exactamente esa región, así que es la zona
+                # válida para medir el pelo residual.
+                _hair_plan_zone = (
+                    final_mask if final_mask is not None
+                    else locals().get("_longcat_focal_mask")
+                )
             elif result is not None and locals().get("_head_hole_plan", False):
                 _hair_plan_zone = locals().get("_head_hole_zone")
             if (_hair_plan_zone is not None
-                    and engine != "kontext" and self._is_bald_request(prompt_pre_rewrite)):
+                    and self._is_bald_request(prompt_pre_rewrite)):
                 _hair_masker = None
                 try:
                     _hair_masker = self._get_clipseg_masker()
@@ -12040,6 +12091,27 @@ class ImgEditorManager:
                     time.sleep(1)
                     import gc
                     gc.collect()
+                except Exception:
+                    pass
+                # v5.1331 — liberar también las sesiones ONNX del proceso
+                # principal (ESRGAN del finisher, CodeFormer del pulido). En
+                # híbrido 8K sostenían la VRAM tras el acabado TOP y el
+                # verificador se saltaba (277 MiB libres de 1891 necesarios,
+                # log 2026-11-11): la foto con Modo Calidad se guardaba sin
+                # verificación visual. Mismo patrón que top_tier_finish usa
+                # antes de cargar Kontext; se recargan bajo demanda.
+                try:
+                    from roop.img_editor.top_tier_finish import _preserve_faces
+                    _verif_cf = getattr(_preserve_faces, "_cf", None)
+                    if _verif_cf is not None:
+                        _preserve_faces._cf = None
+                        del _verif_cf
+                        print("[TopTier] Sesión CodeFormer liberada (se recarga bajo demanda)", flush=True)
+                except Exception:
+                    pass
+                try:
+                    from roop.img_editor.image_quality_pipeline import get_quality_finisher
+                    get_quality_finisher().release_gpu_caches()
                 except Exception:
                     pass
                 try:

@@ -139,9 +139,10 @@ class AnimateManager:
                 if base["steps"] > 25:
                     base["steps"] = 25
             elif engine == "ltx2_audio":
-                # 540p/97 fotogramas es la ruta medida en 8 GB; no se recorta
-                # a 33 como los motores genéricos.
-                if base["frames"] > 97:
+                # 540p/97 fotogramas es la ruta medida en 8 GB; por encima de 8 GB
+                # permite 720p (1280×704) que es la ruta natural y medido con
+                # pagefile. No se recorta a 33 como los motores genéricos.
+                if vram_gb > 8 and base["frames"] > 97:
                     base["frames"] = 97
             else:
                 if base["frames"] > 33:
@@ -200,14 +201,42 @@ class AnimateManager:
 
     def _compose_motion_prompt(self, user_prompt: str, mag: float = 0.5) -> str:
         raw = (user_prompt or "natural motion").strip()
+        # v5.1330: detectar intención de cámara medida e inyectar dirección explícita
+        camera_direction = ""
+        try:
+            nlp = self._get_semantic_analyzer()
+            if hasattr(nlp, "score_concepts"):
+                scores = nlp.score_concepts(raw)
+                camera_score = float(scores.get("camera_view", 0.0))
+                if camera_score > 0.12:  # threshold similar to is_camera_view_request
+                    # Extraer dirección de cámara del prompt traducido
+                    if any(w in raw.lower() for w in ["left", "izquierda", "lado izquierdo"]):
+                        camera_direction = "Camera moves from right to left (orbits left). "
+                    elif any(w in raw.lower() for w in ["right", "derecha", "lado derecho"]):
+                        camera_direction = "Camera moves from left to right (orbits right). "
+                    elif any(w in raw.lower() for w in ["up", "arriba", "alto", "elevado", "high angle", "cenital"]):
+                        camera_direction = "Camera moves upward to high angle (bird's eye). "
+                    elif any(w in raw.lower() for w in ["down", "abajo", "bajo", "low angle", "contrapicado"]):
+                        camera_direction = "Camera moves downward to low angle (worm's eye). "
+                    elif any(w in raw.lower() for w in ["around", "alrededor", "orbit", "orbita"]):
+                        camera_direction = "Camera orbits around the subject. "
+                    elif any(w in raw.lower() for w in ["zoom", "acercar", "alejar", "dolly"]):
+                        camera_direction = "Camera dollies in/out smoothly. "
+                    else:
+                        camera_direction = "Camera changes angle smoothly. "
+        except Exception:
+            pass
+
         if mag > 0.65:
             return (
                 f"Instruction: Animate this exact photograph. "
+                f"{camera_direction}"
                 f"Follow this action and motion completely and obviously: {raw}. "
                 f"Natural cinematic movement, obey the instruction as strongly as possible."
             )
         return (
             f"Instruction: Animate this exact photograph. "
+            f"{camera_direction}"
             f"Apply this motion naturally: {raw}. "
             f"Smooth realistic movement while keeping the scene coherent."
         )

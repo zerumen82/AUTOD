@@ -1,7 +1,7 @@
 # AGENTS.md — AutoAuto
 
 ## Versión vigente
-- **v5.1330 (2026-11-10)**
+- **v5.1333 (2026-11-11)**
 
 ## Objetivo
 - Mejorar FaceSwap: eliminar el halo o blur elíptico fuera de la cara, seguir perfiles y oclusiones con estabilidad y aumentar nitidez y parecido con la fuente.
@@ -19,6 +19,10 @@
 - En Image Editor, el usuario prioriza cumplir la instrucción completa con rapidez, incluso si una edición compuesta cambia las caras. Esa preferencia no reduce la exigencia de identidad en FaceSwap.
 
 ## Criterios de trabajo
+- **Subir SIEMPRE el número de versión** (v5.X en `run.py` banner,
+  `roop/core.py` APP_VERSION y título, `AGENTS.md`, `spec/00-PRINCIPIOS.md` y
+  entrada en `MEMORY.md`) al cerrar un turno con cambios de código o de
+  procesamiento. Preferencia permanente del usuario (2026-11-11).
 - Image Editor no se enruta con listas de palabras, géneros, prendas ni tipos de edición escritos a mano. La decisión sale de los conceptos ya medidos y de la región que el segmentador encuentre en la foto. Una instrucción que no pide una postura nueva no sustituye el resto de la imagen.
 - Consultar MEMORY.md antes de tocar una ruta existente: contiene decisiones actuales, pruebas y trabajo pendiente. Para detalles históricos, usar docs/project_history/PROJECT_LOG_2026-09-29.md.
 - Contrastar las notas con el código y los logs actuales; las entradas antiguas del historial incluyen experimentos revertidos y afirmaciones ya superadas.
