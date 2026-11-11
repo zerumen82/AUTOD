@@ -46,6 +46,12 @@
   truncada sin imports, sin uso) queda en el árbol; borrarla requiere
   aprobación. El commit dañado `a8669ca` queda en el historial; la
   restauración vive sin commit hasta que el usuario lo pida.
+- **Cierre (aprobado por el usuario)**: residuo `quality_enhancements_new.py`
+  borrado; commit **`8949a5e`** (v5.1333) con 19 ficheros (fix de
+  quality_enhancements + tab Animate operativa + ruta focal/VRAM/pelo en Modo
+  Calidad + módulos de animate pendientes coherentes con la tab + probes) y
+  push `9f61e62..8949a5e` a `origin/experiment/klein-9b`. py_compile y ruff
+  crítico de los 11 .py del lote en verde antes del commit.
 
 ## 2026-11-11 — incremento de versión v5.1331 → v5.1332
 
