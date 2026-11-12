@@ -7,6 +7,13 @@ import requests
 import cv2
 import numpy as np
 
+from roop.stdio_safety import ensure_utf8_stdio
+
+# v5.1336: reconfigura stdout/stderr a UTF-8 antes de que se imprima nada.
+# Sin esto, un mensaje con ❌/⚠️/→ en una consola cp1252 lanza
+# UnicodeEncodeError y aborta la operación que lo imprimió.
+ensure_utf8_stdio()
+
 
 class _Tee:
     """Duplicate writes to a file alongside the original stream."""
@@ -86,7 +93,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1335 (2026-11-11)"
+APP_VERSION = "v5.1336 (2026-11-11)"
 
 
 def _active_server_path():
@@ -433,7 +440,7 @@ def run():
                 print(f"[DEBUG] Error forzando icono: {e}")
 
         window = webview.create_window(
-            "AutoAuto v5.1335",
+            "AutoAuto v5.1336",
             url=server_url,
             width=1400,
             height=900

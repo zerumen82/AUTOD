@@ -1,5 +1,113 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — FaceSwap fallo 2: el filtro de origen descartaba caras reales (v5.1336)
+
+- **Origen**: revisión del **fallo 2** del diagnóstico del log de producción
+  («filtrado de caras inválidas»: `❌ Sin geometría`, `❌ Cara INCOMPLETA`,
+  `⚠️ det < 0.14`, `Región dudosa descartada`). El turno anterior (v5.1335)
+  había arreglado los puntos 3-7; este cierra el 2.
+- **Incremento v5.1335 → v5.1336**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### Causa raíz 1 — la salida a consola abortaba la extracción en silencio
+
+- **Síntoma**: `extract_face_images` devolvía 0 caras SIN ningún motivo
+  visible. Con `sys.settrace` se localizó el `return` en la línea del
+  `except Exception:` global que envuelve toda la función.
+- **Causa**: en Windows en español la consola usa **cp1252**, que no puede
+  codificar `❌` (U+274C), `⚠️` (U+26A0 FE0F) ni `→` (U+2192). `print()`
+  lanzaba `UnicodeEncodeError` DENTRO del código, y el `except Exception:`
+  global lo tragaba devolviendo `[]`. Efecto: **en cuanto se imprimía un
+  mensaje de descarte, la foto entera se descartaba y el propio mensaje de
+  error nunca llegaba a verse** (el print que fallaba era justo el que
+  informaba). Medido: `00726.jpg` daba 0 caras en aislamiento y 1 en el
+  lote, según el estado previo (no determinista).
+- **Fix**: `roop/stdio_safety.py` (nuevo) con `ensure_utf8_stdio()`
+  (reconfigura stdout/stderr a UTF-8 con `errors='replace'`) importado por
+  `roop/core.py` y `roop/face_util.py`; el `except Exception:` global de
+  `extract_face_images` ahora **registra siempre** tipo y traceback del
+  error en vez de tragárselo.
+
+### Causa raíz 2 — la verificación independiente era un veto, no un arbitro
+
+- **Síntoma**: `Región dudosa descartada (det=0.21; independent face IoU=0.00)`
+  tiraba la foto entera. Medido sobre 120 archivos reales: era el motivo
+  de rechazo **dominante** (15 de 120 = 12.5 %), por encima de geometría
+  (3) y det bajo (3).
+- **Causa**: MediaPipe es un SEGUNDO detector con sus propios umbrales: que
+  no confirme NO prueba que no haya cara (una cara real con pose difícil,
+  oclusión o poco detalle sale con IoU=0.00). Se usaba como veto.
+- **Fix**: la verificación independiente ya no veta; la cara pasa a la
+  **segunda pasada** (re-detección del crop comparando embeddings), que es
+  el arbitro estructural: la cara debe volver a encontrarse a sí misma.
+  Si la segunda pasada confirma, la cara se rescata; si no, se descarta.
+  El bloque de segunda pasada se extrajo a `_verify_source_face_identity()`
+  (`roop/face_util.py`) para poder reutilizarlo como arbitro.
+
+### Causa raíz 3 — el detector de primer plano no entraba y además pisaba
+
+- **Síntoma**: en `00033.jpg` (768²) la detección directa solo veía un
+  **fragmento** de 152×157px (det 0.12) de una cara que ocupa media foto; el
+  detector de primer plano sí encontraba la cara REAL de 369×585px
+  (det 0.606), pero no entraba: su criterio era un área del **1 %** del
+  frame y el fragmento ocupaba el 4 %.
+- **Causa**: umbral de área demasiado bajo + `faces = _smart_faces`
+  (sustitución) en lugar de unión.
+- **Fix**: el detector de primer plano se activa cuando la detección directa
+  NO es claramente la cara principal (ocupa < 25 % del frame **o** su
+  confianza es < 0.25: una detección débil sobre un retrato grande es
+  típicamente un fragmento). Y sus detecciones se **SUMAN** a las directas,
+  no las sustituyen: sustituir perdía la detección directa buena (en
+  `[002494]_0.jpg`, `02775.jpg` y `03159.jpg` la directa se verificaba con
+  sim 0.90+ y la del primer plano era un fragmento con sim 0.02-0.47 que la
+  segunda pasada rechazaba, dejando la foto sin ninguna cara).
+- **Coste medido**: el detector de primer plano cuesta 0.20 s/imagen con el
+  modelo ya cargado (la detección directa, 0.15 s). Antes ya se activaba en
+  el 75 % de los casos con el umbral del 1 %.
+
+### A/B medido (150 archivos de las 1479 de `D:\PROJECTS\uee\FACES\MARETA`)
+
+| | caras aceptadas | archivos sin cara |
+|---|---|---|
+| v5.1334 (base) | 122 | 28 |
+| v5.1335 (puntos 3-7) | 128 | 22 |
+| + arbitraje de `region_dudosa` | 135 | 15 |
+| + detector de primer plano (unión) | **141** (en 139 archivos) | **11** |
+
+- **19 caras reales recuperadas** (+15.6 %) y archivos sin cara 28 → 11
+  (−61 %). **0 caras perdidas** en el paso final (se detectaron 3
+  regresiones intermedias por la sustitución y se corrigieron con la unión).
+- **Validación visual de las 19 recuperadas, una a una: TODAS son caras
+  reales.** Incluye primer plano sonriente, perfil en ambiente oscuro, cara
+  tumbada, dos caras en una foto de beso, perfil oscuro y primer plano
+  borroso. **0 falsos positivos** introducidos: la segunda pasada sigue
+  rechazando 1 falso positivo persistente por muestra.
+- Rechazos que siguen y son LEGÍTIMOS: `incompleta` (cara cortada por el
+  borde de la foto — el usuario exige caras completas), `geometria` (kps no
+  anatómicos) y `region_dudosa` residual (casos de perfil borroso con
+  det 0.11 que la segunda pasada no puede verificar: sim 0.008-0.246).
+
+### Validación
+
+- `diagnostics/probe_v51335_detection_gates_20261111.py`: 12/12 OK.
+- `diagnostics/probe_faceswap_photo_sharpness.py`: 12/12 OK.
+- `diagnostics/probe_faceswap_align_and_mouth_gate.py`: 9 OK, 0 FAIL.
+- `diagnostics/probe_quality_budget_and_mask.py`: TOTAL FAIL=0.
+- `diagnostics/probe_faceswap_landmark_bbox_guard.py`: todo en verde.
+- `diagnostics/probe_source_bank_loading.py`: 22/24 aceptadas (antes 21/24).
+- Probes nuevos de este turno: `probe_source_reject_reasons_20261112.py`
+  (clasifica el motivo real de cada rechazo), `probe_second_pass_sim_20261112.py`
+  (calibra el sim de la segunda pasada), `probe_source_bank_ab_20261112.py` y
+  `probe_source_bank_perfile_20261112.py` (A/B por archivo).
+- **Fallos preexistentes NO causados por este turno** (verificado con
+  `git stash` que fallan igual sin estos cambios):
+  - `probe_state_independent_20261106.py::test_persistent_residual_skips_quality_finish`
+    (3 != 2) — ya anotado en el turno v5.1335.
+  - `probe_editor_api_contract_20261018.py` — falla en
+    `assert not any(component["type"] == "imageeditor" ...)`; la causa son los
+    cambios SIN commitear de `ui/tabs/img_editor/events.py` de otro turno,
+    no este.
+
 ## 2026-11-12 — FaceSwap: 7 fallos del log de producción reparados (v5.1335)
 
 - **Origen**: revisión a fondo del log de FaceSwap del 2026-11-11 (4 lotes de

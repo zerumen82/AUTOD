@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 # Importaciones basicas
 from roop.capturer import get_image_frame, get_video_frame  # noqa: E402 -- native DLL setup above
 from roop.faceswap_config import get_faceswap_config, landmarks_fit_bbox  # noqa: E402 -- native DLL setup above
+from roop.stdio_safety import ensure_utf8_stdio  # noqa: E402 -- native DLL setup above
+
+# v5.1335: stdout/stderr a UTF-8 ANTES de cualquier print de este módulo.
+# En consola cp1252 un mensaje con ❌/⚠️/→ lanzaba UnicodeEncodeError, y
+# como todo el flujo de extract_face_images está envuelto en un
+# `except Exception` que devuelve [], la foto se descartaba EN SILENCIO.
+ensure_utf8_stdio()
 
 # Variable global simple (sin inicializacion automatica)
 FACE_ANALYSER = None
@@ -513,6 +520,131 @@ def _is_face_complete(face, img_w, img_h, relaxed=False):
         return True  # ante duda no bloquear (la geometría ya filtra)
 
 
+def _verify_source_face_identity(img_bgr, face, source_settings, identity_threshold,
+                                 smart_cache=None, allow_smart=True):
+    """v5.1335 — SEGUNDA PASADA como función reutilizable.
+
+    Re-detecta el crop de la cara (con padding del 50 % y downscale a ~350px)
+    y compara el embedding con el de la detección original. Si el crop vuelve
+    a detectarse como la MISMA cara (sim >= `identity_threshold`), la cara es
+    REAL; si no se re-detecta o detecta otra cosa, es un falso positivo.
+
+    Es el arbitro estructural más fiable del sistema: no depende de la
+    confianza del detector ni de un segundo modelo con sus propios umbrales,
+    sino de que la cara se vuelva a encontrar a sí misma.
+
+    Devuelve (ok, best_sim, detail).
+    """
+    h, w = img_bgr.shape[:2]
+    try:
+        bbox = np.asarray(face.bbox, dtype=np.float32)
+        x1v, y1v, x2v, y2v = [int(max(0, v)) for v in bbox[:4]]
+        _fw_v = float(bbox[2] - bbox[0])
+        _fh_v = float(bbox[3] - bbox[1])
+        if min(_fw_v, _fh_v) < 40:
+            return False, 0.0, "crop demasiado pequeño para re-detectar"
+        emb_orig = getattr(face, 'embedding', None)
+        if emb_orig is None:
+            return False, 0.0, "detección sin embedding"
+        emb_o = np.asarray(emb_orig, dtype=np.float32).flatten()
+        no = np.linalg.norm(emb_o)
+        if no <= 0:
+            return False, 0.0, "embedding nulo"
+        emb_o = emb_o / no
+
+        pad_x = int((x2v - x1v) * 0.5)
+        pad_y = int((y2v - y1v) * 0.5)
+        cx1 = max(0, x1v - pad_x)
+        cy1 = max(0, y1v - pad_y)
+        cx2 = min(w, x2v + pad_x)
+        cy2 = min(h, y2v + pad_y)
+        crop = img_bgr[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
+            return False, 0.0, "crop vacío"
+        face_px = max(x2v - x1v, y2v - y1v)
+        if face_px > 350:
+            scale = 350.0 / face_px
+            crop = cv2.resize(
+                crop,
+                (max(1, int(crop.shape[1] * scale)), max(1, int(crop.shape[0] * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+
+        best_sim = 0.0
+        faces_v = None
+        # 1) Detector principal sobre el crop (BGR nativo y RGB).
+        for cv_img in (crop, cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)):
+            try:
+                faces_v = FACE_ANALYSER.get(cv_img)
+            except Exception:
+                faces_v = None
+            for fv in (faces_v or []):
+                ev = getattr(fv, 'embedding', None)
+                if ev is None:
+                    continue
+                ev = np.asarray(ev, dtype=np.float32).flatten()
+                nv = np.linalg.norm(ev)
+                if nv > 0:
+                    sim = float(np.dot(emb_o, ev / nv))
+                    best_sim = max(best_sim, sim)
+                    if sim >= identity_threshold:
+                        return True, sim, f"Crop confirma identidad (sim={sim:.3f})"
+
+        # 2) El crop puede quedar fuera del alcance de los anchors de 1024:
+        #    confirmar la misma identidad en otra escala del detector.
+        try:
+            for detector_size in source_settings["source_verification_detector_sizes"]:
+                for crop_image in (crop, cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)):
+                    faces_v = _get_faces_at_detector_size(crop_image, FACE_ANALYSER, detector_size)
+                    for verified_face in faces_v:
+                        if not _has_face_geometry(verified_face, max_tilt=45.0):
+                            continue
+                        verified_embedding = getattr(verified_face, 'embedding', None)
+                        if verified_embedding is None:
+                            continue
+                        verified_embedding = np.asarray(
+                            verified_embedding, dtype=np.float32).reshape(-1)
+                        verified_norm = np.linalg.norm(verified_embedding)
+                        if verified_norm > 0 and verified_embedding.size == emb_o.size:
+                            sim = float(np.dot(emb_o, verified_embedding / verified_norm))
+                            best_sim = max(best_sim, sim)
+                            if sim >= identity_threshold:
+                                return True, sim, (
+                                    f"Crop confirma identidad a {detector_size}px (sim={sim:.3f})")
+        except Exception as scale_error:
+            return False, best_sim, f"verificación de escala omitida: {scale_error}"
+
+        # 3) Segunda escala sobre la imagen original: una cara puede
+        #    desaparecer al recortarse (close-ups, expresiones inusuales).
+        if allow_smart:
+            try:
+                if smart_cache is None:
+                    smart_cache = {}
+                if 'faces' not in smart_cache:
+                    from roop.face_util_rotation import get_all_faces_smart
+                    smart_cache['faces'] = get_all_faces_smart(
+                        img_bgr, min_score=0.10, for_target=False, prefer_fast=True,
+                    ) or []
+                from roop.face_util_rotation import _same_face_boxes
+                for alt in (smart_cache['faces'] or []):
+                    alt_emb = getattr(alt, 'embedding', None)
+                    if alt_emb is None or not _same_face_boxes(face.bbox, alt.bbox):
+                        continue
+                    ea = np.asarray(alt_emb, dtype=np.float32).reshape(-1)
+                    ea_norm = np.linalg.norm(ea)
+                    if ea.size == emb_o.size and ea_norm > 0:
+                        alt_sim = float(np.dot(emb_o, ea / ea_norm))
+                        best_sim = max(best_sim, alt_sim)
+                        if alt_sim >= identity_threshold:
+                            return True, alt_sim, f"Segunda escala confirma cara (sim={alt_sim:.3f})"
+            except Exception as smart_exc:
+                return False, best_sim, f"segunda escala omitida: {smart_exc}"
+
+        return False, best_sim, f"el crop no re-detecta la misma cara (sim={best_sim:.3f})"
+    except Exception as error:
+        return False, 0.0, f"verificación interrumpida: {error}"
+
+
 def _get_faces_at_detector_size(image_bgr, analyser, size):
     """Run a configured detector scale without changing shared analyser state."""
     from insightface.app.common import Face as InsightFace
@@ -695,21 +827,68 @@ def extract_face_images(
                 * max(0.0, float(f.bbox[3] - f.bbox[1]))
                 for f in faces if getattr(f, 'bbox', None) is not None
             ), default=0.0)
-            if not faces or _largest_direct_area < 0.01 * w * h:
+            # v5.1335: el criterio de entrada al detector de primer plano era
+            # un área del 1 % del frame. Con eso, un retrato de primer plano
+            # cuyo detector directo solo ve UN FRAGMENTO quedaba bloqueado:
+            # en 00033.jpg (768²) la detección directa era un trozo de
+            # 152x157px (det 0.12) = 4 % del frame → no entraba al detector
+            # de primer plano, que sí encuentra la cara REAL de 369x585px
+            # (det 0.606). La foto se perdía entera.
+            #
+            # Se activa el detector de primer plano cuando la detección
+            # directa NO es claramente la cara principal, con dos señales:
+            #   (a) ocupa menos del 25 % del frame, o
+            #   (b) su confianza es baja (det < 0.25): una detección débil
+            #       sobre un retrato grande es típicamente un fragmento.
+            # La DECISIÓN sigue siendo la misma de siempre: solo se usa el
+            # detector de primer plano si su mejor cara es claramente mayor
+            # que la directa (> 2x, o > 1 % del frame), y la segunda pasada
+            # sigue verificando la identidad de la cara aceptada.
+            _direct_max_det = max((
+                float(getattr(f, 'det_score', 0.0) or 0.0) for f in faces
+            ), default=0.0)
+            _needs_closeup = (
+                not faces
+                or _largest_direct_area < 0.25 * w * h
+                or _direct_max_det < 0.25
+            )
+            _smart_cache = {}
+            if _needs_closeup:
                 try:
                     from roop.face_util_rotation import get_all_faces_smart
                     _smart_faces = get_all_faces_smart(
                         img, min_score=0.10, for_target=False, prefer_fast=True,
                     ) or []
+                    _smart_cache['faces'] = _smart_faces
                     _largest_smart_area = max((
                         max(0.0, float(f.bbox[2] - f.bbox[0]))
                         * max(0.0, float(f.bbox[3] - f.bbox[1]))
                         for f in _smart_faces if getattr(f, 'bbox', None) is not None
                     ), default=0.0)
                     if _smart_faces and (_largest_smart_area > max(_largest_direct_area * 2, 0.01 * w * h)):
-                        faces = _smart_faces
-                        _faces_from_smart_fallback = True
-                        print(f"[SOURCE_DETECT] Recuperadas {len(faces)} cara(s) con detector de primer plano")
+                        # v5.1335: las detecciones del detector de primer plano
+                        # se SUMAN a las directas, NO las sustituyen. Antes
+                        # (`faces = _smart_faces`) se perdía la detección
+                        # directa buena: en [002494]_0.jpg, 02775.jpg y
+                        # 03159.jpg la directa se verificaba bien (sim 0.90+)
+                        # y la del detector de primer plano era un fragmento
+                        # (sim 0.02-0.47) que la segunda pasada rechazaba,
+                        # dejando la foto SIN NINGUNA cara. Con la unión, el
+                        # dedup final se queda con la mejor de cada grupo y
+                        # la segunda pasada verifica todas.
+                        from roop.face_util_rotation import _same_face_boxes
+                        _added = 0
+                        for _sf in _smart_faces:
+                            if any(_same_face_boxes(_sf.bbox, _existing.bbox)
+                                   for _existing in faces):
+                                continue
+                            faces.append(_sf)
+                            _added += 1
+                        print(
+                            f"[SOURCE_DETECT] Detector de primer plano: "
+                            f"{_added} cara(s) añadida(s) a las {_largest_direct_area > 0 and len(faces) - _added or 0} "
+                            f"detección(es) directa(s)"
+                        )
                 except Exception as e:
                     print(f"[SOURCE_DETECT] Detector de primer plano omitido: {e}")
 
@@ -762,6 +941,10 @@ def extract_face_images(
                 # cazador de falsos positivos: un FP con det 0.14-0.22 no supera sim 0.50.
                 _SRC_DET_MIN = 0.14
                 valid_source_faces = []
+                # v5.1335: caras que la verificación independiente no confirmó.
+                # Pasan a la segunda pasada (arbitro estructural) en vez de
+                # descartarse.
+                _doubt_faces = []
                 # v5.1334: copia PRE-filtro para el residual de alta confianza.
                 # Si el filtro acaba vaciando la lista, se recuperan las caras
                 # con det>=0.50 y geometría válida que solo fallaron en
@@ -812,7 +995,22 @@ def extract_face_images(
                         from roop.source_face_validator import confirm_source_region
                         confirmed, detail = confirm_source_region(img, f)
                         if not confirmed:
-                            print(f"[SOURCE_DETECT] Región dudosa descartada (det={det:.2f}; {detail})")
+                            # v5.1335: la verificación independiente (MediaPipe)
+                            # es un SEGUNDO detector con sus propios umbrales:
+                            # que no confirme NO prueba que no haya cara
+                            # (una cara real con pose difícil, oclusión o poco
+                            # detalle sale con IoU=0.00). Antes esto era un veto
+                            # y tiraba la foto entera: era el motivo de
+                            # rechazo DOMINANTE (15 de 120 archivos reales
+                            # medidos). Ahora la cara pasa a la verificación de
+                            # segunda pasada —el arbitro estructural, que
+                            # comprueba que la cara se vuelve a encontrar a sí
+                            # misma— y solo se descarta si tampoco se confirma.
+                            print(
+                                f"[SOURCE_DETECT] Región dudosa (det={det:.2f}; {detail}) "
+                                f"→ segunda pasada"
+                            )
+                            _doubt_faces.append(f)
                             continue
                     valid_source_faces.append(f)
                 # v5.1153 — VERIFICACIÓN DE SEGUNDA PASADA: los gates previos (det+geometría+
@@ -826,145 +1024,54 @@ def extract_face_images(
                 # siguen mandando los gates previos).
                 try:
                     _verified = []
-                    _smart_verify_faces = None
-                    for _f in valid_source_faces:
+                    _smart_verify_cache = {}
+                    # v5.1335: la segunda pasada verifica TANTO las caras ya
+                    # aceptadas por los gates previos COMO las que la
+                    # verificación independiente no confirmó (las dudosas).
+                    # Una dudosa que la segunda pasada confirma es una cara
+                    # REAL y se rescata; una dudosa que tampoco se confirma
+                    # se descarta como hasta ahora.
+                    _verify_queue = [(f, False) for f in valid_source_faces]
+                    _verify_queue += [(f, True) for f in _doubt_faces]
+                    for _f, _was_doubt in _verify_queue:
                         _fw_v = _f.bbox[2] - _f.bbox[0]
                         _fh_v = _f.bbox[3] - _f.bbox[1]
                         if min(_fw_v, _fh_v) < 40:
-                            _verified.append(_f)
+                            # Un re-detect en crops diminutos no es fiable: ahí
+                            # siguen mandando los gates previos.
+                            if not _was_doubt:
+                                _verified.append(_f)
                             continue
                         _x1v, _y1v, _x2v, _y2v = [int(max(0, v)) for v in _f.bbox]
-                        # v5.1153b — 2 bugs de la v5.1153 corregidos (causa del 740->0):
-                        # (1) el bbox apretado hace que la cara LLENE el crop — RetinaFace tiene
-                        #     techo de anchor ~512px (v5.1139 FIX 2) y una cara de 900-2000px en
-                        #     su propio crop es INVISIBLE → n_faces_crop=0 → rechazo en cadena.
-                        #     FIX: padding 50% alrededor del bbox + downscale para que la cara
-                        #     quede en ~350px (zona de detección segura del detector).
-                        # (2) crop en RGB mientras el recognizer corre en BGR → embeddings con
-                        #     canales cambiados. FIX: crop BGR nativo + fallback RGB.
-                        _pad_x = int((_x2v - _x1v) * 0.5)
-                        _pad_y = int((_y2v - _y1v) * 0.5)
-                        _cx1 = max(0, _x1v - _pad_x)
-                        _cy1 = max(0, _y1v - _pad_y)
-                        _cx2 = min(w, _x2v + _pad_x)
-                        _cy2 = min(h, _y2v + _pad_y)
-                        _crop_v = img[_cy1:_cy2, _cx1:_cx2]  # img es BGR aquí
-                        if _crop_v.size == 0:
-                            continue
-                        _face_px_v = max(_x2v - _x1v, _y2v - _y1v)
-                        if _face_px_v > 350:
-                            _scale_v = 350.0 / _face_px_v
-                            _crop_v = cv2.resize(
-                                _crop_v,
-                                (max(1, int(_crop_v.shape[1] * _scale_v)), max(1, int(_crop_v.shape[0] * _scale_v))),
-                                interpolation=cv2.INTER_AREA,
-                            )
-                        _faces_v = None
-                        _emb_orig = getattr(_f, 'embedding', None)
-                        _best_sim_v = 0.0
-                        _ok_v = False
-                        if _emb_orig is not None:
-                            _emb_o = np.asarray(_emb_orig, dtype=np.float32).flatten()
-                            _no = np.linalg.norm(_emb_o)
-                            if _no > 0:
-                                _emb_o = _emb_o / _no
-                                # Una detección cualquiera en BGR no demuestra
-                                # que el color corresponda al embedding de la
-                                # detección original (obtenida en RGB). Probar
-                                # ambos y aceptar solo la misma identidad.
-                                for _cv in (_crop_v, cv2.cvtColor(_crop_v, cv2.COLOR_BGR2RGB)):
-                                    try:
-                                        _faces_v = FACE_ANALYSER.get(_cv)
-                                    except Exception:
-                                        _faces_v = None
-                                    for _fv in (_faces_v or []):
-                                        _ev = getattr(_fv, 'embedding', None)
-                                        if _ev is None:
-                                            continue
-                                        _ev = np.asarray(_ev, dtype=np.float32).flatten()
-                                        _nv = np.linalg.norm(_ev)
-                                        if _nv > 0:
-                                            _sim_v = float(np.dot(_emb_o, _ev / _nv))
-                                            _best_sim_v = max(_best_sim_v, _sim_v)
-                                            if _sim_v >= source_identity_threshold:
-                                                _ok_v = True
-                                                break
-                                    if _ok_v:
-                                        break
-                        if not _ok_v and _emb_orig is not None:
-                            # The 1024 anchors can miss even a padded crop.
-                            # Confirm the same identity on that crop at the
-                            # configured scales, without rotated deduplication.
-                            try:
-                                for detector_size in source_settings["source_verification_detector_sizes"]:
-                                    for crop_image in (_crop_v, cv2.cvtColor(_crop_v, cv2.COLOR_BGR2RGB)):
-                                        _faces_v = _get_faces_at_detector_size(crop_image, FACE_ANALYSER, detector_size)
-                                        for verified_face in _faces_v:
-                                            if not _has_face_geometry(verified_face, max_tilt=45.0):
-                                                continue
-                                            verified_embedding = getattr(verified_face, 'embedding', None)
-                                            if verified_embedding is None:
-                                                continue
-                                            verified_embedding = np.asarray(verified_embedding, dtype=np.float32).reshape(-1)
-                                            verified_norm = np.linalg.norm(verified_embedding)
-                                            if verified_norm > 0 and verified_embedding.size == _emb_o.size:
-                                                verified_similarity = float(np.dot(_emb_o, verified_embedding / verified_norm))
-                                                _best_sim_v = max(_best_sim_v, verified_similarity)
-                                                if verified_similarity >= source_identity_threshold:
-                                                    _ok_v = True
-                                                    print(f"[SOURCE_DETECT] Crop confirma identidad a {detector_size}px (sim={verified_similarity:.3f})")
-                                                    break
-                                        if _ok_v:
-                                            break
-                                    if _ok_v:
-                                        break
-                            except Exception as scale_error:
-                                print(f"[SOURCE_DETECT] Verificación de escala omitida: {scale_error}")
-                        if not _ok_v and _emb_orig is not None and not _faces_from_smart_fallback:
-                            # A face can disappear when cropped even with
-                            # padding (closeups and unusual expressions).
-                            # Confirm it at another detector scale in the
-                            # original image before rejecting the embedding.
-                            if _smart_verify_faces is None:
-                                try:
-                                    from roop.face_util_rotation import get_all_faces_smart
-                                    _smart_verify_faces = get_all_faces_smart(
-                                        img, min_score=0.10, for_target=False,
-                                        prefer_fast=True,
-                                    ) or []
-                                except Exception as _smart_exc:
-                                    _smart_verify_faces = []
-                                    print(f"[SOURCE_DETECT] Segunda escala omitida: {_smart_exc}")
-                            from roop.face_util_rotation import _same_face_boxes
-                            _eo = np.asarray(_emb_orig, dtype=np.float32).reshape(-1)
-                            _eo_norm = np.linalg.norm(_eo)
-                            if _eo_norm > 0:
-                                for _alt in _smart_verify_faces:
-                                    _alt_emb = getattr(_alt, 'embedding', None)
-                                    if _alt_emb is None or not _same_face_boxes(_f.bbox, _alt.bbox):
-                                        continue
-                                    _ea = np.asarray(_alt_emb, dtype=np.float32).reshape(-1)
-                                    _ea_norm = np.linalg.norm(_ea)
-                                    if _ea.size == _eo.size and _ea_norm > 0:
-                                        _alt_sim = float(np.dot(_eo / _eo_norm, _ea / _ea_norm))
-                                        _best_sim_v = max(_best_sim_v, _alt_sim)
-                                        if _alt_sim >= source_identity_threshold:
-                                            _ok_v = True
-                                            print(
-                                                f"[SOURCE_DETECT] Segunda escala confirma cara "
-                                                f"(sim={_alt_sim:.3f})",
-                                                flush=True,
-                                            )
-                                            break
+                        _ok_v, _best_sim_v, _detail_v = _verify_source_face_identity(
+                            img, _f, source_settings, source_identity_threshold,
+                            smart_cache=_smart_cache or _smart_verify_cache,
+                            allow_smart=True,
+                        )
                         if _ok_v:
+                            print(f"[SOURCE_DETECT] {_detail_v}")
+                            if _was_doubt:
+                                print(
+                                    f"[SOURCE_DETECT] Cara dudosa RESCATADA por la segunda "
+                                    f"pasada: det={float(getattr(_f, 'det_score', 0.0) or 0.0):.2f} "
+                                    f"sim={_best_sim_v:.3f}", flush=True,
+                                )
                             _verified.append(_f)
                         else:
-                            print(
-                                f"[SOURCE_DETECT] ❌ Segunda pasada: el crop NO re-detecta la misma "
-                                f"cara (falso positivo persistente) bbox=({_x1v},{_y1v},{_x2v},{_y2v}) "
-                                f"det={float(getattr(_f, 'det_score', 0.0) or 0.0):.2f} "
-                                f"sim={_best_sim_v:.3f} n_faces_crop={len(_faces_v) if _faces_v else 0}. Omitiendo."
-                            )
+                            if _was_doubt:
+                                print(
+                                    f"[SOURCE_DETECT] ❌ Región dudosa descartada: la segunda "
+                                    f"pasada tampoco confirma la cara bbox=({_x1v},{_y1v},"
+                                    f"{_x2v},{_y2v}) det={float(getattr(_f, 'det_score', 0.0) or 0.0):.2f} "
+                                    f"sim={_best_sim_v:.3f}. Omitiendo.", flush=True,
+                                )
+                            else:
+                                print(
+                                    f"[SOURCE_DETECT] ❌ Segunda pasada: el crop NO re-detecta la misma "
+                                    f"cara (falso positivo persistente) bbox=({_x1v},{_y1v},{_x2v},{_y2v}) "
+                                    f"det={float(getattr(_f, 'det_score', 0.0) or 0.0):.2f} "
+                                    f"sim={_best_sim_v:.3f}. Omitiendo."
+                                )
                     valid_source_faces = _verified
                 except Exception as _e_verify:
                     valid_source_faces = _verified
@@ -1355,6 +1462,30 @@ def extract_face_images(
         return results
     
 
-    except Exception:
+    except Exception as _global_error:
+        # v5.1335: este except traga ANTES cualquier error (incluido un
+        # UnicodeEncodeError al imprimir un emoji en una consola cp1252) y
+        # devuelve [] en silencio: la foto se perdía sin dejar rastro. Ahora
+        # el error se REGISTRA siempre, con tipo y traceback, para que un
+        # descarte nunca sea invisible.
+        _error_type = type(_global_error).__name__
+        _error_msg = str(_global_error)
+        try:
+            print(
+                f"[SOURCE_DETECT] ❌ Error inesperado al extraer caras de "
+                f"{os.path.basename(str(image_path))}: {_error_type}: {_error_msg}",
+                flush=True,
+            )
+            import traceback as _traceback_mod
+            _traceback_mod.print_exc()
+        except Exception:
+            # Si ni siquiera el log sale, se deja constancia mínima.
+            try:
+                with open(os.path.join("logs", "face_extract_errors.log"), "a",
+                          encoding="utf-8", errors="replace") as _err_file:
+                    _err_file.write(
+                        f"{image_path}\t{_error_type}\t{_error_msg}\n")
+            except Exception:
+                pass
         _cache_put(CACHE_RESULTS, cache_key, [])
         return []
