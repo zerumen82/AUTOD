@@ -5336,11 +5336,34 @@ class ProcessMgr:
                         _eye_sep = float(np.linalg.norm(_kps_arr[1] - _kps_arr[0]))
                         _mouth_sep = float(np.linalg.norm(_kps_arr[4] - _kps_arr[3]))
                         _eye_rel = _eye_sep / _bw
-                        if _eye_rel < 0.05 or _eye_rel > 1.20:
+                        # v5.1339: el piso de eye_rel medía la separación
+                        # ocular RELATIVA al ancho del bbox, y en un PERFIL de
+                        # canto los dos ojos están casi superpuestos: esa
+                        # relación baja legítimamente a 0.02-0.16. El gate
+                        # rechazaba así perfiles REALES y la foto salía SIN
+                        # SWAP (medido 2026-11-12 en el lote del usuario:
+                        # 130947468 eye_rel 0.043, 184262585 0.040,
+                        # 57702125_010 0.022, 57723678 0.076 — los cuatro
+                        # revisados visualmente son perfiles de canto
+                        # legítimos).
+                        #
+                        # Lo que el gate quiere detectar NO es un perfil, sino
+                        # kps DEGENERADOS (todos los puntos casi en el mismo
+                        # sitio): en ese caso el span VERTICAL de los kps es
+                        # diminuto. Ese span no depende del yaw: la estructura
+                        # vertical del rostro (ojos → nariz → boca) se mantiene
+                        # en frontal y en perfil. Medido en los 7 perfiles
+                        # reales: vspan 0.26-0.46; con kps colapsados cae a
+                        # ~0.0-0.1.
+                        _bh = max(1.0, float(_bb_chk[3] - _bb_chk[1]))
+                        _vspan = float(_kps_arr[:, 1].max() - _kps_arr[:, 1].min()) / _bh
+                        _geometry_coherent = _vspan >= 0.22
+                        _eye_too_small = _eye_rel < 0.05 and not _geometry_coherent
+                        if _eye_too_small or _eye_rel > 1.20:
                             print(
                                 f"[ALIGN_REJECT] Frame {call_num}: kps incoherentes con bbox "
                                 f"(eye_dist/bbox_w={_eye_rel:.3f}, mouth_dist/bbox_w={_mouth_sep/_bw:.3f}, "
-                                f"bbox={_bb_chk.tolist()}) — sin swap; usar refs guardadas",
+                                f"vspan={_vspan:.3f}, bbox={_bb_chk.tolist()}) — sin swap; usar refs guardadas",
                                 flush=True,
                             )
                             # v5.1319: en vídeo, reusa el último kps sano de la

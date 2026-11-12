@@ -1,5 +1,56 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — FaceSwap: el gate de alineación rechazaba perfiles reales (v5.1339)
+
+- **Origen**: revisión de los logs de las últimas ejecuciones de FaceSwap del
+  usuario (`logs/process_20261112_015859.log` y `process_20261112_013836.log`).
+- **Incremento v5.1338 → v5.1339**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### El fallo
+
+- El último lote terminó con **6 fotos SIN SWAP** de ~50 (la salida es
+  idéntica al original) y 4 `SKIP: ninguna cara destino inequívoca`.
+  Dos de las seis eran `ALIGN_REJECT ... kps incoherentes con bbox
+  (eye_dist/bbox_w=0.043 / 0.040 / 0.022 ...)`.
+- **Causa raíz**: el gate de coherencia kps↔bbox (v5.1202) rechazaba cuando
+  `eye_dist/bbox_w < 0.05`. Pero esa relación **depende del yaw**: en un
+  PERFIL de canto los dos ojos están casi superpuestos y baja legítimamente
+  a 0.02-0.16. El gate no distinguía «perfil» de «kps degenerados».
+- Se recuperaron las 7 fotos y se revisaron VISUALMENTE una a una: **las 7
+  son perfiles de canto legítimos** (130947468, 1433050727, 1737120905,
+  184262585, 57702125_010_34db, 57723678, 868219247). Los cuatro rechazos por
+  el gate eran caras reales.
+
+### El fix
+
+- **Fix** (`roop/ProcessMgr.py`): el piso de `eye_rel` solo se aplica si la
+  geometría vertical es INCOHERENTE. La nueva medida es el **span vertical de
+  los kps** (`vspan = (max_y - min_y) / altura_bbox`), que **no depende del
+  yaw**: la estructura ojos → nariz → boca se mantiene en frontal y en perfil.
+  Medido en los 7 perfiles reales: vspan 0.26-0.46; con los kps colapsados
+  (el caso que el gate quería cazar, log 1994859933.jpg) cae a ~0.
+  - `vspan >= 0.22` → geometría coherente → el piso de `eye_rel` NO se aplica.
+  - `vspan < 0.22` → kps degenerados → se rechaza igual que antes.
+  - El techo (`eye_rel > 1.20`) se mantiene siempre.
+- El log del rechazo ahora incluye el `vspan` para poder diagnosticar.
+- **Resultado medido**: las 7 fotos que salían SIN SWAP ahora **hacen swap**
+  (`diagnostics/probe_v51339_profile_align_gate_20261112.py`, 8/8 con swap y
+  sin ALIGN_REJECT).
+- **Contrato del proyecto intacto**:
+  `probe_faceswap_align_and_mouth_gate.py` 9 OK / 0 FAIL, incluido
+  «Frame 1 rechazado (eye_rel=0.028, antes pasaba con warp 1.6x)» — el caso
+  degenerado sigue rechazándose porque su vspan es bajo.
+
+### Lo que NO se ha tocado (y por qué)
+
+- Los 4 `SKIP: ninguna cara destino inequívoca` son otro problema: la foto
+  no tiene referencia guardada por archivo y el mejor match de identidad entre
+  los 43 destinos de la UI y las caras de la foto se queda en sim 0.198-0.234
+  (por debajo de 0.28). Preferir no swappear antes que swappear la cara
+  equivocada es la conducta correcta; queda anotado como pendiente de
+  revisar la trazabilidad de la selección en la UI.
+
 ## 2026-11-12 — FaceSwap: el gate de objeto oral pegaba bocas falsas (v5.1338)
 
 - **Origen**: el usuario probó FaceSwap con 698 caras de origen y 113
