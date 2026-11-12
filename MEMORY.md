@@ -1,5 +1,48 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — Animate: el render de LTX-2 con audio nativo verificado (v5.1342)
+
+- **Origen**: cierre de la revisión de la pestaña Animate. El render real
+  falló dos veces; la causa estaba en el entorno de la prueba, no en la app
+  (ver abajo).
+- **Incremento v5.1341 → v5.1342**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### Render real verificado
+
+- `diagnostics/real_animate_ltx2_audio_20261110.py` con LTX-2 destilado Q4 y
+  audio nativo, 25 fotogramas, sobre una foto real del usuario:
+  - **MP4 generado**: `diagnostics/out/ltx2_audio_20261110/result.mp4`
+    (0.4 MB) en **406 s** (6 min 46 s).
+  - **Vídeo**: H.264 (High), 960×544, 25 fps, 1.0 s.
+  - **Audio**: **pista presente** — AAC (LC), 24 000 Hz, estéreo, 121 kb/s.
+  - **Movimiento real**: los frames extraídos (0, 12, 24) son distintos
+    (el encuadre avanza y la cabeza gira).
+  - **Recursos**: pico de VRAM **7282 MB / 8192 MB (89 %)** y pico de RAM de
+    ComfyUI **28.0 GB / 32.7 GB (86 %)**.
+- El contenido del audio no se ha evaluado (solo se comprueba que la pista
+  existe y es decodificable).
+
+### Por qué fallaban los renders anteriores
+
+- **`[Errno 22] Invalid argument` en el nodo 19 (`SamplerCustomAdvanced`)**:
+  el traceback completo apuntaba a la barra de progreso de **tqdm** escribiendo
+  en el stdout de ComfyUI (`comfy/app/logger.py` → `fp.write`). Era un
+  artefacto del entorno de prueba (el pipe de salida de ComfyUI estaba
+  cerrado), no un fallo de la app ni del modelo. Relanzado con la salida a
+  fichero, el render fue bien.
+- **Timeout del cliente**: `diagnostics/real_animate_ltx2_audio_20261110.py`
+  abortaba el render entero si una consulta `/history` expiraba a los 30 s,
+  sin reintento (la ruta de producción `roop/animate/ltx2_audio.py` ya
+  reintentaba). Corregido.
+
+### Advertencia de recursos (para el usuario)
+
+- El preset de la UI son **97 fotogramas** (1280×704). Con los 25 fotogramas
+  medidos (960×544) el pico fue del 89 % de VRAM y del 86 % de RAM; a 97
+  fotogramas y 1280×704 el margen es mucho menor y el tiempo escala a ~26 min.
+  En una RTX de 8 GB conviene usar 25-49 fotogramas.
+
 ## 2026-11-12 — FaceSwap: un único criterio de geometría para los perfiles (v5.1341)
 
 - **Origen**: pregunta del usuario («¿eso de los perfiles no puede arreglarse?»)
