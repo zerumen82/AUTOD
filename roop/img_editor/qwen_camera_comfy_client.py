@@ -1,5 +1,6 @@
 """Image-to-image camera changes with Qwen Image Edit 2511 and the angle LoRA."""
 
+import hashlib
 import io
 import os
 import re
@@ -79,8 +80,22 @@ def camera_pose(raw_prompt: str, translated_prompt: str = ""):
             # Un encuadre solo de altura mantiene el frente (previa).
             azimuth = "front view"
         else:
-            # Genérico sin medida: movimiento visible (default diseñado).
-            azimuth = "front-right quarter view"
+            # Genérico sin medida: variar azimut determinísticamente por prompt
+            # para que "cambia el ángulo" produzca poses distintas.
+            azimuth_options = [
+                "front view",
+                "front-right quarter view",
+                "right side view",
+                "back-right quarter view",
+                "back view",
+                "back-left quarter view",
+                "left side view",
+                "front-left quarter view",
+            ]
+            # Hash determinístico del prompt crudo para elegir azimut
+            prompt_hash = hashlib.md5(raw_prompt.encode("utf-8")).hexdigest()
+            idx = int(prompt_hash, 16) % len(azimuth_options)
+            azimuth = azimuth_options[idx]
     if el_score < signal:
         elevation = ("eye-level shot" if azimuth != "front-right quarter view"
                      else "elevated shot")

@@ -537,7 +537,7 @@ def on_quality_estimate(image, tier):
     """Resolución efectiva que puede alcanzar el Modo Calidad, sin ejecutarlo."""
     try:
         if image is None:
-            return ""
+            return "⏳ Cargando imagen…"
         img = normalize_image(image)
         if img is None:
             return ""
@@ -545,13 +545,26 @@ def on_quality_estimate(image, tier):
 
         effective, note = limit_quality_tier(img, (tier or "hd").lower())
         target = {"hd": "HD 1920", "4k": "4K 3840", "8k": "8K 7680"}[effective]
+        # Calcular factor de escala
+        max_side = max(img.size)
+        scale_factor = None
+        if effective == "hd":
+            scale_factor = 1920 / max_side if max_side > 1920 else 1.0
+        elif effective == "4k":
+            scale_factor = 3840 / max_side if max_side > 3840 else 1.0
+        elif effective == "8k":
+            scale_factor = 7680 / max_side if max_side > 7680 else 1.0
+        scale_text = ""
+        if scale_factor and scale_factor > 1.0:
+            scale_text = f"×{scale_factor:.1f} escala"
         text = (
-            f"Resultado máximo previsto: **{target} px** de lado mayor "
-            f"(parte de {img.size[0]}×{img.size[1]})."
+            f"📊 **Resultado máximo previsto: {target} px** (lado mayor)  \n"
+            f"📷 Fuente: {img.size[0]}×{img.size[1]} px  \n"
+            f"🔧 Escalado: {scale_text}" if scale_text else f"📷 Fuente: {img.size[0]}×{img.size[1]} px"
         )
         if note:
-            text += f" Tope aplicado: {note}."
-        text += " Ampliar no inventa detalle."
+            text += f"  \n⚠️ Tope aplicado: {note}"
+        text += "  \n⚡ Ampliar no inventa detalle."
         return text
     except Exception as exc:
         print(f"[ImgEditor] Estimación de calidad no disponible: {exc}", flush=True)
