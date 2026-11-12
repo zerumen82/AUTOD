@@ -253,7 +253,13 @@ def desktop_forwards_clean_selection():
 
     def generate(**kwargs):
         calls.append(kwargs)
-        return kwargs["image"], "CPU inference", None
+        # v5.1336: el motor debe devolver un CAMBIO REAL. Desde v5.1327 una
+        # iteración sin un solo píxel modificado no se guarda (no se escribe
+        # una copia idéntica de la foto) y se informa «Edición sin cambios».
+        # El mock devolvía la foto intacta, así que el probe medía un
+        # contrato que ya no existe.
+        altered = Image.fromarray(255 - np.asarray(kwargs["image"]))
+        return altered, "CPU inference", None
 
     manager = SimpleNamespace(generate_intelligent=generate,
                               _last_instruction_compliance=None,
@@ -296,7 +302,11 @@ def painted_mask_keeps_prompt_and_limits_region():
 
     def generate(**kwargs):
         calls.append(kwargs)
-        return kwargs["image"], "CPU inference", None
+        # v5.1336: ver la nota en desktop_forwards_clean_selection: el motor
+        # debe devolver un cambio real (desde v5.1327 una iteración sin
+        # píxeles modificados no se guarda).
+        altered = Image.fromarray(255 - np.asarray(kwargs["image"]))
+        return altered, "CPU inference", None
 
     manager = SimpleNamespace(generate_intelligent=generate,
                               _last_instruction_compliance=None,

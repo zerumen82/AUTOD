@@ -26,14 +26,20 @@ def main():
     assert isinstance(ui["input_img"], gr.Image)
     config = app.get_config_file()
     components = {component["id"]: component for component in config["components"]}
-    assert not any(component["type"] == "imageeditor" for component in components.values())
+    # v5.1336: el aserto original exigía que la UI NO tuviera un componente
+    # "imageeditor" (el contrato de cuando la UI pintaba las máscaras en un
+    # lienzo propio). Hoy la UI usa el ImageEditor NATIVO de Gradio
+    # (`gr.ImageEditor`, con fallback si la versión no lo trae), que es el
+    # editor de máscara del propio framework: la máscara la pinta el usuario
+    # sobre la foto. El contrato vigente es que ese componente EXISTE.
+    assert any(component["type"] == "imageeditor" for component in components.values())
     endpoints = {dependency["api_name"]: dependency
                  for dependency in config["dependencies"]}
     for name, count in (("edit", 8), ("edit_options", 9), ("edit_select", 13)):
         endpoint = endpoints[name]
         assert len(endpoint["inputs"]) == count, endpoint
         assert components[endpoint["inputs"][0]]["type"] == "image", name
-    print("PASS: entrada Image sin lienzo de máscaras; contratos 13/9/8 intactos")
+    print("PASS: entrada Image con ImageEditor nativo; contratos 13/9/8 intactos")
 
     pixels = np.random.default_rng(18).integers(0, 256, (32, 48, 3), dtype=np.uint8)
     source = Image.fromarray(pixels)
@@ -45,7 +51,13 @@ def main():
 
     def generate(**kwargs):
         received.append(kwargs)
-        return kwargs["image"], "OK", None
+        # v5.1336: el motor debe devolver un CAMBIO REAL. Desde v5.1327 una
+        # iteración sin un solo píxel modificado no se guarda (no se escribe
+        # una copia idéntica de la foto) y se informa «Edición sin cambios».
+        # El mock devolvía la foto intacta, así que el probe medía un
+        # contrato que ya no existe.
+        altered = Image.fromarray(255 - np.asarray(kwargs["image"]))
+        return altered, "OK", None
 
     manager = SimpleNamespace(generate_intelligent=generate,
                               _last_instruction_compliance=None,

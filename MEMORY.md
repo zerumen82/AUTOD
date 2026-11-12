@@ -1,5 +1,75 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — Image Editor: el 2º reintento de residual era una llamada duplicada (v5.1337)
+
+- **Origen**: cierre de las deudas que quedaban rojas tras v5.1336. El usuario
+  pidió «arregla lo que falte» sobre tres probes que fallaban.
+- **Incremento v5.1336 → v5.1337**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### El bug real: una iteración de GPU idéntica
+
+- **Síntoma**: `probe_state_independent_20261106.py::test_persistent_residual_skips_quality_finish`
+  fallaba con `3 != 2` (3 llamadas al motor donde se esperaban 2).
+- **Causa raíz** (`roop/img_editor/selected_region_edit.py`): el **segundo
+  reintento** de residual comparaba su zona con la zona ORIGINAL (`zone`), no
+  con la zona ya ampliada del primer reintento. El radio efectivo es
+  `max(residual_retry_min_radius_pixels, span * factor)`, así que con la zona
+  pequeña (`span` 10 px) el mínimo de 8 px domina y dos factores distintos
+  (0.35 y 0.70) producen EXACTAMENTE la misma máscara. Medido: 3 llamadas con
+  las máscaras **100 → 600 → 600 px**: la tercera era una copia de la segunda,
+  una iteración de GPU gastada sin ninguna posibilidad de progreso.
+- **Verificado que es preexistente**: con un worktree en `a55acbe` (donde se
+  añadieron a la vez el segundo reintento y el probe) el probe ya fallaba con
+  `3 != 2`. No es una regresión de v5.1336.
+- **Fix**: el segundo reintento compara su zona con la del **primer** reintento
+  (`expanded`), no con la original. Si no queda margen real dentro del
+  soporte medido, no se llama: se ahorra la iteración en vez de repetirla.
+  Con zonas grandes el segundo reintento sí aporta (usa
+  `residual_retry_growth_fraction_2`, que estaba en el config sin usarse).
+  Además `_expand_zone_within_support` ya no valida `grow_frac` dos veces con
+  nombres distintos ni calcula un `growth2` que se descartaba.
+- **Resultado**: `probe_state_independent_20261106.py` 7/7 OK y
+  `probe_editor_residual_policy_20261106.py` 9/9 OK. El bug está ARREGLADO,
+  no oculto: el probe sigue exigiendo el mismo contrato.
+
+### Dos probes con contrato obsoleto (no eran bugs de la app)
+
+- `probe_editor_api_contract_20261018.py` fallaba en
+  `assert not any(component["type"] == "imageeditor" ...)`. Ese aserto era el
+  contrato de cuando la UI pintaba las máscaras en un lienzo propio; hoy la UI
+  usa el **ImageEditor nativo de Gradio** (`gr.ImageEditor`, con fallback si
+  la versión no lo trae), que es el editor de máscara del framework. El
+  aserto se invierte: el contrato vigente es que ese componente EXISTE.
+  Verificado que el resto del probe (transferencia PNG sin pérdida, Kontext
+  recibe la foto original sin máscara manual, contratos 13/9/8) sigue verde.
+- `probe_editor_selection_ui_contract_20261019.py` fallaba en 2 tests con
+  «Edición sin cambios: CPU inference (no se guardó copia)». Desde **v5.1327**
+  una iteración sin un solo píxel modificado **no** se guarda (no se escribe
+  una copia idéntica de la foto): decisión del usuario del 2026-11-10 01:01,
+  ya documentada. Los mocks de los probes devolvían la foto intacta, así que
+  medían un contrato que ya no existe; ahora devuelven un cambio real.
+  Resultado: **17/17 PASS** (antes 15/17).
+
+### Trabajo pendiente de otra sesión, recuperado y committeado
+
+- `ui/tabs/img_editor/events.py`: el texto de la estimación de calidad pasa a
+  un formato con la fuente, el factor de escalado y los topes aplicados.
+- `roop/img_editor/qwen_camera_comfy_client.py`: sin medida de cámara, el
+  azimut se elige de forma determinista por hash del prompt en lugar de
+  fijar siempre «front-right quarter view», para que dos peticiones de
+  «cambia el ángulo» den poses distintas.
+- Verificado con `probe_editor_quality_fixes_20261111.py` (PASS, 0 fallos),
+  `probe_editor_camera_caps_20261110.py` (TOTAL FAIL=0) y
+  `probe_editor_versatility_integrity_20261105.py` (exit 0).
+
+### Pendiente
+
+- `diagnostics/probe_suite_barrido.py` (nuevo): barre todos los probes del
+  repo en procesos limpios con timeout y lista los que fallan. Se añadió para
+  tener el estado REAL de la suite de una vez; el barrido completo se
+  interrumpió por un reinicio del servidor y queda pendiente de ejecutarse.
+
 ## 2026-11-12 — FaceSwap fallo 2: el filtro de origen descartaba caras reales (v5.1336)
 
 - **Origen**: revisión del **fallo 2** del diagnóstico del log de producción

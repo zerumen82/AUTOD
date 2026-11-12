@@ -492,13 +492,18 @@ def _expand_zone_within_support(zone, support, grow_frac=None):
     clothing segmenter locates the garments of the photo and they are
     intersected with the measured selection. Returns None when the garments
     cannot be located, so the caller falls back to the measured support.
+
+    v5.1336: `grow_frac` es el factor de crecimiento REAL (antes se pasaba
+    por dos validaciones con nombres distintos y `growth2` se calculaba sin
+    usarse nunca). El radio efectivo es `max(minimum_radius, span*factor)`:
+    con una zona pequeña el `minimum_radius` domina y dos factores
+    distintos producen la MISMA máscara.
     """
     import cv2
 
     threshold, growth, growth2, minimum_radius = _residual_policy()
     if grow_frac is not None:
         growth = _residual_fraction(grow_frac, "residual_retry_growth_fraction")
-        growth2 = _residual_fraction(grow_frac, "residual_retry_growth_fraction_2")
     z = np.asarray(zone, dtype=bool)
     if support is None:
         s = np.ones_like(z, dtype=bool)
@@ -2602,17 +2607,32 @@ def edit_described_subject(
                     result, note = result2, note2
                     effective = Image.fromarray(expanded.astype(np.uint8) * 255, "L")
         # Segundo reintento con zona aún más amplia dentro del soporte medido.
+        # v5.1336: este reintento se comparaba con `zone` (la zona ORIGINAL),
+        # así que se disparaba aunque produjera EXACTAMENTE la misma máscara
+        # que el primer reintento: una tercera llamada idéntica a la segunda,
+        # gastando una iteración de GPU sin ninguna posibilidad de progreso
+        # (medido: 3 llamadas con las máscaras 100 → 600 → 600 px). El radio
+        # efectivo lo fija `residual_retry_min_radius_pixels` cuando la zona
+        # es pequeña (`max(minimum_radius, span*factor)`), así que dos
+        # factores distintos dan la misma zona.
+        # Ahora se compara con la zona del PRIMER reintento: si no hay
+        # margen real dentro del soporte medido, no se llama (se ahorra la
+        # iteración en vez de repetirla). Con zonas grandes el segundo
+        # reintento sí aporta (factor `residual_retry_growth_fraction_2`).
         if (
             target_query
             and _note_reports_residual_failure(note)
             and not (cancel_check and cancel_check())
         ):
-            expanded2 = _expand_zone_within_support(zone, compose_support, grow_frac=get_config()["instruction_scope"]["region_growth_fraction"])
-            grew2 = int(expanded2.sum()) > int(np.asarray(zone, dtype=bool).sum())
+            _growth_2 = _residual_policy()[2]
+            expanded2 = _expand_zone_within_support(
+                zone, compose_support, grow_frac=_growth_2,
+            )
+            grew2 = int(expanded2.sum()) > int(np.asarray(expanded, dtype=bool).sum())
             if grew2:
                 print(
                     "[ImgEditor] Objetivo residual: segundo reintento con zona ampliada "
-                    f"dentro del soporte ({int(zone.sum())} → {int(expanded2.sum())} px)",
+                    f"dentro del soporte ({int(expanded.sum())} → {int(expanded2.sum())} px)",
                     flush=True,
                 )
                 retry_seed2 = (int(seed) + 2) if seed is not None else None
