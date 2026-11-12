@@ -1,5 +1,56 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — FaceSwap: un único criterio de geometría para los perfiles (v5.1341)
+
+- **Origen**: pregunta del usuario («¿eso de los perfiles no puede arreglarse?»)
+  tras arreglar UN gate. La revisión horizontal encontró el mismo criterio
+  replicado en **cuatro** sitios.
+- **Incremento v5.1340 → v5.1341**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### El patrón replicado
+
+- El criterio clásico `0.05 < eye_dist/bbox_w < 1.20` estaba copiado en:
+  1. `_remember_good_face_geom` — el histórico de kps sanos (vídeo).
+  2. `_recovered_coherent_kps` — la reconstrucción de kps degenerados.
+  3. `_swap_from_saved_reference` — la selección por archivo (fotos).
+  4. el gate de alineación de la foto (arreglado en v5.1339).
+- Los tres primeros seguían rechazando **perfiles reales** con eye_rel bajo.
+  Eso importa: sin histórico sano, un perfil en VÍDEO no tiene con qué
+  reconstruir su geometría, y sin referencia válida no se localiza la cara
+  destino en FOTOS. Es decir, el mismo error de gate afectaba a las tres
+  rutas (foto, vídeo y recuperación), no solo a la que se había visto.
+
+### El fix: un solo helper, un solo criterio
+
+- **`ProcessMgr._coherent_face_geometry(kps, bbox)`** → `(ok, eye_rel, vspan)`:
+  - `eye_rel > 1.20` → siempre incoherente (kps absurdos).
+  - `vspan >= 0.22` → geometría coherente (perfil o frontal): el piso de
+    `eye_rel` **no** se aplica. `vspan` = span vertical de los kps sobre la
+    altura del bbox; no depende del yaw porque la estructura ojos → nariz →
+    boca se mantiene en frontal y en perfil.
+  - `vspan < 0.22` → kps degenerados: se aplica el piso clásico.
+- Los **cuatro** sitios usan ahora el helper. No queda ningún umbral
+  clásico replicado fuera de él (lo comprueba el contrato P6 del probe).
+- **Medido** con los kps REALES de los 7 perfiles del usuario: los tres que
+  fallaban (eye_rel 0.043, 0.040, 0.022) ahora son coherentes (vspan 0.401,
+  0.339, 0.370) y el caso degenerado (vspan colapsado) se sigue rechazando.
+
+### Validación
+
+- `diagnostics/probe_v51341_profile_geometry_gate_20261112.py` (nuevo): 10/10
+  — los 5 perfiles reales medidos, el caso degenerado, el perfil con ojos
+  juntos y span sano, los kps absurdos, que los 4 sitios usan el helper y
+  que no queda el umbral clásico replicado.
+- `probe_faceswap_align_and_mouth_gate.py`: 9 OK / 0 FAIL.
+- `probe_faceswap_constrained_align.py`: 53 OK / 0 FAIL.
+- `probe_v51339_profile_align_gate_20261112.py`: 8/8 (las 7 fotos que salían
+  sin swap ahora lo hacen).
+- **Fallo preexistente NO causado por este turno**:
+  `probe_faceswap_batch_first_photo.py` y `probe_faceswap_landmarks_real.py`
+  fallan porque su fixture `D:\PROJECTS\uee\AUTO-DEEP\input\posti\1994859933.jpg`
+  ya no existe en disco.
+
 ## 2026-11-12 — Animate: arranca ComfyUI solo, como hace el Editor (v5.1340)
 
 - **Origen**: revisión de la pestaña **Animate** a petición del usuario.

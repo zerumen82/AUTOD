@@ -238,14 +238,26 @@ def main():
         last_note = 0
         while time.time() - t0 < args.timeout:
             time.sleep(3)
-            h = requests.get(f"{base}/history/{prompt_id}", timeout=30).json()
+            # v5.1339: un /history lento (ComfyUI ocupado con el VAE decode en
+            # el mismo proceso) expiraba y abortaba la prueba entera tras
+            # ~15 min de render válido. Se reintenta, igual que hace la ruta de
+            # producción en roop/animate/ltx2_audio.py.
+            try:
+                h = requests.get(f"{base}/history/{prompt_id}", timeout=120).json()
+            except requests.exceptions.RequestException:
+                continue
             if prompt_id in h:
                 history = h[prompt_id]
                 break
             if time.time() - last_note > 30:
-                q = requests.get(base + "/queue", timeout=20).json()
-                say(f"[WAIT] {time.time() - t0:.0f}s cola={len(q.get('queue_running', []))} ejecutando, "
-                    f"pendientes={len(q.get('queue_pending', []))}, gpu={_nvidia_used_mb()}MB")
+                try:
+                    q = requests.get(base + "/queue", timeout=20).json()
+                    running = len(q.get('queue_running', []))
+                    pending = len(q.get('queue_pending', []))
+                except requests.exceptions.RequestException:
+                    running, pending = -1, -1
+                say(f"[WAIT] {time.time() - t0:.0f}s cola={running} ejecutando, "
+                    f"pendientes={pending}, gpu={_nvidia_used_mb()}MB")
                 last_note = time.time()
 
         elapsed = time.time() - t0

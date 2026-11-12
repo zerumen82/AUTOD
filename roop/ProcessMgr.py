@@ -5084,6 +5084,50 @@ class ProcessMgr:
             pass
         return new_face
 
+    @staticmethod
+    def _coherent_face_geometry(kps, bbox):
+        """v5.1339 — Geometría kps↔bbox coherente, INVARIANTE al yaw.
+
+        Devuelve (ok, eye_rel, vspan).
+
+        El criterio clásico era `0.05 < eye_dist/bbox_w < 1.20`. El piso mide
+        la separación ocular RELATIVA al ancho del bbox, y esa relación
+        depende del yaw: en un PERFIL de canto los dos ojos están casi
+        superpuestos y baja legítimamente a 0.02-0.16. El gate no distinguía
+        «perfil» de «kps degenerados», y los perfiles reales salían sin swap.
+
+        La señal que sí distingue es el **span vertical de los kps**
+        (`vspan`): la estructura ojos → nariz → boca se mantiene en frontal y
+        en perfil, pero se colapsa cuando el regresor devuelve los landmarks
+        todos amontonados. Medido 2026-11-12 sobre 7 perfiles REALES del
+        usuario: vspan 0.26-0.46 (ninguno por debajo de 0.26); con kps
+        degenerados (eye_rel 0.028, log 1994859933.jpg) cae a ~0.
+
+        Regla:
+          - `eye_rel > 1.20` → siempre incoherente (kps absurdos).
+          - `vspan >= 0.22` → geometría coherente (perfil o frontal): el piso
+            de `eye_rel` NO se aplica.
+          - `vspan < 0.22` → kps degenerados: se aplica el piso clásico.
+        """
+        try:
+            _kps = np.asarray(kps, dtype=np.float32)
+            _bb = np.asarray(bbox, dtype=np.float32).reshape(-1)
+            if _kps.shape != (5, 2) or _bb.size != 4:
+                return False, 0.0, 0.0
+            if not (np.isfinite(_kps).all() and np.isfinite(_bb).all()):
+                return False, 0.0, 0.0
+            _bw = max(1.0, float(_bb[2] - _bb[0]))
+            _bh = max(1.0, float(_bb[3] - _bb[1]))
+            _eye_rel = float(np.linalg.norm(_kps[1] - _kps[0])) / _bw
+            _vspan = float(_kps[:, 1].max() - _kps[:, 1].min()) / _bh
+            if _eye_rel > 1.20:
+                return False, _eye_rel, _vspan
+            if _vspan >= 0.22:
+                return True, _eye_rel, _vspan
+            return (0.05 < _eye_rel < 1.20), _eye_rel, _vspan
+        except Exception:
+            return False, 0.0, 0.0
+
     def _remember_good_face_geom(self, video_key, person_idx, target_face):
         """v5.1319: guarda la geometría sana con la que se completó un swap.
 
@@ -5100,12 +5144,13 @@ class ProcessMgr:
                 return
             if not landmarks_fit_bbox(kps, bbox):
                 return
-            # Mismo rango que el gate v5.1202: los kps degenerados caben
-            # DENTRO del bbox (landmarks_fit_bbox los aprueba) pero con los
-            # ojos superpuestos (eye_rel<0,05) — no sirven como histórico.
-            _bw = max(1.0, float(bbox[2] - bbox[0]))
-            _eye_rel = float(np.linalg.norm(kps[1] - kps[0])) / _bw
-            if not (0.05 < _eye_rel < 1.20):
+            # Mismo criterio que el gate de alineación (v5.1339): los kps
+            # degenerados caben DENTRO del bbox (landmarks_fit_bbox los
+            # aprueba) pero con los ojos superpuestos (eye_rel<0,05) y el span
+            # vertical colapsado — no sirven como histórico. Un PERFIL real
+            # tiene eye_rel bajo con vspan sano: sí sirve.
+            _ok_geom, _eye_rel, _vspan = self._coherent_face_geometry(kps, bbox)
+            if not _ok_geom:
                 return
             if not hasattr(self, "_last_good_face_geom"):
                 self._last_good_face_geom = {}
@@ -5155,8 +5200,12 @@ class ProcessMgr:
                     return None
                 if not landmarks_fit_bbox(kps, bbox.astype(np.float32)):
                     return None
-                eye_rel = float(np.linalg.norm(kps[1] - kps[0])) / bw
-                if not (0.05 < eye_rel < 1.20):
+                # v5.1339: criterio invariante al yaw (un perfil real con los
+                # ojos juntos es geometría SANA; lo degenerado colapsa el span
+                # vertical).
+                _ok_g, _eye_rel, _vspan = self._coherent_face_geometry(
+                    kps, bbox.astype(np.float32))
+                if not _ok_g:
                     return None
                 return kps
 
@@ -5232,8 +5281,12 @@ class ProcessMgr:
                         box_c = np.asarray(getattr(cand, 'bbox', None), dtype=np.float32).reshape(-1)
                         if kps_c.shape != (5, 2) or not np.isfinite(kps_c).all() or box_c.size != 4:
                             continue
-                        eye_rel_c = float(np.linalg.norm(kps_c[1] - kps_c[0])) / max(1.0, float(box_c[2] - box_c[0]))
-                        if not (0.05 < eye_rel_c < 1.20):
+                        # v5.1339: criterio invariante al yaw (un perfil real
+                        # con los ojos juntos es geometría SANA; lo degenerado
+                        # colapsa el span vertical).
+                        _ok_c, _eye_rel_c, _vspan_c = self._coherent_face_geometry(
+                            kps_c, box_c)
+                        if not _ok_c:
                             continue
                         inter = max(0.0, min(tgt_box[2], box_c[2]) - max(tgt_box[0], box_c[0])) * max(
                             0.0, min(tgt_box[3], box_c[3]) - max(tgt_box[1], box_c[1]),
@@ -5349,17 +5402,15 @@ class ProcessMgr:
                         #
                         # Lo que el gate quiere detectar NO es un perfil, sino
                         # kps DEGENERADOS (todos los puntos casi en el mismo
-                        # sitio): en ese caso el span VERTICAL de los kps es
-                        # diminuto. Ese span no depende del yaw: la estructura
-                        # vertical del rostro (ojos → nariz → boca) se mantiene
-                        # en frontal y en perfil. Medido en los 7 perfiles
+                        # sitio): ahí el span VERTICAL de los kps es diminuto.
+                        # Ese span no depende del yaw: la estructura vertical
+                        # del rostro (ojos → nariz → boca) se mantiene en
+                        # frontal y en perfil. Medido en los 7 perfiles
                         # reales: vspan 0.26-0.46; con kps colapsados cae a
-                        # ~0.0-0.1.
-                        _bh = max(1.0, float(_bb_chk[3] - _bb_chk[1]))
-                        _vspan = float(_kps_arr[:, 1].max() - _kps_arr[:, 1].min()) / _bh
-                        _geometry_coherent = _vspan >= 0.22
-                        _eye_too_small = _eye_rel < 0.05 and not _geometry_coherent
-                        if _eye_too_small or _eye_rel > 1.20:
+                        # ~0.0-0.1. Criterio único en `_coherent_face_geometry`.
+                        _ok_geom, _eye_rel, _vspan = self._coherent_face_geometry(
+                            _kps_arr, _bb_chk)
+                        if not _ok_geom:
                             print(
                                 f"[ALIGN_REJECT] Frame {call_num}: kps incoherentes con bbox "
                                 f"(eye_dist/bbox_w={_eye_rel:.3f}, mouth_dist/bbox_w={_mouth_sep/_bw:.3f}, "
