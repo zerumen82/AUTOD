@@ -4261,6 +4261,45 @@ class ProcessMgr:
         return out, note
 
     @staticmethod
+    def _mouth_object_confirmed(occ_score, occ_rel, occ_ring,
+                                 axis_object=False, mouth_swap_diff=-1.0):
+        """v5.1335 — ¿Hay un objeto REAL delante de la boca?
+
+        Dos condiciones, ambas necesarias:
+
+        1. Señales de solape (occ / rel / ring): la máscara de oclusión es
+           «textura AND no-piel», así que la BARBA y la CAVIDAD ORAL de una
+           boca abierta producen las MISMAS señales que un dedo delante de la
+           boca. Solo descartan lo que claramente no es una cara.
+
+        2. El swap NO cambió la zona de la boca (`mouth_swap_diff` alto): si
+           el modelo ya la cambió, la boca del destino no está tapada — es
+           simplemente la boca, y pegarla encima de la cara swapeada es lo que
+           el usuario ve como «boca mal». Si la zona quedó intacta, algo la
+           protegió (objeto real) y pegar la zona ORIGINAL es correcto.
+
+        Medido 2026-11-12 sobre 9 fotos reales del usuario: el objeto real
+        (dedo) dio diff 0.043 y las 8 falsas (barba/cavidad) 0.089-0.184.
+        `mouth_swap_diff < 0` significa "no medible": no se bloquea.
+        """
+        if axis_object:
+            return True
+        signals_ok = (
+            (occ_score > 0.010)
+            and (occ_rel > 0.20)
+            and (occ_ring > 0.04)
+            and (
+                (occ_score > 0.025)
+                or (occ_rel > 0.35 and occ_ring > 0.30)
+            )
+        ) or (occ_score > 0.035)
+        if not signals_ok:
+            return False
+        if mouth_swap_diff >= 0.0 and mouth_swap_diff > 0.07:
+            return False
+        return True
+
+    @staticmethod
     def _is_profile_face(kps, det_score=None):
         """Detect if face is a profile/side view based on 5-point kps landmarks
         v5.1074c: Reducido falsos perfiles — antes 40% del video era "perfil" (4089/10K).
@@ -6470,6 +6509,48 @@ class ProcessMgr:
                     # expresión oral se maneja con oral_strength (solo apertura), y el
                     # paste (objeto real) con occ.
                     mouth_signal = mouth_occ_score
+                    # v5.1335 — LA SEÑAL QUE FALTABA: ¿el swap YA cambió esta
+                    # zona? La máscara de oclusión es «textura AND no-piel», así
+                    # que marca igual la BARBA, la CAVIDAD ORAL de una boca
+                    # abierta y un dedo delante de la boca: con occ/rel/ring los
+                    # tres son indistinguibles (medido 2026-11-12 sobre 9 fotos
+                    # reales del usuario: 8 de las 9 que dispararon el pegado
+                    # NO tenían objeto, y la única que sí lo tenía —un dedo—
+                    # era idéntica en occ/rel/ring a las falsas).
+                    #
+                    # El diff entre la zona de la boca YA swapeada y la del
+                    # destino sí discrimina, porque usa la IMAGEN y no un
+                    # solape de máscaras:
+                    #   - objeto delante → la zona quedó protegida → el swap no
+                    #     la tocó → diff BAJO (medido 0.043 con el dedo).
+                    #   - boca normal → el swap cambió la boca (la del source)
+                    #     → diff ALTO (medido 0.089-0.184).
+                    # Con un objeto, lo que se pega es la zona ORIGINAL, que
+                    # contiene el objeto: pegarla es correcto. Sin objeto, lo
+                    # que se pegaría es la boca del destino encima de la cara
+                    # swapeada («boca mal»).
+                    #
+                    # OJO al sentido: en v5.1045 este diff se descartó porque se
+                    # usaba como BOOST (subir el pegado cuando el diff era
+                    # alto), que es justo lo contrario de lo que mide. Aquí es un
+                    # GATE NEGATIVO: diff alto = el modelo ya la cambió = no
+                    # hay nada que preservar.
+                    _mouth_swap_diff = -1.0
+                    try:
+                        _dbg_ref = np.asarray(reference_region)
+                        _dbg_sw = np.asarray(raw_swapped_aligned)
+                        if _dbg_ref.shape != _dbg_sw.shape:
+                            _dbg_sw = cv2.resize(
+                                _dbg_sw, (_dbg_ref.shape[1], _dbg_ref.shape[0]))
+                        _dbg = np.abs(
+                            _dbg_sw.astype(np.float32)
+                            - _dbg_ref.astype(np.float32)
+                        ).mean(axis=2) / 255.0
+                        _mouth_swap_diff = float(
+                            (_dbg * _mm_f).sum() / max(1e-6, _mm_f.sum())
+                        )
+                    except Exception:
+                        _mouth_swap_diff = -1.0
                     # A strong profile can put MediaPipe's mouth on the cheek.
                     # Once the nose/eye axis confirms the 106-point mouth,
                     # a thin foreground object may have a small crop mean even
@@ -6507,15 +6588,19 @@ class ProcessMgr:
                         # documentados cruzan los labios con fuerza: rel 0.53-1.0 y
                         # ring 0.66-1.0. Dentro de la banda se exige rel>0.35 y ring>0.30;
                         # por encima de 0.025 mandan los umbrales generales.
-                        _mouth_has_object = _axis_object or (
-                            (mouth_occ_score > 0.010)
-                            and (mouth_occ_rel > 0.20)
-                            and (mouth_occ_ring > 0.04)
-                            and (
-                                (mouth_occ_score > 0.025)
-                                or (mouth_occ_rel > 0.35 and mouth_occ_ring > 0.30)
+                        _mouth_has_object = self._mouth_object_confirmed(
+                            mouth_occ_score, mouth_occ_rel, mouth_occ_ring,
+                            axis_object=_axis_object,
+                            mouth_swap_diff=_mouth_swap_diff,
+                        )
+                        if (not _mouth_has_object and _mouth_swap_diff > 0.07
+                                and (mouth_occ_score > 0.010)):
+                            print(
+                                f"[MOUTH_OBJECT] Descartado: el swap ya cambió "
+                                f"la zona de la boca (diff={_mouth_swap_diff:.3f}) "
+                                f"→ no hay objeto que preservar",
+                                flush=True,
                             )
-                        ) or (mouth_occ_score > 0.035)
                         if _mouth_has_object:
                             mouth_force_paste = True
                             # Con objeto confirmado, dejar 38% de swap encima

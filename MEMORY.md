@@ -1,5 +1,79 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — FaceSwap: el gate de objeto oral pegaba bocas falsas (v5.1338)
+
+- **Origen**: el usuario probó FaceSwap con 698 caras de origen y 113
+  destinos y reporta «visualmente mucho mejor, pero en algunas bocas mal».
+  Del log de esa sesión (114 fotos) salían **9 casos con
+  `force_paste=True paste_strength≈0.90`**.
+- **Incremento v5.1337 → v5.1338**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### El diagnóstico: la máscara de oclusión no sabe qué es una barba
+
+- Se recuperaron las 9 fotos de destino y se revisaron VISUALMENTE una a
+  una (recorte de la zona de la boca, `diagnostics/probe_mouth_occlusion_
+  signals_20261112.py`): **solo UNA tenía objeto real** — un dedo delante de
+  la boca (`215543979.jpg`). Las otras ocho NO: cuatro son bocas abiertas o
+  sonrisas y cuatro tienen **barba**.
+- **Causa raíz**: `detect_foreground_occlusion` (`roop/quality_enhancements.py`)
+  construye la máscara como **textura AND no-piel** (Sobel ∩ fuera del
+  rango HSV de piel). La barba no está en el rango de piel y tiene mucha
+  textura → sale como oclusión con la máxima intensidad; la cavidad oral de
+  una boca abierta, igual. Con las señales de solape (`occ`, `rel`, `ring`)
+  un dedo, una barba y una cavidad oral son **indistinguibles**: los valores
+  medidos del objeto real (occ 0.018 / rel 0.745 / ring 0.342) caen dentro
+  del rango de los falsos (occ 0.012-0.023 / rel 0.534-0.738 / ring 0.913).
+- El propio MEMORY ya lo avisaba (2026-11-05): *«Señales no acreditan objeto
+  real sin imagen/máscara»*.
+
+### La señal que sí discrimina: ¿el swap YA cambió esa zona?
+
+- Se añadió la diferencia entre la zona de la boca **ya swapeada**
+  (`raw_swapped_aligned`) y la del **destino** (`reference_region`), medida
+  dentro de la máscara de la boca (`_mouth_swap_diff`).
+  - **Objeto delante** → la máscara protegió la zona → el swap no la tocó →
+    diff **BAJO** (medido 0.043 con el dedo).
+  - **Boca normal** → el swap cambió la boca por la de la fuente → diff
+    **ALTO** (medido 0.089-0.096 en los falsos, 0.10-0.18 en el resto).
+- **OJO al sentido**: en v5.1045 esta misma diferencia se descartó porque se
+  usaba como BOOST (subir el pegado cuando el diff era alto), que es
+  exactamente lo contrario de lo que mide. Aquí es un **GATE NEGATIVO**: si
+  el modelo ya cambió la zona, la boca del destino NO está tapada — es
+  simplemente la boca, y pegarla al 90 % encima de la cara swapeada es lo que
+  el usuario ve como «boca mal».
+- **Fix** (`roop/ProcessMgr.py`): gate extraído a
+  `ProcessMgr._mouth_object_confirmed(occ, rel, ring, axis_object, mouth_swap_diff)`
+  con umbral `diff > 0.07` → descarta el pegado. Si el diff no es medible
+  (`-1`), NO se bloquea: se mantiene el comportamiento anterior.
+- **Resultado medido sobre las 9 fotos reales**: los 2 falsos positivos que
+  llegaban a pegarse se descartan (`[MOUTH_OBJECT] Descartado: el swap ya
+  cambió la zona de la boca (diff=0.089)`) y el **dedo real se conserva**
+  (`reason=object force_paste=True paste_strength=0.902`).
+
+### Validación
+
+- `diagnostics/probe_v51338_mouth_object_gate_20261112.py` (nuevo): 9/9
+  contratos con los valores MEDIDOS (el objeto real, los dos falsos
+  positivos, el diff no medible, el caso de eje de perfil, el objeto
+  masivo con la zona intacta y con la zona cambiada, y la ausencia de
+  señales de solape).
+- `diagnostics/probe_faceswap_align_and_mouth_gate.py`: **9 OK, 0 FAIL** — los
+  contratos del proyecto siguen intactos, incluido «Objeto real fino en la
+  banda sigue paste (restore=0.89 >= 0.80)» y «Objeto masivo (occ=0.040)
+  dispara (restore=0.92 >= 0.80)».
+- `diagnostics/probe_mouth_occlusion_signals_20261112.py` (nuevo): mide
+  occ/rel/ring/diff sobre fotos reales con el pipeline de swap completo
+  (tabla de calibración).
+
+### Pendiente
+
+- Falta calibrar el umbral 0.07 con más casos de objeto real: aquí solo
+  había UNO con objeto (el dedo). El resto de los objetos reales
+  documentados (logs 223907/231021/232209) pertenecen a fotos que ya no
+  están en disco. Con más muestras, el umbral debe reajustarse con la
+  misma tabla.
+
 ## 2026-11-12 — Image Editor: el 2º reintento de residual era una llamada duplicada (v5.1337)
 
 - **Origen**: cierre de las deudas que quedaban rojas tras v5.1336. El usuario
