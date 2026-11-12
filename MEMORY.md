@@ -1,5 +1,41 @@
 # MEMORY.md — AutoAuto
 
+## 2026-11-12 — Animate: arranca ComfyUI solo, como hace el Editor (v5.1340)
+
+- **Origen**: revisión de la pestaña **Animate** a petición del usuario.
+- **Incremento v5.1339 → v5.1340**: `run.py` (banner), `roop/core.py`
+  (APP_VERSION y título), `AGENTS.md`, `spec/00-PRINCIPIOS.md` y esta entrada.
+
+### Estado de Animate (revisado el 2026-11-12)
+
+- **ComfyUI**: instalado en `ui/tob/ComfyUI` (v0.19.0), arranca bien en el
+  puerto 8188 con la RTX 3060 Ti (VRAM 8192 MB, RAM 32713 MB, torch 2.8.0+cu128).
+  Levanta TODOS los nodos que necesita la pestaña: `LTXVImgToVideo`,
+  `LTXVConditioning`, `LTXVAudioVAELoader/Encode/Decode`, `LTXVSeparateAVLatent`,
+  `LTXVConcatAVLatent`, `LTXVEmptyLatentAudio`, `LTXVScheduler`,
+  `ModelSamplingLTXV`, `LTXAVTextEncoderLoader`, más FramePack
+  (`LoadFramePackModel`, `FramePackSampler`), Wan y MMAudio.
+- **Modelos**: los 5 de LTX-2 presentes (`ltx-2-19b-distilled_Q4_K_M.gguf`
+  11.78 GB + VAEs), `FramePackI2V_HY_bf16.safetensors` (23.98 GB) y los de Wan
+  (pesos + `wan2.2_vae.safetensors`). `ltx2_audio.missing_models()` → `[]`.
+- **Motores**: `ltx2_audio` (LTX-2 destilado Q4 con audio nativo, 8 pasos,
+  CFG 1,0, 25 fps), `framepack` y `wan_video`. El de Wan está limitado por
+  VRAM a 49 fotogramas / 20 pasos en tarjetas de 8 GB (no es un fallo).
+- Contratos: `probe_ltx2_animate_wiring_20261110.py` PASS (0 fallos) y
+  `probe_ltx2_audio_contract_20261110.py` PASS (0 fallos).
+
+### El punto de fricción que se arregla
+
+- `roop/animate/ltx2_audio.py` devolvía **«ComfyUI no está activo. Inicia
+  ComfyUI primero.»** y paraba: el usuario tenía que arrancar el backend a
+  mano, un paso que el Editor de imagen no pide (el Editor lo arranca solo
+  con `comfy_launcher.start(directly_run=True)`).
+- **Fix**: Animate ahora hace lo mismo — si ComfyUI no responde, lo arranca y
+  reintenta la comprobación; si no puede, devuelve el mensaje con el motivo.
+- Contexto: `roop/session_shutdown.py` detiene ComfyUI al cerrar la sesión
+  (`tracked … tree-killed`), así que este arranque automático es lo que
+  devuelve la pestaña a la vida después de cada cierre.
+
 ## 2026-11-12 — FaceSwap: el gate de alineación rechazaba perfiles reales (v5.1339)
 
 - **Origen**: revisión de los logs de las últimas ejecuciones de FaceSwap del

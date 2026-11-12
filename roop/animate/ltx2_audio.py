@@ -245,10 +245,28 @@ def generate(image_path, prompt, output_path, width=DEFAULT_WIDTH, height=DEFAUL
     ensure_clip_links()
 
     base = comfy_base_url()
+    # v5.1339: Animate arrancaba ComfyUI solo si el usuario lo hacia a
+    # mano ("ComfyUI no esta activo. Inicia ComfyUI primero."), mientras que
+    # el Editor de imagen lo arranca solo. El mismo criterio en las dos rutas
+    # evita un paso manual que el usuario no tiene por que conocer: si el
+    # backend no esta vivo, se levanta aqui.
     try:
         requests.get(f"{base}/system_stats", timeout=5)
     except Exception:
-        return None, "ComfyUI no está activo. Inicia ComfyUI primero."
+        try:
+            from ui.tabs.comfy_launcher import is_comfyui_running, start as start_comfyui
+            if not is_comfyui_running():
+                _say("ComfyUI no estaba activo; arrancando el backend...")
+                _comfy_ok, _comfy_msg, _ = start_comfyui(directly_run=True)
+                if not _comfy_ok:
+                    return None, f"ComfyUI no disponible: {_comfy_msg}"
+                _say("ComfyUI listo")
+            requests.get(f"{base}/system_stats", timeout=10)
+        except Exception as _comfy_error:
+            return None, (
+                "ComfyUI no esta activo. Inicia ComfyUI primero "
+                f"({_comfy_error})."
+            )
 
     width, height = fit_size(width, height)
     frames = fit_frames(frames)
