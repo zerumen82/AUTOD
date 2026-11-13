@@ -32,3 +32,15 @@
   Verificado en medidas: «go topless», «go without bra» y «must topless» dan
   sujeto «The woman»; «go barefoot» y «be bald» siguen clasificados como antes
   (sin regresión). Pendiente: PASS visual real de una muestra.
+- **v5.1345b (2026-11-13) — Color del parche y borde del pegado.**
+  Medido con la edición real «LA MUJER DEBE ir sin sujetador» (log
+  2026-11-13, la que el usuario vio cumplida pero con el pegote):
+  `Armonización de tono Lab shift=[-50.0, 17.8, 6.8]` — el shift L caía
+  EXACTAMENTE en el tope ±50 y truncaba el desplazamiento real medido de la
+  piel (~-55): la zona seguía con el tono equivocado («no era el color»).
+  `Pegado exacto: 0px de feather` dejaba una línea dura en el contorno, que
+  se leía como corte y como pegote en la espalda. Fix: tope del shift Lab a
+  ±80 (piel y fondo; sigue acotando un anillo de referencia sin contenido) y
+  feather mínimo de 1–2 px proporcional al cambio (no al recorte) en el
+  contorno del pegado, sin atenuar el interior. No cambia el alcance de la
+  zona pegada ni las decisiones medidas de pegado.

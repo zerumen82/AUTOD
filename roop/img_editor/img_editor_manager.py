@@ -3570,17 +3570,17 @@ class ImgEditorManager:
         )
         if exact_paste or change_ratio < 0.25:
             # v5.1264 apagó el feather a 0px para no dejar el halo exterior.
-            # La costura que quedaba (log 00:08) no nace en el pegado sino en
-            # el borde binario de la máscara que ve el modelo, así que ahora
-            # se suaviza ESA máscara (_soften_generation_edge, solo en
-            # apariencia). El pegado sigue exacto: un feather hacia dentro
-            # atenuaba los mechones finos que cuelgan (188 px al 74 % de
-            # fantasma en probe_editor_measured_paste_zone [1]).
-            feather_px = 0
-            soft = local_mask.convert("L")
+            # v5.1345 — medido 2026-11-13 («ir sin sujetador», la edición que
+            # el usuario vio con el pegote): con 0px el borde del cambio es una
+            # línea dura sobre la espalda y la costura se nota. Un feather de
+            # 1-2 px, proporcional al cambio y no al recorte, suaviza SOLO el
+            # contorno sin atenuar los mechones finos del interior (que era el
+            # motivo para apagarlo del todo).
+            feather_px = max(1, min(2, int(round(min(crop_w, crop_h) * 0.002))))
+            soft = self._feather_mask(local_mask, amount=feather_px)
             print(
-                f"[ImgEditor] Pegado exacto: 0px de feather "
-                f"({change_ratio:.1%} del recorte); 0 fuera, sin halo",
+                f"[ImgEditor] Pegado con borde suave: {feather_px}px de feather "
+                f"({change_ratio:.1%} del recorte); transición mínima en el contorno",
                 flush=True,
             )
         else:

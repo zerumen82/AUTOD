@@ -151,7 +151,13 @@ def _harmonize_patch(patch, image, box, write_crop, skin, ring_px=28, person_mas
     # sube a ±50, que es el que proyecta la zona sobre el entorno (104,8 −
     # 20 ≈ 85 frente a 84,5) y sigue dejando margen para que un anillo de
     # referencia sin contenido no pueda disparar el tono.
-    shift = np.clip(ring_mean - patch_mean, -50.0, 50.0)
+    # Medido 2026-11-13 (log «ir sin sujetador», edición final del usuario):
+    # la referencia pedía exactamente −50,0 en L —el tope— y el resultado
+    # seguía con el tono equivocado («no era el color»). El recorte a ±50
+    # truncaba el shift real, así que la zona quedaba a decenas de niveles del
+    # entorno. El tope sube a ±80: sigue acotando un anillo de referencia sin
+    # contenido, pero ya no corta un desplazamiento medido de piel real.
+    shift = np.clip(ring_mean - patch_mean, -80.0, 80.0)
     if float(np.linalg.norm(shift)) > 1.5:
         print(
             f"[ImgEditor] Armonización de tono Lab shift="
@@ -219,7 +225,7 @@ def _harmonize_patch(patch, image, box, write_crop, skin, ring_px=28, person_mas
         _ring_bg = _ring_bg & (_ring_sat < 25.0)
         if _ring_bg.any():
             _bg_ref = _ring_lab[_ring_bg].mean(axis=0)
-            _bg_shift = np.clip(_bg_ref - _bg_med, -50.0, 50.0)
+            _bg_shift = np.clip(_bg_ref - _bg_med, -80.0, 80.0)
             if float(np.linalg.norm(_bg_shift)) > 1.5:
                 print(
                     f"[ImgEditor] Armonización de fondo Lab shift="
