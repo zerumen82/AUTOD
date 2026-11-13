@@ -58,6 +58,18 @@
   ropa sigue medida, el marcador TARGET_RESIDUAL_FAIL impide «OK» y se cae a
   la ruta directa. Sin listas de prendas: referencia = ropa medida en la
   imagen original dentro de la zona pegada.
+- **v5.1348 (2026-11-13) — Un estado local sin medición no repinta la ropa
+  entera.**
+  Medido en el log («IR DESCALZA», 2026-11-13 13:14): CLIPSeg devolvió
+  `Máscara VACÍA para 'go barefoot'` y el flujo volvió a `zone = clothing`
+  (93105 px = 55 % de 168688 px de persona), repintando el cuerpo con shift
+  −58,9 L; la foto empeoró. Dos causas y dos arreglos, sin listas:
+  1) un ESTADO es piel por definición y `_request_region_on_subject` lo
+     descarta («cae en piel del sujeto»); ahora se mide la consulta sobre el
+     sujeto **aceptando piel**, acotada a 1–55 % de la persona;
+  2) si aun así no hay zona y la ropa medida cubre ≥50 % de la persona con
+     una instrucción que NO es exposición completa, se conserva la foto con
+     aviso explícito en vez de repintar el cuerpo entero.
 - **v5.1347 (2026-11-13) — Zona local: «descalza» ya no repinta la ropa
   entera.**
   Medido en el log («LA MUJER DEBE IR DESCALZA», 2026-11-13 12:42): la ruta

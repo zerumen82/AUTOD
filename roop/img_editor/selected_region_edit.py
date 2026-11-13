@@ -2417,6 +2417,44 @@ def edit_described_subject(
                     f"zona ({int(zone.sum())} px); no se usa la ropa entera",
                     flush=True,
                 )
+            if zone is None:
+                # v5.1348 — un ESTADO («descalza», «topless») es piel por
+                # definición y el medidor de objetos lo descarta («cae en piel
+                # del sujeto»). Se mide la consulta sobre el sujeto aceptando
+                # piel, acotada a una parte de la persona (1–55 %).
+                try:
+                    _masker = manager._get_clipseg_masker()
+                except Exception:
+                    _masker = None
+                if _masker is not None:
+                    import cv2
+                    _subj = np.asarray(subject, dtype=bool)
+                    _best, _best_part = None, 0.0
+                    for _q in (instruction, raw_prompt):
+                        try:
+                            _m = _masker.generate_mask(image, _q)
+                        except Exception:
+                            continue
+                        if _m is None:
+                            continue
+                        _a = np.asarray(_m.convert("L"))
+                        if _a.shape[:2] != _subj.shape:
+                            _a = cv2.resize(
+                                _a, (_subj.shape[1], _subj.shape[0]),
+                                interpolation=cv2.INTER_LINEAR)
+                        _z = (_a >= 96) & _subj
+                        _part = float(_z.sum()) / max(1, int(_subj.sum()))
+                        if 0.01 <= _part <= 0.55 and _part > _best_part:
+                            _best, _best_part = _z, _part
+                    if _best is not None:
+                        zone = _best
+                        zone_label = "zona medida del estado (piel del sujeto)"
+                        print(
+                            "[ImgEditor] Sin selección: el estado mide su "
+                            f"propia zona ({int(zone.sum())} px, "
+                            f"{_best_part:.0%} de la persona)",
+                            flush=True,
+                        )
     if full_body and manager.measured_full_body_exposure(instruction):
         clothing = _measured_clothing_zone(manager, image, subject, None)
         person_px = int(subject.sum())
@@ -2464,6 +2502,24 @@ def edit_described_subject(
         # borraba la zona ya decidida arriba: con la ropa no localizada
         # (`clothing=None`) la ruta devolvía la foto idéntica con el mensaje
         # «la zona medida quedó vacía».
+        # v5.1348 — pero un estado LOCAL sin medición no puede convertirse en
+        # «toda la ropa». Medido 2026-11-13 13:14 («IR DESCALZA»): ropa
+        # 93105 px = 55 % de 168688 px de persona → se repintó el cuerpo
+        # entero con shift −58,9 L y la foto empeoró. Sin zona medida del
+        # estado no se repinta a ciegas.
+        _person_px = int(np.asarray(subject, dtype=bool).sum())
+        if (clothing is not None and not full_body
+                and str(regime.get("direction", "")).lower() == "uncover"
+                and int(clothing.sum()) >= 0.5 * max(1, _person_px)):
+            print(
+                "[ImgEditor] Sin selección: estado local sin zona medida "
+                f"(la ropa abarca {int(clothing.sum())} px de {_person_px}); "
+                "no se repinta a ciegas",
+                flush=True,
+            )
+            return kept(
+                "estado local sin zona medida (la ropa abarca la persona); "
+                "se conserva la foto")
         zone = clothing
         zone_label = "zona de ropa medida"
     if zone is None:

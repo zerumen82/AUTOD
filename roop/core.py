@@ -93,7 +93,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1347 (2026-11-13)"
+APP_VERSION = "v5.1348 (2026-11-13)"
 
 
 def _active_server_path():
@@ -440,7 +440,7 @@ def run():
                 print(f"[DEBUG] Error forzando icono: {e}")
 
         window = webview.create_window(
-            "AutoAuto v5.1347",
+            "AutoAuto v5.1348",
             url=server_url,
             width=1400,
             height=900
