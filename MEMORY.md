@@ -58,3 +58,11 @@
   ropa sigue medida, el marcador TARGET_RESIDUAL_FAIL impide «OK» y se cae a
   la ruta directa. Sin listas de prendas: referencia = ropa medida en la
   imagen original dentro de la zona pegada.
+- **v5.1345d (2026-11-13) — Presupuesto de pasos del cuerpo (adherencia).**
+  Bug medido: `_vision_zone_pass` solo reenviaba `step_cap` cuando la receta
+  traía `kontext_img2img_denoise`; en la ruta corporal con visión (LongCat
+  Turbo) el `steps` de la receta se ignoraba y el cliente caía siempre a 12
+  (log «sin ropa»/«desnuda»/«sin sujetador»: `1.9 s/paso ×12`). El `step_cap`
+  se reenvía siempre (cliente acota 4..28) y la receta corporal sube a 24
+  pasos con denoise 1.0. Es un cambio numérico de esfuerzo, no de ruta: no
+  añade vocabulario ni estrecha ninguna categoría de la versatilidad.

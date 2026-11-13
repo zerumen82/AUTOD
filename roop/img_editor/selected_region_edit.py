@@ -749,7 +749,15 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
     if recipe.get("kontext_img2img_denoise") is not None:
         generate_options["kontext_img2img_denoise"] = float(
             recipe["kontext_img2img_denoise"])
-        generate_options["step_cap"] = int(recipe.get("steps", 12))
+    # v5.1345d — el `steps` de la receta se ignoraba en Turbo: sin `step_cap`
+    # el cliente cae a 12. Medido 2026-11-13 (log «sin ropa»/«desnuda»): la
+    # pasada corporal iba a 12 pasos aunque la receta pidiera más, y el modelo
+    # no completaba la instrucción. El presupuesto de pasos se forwardea
+    # siempre; el cliente lo acota a 4..28.
+    try:
+        generate_options["step_cap"] = int(recipe.get("steps", 12) or 12)
+    except (TypeError, ValueError):
+        generate_options["step_cap"] = 12
     generated, note = client.generate(**generate_options)
     if cancel_check and cancel_check():
         return None, "Cancelado"
@@ -2559,8 +2567,12 @@ def edit_described_subject(
         # 0.95 — the 5% preserved latent at 0.95 keeps fabric structure. The "tono
         # de piel oscuro" documented for 1.0 was caused by ±40 harmonization (now ±30).
         _vision_denoise = 1.0
+        # v5.1345d — 24 pasos (antes 12) para cambios de cuerpo/ropa: con 12
+        # el modelo a veces conservaba la prenda (log 2026-11-13 «sin ropa»,
+        # «desnuda», «sin sujetador»). denoise sigue a 1.0 y el cliente acota
+        # a 28; el resto del recorrido (pasos configurables) no cambia.
         vision_recipe = {
-            "steps": 12,
+            "steps": 24,
             "guidance": 3.5,
             "denoise": _vision_denoise,
             "no_kontext": True,
