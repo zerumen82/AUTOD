@@ -4957,8 +4957,25 @@ class ImgEditorManager:
                     grounded.append(projected)
                     seen_queries.add(projected)
             if not grounded or (len(grounded) != 1 and not allow_multiple):
-                print("[ImgEditor] La propuesta no identifica una sola zona de la instrucción", flush=True)
-                return []
+                # v5.1345 — la propuesta del modelo local puede nombrar algo
+                # que NO está en la instrucción (medido 2026-11-13: «must go
+                # topless» → propuso «chest» → sin coincidencia → se devolvía
+                # la foto intacta). La decisión no puede ser abandonar: el
+                # sujeto lo da la gramática de la instrucción (sintagma
+                # determinante, sin vocabulario de prendas) y la región la
+                # mide el segmentador en la foto. Si el segmentador no
+                # encuentra una zona plausible, las compuertas de abajo siguen
+                # rechazándola; nunca se repinta a ciegas.
+                subject = self._visual_subject_description(instruction)
+                if subject:
+                    grounded = [subject]
+                else:
+                    print(
+                        "[ImgEditor] La propuesta no identifica una sola zona "
+                        "de la instrucción",
+                        flush=True,
+                    )
+                    return []
             best = None
             best_coverage = 0.0
             measured_regions = []

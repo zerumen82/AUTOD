@@ -13,3 +13,22 @@
   `[]` (una sola cláusula), "sin medias y el hombre debe ir sin zapatos" →
   `['...', '...']` (dos cláusulas con sujeto). Además se limpió código muerto en
   `_body_state_clause` (bloque `cover` inalcanzable tras `return ""`).
+- **v5.1345 (2026-11-13) — Fix genérico: instrucción no clasificada ya no
+  devuelve la foto intacta.**
+  Log real: «LA MUJER DEBE ir en topless» / «ir sin sujetador» caían en ámbito
+  no clasificado; `_proposed_region_passes` pedía al rewriter una zona, el
+  rewriter proponía «chest», que no estaba en el texto → `grounded` vacío →
+  «La propuesta no identifica una sola zona» → «Región no medida; no se
+  sustituye la foto». Resultado: no se editaba nada.
+  Fix (sin listas de palabras ni prendas): cuando la propuesta no coincide con
+  la instrucción, el sujeto se extrae con la gramática ya existente
+  (`_visual_subject_description`: sintagma determinante / patrón de predicado)
+  y **el segmentador mide esa zona en la foto**. Las compuertas existentes
+  (cobertura ≤ max_coverage 0,9, crecimiento de sujeto y guardas de cara)
+  siguen rechazando una medición implausible: nunca se repinta a ciegas.
+  Además, el sufijo de desnudez local era «No shoe, sock, garment or covering…»
+  para cualquier prenda (confundía al modelo en peticiones de sujetador):
+  ahora es «No garment or covering of any kind may remain there.»
+  Verificado en medidas: «go topless», «go without bra» y «must topless» dan
+  sujeto «The woman»; «go barefoot» y «be bald» siguen clasificados como antes
+  (sin regresión). Pendiente: PASS visual real de una muestra.
