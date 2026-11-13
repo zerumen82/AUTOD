@@ -1375,8 +1375,22 @@ class ImgEditorManager:
                     f" {_subject[0].upper()}{_subject[1:]} is fully nude, "
                     "bare skin, no clothing at all."
                 )
-            print("[ImgEditor] Sufijo de desnudez total omitido: el alcance medido no es corporal completo", flush=True)
-            return ""
+            # Local uncover (e.g. «descalza», «sin zapatos»): el área medida debe
+            # mostrar piel descubierta. Sin esta frase de estado final, el modelo
+            # recibe solo la acción («must go barefoot») y puede conservar los
+            # zapatos (medido en el caso real 2026-11-12). Describir el estado
+            # esperado evita que el motor repinte la zona entera o quede intacta.
+            print(
+                "[ImgEditor] Sufijo de desnudez local: el área medida debe mostrar "
+                "piel descubierta",
+                flush=True,
+            )
+            return (
+                " The measured area shows bare skin with nothing covering it. "
+                "No shoe, sock, garment or covering of any kind may remain there."
+            )
+        print("[ImgEditor] Sufijo de estado omitido...", flush=True)
+        return ""
         if body_direction == "cover" and intensity >= minimum_intensity:
             # v5.1284 — el sufijo no puede inventar la prenda. Medido el
             # 2026-11-03: «el hombre debe vestir con un tanga» mide cover con
@@ -1388,7 +1402,6 @@ class ImgEditorManager:
                     "covering the body.")
         print(f"[ImgEditor] Sufijo de estado omitido (dirección={body_direction}, intensity={float(body_intensity):.2f} — sin estado medido que describir; el texto del usuario manda)", flush=True)
         return ""
-
     def _measured_body_state_facts(self, raw_prompt: str, translated_prompt: str,
                                    fallback_direction: str,
                                    fallback_intensity: float):
@@ -3871,7 +3884,44 @@ class ImgEditorManager:
                 ) else clauses
             )
         else:
-            parts = re.split(r"\s+(?:and|y)\s+", text, flags=re.IGNORECASE)
+            # No punctuation boundary: split on "and"/"y" ONLY when the
+            # fragment after the conjunction is an independent clause (has its
+            # own subject + predicate). "the woman must go without stockings
+            # and shoes" is one removal request with a coordinated object
+            # list; splitting it there would treat "shoes" as a separate
+            # subject and break the compound measurement (medido 2026-11-13:
+            # cláusula 'shoes' sin sujeto → zona no medida → abort).
+            raw_parts = re.split(r"\s+(?:and|y)\s+", text, flags=re.IGNORECASE)
+            if len(raw_parts) <= 1:
+                return []
+            parts = []
+            for part in raw_parts:
+                stripped = re.sub(r"^(?:and|y)\s+", "", part.strip(" .,!?"), flags=re.I)
+                if not stripped:
+                    continue
+                # A fragment is an independent clause when it contains a
+                # subject (pronoun, article+noun) AND a predicate (modal,
+                # copular, or action verb). A bare noun/object fragment
+                # ("shoes", "SIN ZAPATOS") belongs to the previous clause's
+                # coordinated object list, not a separate subject.
+                has_subject = bool(re.search(
+                    r"\b(?:the|a|an|this|that|he|she|it|they|we|you|"
+                    r"el|la|los|las|un|una|unos|unas|"
+                    r"\w+\s+(?:must|should|has|have|is|are|was|were|"
+                    r"debe|deben|tiene|tienen|va|van|"
+                    r"es|son|est[aá]|est[aá]n)\b)",
+                    stripped, flags=re.I,
+                ))
+                if has_subject:
+                    parts.append(stripped)
+                else:
+                    # Coordinated object: attach to the previous clause.
+                    if parts:
+                        parts[-1] = f"{parts[-1]} and {stripped}"
+                    else:
+                        parts.append(stripped)
+            if len(parts) < 2:
+                return []
         clauses = [re.sub(r"^(?:and|y)\s+", "", part.strip(" .,!?"), flags=re.I)
                    for part in parts]
         if (not 2 <= len(clauses) <= 6
