@@ -1387,7 +1387,7 @@ class ImgEditorManager:
             )
             return (
                 " The measured area shows bare skin with nothing covering it. "
-                "No shoe, sock, garment or covering of any kind may remain there."
+                "No garment or covering of any kind may remain there."
             )
         print("[ImgEditor] Sufijo de estado omitido...", flush=True)
         return ""
