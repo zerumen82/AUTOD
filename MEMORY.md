@@ -58,7 +58,13 @@
   ropa sigue medida, el marcador TARGET_RESIDUAL_FAIL impide «OK» y se cae a
   la ruta directa. Sin listas de prendas: referencia = ropa medida en la
   imagen original dentro de la zona pegada.
-- **v5.1345d (2026-11-13) — Presupuesto de pasos del cuerpo (adherencia).**
+- **v5.1346 (2026-11-13) — Cierre de la tanda de versatilidad/cumplimiento.**
+  Consolida bajo un solo número los arreglos registrados arriba como 5.1345,
+  5.1345b, 5.1345c y 5.1345d: instrucción no clasificada medida por sujeto,
+  sufijo uncover genérico, tope Lab ±80, feather mínimo del contorno,
+  verificación de ropa residual en exposición completa y `step_cap` forwardeado
+  con 24 pasos en cuerpo/uncover. Sin listas de prendas ni censura; ninguna
+  categoría de la versatilidad queda estrechada.
   Bug medido: `_vision_zone_pass` solo reenviaba `step_cap` cuando la receta
   traía `kontext_img2img_denoise`; en la ruta corporal con visión (LongCat
   Turbo) el `steps` de la receta se ignoraba y el cliente caía siempre a 12

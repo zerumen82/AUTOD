@@ -452,7 +452,7 @@ def set_console_icon():
 if __name__ == "__main__":
     _open_ui_session_log()
     print("\n" + "="*70)
-    print("  AutoAuto v5.1345 (2026-11-13)")
+    print("  AutoAuto v5.1346 (2026-11-13)")
     print("="*70 + "\n")
     if set_console_icon():
         print("[INFO] Icono de AutoAuto aplicado a la ventana de consola")
