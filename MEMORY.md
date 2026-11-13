@@ -44,3 +44,17 @@
   feather mínimo de 1–2 px proporcional al cambio (no al recorte) en el
   contorno del pegado, sin atenuar el interior. No cambia el alcance de la
   zona pegada ni las decisiones medidas de pegado.
+- **v5.1345c (2026-11-13) — «sin ropa»/«desnuda» ya no declaran OK sin quitar
+  la ropa.**
+  Medido en el log: `Validación visual OK: cambio real, sin fantasma` en
+  «LA MUJER DEBE IR SIN ROPA» y «…IR DESNUDA» aunque la ropa siguiera puesta.
+  Causa: `selected_region_edit.py:2572` activaba la verificación de ropa
+  residual SOLO con `zone_label == "zona de ropa medida"`; en exposición
+  completa la zona es «persona medida menos la cabeza» y la comprobación nunca
+  corría. `_validate_visual_edit` solo mide «cambió algo», no que se cumpliera
+  lo pedido. Fix: la verificación de ropa residual aplica a cualquier zona de
+  un cambio medido `uncover` (ropa medida u persona menos cabeza), y el
+  reintento con zona ampliada dentro del soporte también cubre ese caso. Si la
+  ropa sigue medida, el marcador TARGET_RESIDUAL_FAIL impide «OK» y se cae a
+  la ruta directa. Sin listas de prendas: referencia = ropa medida en la
+  imagen original dentro de la zona pegada.

@@ -2569,10 +2569,18 @@ def edit_described_subject(
             f"[ImgEditor] Sin selección: motor con visión (LongCat) denoise={_vision_denoise:.2f}, guidance=3.5",
             flush=True,
         )
+        # v5.1345c — la verificación de ropa residual también aplica a la
+        # exposición completa. Medido 2026-11-13 (log «sin ropa» y «desnuda»):
+        # con zona «persona medida menos la cabeza» _check_clothing quedaba a
+        # False y la ruta declaraba «Validación visual OK: cambio real» aunque
+        # la ropa siguiera puesta. La referencia es la ropa MEDIDA en la imagen
+        # original dentro de la zona pegada; no depende del tipo de prenda.
         _check_clothing = (
             not target_query
-            and zone_label == "zona de ropa medida"
             and str(regime.get("direction", "")).lower() == "uncover"
+            and zone_label in (
+                "zona de ropa medida", "persona medida menos la cabeza",
+            )
         )
         result, note = _vision_zone_pass(
             manager, client, image, zone, compose_support, body_prompt,
@@ -2586,8 +2594,10 @@ def edit_described_subject(
         # v5.1311 — residual alto: un reintento con la zona crecida dentro
         # del soporte ya medido (sin listas de prendas). Si sigue fallando,
         # el marcador TARGET_RESIDUAL_FAIL impide «Validación visual OK».
+        # v5.1345c — el reintento también cubre la exposición completa medida
+        # (antes solo con target_query, así que «sin ropa» no reintentaba).
         if (
-            target_query
+            (target_query or _check_clothing)
             and _note_reports_residual_failure(note)
             and not (cancel_check and cancel_check())
         ):
