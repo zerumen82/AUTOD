@@ -58,6 +58,20 @@
   ropa sigue medida, el marcador TARGET_RESIDUAL_FAIL impide «OK» y se cae a
   la ruta directa. Sin listas de prendas: referencia = ropa medida en la
   imagen original dentro de la zona pegada.
+- **v5.1347 (2026-11-13) — Zona local: «descalza» ya no repinta la ropa
+  entera.**
+  Medido en el log («LA MUJER DEBE IR DESCALZA», 2026-11-13 12:42): la ruta
+  descrita eligió `zona de ropa medida = 126662 px` sobre una persona de
+  145346 px (87 %) y repintó el cuerpo entero para quitar los zapatos; el
+  resultado empeoró. Causa: `_requested_removal_target` no devuelve objeto
+  nombrado para un estado local («descalza», «topless», «sin sujetador»), así
+  que se caía al `zone = clothing` de toda la ropa medida.
+  Fix (sin listas): si `full_body` es falso, la dirección es `uncover` y no hay
+  objetivo nombrado, la zona la mide el segmentador **sobre la propia
+  instrucción** con `_request_region_on_subject` (la misma medición que usa la
+  ruta directa). Si no mide una parte plausible, se conserva el
+  comportamiento anterior. Verificado: «go barefoot» y «go topless» no son
+  exposición completa; «without clothes»/«naked» sí lo siguen siendo.
 - **v5.1346 (2026-11-13) — Cierre de la tanda de versatilidad/cumplimiento.**
   Consolida bajo un solo número los arreglos registrados arriba como 5.1345,
   5.1345b, 5.1345c y 5.1345d: instrucción no clasificada medida por sujeto,

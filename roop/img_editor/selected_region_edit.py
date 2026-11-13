@@ -2387,6 +2387,36 @@ def edit_described_subject(
                     ),
                     flush=True,
                 )
+        if zone is None:
+            # v5.1346b — un estado local sin objeto nombrado («descalza»,
+            # «topless», «sin sujetador») no puede caer en la ropa MEDIDA
+            # entera. Medido 2026-11-13 (log «IR DESCALZA»): ropa medida
+            # 126662 px = 87 % de la persona → se repintaba el cuerpo entero
+            # para quitar los zapatos. La zona la decide el segmentador sobre
+            # la propia instrucción (misma medición que usa la ruta directa).
+            try:
+                _subject_pil = Image.fromarray(
+                    (np.asarray(subject, dtype=bool).astype(np.uint8) * 255), "L")
+                request_zone = manager._request_region_on_subject(
+                    image, _subject_pil, [raw_prompt, instruction])
+            except Exception:
+                request_zone = None
+            if request_zone is not None:
+                measured = np.asarray(request_zone.convert("L")) >= 96
+                if measured.shape[:2] != np.asarray(subject).shape[:2]:
+                    import cv2
+                    measured = cv2.resize(
+                        measured.astype(np.uint8),
+                        (np.asarray(subject).shape[1], np.asarray(subject).shape[0]),
+                        interpolation=cv2.INTER_NEAREST,
+                    ) > 0
+                zone = measured
+                zone_label = "zona medida de la instrucción (segmentador)"
+                print(
+                    "[ImgEditor] Sin selección: la instrucción mide su propia "
+                    f"zona ({int(zone.sum())} px); no se usa la ropa entera",
+                    flush=True,
+                )
     if full_body and manager.measured_full_body_exposure(instruction):
         clothing = _measured_clothing_zone(manager, image, subject, None)
         person_px = int(subject.sum())
