@@ -1,3 +1,6 @@
+- **v5.1376 (2026-11-16) - «Mejorar fotos» sin emojis sueltos: texto limpio y alineado; los colores ya son el código visual (petición de usuario).**
+  Eliminados TODOS los emojis de la pestaña (título, cabeceras de sección, etiquetas de slider, botones, checkboxes, labels de archivos). La identidad visual pasa a ser cromática: barra de color por slider + viñeta azul por sección. Reemplazos desde consola fallaron en 2 cabeceras por codepage (📥/🧩) -> corregidos con ediciones directas. Verificado 0 emojis en ui/tabs/enhance/ui.py; contrato events.py 30/30 («keys faltantes: NINGUNA», «BUILD ENHANCE TAB OK»).
+
 - **v5.1375 (2026-11-16) - «Mejorar fotos» más visual: acentos por mejora, hero con glow y título en degradado (petición de usuario).**
   Capa visual sobre el layout de v5.1374 (estructura intacta): título con degradado azul-cian, viñeta azul en cada cabecera de sección, hero de foto ampliado a 460px con fondo #0d0d0d y glow azul (border #1f4d8f + box-shadow), barra de color a la izquierda de cada etiqueta de slider (border-left currentColor) con un color de acento por función (denoise cian, sharpen violeta, caras rosa, luz ámbar, sombras gris, luces amarillo, temperatura azul claro, grano indigo), botón PROCESAR LOTE con degradado y glow. Contrato events.py 30/30 verificado («keys faltantes: NINGUNA», «BUILD ENHANCE TAB OK»).
 

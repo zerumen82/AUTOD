@@ -155,7 +155,7 @@ def _slider(label, emoji, color, minimum, maximum, step, value, info, slider_key
     """
     gr.HTML(
         f'<div class="enhance-slider-wrap">'
-        f'<div class="enhance-slider-label" style="color:{color}">{emoji} {label}</div>'
+        f'<div class="enhance-slider-label" style="color:{color}">{label}</div>'
         f"</div>"
     )
     return gr.Slider(
@@ -180,7 +180,7 @@ def build_enhance_ui():
     with gr.Column(elem_classes=["img-enhance-container"]):
         # ---------- Cabecera ----------
         with gr.Group(elem_classes=["img-enhance-header"]):
-            gr.Markdown("## ✨ MEJORAR FOTOS")
+            gr.Markdown("## MEJORAR FOTOS")
             gr.Markdown("_Ajusta a la derecha, mira el resultado al instante, exporta el lote. 100 % local._")
 
         # ---------- Vista de trabajo: foto protagonista + panel de control ----------
@@ -188,23 +188,23 @@ def build_enhance_ui():
             with gr.Column(scale=5, elem_classes=["enhance-hero"]):
                 preview_slider = gr.ImageSlider(label="Antes / después — arrastra el comparador", type="pil", height=460)
                 with gr.Row():
-                    btn_preview = gr.Button("🔍 Vista previa", variant="secondary", scale=1, elem_classes=["btn-secondary"])
+                    btn_preview = gr.Button("Vista previa", variant="secondary", scale=1, elem_classes=["btn-secondary"])
                     preview_status = gr.Markdown("_Carga una foto y mueve los sliders_")
                 status_msg = gr.HTML("<div class='enhance-status'>Listo para importar y ajustar.</div>")
 
             with gr.Column(scale=4, elem_classes=["enhance-panel"]):
-                gr.Markdown("📥 Importar", elem_classes=["enhance-section"])
+                gr.Markdown("Importar", elem_classes=["enhance-section"])
                 input_files = gr.Files(
-                    label="\U0001F4C1 Seleccionar fotos (varias)",
+                    label="Seleccionar fotos (varias)",
                     file_types=["image"],
                 )
                 input_folder = gr.File(
-                    label="\U0001F4C2 O carpeta entera",
+                    label="O carpeta entera",
                     file_count="directory",
                     file_types=["image"],
                 )
                 with gr.Row():
-                    btn_load_sample = gr.Button("📦 Ejemplo", variant="secondary", size="sm", elem_classes=["btn-secondary"])
+                    btn_load_sample = gr.Button("Ejemplo", variant="secondary", size="sm", elem_classes=["btn-secondary"])
                 queue_table = gr.Dataframe(
                     headers=["Archivo", "Estado", "Tamaño"],
                     interactive=False,
@@ -212,40 +212,40 @@ def build_enhance_ui():
                     elem_classes=["enhance-dataframe"],
                 )
 
-                gr.Markdown("🧩 Mejoras", elem_classes=["enhance-section"])
+                gr.Markdown("Mejoras", elem_classes=["enhance-section"])
                 with gr.Row():
-                    denoise_slider = _slider("Denoise", "🧹", "#22d3ee", minimum=0, maximum=100, step=1, value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = agresivo.", slider_key="denoise")
-                    sharpen_slider = _slider("Sharpen", "🔎", "#a855f7", minimum=0, maximum=100, step=1, value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo.", slider_key="sharpen")
+                    denoise_slider = _slider("Denoise", "", "#22d3ee", minimum=0, maximum=100, step=1, value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = agresivo.", slider_key="denoise")
+                    sharpen_slider = _slider("Sharpen", "", "#a855f7", minimum=0, maximum=100, step=1, value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo.", slider_key="sharpen")
                 with gr.Row():
-                    recover_slider = _slider("Recover Faces", "🧑", "#f472b6", minimum=0, maximum=100, step=1, value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = total.", slider_key="recover")
-                    upscale_factor = gr.Dropdown(choices=[1, 2, 4, 6], value=int(defaults.get("upscale_factor", 2)), label="⬆️ Factor upscale", show_label=True)
+                    recover_slider = _slider("Recover Faces", "", "#f472b6", minimum=0, maximum=100, step=1, value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = total.", slider_key="recover")
+                    upscale_factor = gr.Dropdown(choices=[1, 2, 4, 6], value=int(defaults.get("upscale_factor", 2)), label="Factor upscale", show_label=True)
                 with gr.Row():
-                    exposure_slider = _slider("Exposición", "💡", "#fbbf24", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio.", slider_key="exposure")
-                    shadow_slider = _slider("Sombras", "🌑", "#94a3b8", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio.", slider_key="shadow")
+                    exposure_slider = _slider("Exposición", "", "#fbbf24", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio.", slider_key="exposure")
+                    shadow_slider = _slider("Sombras", "", "#94a3b8", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio.", slider_key="shadow")
                 with gr.Row():
-                    highlight_slider = _slider("Luces", "✨", "#facc15", minimum=0.0, maximum=2.0, step=0.05, value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio.", slider_key="highlight")
-                    temperature_slider = _slider("Temperatura", "🌡️", "#38bdf8", minimum=0, maximum=100, step=1, value=float(defaults.get("temperature", 50)), info="0 = neutra · + = cálida.", slider_key="temperature")
+                    highlight_slider = _slider("Luces", "", "#facc15", minimum=0.0, maximum=2.0, step=0.05, value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio.", slider_key="highlight")
+                    temperature_slider = _slider("Temperatura", "", "#38bdf8", minimum=0, maximum=100, step=1, value=float(defaults.get("temperature", 50)), info="0 = neutra · + = cálida.", slider_key="temperature")
                 with gr.Row():
-                    grain_strength_slider = _slider("Grano (fuerza)", "🎞️", "#818cf8", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength")
-                    grain_size_slider = _slider("Grano (tamaño)", "🎞️", "#818cf8", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size")
+                    grain_strength_slider = _slider("Grano (fuerza)", "", "#818cf8", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength")
+                    grain_size_slider = _slider("Grano (tamaño)", "", "#818cf8", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size")
 
         # ---------- Banda de presets y exportación ----------
-        gr.Markdown("🎛️ Presets · Exportación", elem_classes=["enhance-section"])
+        gr.Markdown("Presets · Exportación", elem_classes=["enhance-section"])
         with gr.Row():
             preset_dropdown = gr.Dropdown(choices=["Retrato", "Paisaje", "Nocturna", "Producto", "Archivo"], value="Retrato", label="Preset de fábrica")
-            preset_apply_btn = gr.Button("✅ Aplicar preset", variant="primary", elem_classes=["btn-apply"])
+            preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"])
             preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset")
-            preset_save_btn = gr.Button("💾 Guardar", variant="secondary", elem_classes=["btn-save"])
+            preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"])
         preset_status = gr.Markdown("")
         with gr.Row():
-            auto_mode = gr.Checkbox(label="🤖 Modo automático (medido por foto)", value=False)
+            auto_mode = gr.Checkbox(label="Modo automático (medido por foto)", value=False)
             apply_filters_to_filename = gr.Checkbox(label="Filtros en el nombre del archivo", value=bool(config.get("export", {}).get("add_applied_filters_to_filename", True)))
             output_path = gr.Textbox(label="Carpeta de destino", value=get_enhance_output_dir(), interactive=False, scale=2)
             format_dropdown = gr.Dropdown(choices=["png", "jpg", "jpeg"], value=config.get("export", {}).get("default_format", "png"), label="Formato", scale=1)
         result_table = gr.Dataframe(headers=["Entrada", "Salida", "Notas", "OK"], interactive=False, label="Resultado del lote", elem_classes=["enhance-dataframe"])
         with gr.Row():
-            batch_btn = gr.Button("🚀 PROCESAR LOTE", variant="primary", elem_classes=["btn-batch"], scale=3)
-            cancel_btn = gr.Button("⏹ Cancelar", variant="stop", scale=1)
+            batch_btn = gr.Button("PROCESAR LOTE", variant="primary", elem_classes=["btn-batch"], scale=3)
+            cancel_btn = gr.Button("Cancelar", variant="stop", scale=1)
 
     return {
         "session_state": session_state,
@@ -279,3 +279,4 @@ def build_enhance_ui():
         "status_msg": status_msg,
         "result_table": result_table,
     }
+
