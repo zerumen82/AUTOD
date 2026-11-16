@@ -27,9 +27,11 @@ ENHANCE_CSS = """
 }
 .img-enhance-header { text-align: center; margin-bottom: 8px; }
 .img-enhance-header h2 {
-    color: #fafafa;
-    font-size: 22px;
-    font-weight: 800;
+    background: linear-gradient(90deg, #4da3ff 0%, #7dd3fc 60%, #a5f3fc 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 26px;
+    font-weight: 900;
     letter-spacing: -0.3px;
     margin: 0 0 2px 0;
 }
@@ -44,9 +46,20 @@ ENHANCE_CSS = """
     border-bottom: 1px solid #2a2a2a;
     padding-bottom: 3px;
 }
+.enhance-section::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: #0f82ff;
+    margin-right: 6px;
+    vertical-align: middle;
+}
 .enhance-hero {
-    background: #1c1c1c;
-    border: 1px solid #2a2a2a;
+    background: #0d0d0d;
+    border: 1px solid #1f4d8f;
+    box-shadow: 0 0 22px rgba(15, 130, 255, 0.18);
     border-radius: 10px;
     padding: 10px;
 }
@@ -64,11 +77,13 @@ ENHANCE_CSS = """
 }
 .enhance-slider-label {
     color: #d9d9d9;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 11.5px;
+    font-weight: 700;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+    border-left: 3px solid currentColor;
+    padding-left: 7px;
 }
 .enhance-slider-value {
     color: #0f82ff;
@@ -82,15 +97,16 @@ ENHANCE_CSS = """
 .img-enhance-container .gap { gap: 4px !important; }
 .img-enhance-container .wrap { gap: 4px !important; }
 .btn-batch {
-    background: #0f82ff !important;
+    background: linear-gradient(90deg, #0f82ff 0%, #22b8ff 100%) !important;
     color: #ffffff !important;
-    font-weight: 700 !important;
-    height: 38px !important;
-    border-radius: 8px !important;
-    font-size: 12px !important;
-    letter-spacing: 0.4px;
+    font-weight: 800 !important;
+    height: 42px !important;
+    border-radius: 9px !important;
+    font-size: 13px !important;
+    letter-spacing: 0.6px;
     text-transform: uppercase;
     border: none !important;
+    box-shadow: 0 0 16px rgba(15, 130, 255, 0.35);
 }
 .btn-secondary {
     background: #242424 !important;
@@ -170,7 +186,7 @@ def build_enhance_ui():
         # ---------- Vista de trabajo: foto protagonista + panel de control ----------
         with gr.Row():
             with gr.Column(scale=5, elem_classes=["enhance-hero"]):
-                preview_slider = gr.ImageSlider(label="Antes / después — arrastra el comparador", type="pil", height=380)
+                preview_slider = gr.ImageSlider(label="Antes / después — arrastra el comparador", type="pil", height=460)
                 with gr.Row():
                     btn_preview = gr.Button("🔍 Vista previa", variant="secondary", scale=1, elem_classes=["btn-secondary"])
                     preview_status = gr.Markdown("_Carga una foto y mueve los sliders_")
@@ -198,20 +214,20 @@ def build_enhance_ui():
 
                 gr.Markdown("🧩 Mejoras", elem_classes=["enhance-section"])
                 with gr.Row():
-                    denoise_slider = _slider("Denoise", "🧹", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = agresivo.", slider_key="denoise")
-                    sharpen_slider = _slider("Sharpen", "🔎", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo.", slider_key="sharpen")
+                    denoise_slider = _slider("Denoise", "🧹", "#22d3ee", minimum=0, maximum=100, step=1, value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = agresivo.", slider_key="denoise")
+                    sharpen_slider = _slider("Sharpen", "🔎", "#a855f7", minimum=0, maximum=100, step=1, value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo.", slider_key="sharpen")
                 with gr.Row():
-                    recover_slider = _slider("Recover Faces", "🧑", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = total.", slider_key="recover")
+                    recover_slider = _slider("Recover Faces", "🧑", "#f472b6", minimum=0, maximum=100, step=1, value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = total.", slider_key="recover")
                     upscale_factor = gr.Dropdown(choices=[1, 2, 4, 6], value=int(defaults.get("upscale_factor", 2)), label="⬆️ Factor upscale", show_label=True)
                 with gr.Row():
-                    exposure_slider = _slider("Exposición", "💡", "#4da3ff", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio.", slider_key="exposure")
-                    shadow_slider = _slider("Sombras", "🌑", "#4da3ff", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio.", slider_key="shadow")
+                    exposure_slider = _slider("Exposición", "💡", "#fbbf24", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio.", slider_key="exposure")
+                    shadow_slider = _slider("Sombras", "🌑", "#94a3b8", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio.", slider_key="shadow")
                 with gr.Row():
-                    highlight_slider = _slider("Luces", "✨", "#4da3ff", minimum=0.0, maximum=2.0, step=0.05, value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio.", slider_key="highlight")
-                    temperature_slider = _slider("Temperatura", "🌡️", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("temperature", 50)), info="0 = neutra · + = cálida.", slider_key="temperature")
+                    highlight_slider = _slider("Luces", "✨", "#facc15", minimum=0.0, maximum=2.0, step=0.05, value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio.", slider_key="highlight")
+                    temperature_slider = _slider("Temperatura", "🌡️", "#38bdf8", minimum=0, maximum=100, step=1, value=float(defaults.get("temperature", 50)), info="0 = neutra · + = cálida.", slider_key="temperature")
                 with gr.Row():
-                    grain_strength_slider = _slider("Grano (fuerza)", "🎞️", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength")
-                    grain_size_slider = _slider("Grano (tamaño)", "🎞️", "#4da3ff", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size")
+                    grain_strength_slider = _slider("Grano (fuerza)", "🎞️", "#818cf8", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength")
+                    grain_size_slider = _slider("Grano (tamaño)", "🎞️", "#818cf8", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size")
 
         # ---------- Banda de presets y exportación ----------
         gr.Markdown("🎛️ Presets · Exportación", elem_classes=["enhance-section"])

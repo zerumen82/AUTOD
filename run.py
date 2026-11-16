@@ -453,7 +453,7 @@ def main():
     """Punto de entrada compartido: `python run.py` y launcher del exe."""
     _open_ui_session_log()
     print("\n" + "="*70)
-    print("  AutoAuto v5.1374 (2026-11-16)")
+    print("  AutoAuto v5.1375 (2026-11-16)")
     print("="*70 + "\n")
     if set_console_icon():
         print("[INFO] Icono de AutoAuto aplicado a la ventana de consola")
