@@ -9,6 +9,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMG_EDITOR_OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "img_editor")
 GENERATION_OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "generate")
 ANIMATE_OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "animate")
+ENHANCE_OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "enhance")
 
 
 def get_img_editor_output_dir() -> str:
@@ -24,3 +25,8 @@ def get_generation_output_dir() -> str:
 def get_animate_output_dir() -> str:
     os.makedirs(ANIMATE_OUTPUT_DIR, exist_ok=True)
     return ANIMATE_OUTPUT_DIR
+
+
+def get_enhance_output_dir() -> str:
+    os.makedirs(ENHANCE_OUTPUT_DIR, exist_ok=True)
+    return ENHANCE_OUTPUT_DIR

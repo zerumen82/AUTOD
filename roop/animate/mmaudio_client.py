@@ -300,11 +300,27 @@ def add_audio_to_video(
     if cancel_check and cancel_check():
         return video_path, _CANCELLED
 
+    base = get_comfyui_url().rstrip("/")
+    # Auto-arrancar ComfyUI si no está vivo (mismo criterio que LTX-2),
+    # para no obligar al usuario a levantarlo a mano.
+    try:
+        import requests
+        requests.get(f"{base}/system_stats", timeout=5)
+    except Exception:
+        try:
+            from ui.tabs.comfy_launcher import is_comfyui_running, start as start_comfyui
+            if not is_comfyui_running():
+                _comfy_ok, _comfy_msg, _ = start_comfyui(directly_run=True)
+                if not _comfy_ok:
+                    status = get_status_message(check_comfy=True)
+                    return video_path, f"Audio omitido: ComfyUI no disponible ({_comfy_msg})"
+            requests.get(f"{base}/system_stats", timeout=10)
+        except Exception as _e:
+            pass
     status = get_status_message(check_comfy=True)
     if not is_available(check_comfy=True):
         return video_path, f"Audio omitido: {status}"
 
-    base = get_comfyui_url().rstrip("/")
     duration, _fps = _video_duration(video_path)
     prompt = _resolve_sound_prompt(sound_prompt, motion_prompt)
     seed = int(time.time()) % (2**32)

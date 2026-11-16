@@ -237,10 +237,14 @@ def _is_our_comfyui(port: int) -> bool:
 
     v5.1095: fingerprint mínimo — el venv propio tiene ComfyUI-GGUF
     (UnetLoaderGGUF). Una instancia ajena (p.ej. 8189) no lo tiene.
+
+    v5.1365: el timeout pasó de 3 s a 10 s. Medido el 2026-11-15: este
+    endpoint responde en 36 ms, pero con la máquina ocupada puede pasar de
+    3 s y el ComfyUI propio se detectaba como «ajeno».
     """
     try:
         r = requests.get(
-            f"http://127.0.0.1:{port}/object_info/UnetLoaderGGUF", timeout=3
+            f"http://127.0.0.1:{port}/object_info/UnetLoaderGGUF", timeout=10
         )
         return r.status_code == 200 and "UnetLoaderGGUF" in r.json()
     except Exception:
@@ -252,6 +256,12 @@ def detect_comfyui_port() -> Optional[int]:
 
     v5.1095: solo acepta el 8188 y únicamente si tiene nodos GGUF.
     Un ComfyUI ajeno (aunque responda /system_stats) se ignora.
+
+    v5.1365: el fingerprint va PRIMERO y `/system_stats` queda como
+    respaldo. Medido el 2026-11-15: `/system_stats` tardó 15,3 s con la
+    máquina ocupada y su timeout era de 2 s, así que un ComfyUI NUESTRO se
+    anunciaba como «puerto ocupado por un proceso ajeno» y toda edición
+    fallaba con «ComfyUI no disponible».
     """
     print(f"[DEBUG] detect_comfyui_port() llamado")
     port = OUR_PORT
@@ -263,15 +273,17 @@ def detect_comfyui_port() -> Optional[int]:
         print(f"[DEBUG] No se encontró NUESTRO ComfyUI en puerto {port}")
         return None
 
-    # Then verify it's actually ComfyUI
+    # v5.1365: fingerprint barato primero (milisegundos).
+    if _is_our_comfyui(port):
+        print(f"[ComfyLauncher] ✓ NUESTRO ComfyUI detectado en puerto {port}")
+        return port
+
+    # Respaldo: comprobar que al menos es ComfyUI (para el aviso claro).
     try:
         print(f"[DEBUG] Haciendo request HTTP a puerto {port}...")
-        response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=2)
+        response = requests.get(f"http://127.0.0.1:{port}/system_stats", timeout=15)
         print(f"[DEBUG] HTTP response: {response.status_code}")
         if response.status_code == 200:
-            if _is_our_comfyui(port):
-                print(f"[ComfyLauncher] ✓ NUESTRO ComfyUI detectado en puerto {port}")
-                return port
             print(
                 f"[ComfyLauncher] ⚠ Puerto {port} ocupado por un ComfyUI AJENO "
                 f"(sin nodos GGUF) — se ignora"

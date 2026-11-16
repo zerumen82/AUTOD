@@ -375,14 +375,19 @@ def ui_endpoint_contract():
         "quality_upscale", "quality_color", "quality_realism",
     )]
     for name, count in (("edit", 8), ("edit_options", 9), ("edit_select", 13),
-                        ("edit_region", 14), ("edit_manual_region", 15)):
+                        ("edit_region", 14), ("edit_manual_region", 17)):
         assert len(endpoints[name]["inputs"]) == count, (name, endpoints[name])
         if count <= 13:
             expected = ordered[:count]
         elif name == "edit_region":
             expected = ordered + [ui["selection_state"]._id]
         else:
-            expected = ordered + [ui["selection_state"]._id, ui["manual_mask_editor"]._id]
+            # v5.1349: el botón de escritorio añade «Solo acabado», la selección,
+            # la máscara pintada y la categoría del selector (en ese orden).
+            expected = ordered + [
+                ui["quality_only_finish"]._id, ui["selection_state"]._id,
+                ui["manual_mask_editor"]._id, ui["category"]._id,
+            ]
         assert endpoints[name]["inputs"] == expected, f"{name}: argument order changed"
     assert isinstance(ui["input_img"], gr.Image)
     assert isinstance(ui["manual_mask_editor"], gr.ImageEditor)

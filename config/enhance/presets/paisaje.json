@@ -1,0 +1,21 @@
+{
+  "name": "Paisaje",
+  "description": "Detalles nítidos, colores equilibrados",
+  "sliders": {
+    "denoise_strength": 50,
+    "sharpen_strength": 60,
+    "recover_faces_strength": 0.6,
+    "exposure": 1.0,
+    "shadow": 0.5,
+    "highlight": 1.2,
+    "temperature": 55,
+    "grain_strength": 15,
+    "grain_size": 15
+  },
+  "models": {
+    "denoise": "models/scunet-onnx",
+    "sharpen": "models/nafnet-onnx",
+    "recover_faces": "models/GFPGANv1.4.onnx",
+    "upscale": "models/real_esrgan_x4.onnx"
+  }
+}

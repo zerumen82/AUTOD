@@ -657,6 +657,20 @@ def wire_events(ui_comp):
     _src_last_key = None
     _src_last_finished_at = 0.0
 
+    _dest_processing = False
+    _dest_last_key = None
+    _dest_last_finished_at = 0.0
+
+    def _dest_files_key(files):
+        if not files:
+            return ()
+        paths = []
+        for f in files:
+            p = _resolve_target_path(f)
+            if p:
+                paths.append(os.path.normpath(p))
+        return tuple(sorted(paths))
+
     def _src_files_key(files):
         if not files:
             return ()
@@ -748,11 +762,20 @@ def wire_events(ui_comp):
     )
 
     def _resolve_target_path(f):
-        if hasattr(f, "name"):
-            return f.name
-        if isinstance(f, dict):
-            return f.get("name", str(f))
-        return str(f)
+        try:
+            if isinstance(f, str):
+                return f
+            if isinstance(f, dict):
+                name = f.get("name") or f.get("path") or f.get("filename")
+                if name:
+                    return name
+            if hasattr(f, "name") and getattr(f, "name", None):
+                return f.name
+            if hasattr(f, "path") and getattr(f, "path", None):
+                return f.path
+        except Exception:
+            pass
+        return str(f) if f is not None else None
 
     def _target_empty_outputs():
         return (gr.update(maximum=1, value=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
@@ -815,6 +838,26 @@ def wire_events(ui_comp):
             outputs, _ = _load_target_files([_resolve_target_path(f) for f in files])
             return outputs
 
+    def _safe_on_dest_changed(files):
+        nonlocal _dest_processing, _dest_last_key, _dest_last_finished_at
+        files_key = _dest_files_key(files)
+        now = time.time()
+        if _dest_processing:
+            return _target_empty_outputs()
+        if files_key and files_key == _dest_last_key and (now - _dest_last_finished_at) < 3.0:
+            return on_dest_changed(files)
+        _dest_processing = True
+        try:
+            result = on_dest_changed(files)
+            _dest_last_key = files_key
+            _dest_last_finished_at = time.time()
+            return result
+        except Exception as exc:
+            print(f"[UI] Error cargando destino: {exc}")
+            return _target_empty_outputs()
+        finally:
+            _dest_processing = False
+
     def on_add_target_path(ruta):
         paths = _direct_paths(ruta)
         if not paths:
@@ -864,7 +907,13 @@ def wire_events(ui_comp):
         return gr.update(interactive=True)
 
     _path_outputs = [ui_comp["target_path_input"], ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["file_indicator"]]
-    ui_comp["bt_destfiles"].change(on_dest_changed, [ui_comp["bt_destfiles"]], [ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]], queue=False).then(update_file_indicator, None, ui_comp["file_indicator"]).then(update_source_random_state, None, ui_comp["source_random"])
+    ui_comp["bt_destfiles"].upload(
+        fn=_safe_on_dest_changed,
+        inputs=[ui_comp["bt_destfiles"]],
+        outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]],
+        show_progress="full",
+        queue=False,
+    ).then(update_file_indicator, None, ui_comp["file_indicator"]).then(update_source_random_state, None, ui_comp["source_random"])
     ui_comp["bt_add_target_path"].click(fn=on_add_target_path, inputs=[ui_comp["target_path_input"]], outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
     ui_comp["target_path_input"].submit(fn=on_add_target_path, inputs=[ui_comp["target_path_input"]], outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
     ui_comp["bt_browse_path"].click(fn=on_browse_and_load, outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])

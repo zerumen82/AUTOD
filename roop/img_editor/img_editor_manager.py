@@ -3,8 +3,9 @@
 import os
 import cv2
 import re
+import contextvars
 from types import SimpleNamespace
-from typing import Optional, Tuple, Dict
+from typing import Any, Dict, Optional, Tuple
 from PIL import Image, ImageFilter
 import numpy as np
 from roop.utils import get_vram_gb
@@ -16,6 +17,49 @@ from roop.img_editor.gen_prompt_config import (
 )
 
 from roop.utilities import resolve_relative_path
+
+
+# Selector «Tipo de edición» del Image Editor (v5.1349).
+# Es un PRIOR de ruta y una ayuda para la caja: con "auto" el comportamiento es
+# idéntico al anterior. Con una categoría solo se eleva su eje medido, salvo que
+# el prompt mida una señal muy alta de otro eje (entonces el selector se ignora
+# y queda registrado). Nunca prohíbe ni sustituye un prompt.
+_SCOPE_HINT = contextvars.ContextVar("img_editor_scope_hint", default="auto")
+# Mientras se evalúa el propio selector no se vuelve a aplicar el hint: evita
+# recursión al medir el POV dentro de _apply_scope_hint.
+_SCOPE_HINT_EVALUATING = contextvars.ContextVar(
+    "img_editor_scope_hint_evaluating", default=False,
+)
+# Avisos del selector ya emitidos en esta petición (evita repetirlos en cada
+# medición de hechos de la misma generación).
+_SCOPE_HINT_LOGGED = contextvars.ContextVar(
+    "img_editor_scope_hint_logged", default=None,
+)
+# Motor propio de una categoría: solo el que NO elige ya la ruta medida.
+# Las demás opciones dejan el modelo en manos de la ruta (sin entradas
+# redundantes que parezcan forzar un motor).
+_PINNED_ENGINE_BY_HINT = {
+    "camera": "qwen_camera",
+}
+# Selector «Tipo de edición»: una sola tabla manda el eje y los hechos que
+# eleva cada categoría. «camera» no eleva hechos: fuerza el POV en la ruta.
+_SCOPE_HINT_EFFECTS = {
+    "pose": {"axis": "pose", "facts": {"pose": True}},
+    "clothing": {"axis": "body", "facts": {"body": True}},
+    "body": {"axis": "body", "facts": {"body": True}},
+    "features": {"axis": "local_appearance", "facts": {"local_appearance": True}},
+    "background": {"axis": "scenario", "facts": {"scenario": True}},
+    "camera": {"axis": "camera", "facts": {}},
+    "add": {"axis": "structural_add", "facts": {"structural_add": True}},
+    "remove": {"axis": "structural_remove", "facts": {"structural_remove": True}},
+    "people": {"axis": "people", "facts": {}},
+}
+# Umbral de señal «muy alta» del prompt medido que gana al selector.
+_SCOPE_HINT_STRONG_INTENSITY = 0.60
+# Medidas del prompt ya hechas en esta petición (fact una vez por texto).
+_SCOPE_HINT_MEASURED = contextvars.ContextVar(
+    "img_editor_scope_hint_measured", default=None,
+)
 
 
 def _strip_possessive(text: str) -> str:
@@ -323,6 +367,109 @@ class ImgEditorManager:
             return False, f"fantasma detectado en '{prompt}': material original persiste"
         return True, ""
 
+    def _measure_requested_change(
+        self, original: Image.Image, edited: Image.Image,
+        raw_prompt: str, translated_prompt: str,
+        zone: Optional[Image.Image] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Mide si lo pedido se ve en el resultado (P6, P7, P8).
+
+        - P6 (personas): el número de caras detectadas tiene que subir.
+        - P7 (apariencia local): el cambio tiene que estar DENTRO de la zona
+          medida y no fuera.
+        - P8 (objeto añadido): tiene que haber evidencia nueva del concepto.
+
+        Devuelve None cuando no hay nada que medir, o un dict con `ok`,
+        `unmet` y el detalle medido. No hay listas de palabras: todo sale de la
+        segmentación, las caras detectadas y los píxeles.
+
+        Calibrado el 2026-11-15 con fotos reales (`diagnostics/
+        diag_new_concept_evidence_20261115.py`): la presencia global de un
+        concepto NO discrimina cuando la ruta repinta el fotograma entero
+        (bajó en los tres casos medidos), así que la evidencia nueva y el
+        recuento de caras son las señales que se usan.
+        """
+        from roop.img_editor.measured_verification import (
+            load_verification_settings,
+            new_concept_evidence,
+            zone_change,
+        )
+
+        facts = self._prompt_authority_facts(raw_prompt, translated_prompt)
+        hint = (_SCOPE_HINT.get() or "auto").strip().lower()
+        settings = load_verification_settings()
+        wants_addition = bool(facts.get("structural_add")) or hint in ("add", "people")
+        wants_zone = bool(
+            facts.get("local_appearance") or facts.get("surface_recolor")
+            or facts.get("local_region")
+        ) or hint == "features"
+        if not wants_addition and not wants_zone:
+            return None
+
+        detail: Dict[str, Any] = {}
+        problems: list = []
+        if wants_addition:
+            faces_before = len(self._detect_edit_faces(original))
+            faces_after = len(self._detect_edit_faces(edited))
+            person_gain = faces_after - faces_before
+            target = (
+                self._extract_addition_target(raw_prompt)
+                or self._extract_addition_target(translated_prompt)
+            )
+            evidence: Dict[str, Any] = {}
+            if target:
+                masker = None
+                try:
+                    masker = self._get_clipseg_masker()
+                    if masker is not None:
+                        # CPU a propósito: ComfyUI sigue con la VRAM y el
+                        # segmentador no debe pelearla (mismo criterio que
+                        # `_detect_edit_faces`).
+                        masker.device = "cpu"
+                        if masker.model is not None:
+                            masker.model.to("cpu")
+                        evidence = new_concept_evidence(
+                            masker, original, edited, target,
+                        )
+                except Exception as error:
+                    evidence = {"available": False, "reason": str(error)}
+                finally:
+                    if masker is not None:
+                        masker.unload()
+            fresh_area = float(evidence.get("fresh_area") or 0.0)
+            min_fresh = settings["addition"]["min_fresh_area"]
+            min_people = settings["addition"]["min_person_count_gain"]
+            detail["addition"] = {
+                "target": target,
+                "faces_before": faces_before,
+                "faces_after": faces_after,
+                "person_gain": person_gain,
+                "fresh_area": fresh_area,
+                "evidence": evidence,
+            }
+            if person_gain < min_people and fresh_area < min_fresh:
+                problems.append(
+                    "no se midió rastro del añadido pedido "
+                    f"(caras {faces_before}→{faces_after}, "
+                    f"evidencia nueva {fresh_area:.4%})"
+                )
+        if wants_zone and zone is not None:
+            zone_report = zone_change(original, edited, zone)
+            detail["zone"] = zone_report
+            if zone_report.get("available") and not zone_report.get("ok"):
+                problems.append(
+                    "el cambio medido no se ciñó a la zona pedida "
+                    f"(dentro {zone_report['inside_ratio']:.2%}, "
+                    f"fuera {zone_report['outside_ratio']:.2%})"
+                )
+        if not problems:
+            return {"ok": True, "unmet": "", "detail": detail}
+        return {
+            "ok": False,
+            "unmet": "; ".join(problems),
+            "detail": detail,
+        }
+
     @staticmethod
     def _preserves_face_layout(facts: dict) -> bool:
         """Only measured appearance/recolor edits imply the same face layout."""
@@ -410,12 +557,21 @@ class ImgEditorManager:
         return False
 
     @staticmethod
+    def _same_people_clause() -> str:
+        """The contract of a photo whose people may not multiply."""
+        return (
+            "The result must contain exactly the same people as the input: "
+            "no face may be added, copied or duplicated, and no new person "
+            "may appear anywhere in the photo."
+        )
+
+    @staticmethod
     def _same_people_retry_prompt(instruction: str) -> str:
         return (
             "The previous edit painted a new face or person that is not in the "
-            "input photo. The result must contain exactly the same people as "
-            "the input: no face may be added, copied or duplicated. "
-            f"Do this visible edit now: {instruction}. "
+            "input photo. "
+            + ImgEditorManager._same_people_clause()
+            + f" Do this visible edit now: {instruction}. "
             "Keep the pose and the framing, and leave every original person "
             "exactly where they are."
         )
@@ -1056,7 +1212,32 @@ class ImgEditorManager:
         if self.measured_full_body_exposure(instruction):
             return True
         if not self._has_unmeasured_clause(instruction):
-            return False          # everything the sentence asks is measured
+            # A coordinated body request can name two measured local states.
+            # The clothing mask may cover just one of them, so the model needs
+            # the selected person's full support to apply both instructions.
+            clauses = [part.strip() for part in re.split(
+                r"\s*(?:[,;]|\b(?:and|y)\b)\s*", instruction or "", flags=re.I,
+            ) if part.strip()]
+            try:
+                scorer = self._get_semantic_analyzer(full_ai=False)
+                minimum = self._body_scope_policy()["full_exposure_min_score"]
+                body_scopes = []
+                for clause in clauses:
+                    scope = self._requested_change_scope(clause) or clause
+                    scores = scorer.score_concepts(scope)
+                    body_scopes.append((
+                        max(float(scores.get("body_exposure_local", 0.0)),
+                            float(scores.get("body_exposure_full", 0.0))) >= minimum,
+                        str(scorer.get_body_direction(scope)).lower(),
+                    ))
+                coordinated = (
+                    sum(is_body for is_body, _ in body_scopes) >= 2
+                    and any(direction == "uncover" for _, direction in body_scopes)
+                )
+            except Exception:
+                coordinated = False
+            if not coordinated:
+                return False
         return 0 < int(garment_pixels) < 0.5 * max(1, int(person_pixels))
 
     def _has_unmeasured_clause(self, text: str) -> bool:
@@ -1083,10 +1264,13 @@ class ImgEditorManager:
         «remove the lamp» is structural_remove, already measured by other
         means.
         """
-        clauses = self._split_compound_instruction(text or "")
-        if len(clauses) < 2:
-            clauses = [c.strip() for c in re.split(r"\s*[,;]\s*", text or "")
-                       if c.strip()]
+        # Measure coordinated removal predicates independently even when the
+        # dispatch parser keeps them as one instruction for the same subject.
+        # This widens the editable support without promoting the request to
+        # complete nudity (controlled separately by instruction_scope).
+        clauses = [c.strip() for c in re.split(
+            r"\s*(?:[,;]|\b(?:and|y)\b)\s*", text or "", flags=re.I,
+        ) if c.strip()]
         if len(clauses) < 2:
             return False
         try:
@@ -2159,8 +2343,60 @@ class ImgEditorManager:
         )
         return tail.strip(" ,.;:!?")
 
+    @staticmethod
+    def _is_whole_instruction(query: str, text: str) -> bool:
+        """Whether this query is the whole instruction (and not a zone).
+
+        A sentence is not a place in the photo: CLIPSeg spreads it over
+        everything and returns a diffuse speck («Change the astronaut suit
+        to blue» midió 5,0 % y el modelo repintó una esquirla del cuello).
+        The instruction that HAS a predicate keeps its change («la mujer
+        debe ir sin medias» → «ir sin medias» es la parte que cambia).
+        """
+        def words(value):
+            return {
+                word for word in re.findall(r"[\w']+", (value or "").lower())
+                if len(word) > 2
+            }
+
+        query_words = words(query)
+        text_words = words(text)
+        return bool(text_words) and text_words <= query_words
+
+    def _request_change_queries(self, texts) -> list:
+        """The zone that changes, measured with phrases the segmenter can draw.
+
+        v5.1357: a whole instruction is not a zone. The change is measured
+        with the predicate when the sentence has one («ir sin medias» → las
+        medias) and with the subject phrase when it has none («Change the
+        astronaut suit to blue» → «astronaut suit», el traje entero). When
+        the phrase covers the measured subject it IS the subject, not a part
+        of it, and the caller repaints that whole surface.
+        """
+        queries = []
+        seen = set()
+        for text in texts:
+            if not text or not str(text).strip():
+                continue
+            for query in self._visual_request_queries([text]):
+                if self._is_whole_instruction(query, text):
+                    continue
+                key = query.casefold()
+                if len(query) < 3 or key in seen:
+                    continue
+                seen.add(key)
+                queries.append(query)
+            for description in self._visual_subject_descriptions(str(text)):
+                key = description.casefold()
+                if len(description) < 3 or key in seen:
+                    continue
+                seen.add(key)
+                queries.append(description)
+        return queries
+
     def _request_region_on_subject(
         self, image: Image.Image, subject_mask: Image.Image, texts,
+        queries: Optional[list] = None,
     ) -> Optional[Image.Image]:
         """Region the segmenter assigns to the request, on this subject.
 
@@ -2171,7 +2407,8 @@ class ImgEditorManager:
         skin overlap and dropped the object (2026-10-08, dark shoe luma 38,
         sent mask 62% skin).
         """
-        queries = self._visual_request_queries(texts)
+        if queries is None:
+            queries = self._visual_request_queries(texts)
         if not queries or subject_mask is None:
             return None
         try:
@@ -3948,8 +4185,16 @@ class ImgEditorManager:
         ))
 
     @staticmethod
-    def _background_mask_from_people(image: Image.Image, masker, faces: list) -> Optional[Image.Image]:
-        """Edit scenery only when the people can be protected reliably."""
+    def _people_foreground(image: Image.Image, masker, faces: list) -> Optional[np.ndarray]:
+        """The people of this photo, as a binary mask without dilation.
+
+        v5.1357: the mask that protects the people and the mask that starts
+        the repaint are not the same one. The repaint starts a few pixels
+        AWAY from the silhouette (so the model does not eat the hair), but
+        the people that go back over the new scenery are the silhouette
+        itself: restoring the dilated ring put a rim of the old backdrop
+        around the person (halo claro medido en la matriz P1).
+        """
         foreground = np.zeros((image.height, image.width), dtype=np.uint8)
         for query in ("person", "human", "man", "woman"):
             part = masker.generate_mask(image, query)
@@ -3970,11 +4215,143 @@ class ImgEditorManager:
                     return None
             except (TypeError, ValueError, AttributeError):
                 return None
-        foreground = cv2.dilate(foreground, np.ones((7, 7), np.uint8))
+        return foreground
+
+    @staticmethod
+    def _background_mask_from_people(image: Image.Image, masker, faces: list, gap: int = 7) -> Optional[Image.Image]:
+        """Edit scenery only when the people can be protected reliably.
+
+        `gap` es la banda SIN pintar que queda entre la silueta y el
+        escenario. Las demás rutas mantienen 7 px para que el muestreador no
+        toque nunca el borde de la persona. La ruta de escenario pasa 1 px:
+        esa banda no se repinta y devolvía el fondo viejo como halo claro
+        pegado al pelo (medido 2026-11-14 con la foto de astronauta: 2,27 px
+        de franja con 7 px y 0,00 px con 1 px). Ahí la persona ya se devuelve
+        encima del escenario, así que no hay borde que proteger.
+        """
+        foreground = ImgEditorManager._people_foreground(image, masker, faces)
+        if foreground is None:
+            return None
+        band = max(1, int(gap)) | 1
+        foreground = cv2.dilate(foreground, np.ones((band, band), np.uint8))
         background = (1 - foreground) * 255
         if float((background > 0).mean()) < 0.12:
             return None
         return Image.fromarray(background.astype(np.uint8), "L")
+
+    def _measured_background_zone(
+        self, image: Image.Image, faces: list,
+    ) -> Optional[tuple]:
+        """The scenery of this photo, with the people measured out of it.
+
+        v5.1357: a new scenario used to regenerate the whole frame, and the
+        model duplicated the person and changed both faces (matrix P1,
+        category «background»: FAIL). The scenery is measurable: the people
+        are the complement of the person mask, and the face check keeps the
+        route honest. Returns (background zone, people silhouette) or None
+        when the people cannot be located, so the caller falls back to the
+        previous behaviour.
+        """
+        if not faces:
+            return None
+        try:
+            masker = self._get_clipseg_masker()
+        except Exception:
+            return None
+        if masker is None:
+            return None
+        try:
+            zone = self._background_mask_from_people(
+                image, masker, faces, gap=1,
+            )
+            foreground = self._people_foreground(image, masker, faces)
+        except Exception:
+            return None
+        if zone is None or foreground is None:
+            print(
+                "[ImgEditor] Las personas no se pudieron medir; el escenario "
+                "se regenera completo",
+                flush=True,
+            )
+            return None
+        coverage = float((np.asarray(zone.convert("L")) >= 96).mean())
+        people = Image.fromarray(foreground * 255, "L")
+        print(
+            f"[ImgEditor] Fondo medido: {coverage:.1%} de la foto; las "
+            "personas quedan fuera de la zona",
+            flush=True,
+        )
+        return zone, people
+
+    def _restore_measured_people(
+        self, source: Image.Image, generated: Image.Image,
+        people_mask: Image.Image,
+    ) -> Image.Image:
+        """The measured people over the new scenery, with a soft seam.
+
+        The sampler only noises the measured background, so the people are
+        already the photo's pixels. This pass guarantees it even if the model
+        painted over the edge of the mask, and feathers the seam so the new
+        scenery does not cut the person with a hard line. The mask is the
+        silhouette itself (not the dilated ring that starts the repaint), so
+        the old backdrop does not come back as a halo around the person.
+        """
+        from PIL import ImageFilter
+
+        people = np.asarray(
+            people_mask.convert("L").resize(source.size, Image.Resampling.BILINEAR),
+            dtype=np.uint8,
+        )
+        # La silueta medida sobrecubre ~1 px de fondo en la mitad de su
+        # contorno (45 % de los píxeles de borde ya son fondo claro, medido
+        # 2026-11-14): devolverla tal cual repone ese filo como halo gris
+        # sobre el escenario nuevo. Se entrega 1 px por dentro, con borde
+        # suave, así el último píxel se funde con el escenario y no con el
+        # fondo viejo.
+        shrunk = cv2.erode(
+            (people >= 96).astype(np.uint8), np.ones((3, 3), np.uint8),
+        ) * 255
+        keep = Image.fromarray(shrunk, "L").filter(ImageFilter.GaussianBlur(2))
+        return Image.composite(source.convert("RGB"), generated.convert("RGB"), keep)
+
+    def _background_change_fraction(
+        self, source: Image.Image, generated: Image.Image,
+        background_zone: Image.Image,
+    ) -> float:
+        """How much of the measured scenery actually changed."""
+        left = np.asarray(source.convert("RGB"), dtype=np.int16)
+        right = np.asarray(
+            generated.convert("RGB").resize(source.size, Image.Resampling.LANCZOS),
+            dtype=np.int16,
+        )
+        zone = np.asarray(
+            background_zone.convert("L").resize(source.size, Image.Resampling.BILINEAR),
+        ) >= 96
+        if not zone.any():
+            return 0.0
+        delta = np.max(np.abs(right - left), axis=2)
+        return float((delta[zone] > 30).mean())
+
+    def _compose_background_prompt(self, instruction: str) -> str:
+        """Prompt of a scenery change that must keep the measured people.
+
+        The generic wrapper for a new scenario says «keep the same room» and
+        «the face of the edited person may change»; both contradict a
+        background replacement whose people are preserved pixel by pixel.
+        """
+        from roop.img_editor.element_selection import load_settings
+
+        template = load_settings()["edit"].get(
+            "background_template",
+            "Instruction: {instruction}. Replace only the scenery behind the "
+            "people. Keep every person exactly as in the photo: same face, "
+            "same hair, same clothes, same pose, same position and size. Keep "
+            "the same framing and camera. Apply the requested change to the "
+            "background as completely, strongly and obviously as possible.",
+        )
+        prompt = template.format(instruction=(instruction or "").strip())
+        print(f"[ImgEditor] Kontext Prompt: {prompt}")
+        return prompt
 
     def _surface_without_people(
         self, image: Image.Image, mask: Optional[Image.Image], faces,
@@ -4131,7 +4508,18 @@ class ImgEditorManager:
             people = np.asarray(
                 background.convert("L").resize(image.size, Image.Resampling.BILINEAR)
             ) < 128
-            box[people & ~region] = 0
+            region_pixels = float(region.sum())
+            overlap_ratio = (
+                float((people & region).sum()) / region_pixels
+                if region_pixels > 0 else 0.0
+            )
+            # Una persona que domina la caja (>= 55 % del área medida) es el
+            # objetivo de la eliminación: se conserva la zona medida tal cual.
+            # Una persona que solo roza la zona es un transeúnte: se resta por
+            # completo para que no entre en la máscara cerrada.
+            if overlap_ratio >= 0.55:
+                return mask
+            box[people] = 0
         finished = Image.fromarray(box * 255, "L")
         coverage = float((np.asarray(finished) >= 96).mean())
         # Same surface floor as a recolor: a speck is not an object zone.
@@ -4344,22 +4732,172 @@ class ImgEditorManager:
             predicates.append(clause[match.end():].strip() if match else clause.strip())
         return ", ".join(part for part in predicates if part)
 
-    @classmethod
-    def _explicit_viewpoint_request(cls, raw_prompt: str, translated_prompt: str) -> bool:
-        """Detect a requested camera change by measured camera concepts."""
+    def _explicit_viewpoint_request(self, raw_prompt: str, translated_prompt: str) -> bool:
+        """Detect a requested camera change by measured camera concepts.
+
+        v5.1349: a clause that already measures a pose is a posture request, not
+        a camera request. «cambiar de postura … mostrando el culo a la cámara»
+        activated Qwen Cámara by the token "cámara" (240 s, score=0.00). The
+        pose measurement of that same clause wins; a genuine camera clause
+        measures no pose of its own.
+        """
         from roop.img_editor.nlp.semantic_analyzer import is_camera_view_request
 
-        return any(
-            is_camera_view_request(scope)
-            for text in (raw_prompt, translated_prompt) if text
+        cache = _SCOPE_HINT_MEASURED.get()
+        key = ("pov", raw_prompt or "", translated_prompt or "")
+        if cache is not None and key in cache:
+            return cache[key]
+        detected = False
+        for text in (raw_prompt, translated_prompt):
+            if not text:
+                continue
             for clause in re.split(
                 r"\s*(?:[,;]|\band\b|\by\b|\bwhile\b|\bmientras\b)\s*",
                 text, flags=re.I,
+            ):
+                scope = self._requested_change_scope(clause)
+                if not scope:
+                    continue
+                pose_facts = self._prompt_authority_facts(
+                    clause, clause, camera_counts_as_pose=False,
+                )
+                if pose_facts.get("pose"):
+                    continue
+                if is_camera_view_request(scope):
+                    detected = True
+                    break
+            if detected:
+                break
+        if cache is not None:
+            cache[key] = detected
+        return detected
+
+    def _strong_prompt_axis(
+        self, facts: dict, raw_prompt: str, translated_prompt: str,
+    ) -> str:
+        """Measured axis strong enough to override the editor category."""
+        cache = _SCOPE_HINT_MEASURED.get()
+        key = ("strong", raw_prompt or "", translated_prompt or "")
+        if cache is not None and key in cache:
+            return cache[key]
+        token = _SCOPE_HINT_EVALUATING.set(True)
+        try:
+            point_of_view = self._explicit_viewpoint_request(
+                raw_prompt, translated_prompt,
             )
-            for scope in (cls._requested_change_scope(clause),)
+            # `facts["pose"]` also counts a measured camera clause as pose. Only
+            # a posture measured on its own wins over the camera axis.
+            posture_alone = bool(
+                facts.get("pose")
+                and self._prompt_authority_facts(
+                    raw_prompt, translated_prompt, camera_counts_as_pose=False,
+                ).get("pose")
+            )
+        finally:
+            _SCOPE_HINT_EVALUATING.reset(token)
+        if posture_alone:
+            axis = "pose"
+        elif float(facts.get("body_intensity") or 0.0) >= _SCOPE_HINT_STRONG_INTENSITY:
+            axis = "body"
+        elif float(facts.get("scenario_strength") or 0.0) >= _SCOPE_HINT_STRONG_INTENSITY:
+            axis = "scenario"
+        elif point_of_view:
+            axis = "camera"
+        else:
+            axis = ""
+        if cache is not None:
+            cache[key] = axis
+        return axis
+
+    def _apply_scope_hint(
+        self, facts: dict, hint: str, raw_prompt: str, translated_prompt: str,
+    ) -> dict:
+        """Elevate the axis chosen in the editor's category selector.
+
+        Precedence: the selector commands unless the measured prompt carries a
+        very high signal of another axis. The result keeps the existing
+        mutual exclusion of facts (pose > body > scenario > appearance >
+        region), so a hint only promotes its axis and never invents a region.
+        """
+        hint = (hint or "auto").strip().lower()
+        effect = _SCOPE_HINT_EFFECTS.get(hint)
+        if not effect:
+            return facts
+        axis = effect["axis"]
+        logged = _SCOPE_HINT_LOGGED.get()
+
+        def _log_once(key, text):
+            if logged is None:
+                print(text, flush=True)
+            elif key not in logged:
+                logged.add(key)
+                print(text, flush=True)
+
+        strong = self._strong_prompt_axis(facts, raw_prompt, translated_prompt)
+        if strong and strong != axis:
+            _log_once(
+                ("ignored", hint, strong),
+                f"[ImgEditor] Selector ignorado: medición fuerte de «{strong}» "
+                f"frente a la categoría «{hint}»",
+            )
+            return facts
+        hinted = dict(facts)
+        # El selector manda sobre lo medido débil: un eje que el prompt midió
+        # por debajo del umbral fuerte no puede borrar el eje elegido. Antes,
+        # un `body` débil limpiaba `local_appearance`/`scenario` en la cadena
+        # de precedencia y el «eje elevado» del log era mentira (la categoría
+        # no cambiaba nada). Las señales fuertes ya devolvieron arriba.
+        for key in (
+            "pose", "body", "scenario", "local_appearance", "local_region",
+            "region_ambiguous", "surface_recolor",
+        ):
+            hinted[key] = False
+        hinted.update(effect["facts"])
+        if hint == "people":
+            if not (hinted.get("structural_add")
+                    or hinted.get("structural_remove")):
+                hinted["scenario"] = True
+        elif axis == "body":
+            # La categoría eleva el eje; la DIRECCIÓN y la intensidad salen
+            # siempre de la medición del prompt. No se inventa «quitar ropa»:
+            # una frase neutra conserva «change» (antes la categoría forzaba
+            # uncover y desnudaba con «hazlo bonito»).
+            hinted["body_intensity"] = max(
+                float(hinted.get("body_intensity") or 0.0), 0.45,
+            )
+        hinted["authority"] = bool(hinted.get("pose") or hinted.get("body"))
+        _log_once(
+            ("applied", hint, strong),
+            f"[ImgEditor] Selector «{hint}»: eje {axis} elevado"
+            + (f" (medición fuerte de «{strong}» coincide)" if strong else ""),
+        )
+        return hinted
+
+    def _facts_measure_axis(
+        self, facts: dict, raw_prompt: str, translated_prompt: str,
+    ) -> bool:
+        """Whether these already-measured facts capture an edit axis."""
+        return bool(
+            facts.get("pose") or facts.get("body") or facts.get("scenario")
+            or facts.get("local_appearance") or facts.get("local_region")
+            or facts.get("region_ambiguous") or facts.get("surface_recolor")
+            or facts.get("structural_add") or facts.get("structural_remove")
+            or self._explicit_viewpoint_request(raw_prompt, translated_prompt)
         )
 
-    def _prompt_authority_facts(self, raw_prompt: str, translated_prompt: str) -> dict:
+    def _prompt_measures_any_axis(
+        self, raw_prompt: str, translated_prompt: str,
+    ) -> bool:
+        """Whether the prompt measures any edit axis at all."""
+        return self._facts_measure_axis(
+            self._prompt_authority_facts(raw_prompt, translated_prompt),
+            raw_prompt, translated_prompt,
+        )
+
+    def _prompt_authority_facts(
+        self, raw_prompt: str, translated_prompt: str,
+        camera_counts_as_pose: bool = True,
+    ) -> dict:
         """Separate a new pose from a body change.
 
         A whole sentence dilutes one clause: "bald, naked" scored like a weak
@@ -4381,6 +4919,9 @@ class ImgEditorManager:
             # me vale»). Un pedido de escenario NO es una región local: manda
             # la regeneración completa, sin ancla, como la postura.
             "scenario": False,
+            # v5.1349: fuerza medida del escenario (solo lectura). Permite
+            # decidir si el pedido de fondo es «señal muy alta» sin listas.
+            "scenario_strength": 0.0,
             # v5.1209: la eliminación estructural que el caller usa para
             # cerrar la zona dentro de su propia caja (sin listas de tipos).
             "structural_remove": False,
@@ -4397,6 +4938,7 @@ class ImgEditorManager:
         # raise the body score and cancel a removal that the Spanish clause
         # had already measured (2026-10-08: "elimina tatoo de la mujer").
         judged = []
+        scenario_strength = 0.0
         for text in texts:
             clauses = self._instruction_clauses(text)
             clauses.append(text.strip())
@@ -4420,6 +4962,7 @@ class ImgEditorManager:
                 background_score = float(
                     scores.get("structural_background", 0.0),
                 )
+                scenario_strength = max(scenario_strength, background_score)
                 structural_score = max(
                     remove_score,
                     structural_add_score,
@@ -4480,7 +5023,7 @@ class ImgEditorManager:
                         if camera_view_hit else 0.0,
                     ) * 1.10
                 )
-                if camera_view_hit or (
+                if (camera_view_hit and camera_counts_as_pose) or (
                     pose_has_distinct_evidence and pose_score >= 0.20
                     and pose_score >= max(
                         body_score, appearance_score, recolor_score,
@@ -4607,6 +5150,15 @@ class ImgEditorManager:
         facts["structural_add"] = bool(
             any(item["structural_add"] for item in judged)
         )
+        facts["scenario_strength"] = float(scenario_strength)
+        hint = _SCOPE_HINT.get()
+        # «camera» no eleva hechos: su efecto (POV forzado) vive en la ruta, así
+        # que no se vuelve a medir aquí.
+        if (hint and hint not in ("auto", "camera")
+                and not _SCOPE_HINT_EVALUATING.get()):
+            facts = self._apply_scope_hint(
+                facts, hint, raw_prompt, translated_prompt,
+            )
         return facts
 
     def _visual_subject_descriptions(self, text: str) -> list:
@@ -5651,6 +6203,31 @@ class ImgEditorManager:
                     flush=True,
                 )
             measured.append({"query": query, "region": limited})
+        if not measured and gate_faces and len(gate_faces) == 1:
+            # v5.1356: el sujeto nombrado puede no ser segmentable por
+            # CLIPSeg («astronaut» en la matriz P1: cobertura 0 %). Con UNA
+            # sola cara, la persona que la lleva es el sujeto; se mide con el
+            # segmentador genérico de persona ya usado en
+            # _background_mask_from_people y en la protección de add. El
+            # sujeto sigue siendo el del prompt; solo cambia el medio de
+            # segmentación. La compuerta de solape facial sigue vigente.
+            person_mask = self._build_clipseg_person_mask(image)
+            if person_mask is not None:
+                region = np.asarray(person_mask.convert("L"))
+                if region.shape[:2] != (height, width):
+                    region = cv2.resize(
+                        region, (width, height), interpolation=cv2.INTER_LINEAR
+                    )
+                limited = self._grow_measured_subject(region, gate_faces, width, height)
+                if limited is not None:
+                    grown_coverage = float((limited > 96).mean())
+                    if int((limited > 96).sum()) >= 48 and 0.04 <= grown_coverage <= 0.85:
+                        measured.append({"query": queries[0], "region": limited})
+                        print(
+                            f"[ImgEditor] '{queries[0]}' medido por máscara genérica "
+                            f"de persona (1 cara); cobertura={grown_coverage:.1%}",
+                            flush=True,
+                        )
         groups = self._group_measured_subjects(measured, raw_prompt, translated_prompt)
         for index, group in enumerate(groups, start=1):
             print(
@@ -5749,6 +6326,7 @@ class ImgEditorManager:
 
     def _body_paste_zone(
         self, source, generated, subject_mask, request_region, texts, box,
+        queries: Optional[list] = None,
     ) -> Optional[Image.Image]:
         """Measure a body's requested change in source and generated coordinates.
 
@@ -5769,7 +6347,7 @@ class ImgEditorManager:
         updated_photo = source.convert("RGB").copy()
         updated_photo.paste(updated_crop, box[:2])
         state_region = self._request_region_on_subject(
-            updated_photo, subject_mask, texts,
+            updated_photo, subject_mask, texts, queries=queries,
         )
         # v5.1204: sin parte distinta, la persona medida ES la zona (el
         # llamador ya decidió arriba: «Cuerpo sin parte distinta: la
@@ -6144,7 +6722,15 @@ class ImgEditorManager:
         lead = ImgEditorManager._determiner_phrases(text)
         if lead and text.lower().startswith(lead[0].lower()):
             return lead[0]
-        return ""
+        # v5.1356: imperativo en inglés sin determinante («Change the astronaut
+        # suit to blue», «Make the astronaut taller»): _PREDICATE_RE no casa
+        # «change»/«make» y _determiner_phrases exige sintagma inicial. Sin
+        # sujeto la edición de ropa/cuerpo aborta con «cuerpo no medido; se
+        # conserva la foto» (matriz P1, diagnostics/out/editor_categories_
+        # _20261114). Fallback gramatical: _leading_visual_subject recorta
+        # auxiliares y devuelve el sujeto nombrado; el segmentador y la
+        # compuerta de cara siguen decidiendo.
+        return ImgEditorManager._leading_visual_subject(text)
 
     @staticmethod
     def _attach_subject(clause: str, subject: str) -> str:
@@ -7390,7 +7976,36 @@ class ImgEditorManager:
             print(f"[ImgEditor] Face enhancement error: {e}")
             return image
 
-    def generate_intelligent(
+    @staticmethod
+    def _max_generation_passes() -> int:
+        """How many generation passes one request may spend (config, not a magic number)."""
+        try:
+            from roop.img_editor.element_selection import load_settings
+
+            value = int(load_settings()["edit"].get("max_passes", 2))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return 2
+        return max(1, value)
+
+    def generate_intelligent(self, *args, **kwargs):
+        """Public entry: scopes the editor category hint to this request only.
+
+        The ContextVar carries the «Tipo de edición» selected in the editor to
+        every measured decision (facts, routes, region selection). Resetting in
+        `finally` keeps the next request on «auto» even if this one fails.
+        """
+        scope_hint = kwargs.pop("scope_hint", "auto")
+        token = _SCOPE_HINT.set(scope_hint or "auto")
+        logged_token = _SCOPE_HINT_LOGGED.set(set())
+        measured_token = _SCOPE_HINT_MEASURED.set({})
+        try:
+            return self._generate_intelligent(*args, **kwargs)
+        finally:
+            _SCOPE_HINT_MEASURED.reset(measured_token)
+            _SCOPE_HINT_LOGGED.reset(logged_token)
+            _SCOPE_HINT.reset(token)
+
+    def _generate_intelligent(
         self,
         image,
         prompt: str,
@@ -7428,6 +8043,14 @@ class ImgEditorManager:
 
         self._last_instruction_compliance = None
         auto_requested = engine == "auto"
+        # v5.1357 (P3): tope de PASADAS de generación por petición. Medido
+        # 2026-11-14: cada pasada de LongCat cuesta 35-215 s y una petición
+        # que no cumplía encadenaba ruta descrita + ruta directa + reintento
+        # (4-7 min). Con dos pasadas el resultado se entrega y se dice que
+        # no se verificó, en vez de alargar la espera sin garantía.
+        passes_used = 0
+        max_passes = self._max_generation_passes()
+        pass_budget = {"used": 0, "max": max_passes}
         if auto_requested:
             engine = "longcat"
             print(
@@ -7438,6 +8061,21 @@ class ImgEditorManager:
         elif engine in ("longcat_full", "imagine"):
             print(f"[ImgEditor] Alias legacy {engine} → kontext", flush=True)
             engine = "kontext"
+        # v5.1349: la categoría del selector fija el MODELO, no la ruta. Se
+        # aplica solo con Auto para no desactivar `auto_requested`, del que
+        # dependen las rutas de sujeto descrito y de apariencia.
+        scope_hint = (_SCOPE_HINT.get() or "auto").strip().lower()
+        pinned_engine = _PINNED_ENGINE_BY_HINT.get(scope_hint)
+        engine_for_model = (
+            pinned_engine if (pinned_engine and auto_requested) else engine
+        )
+        hint_camera = scope_hint == "camera"
+        if pinned_engine and pinned_engine != engine:
+            print(
+                f"[ImgEditor] Selector «{scope_hint}»: modelo {pinned_engine} "
+                f"(ruta {engine})",
+                flush=True,
+            )
         manual_mask_requested = (
             mask_image is not None and str(mask_mode).lower() == "manual"
         )
@@ -7472,7 +8110,18 @@ class ImgEditorManager:
             )
 
         # Calidad sin prompt usa restauración/upscale local y no necesita ComfyUI.
-        pure_quality_request = bool(quality_mode and not (prompt or "").strip())
+        # v5.1349: «Solo acabado» dentro de Modo Calidad aplica únicamente los
+        # pasos marcados; el prompt no edita nada y se ignora en la generación.
+        only_finish = bool((quality_steps or {}).get("only_finish"))
+        pure_quality_request = bool(
+            quality_mode and (only_finish or not (prompt or "").strip())
+        )
+        if only_finish and quality_mode:
+            print(
+                "[ImgEditor] Solo acabado: el prompt no edita; se aplican los "
+                "pasos de calidad marcados",
+                flush=True,
+            )
         if pure_quality_request:
             # This request has no semantic edit to plan, translate or verify.
             # Running FaceAnalysis and the full edit router first loaded five
@@ -7627,10 +8276,62 @@ class ImgEditorManager:
 
         # A requested camera change is not reliably solved by the current
         # single-image models. Detect it early so the result can say so.
-        explicit_viewpoint_request = self._explicit_viewpoint_request(prompt_raw, prompt)
+        measured_viewpoint_request = self._explicit_viewpoint_request(prompt_raw, prompt)
+        # El selector «camera» fuerza el POV, salvo que el prompt mida una señal
+        # muy alta de otro eje: entonces el selector se ignora (misma regla que
+        # en los hechos) y manda la medición.
+        hint_camera_wins = False
+        if hint_camera and prompt:
+            measured_facts = self._prompt_authority_facts(prompt_raw, prompt)
+            strong_axis = self._strong_prompt_axis(
+                measured_facts, prompt_raw, prompt,
+            )
+            hint_camera_wins = not strong_axis or strong_axis == "camera"
+            if hint_camera_wins and not measured_viewpoint_request:
+                print(
+                    "[ImgEditor] Selector «camera»: POV explícito forzado por la categoría",
+                    flush=True,
+                )
+            elif not hint_camera_wins:
+                print(
+                    f"[ImgEditor] Selector ignorado: medición fuerte de "
+                    f"«{strong_axis}» frente a la categoría «camera»",
+                    flush=True,
+                )
+        explicit_viewpoint_request = (
+            hint_camera_wins and bool(prompt)
+        ) or measured_viewpoint_request
         if explicit_viewpoint_request:
             print("[ImgEditor] Cambio de cámara solicitado; cumplimiento visual no verificado", flush=True)
-        if engine == "qwen_camera" and (
+        # v5.1349: la zona sigue midiéndose; con Modo Calidad y un prompt que no
+        # mide ningún eje se aplica el acabado en vez de devolver la foto con
+        # «Zona local no medida» (logs «MEJORA LA IMAGEN…»: no hacía nada).
+        if (quality_hybrid and quality_style != "solo_mejora"
+                and mask_image is None
+                and not explicit_viewpoint_request
+                and not self._prompt_measures_any_axis(prompt_raw, prompt)):
+            from roop.img_editor.top_tier_finish import run_top_tier_quality
+            print(
+                "[ImgEditor] Modo Calidad sin eje medido en el prompt: "
+                "se aplica acabado en vez de una zona inexistente",
+                flush=True,
+            )
+            result, note, quality_analysis = run_top_tier_quality(
+                img,
+                enhance_tier=enhance_tier,
+                use_generative=False,
+                preserve_faces=bool(quality_preserve_faces),
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+                quality_steps=quality_steps,
+            )
+            self._last_quality_analysis = quality_analysis
+            if cancel_check and cancel_check():
+                return None, "Cancelado", None
+            return result, (
+                f"Sin eje medido en el prompt: acabado {enhance_tier} | {note}"
+            ), None
+        if engine_for_model == "qwen_camera" and (
                 not explicit_viewpoint_request or mask_image is not None
                 or quality_style == "solo_mejora"
                 or (quality_hybrid and quality_use_generative is True)
@@ -7661,6 +8362,20 @@ class ImgEditorManager:
                     self._prompt_authority_facts(extra_edit, extra_edit)
                     if extra_edit else {}
                 )
+                if (hint_camera_wins and extra_edit
+                        and not self._facts_measure_axis(
+                            extra_facts, extra_edit, extra_edit,
+                        )):
+                    # El usuario eligió «Cámara»: una frase genérica que no mide
+                    # ningún eje no debe convertirse en un segundo pase local
+                    # imposible de medir (terminaría conservando la foto).
+                    print(
+                        "[ImgEditor] Selector «camera»: resto del prompt sin eje "
+                        "medido; solo se aplica la pasada de cámara",
+                        flush=True,
+                    )
+                    extra_edit = ""
+                    extra_facts = {}
                 full_instruction_in_camera_pass = bool(
                     extra_edit and (
                         self._explicit_viewpoint_request(extra_edit, extra_edit)
@@ -7691,33 +8406,48 @@ class ImgEditorManager:
                             output, extra_edit,
                         )
                         if local_mask is None:
-                            return img, (
-                                "Edición combinada no aplicada: no se midió una "
-                                "región para los cambios restantes; foto original conservada"
-                            ), None
-                        follow_result, follow_message, _ = self.generate_intelligent(
-                            output,
-                            extra_edit,
-                            negative_prompt=negative_prompt,
-                            seed=seed,
-                            use_rewriter=False,
-                            use_semantic=False,
-                            engine="longcat",
-                            mask_image=local_mask,
-                            mask_mode="global",
-                            enhance_faces=False,
-                            lora_name=lora_name,
-                            lora_strength=lora_strength,
-                            progress_callback=progress_callback,
-                            cancel_check=cancel_check,
-                        )
-                        if follow_result is None:
-                            return img, (
-                                "Edición combinada no aplicada: falló el pase local; "
-                                f"foto original conservada ({follow_message})"
-                            ), None
-                        output = follow_result.convert("RGB")
-                        route_note += " + cambios restantes sobre regiones medidas"
+                            if not hint_camera_wins:
+                                return img, (
+                                    "Edición combinada no aplicada: no se midió una "
+                                    "región para los cambios restantes; foto original conservada"
+                                ), None
+                            # v5.1349: con la categoría «Cámara» el cambio de
+                            # cámara ES la petición; un resto sin región medida
+                            # no tira abajo el reencuadre ya generado.
+                            route_note += (
+                                " | resto sin región medida; se conserva el "
+                                "cambio de cámara"
+                            )
+                        else:
+                            follow_result, follow_message, _ = self.generate_intelligent(
+                                output,
+                                extra_edit,
+                                negative_prompt=negative_prompt,
+                                seed=seed,
+                                use_rewriter=False,
+                                use_semantic=False,
+                                engine="longcat",
+                                mask_image=local_mask,
+                                mask_mode="global",
+                                enhance_faces=False,
+                                lora_name=lora_name,
+                                lora_strength=lora_strength,
+                                progress_callback=progress_callback,
+                                cancel_check=cancel_check,
+                            )
+                            if follow_result is None:
+                                if not hint_camera_wins:
+                                    return img, (
+                                        "Edición combinada no aplicada: falló el pase local; "
+                                        f"foto original conservada ({follow_message})"
+                                    ), None
+                                route_note += (
+                                    " | resto no aplicado; se conserva el cambio "
+                                    "de cámara"
+                                )
+                            else:
+                                output = follow_result.convert("RGB")
+                                route_note += " + cambios restantes sobre regiones medidas"
                     # v5.1330: no aplicar acabado TOP post-edit en cambios de cámara.
                     # Qwen Cámara ya genera a ~1 MP con la LoRA de ángulos; el
                     # upscale + preservación facial + color/luz re-escribe píxeles
@@ -7728,18 +8458,52 @@ class ImgEditorManager:
                     elif output.size != img.size:
                         output = output.resize(img.size, Image.Resampling.LANCZOS)
                         route_note += " | tamaño original por interpolación"
-                    # v5.1330: validar cumplimiento visual del cambio de cámara
-                    # usando landmarks MediaPipe 468. Si no hay cambio significativo,
-                    # marcar como fallo y no reportar éxito.
+                    # v5.1365 (P9): el cambio de cámara se verifica con la
+                    # FIRMA DE ENCUADRE medida (posición, tamaño, roll y
+                    # proporción frente de la cara). Antes se usaba
+                    # `_camera_change_score`, que devolvía 0.00 cuando la
+                    # malla 468 no encontraba cara en la salida: eso se leía
+                    # como «no hubo cambio» en un cambio de cámara REAL
+                    # (medido el 2026-11-15 con la salida de Qwen Camera).
+                    # Ahora la ausencia de malla se informa como «no
+                    # medible», que es lo que realmente pasó.
                     try:
-                        from roop.img_editor.top_tier_finish import _camera_change_score
-                        cam_score = _camera_change_score(img, output)
-                        if cam_score < 0.15:  # Umbral: cambio de cámara real >0.15
-                            route_note += f" | ADVERTENCIA: cambio de cámara no detectado (score={cam_score:.2f})"
-                            print(f"[ImgEditor] Cambio de cámara no verificado: score={cam_score:.2f}", flush=True)
+                        from roop.img_editor.measured_verification import framing_change
+                        cam_report = framing_change(img, output)
+                        if not cam_report.get("medible"):
+                            route_note += (
+                                " | cambio de cámara NO medible "
+                                f"({cam_report.get('reason')})"
+                            )
+                            print(
+                                "[ImgEditor] Cambio de cámara no medible: "
+                                f"{cam_report.get('reason')}",
+                                flush=True,
+                            )
+                        elif cam_report.get("changed"):
+                            route_note += (
+                                " | cambio de encuadre medido "
+                                f"(score={cam_report['score']:.2f}, "
+                                f"desplazamiento={cam_report['center_shift']:.3f}, "
+                                f"tamaño={cam_report['area_ratio']:.2f})"
+                            )
+                            print(
+                                f"[ImgEditor] Cambio de encuadre medido: "
+                                f"score={cam_report['score']:.2f} "
+                                f"{cam_report['indicators']}",
+                                flush=True,
+                            )
                         else:
-                            route_note += f" | cambio de cámara verificado (score={cam_score:.2f})"
-                            print(f"[ImgEditor] Cambio de cámara verificado: score={cam_score:.2f}", flush=True)
+                            route_note += (
+                                " | cambio de encuadre NO medido "
+                                f"(score={cam_report['score']:.2f})"
+                            )
+                            print(
+                                f"[ImgEditor] Cambio de encuadre no medido: "
+                                f"score={cam_report['score']:.2f} "
+                                f"{cam_report['indicators']}",
+                                flush=True,
+                            )
                     except Exception as cam_val_error:
                         print(f"[ImgEditor] Validación de cámara no disponible: {cam_val_error}", flush=True)
                     if cancel_check and cancel_check():
@@ -7777,9 +8541,12 @@ class ImgEditorManager:
                 auto_upscale=auto_upscale, enhance_tier=enhance_tier,
                 quality_preserve_faces=quality_preserve_faces,
                 quality_steps=quality_steps, cancel_check=cancel_check,
+                pass_budget=pass_budget,
             )
             if described is not None:
                 out_img, out_note, out_mask = described
+                # v5.1357 (P3): la ruta descrita ya gastó sus pasadas.
+                passes_used = int(pass_budget.get("used", passes_used))
                 # v5.1311 — residual del objetivo medido: el pase cambió
                 # píxeles pero no retiró lo pedido (zapatos/medias/objeto).
                 # No aceptar como «Validación visual OK»; probar ruta fuerte.
@@ -8305,6 +9072,22 @@ class ImgEditorManager:
                         faces=source_faces,
                         structural_remove=bool(authority_facts.get("structural_remove")),
                     )
+                elif authority_facts.get("structural_remove"):
+                    # v5.1357: una ELIMINACIÓN pide una zona medida: el objeto
+                    # que se quita, medido en la foto («black helmet», 11,9 %).
+                    # Sin esta rama el pedido caía en la ruta global: el modelo
+                    # redibujaba la foto entera, el casco salía por recorte de
+                    # cuadro y además inventaba un parche nuevo en el pecho
+                    # (matriz P1, categoría «remove»: FAIL visual).
+                    region_edit = True
+                    preserve_frame = True
+                    prompt_authority = True
+                    subject_passes = self._measured_region_passes(
+                        img, score_raw, prompt,
+                        surface_recolor=False,
+                        faces=source_faces,
+                        structural_remove=True,
+                    )
                 elif preserve_frame:
                     subject_passes = self._measured_subject_passes(
                         img, score_raw, prompt, source_faces,
@@ -8580,9 +9363,38 @@ class ImgEditorManager:
                         len(subject_passes) == 1
                         and subject_passes[0].get("deliver_region")
                     )
+                    # v5.1357: un escenario nuevo con personas MEDIBLES se
+                    # repinta solo en el fondo. La regeneración completa
+                    # duplicaba a la persona y cambiaba ambas caras (matriz P1,
+                    # categoría «background»: FAIL visual). Con la zona de
+                    # fondo medida, el sampler pinta el cenário y los píxeles
+                    # de las personas se conservan (SetLatentNoiseMask).
+                    background_zone = None
+                    people_mask = None
+                    if multi_output is None and scenario_edit:
+                        measured_background = self._measured_background_zone(
+                            img, source_faces,
+                        )
+                        if measured_background is not None:
+                            background_zone, people_mask = measured_background
+                            frame_note = (
+                                "escenario nuevo con las personas medidas "
+                                "conservadas"
+                            )
                     if body_edit and subject_mask is not None and multi_output is None:
+                        # v5.1357: la zona pedida se mide con la FRASE que
+                        # nombra la cosa («astronaut suit»), no con la frase
+                        # entera. La frase entera no es una zona: CLIPSeg la
+                        # reparte por la foto, midió 5,0 % y el modelo repintó
+                        # una esquirla del cuello dejando el traje naranja
+                        # (matriz P1, diagnostics/out/editor_categories_20261114).
+                        # Si la frase cubre el sujeto medido, no es «una parte
+                        # más»: ES el sujeto, y el traje entero se repinta.
                         body_request_region = self._request_region_on_subject(
                             img, subject_mask, [score_raw, edit_text],
+                            queries=self._request_change_queries(
+                                [score_raw, edit_text],
+                            ),
                         )
                         if body_request_region is not None:
                             body_request_region = self._continue_body_part(
@@ -8611,7 +9423,18 @@ class ImgEditorManager:
                         )
                         else None
                     )
-                    if (
+                    if multi_output is None and background_zone is not None:
+                        generation_image = img
+                        generation_mask = background_zone
+                        # local_box stays None: the scenery is already the
+                        # full frame and the people are put back over it, so
+                        # there is no local paste to integrate.
+                        print(
+                            "[ImgEditor] Escenario: solo el fondo medido se "
+                            "repinta; las personas conservan sus píxeles",
+                            flush=True,
+                        )
+                    elif (
                         multi_output is None
                         and (appearance_edit or region_edit)
                         and subject_mask is not None
@@ -8719,13 +9542,27 @@ class ImgEditorManager:
                             # cambie — el wrapper recibe el mismo gesto que la
                             # postura para no escribir «keep the same room»
                             # contra «que esté en una playa».
-                            fast_prompt = self._compose_generation_prompt(
-                                edit_text, engine="longcat", magnitude=0.85,
-                                pose_change=bool(authority_facts["pose"]) or scenario_edit,
-                                body_transform=bool(authority_facts["body"]),
-                                body_direction=str(authority_facts["body_direction"]),
-                                body_intensity=float(authority_facts["body_intensity"]),
-                            )
+                            if scenario_edit and background_zone is not None:
+                                # v5.1357: con el fondo medido, el wrapper de
+                                # escenario no puede decir «keep the same room»
+                                # (contradice el pedido) ni «the face may
+                                # change» (las personas se conservan).
+                                fast_prompt = self._compose_background_prompt(
+                                    edit_text,
+                                )
+                                print(
+                                    "[ImgEditor] Escenario: Turbo repinta el "
+                                    "fondo medido y conserva a las personas",
+                                    flush=True,
+                                )
+                            else:
+                                fast_prompt = self._compose_generation_prompt(
+                                    edit_text, engine="longcat", magnitude=0.85,
+                                    pose_change=bool(authority_facts["pose"]) or scenario_edit,
+                                    body_transform=bool(authority_facts["body"]),
+                                    body_direction=str(authority_facts["body_direction"]),
+                                    body_intensity=float(authority_facts["body_intensity"]),
+                                )
                             if scenario_edit:
                                 authority_label = "Escenario"
                             elif authority_facts["pose"] and authority_facts["body"]:
@@ -8762,17 +9599,26 @@ class ImgEditorManager:
                             # negative branch, so keep user exclusions in text.
                             fast_prompt += f" Avoid: {negative_prompt}."
                         from roop.img_editor.flux_edit_comfy_client import measured_appearance_sample, measured_region_sample
-                        appearance_sample = (
-                            measured_appearance_sample(generation_mask is not None)
-                            if appearance_edit or recolor_edit
-                            else measured_region_sample(generation_mask is not None) if region_edit
-                            else {
+                        if background_zone is not None:
+                            # v5.1357: el fondo medido se repinta entero
+                            # (fuerza 1,00) y el texto manda; los píxeles de
+                            # las personas no entran en el ruido.
+                            appearance_sample = {
                                 "num_inference_steps": 12, "denoise": 1.0,
-                                # The local body pass keeps the photo anchored;
-                                # the full-photo body pass does not.
-                                "no_kontext": generation_mask is None,
+                                "no_kontext": True,
                             }
-                        )
+                        else:
+                            appearance_sample = (
+                                measured_appearance_sample(generation_mask is not None)
+                                if appearance_edit or recolor_edit
+                                else measured_region_sample(generation_mask is not None) if region_edit
+                                else {
+                                    "num_inference_steps": 12, "denoise": 1.0,
+                                    # The local body pass keeps the photo anchored;
+                                    # the full-photo body pass does not.
+                                    "no_kontext": generation_mask is None,
+                                }
+                            )
                         if appearance_edit and generation_mask is not None and not deliver_region:
                             appearance_sample, vision_reference = (
                                 self._with_covered_reference(
@@ -8794,8 +9640,66 @@ class ImgEditorManager:
                                 f"fuerza {appearance_sample['denoise']:.2f}, sin agujero",
                                 flush=True,
                             )
-                        fast_result, fast_msg = fast_client.generate(
-                            image=generation_image, prompt=fast_prompt,
+                        if (region_edit and authority_facts.get("structural_remove")
+                                and generation_mask is not None):
+                            try:
+                                from roop.img_editor.lama_inpaint import is_available, lama_inpaint
+                                if is_available():
+                                    print(
+                                        "[ImgEditor] Eliminación con inpaint LaMa "
+                                        "(relleno desde el entorno, sin invención)",
+                                        flush=True,
+                                    )
+
+                                    lama_output = lama_inpaint(
+                                        generation_image, generation_mask,
+                                    )
+                                    class _Shim:
+                                        pass
+                                    fast_result = _Shim()
+                                    fast_result.image = lama_output
+                                    fast_msg = "LaMa inpaint: zona rellenada desde el entorno"
+                                    passes_used = passes_used
+                                else:
+                                    fast_result, fast_msg = fast_client.generate(
+                                        image=generation_image, prompt=fast_prompt,
+                                        negative_prompt=negative_prompt,
+                                        guidance_scale=1.0,
+                                        seed=seed,
+                                        prompt_authority=prompt_authority,
+                                        preserve_frame=preserve_frame,
+                                        mask_image=generation_mask,
+                                        keep_source_pixels=generation_mask is not None,
+                                        reference_image=vision_reference,
+                                        lora_name=lora_name, lora_strength=lora_strength,
+                                        progress_callback=progress_callback,
+                                        cancel_check=cancel_check,
+                                        **appearance_sample,
+                                    )
+                            except Exception as _lama_error:
+                                print(
+                                    f"[ImgEditor] LaMa falló, se usa el pase difuso: "
+                                    f"{_lama_error}",
+                                    flush=True,
+                                )
+                                fast_result, fast_msg = fast_client.generate(
+                                    image=generation_image, prompt=fast_prompt,
+                                    negative_prompt=negative_prompt,
+                                    guidance_scale=1.0,
+                                    seed=seed,
+                                    prompt_authority=prompt_authority,
+                                    preserve_frame=preserve_frame,
+                                    mask_image=generation_mask,
+                                    keep_source_pixels=generation_mask is not None,
+                                    reference_image=vision_reference,
+                                    lora_name=lora_name, lora_strength=lora_strength,
+                                    progress_callback=progress_callback,
+                                    cancel_check=cancel_check,
+                                    **appearance_sample,
+                                )
+                        else:
+                            fast_result, fast_msg = fast_client.generate(
+                                image=generation_image, prompt=fast_prompt,
                             negative_prompt=negative_prompt,
                             guidance_scale=1.0,
                             seed=seed,
@@ -8809,12 +9713,111 @@ class ImgEditorManager:
                             cancel_check=cancel_check,
                             **appearance_sample,
                         )
+                        if fast_result is not None:
+                            passes_used += 1
+                            pass_budget["used"] = passes_used
                     if multi_output is not None or fast_result is not None:
                         if multi_output is not None:
                             output = multi_output
                         else:
                             output = fast_result.image.convert("RGB")
                             gen_size = output.size
+                            if background_zone is not None:
+                                # v5.1357: las personas medidas vuelven sobre el
+                                # escenario nuevo; la costura se suaviza y el
+                                # fondo se mide para saber si el modelo repintó
+                                # algo (si no cambió, el pedido no se cumplió).
+                                if output.size == img.size:
+                                    output = self._restore_measured_people(
+                                        img, output, people_mask,
+                                    )
+                                changed = self._background_change_fraction(
+                                    img, output, background_zone,
+                                )
+                                print(
+                                    "[ImgEditor] Fondo repintado: "
+                                    f"{changed:.1%} de los píxeles del fondo "
+                                    "cambiaron; las personas conservan la foto",
+                                    flush=True,
+                                )
+                                fast_msg = (
+                                    f"{fast_msg}; escenario nuevo con las "
+                                    "personas medidas conservadas"
+                                )
+                                # El modelo puede poblar el fondo pintado con
+                                # otra persona (medido 2026-11-14: pintó un
+                                # segundo astronauta junto a la original). Las
+                                # personas medidas NO se mueven en esta ruta,
+                                # así que una cara añadida es un defecto y se
+                                # reintenta con el contrato de «las mismas
+                                # personas».
+                                added_face = self._added_face_mask(
+                                    img, output, detected_faces or source_faces,
+                                )
+                                if added_face is not None and passes_used < max_passes and not (
+                                    cancel_check and cancel_check()
+                                ):
+                                    print(
+                                        "[ImgEditor] Persona nueva pintada en el "
+                                        "fondo; segundo intento con las mismas "
+                                        "personas",
+                                        flush=True,
+                                    )
+                                    retry_prompt = (
+                                        "The previous edit painted a new person "
+                                        "that is not in the input photo. "
+                                        + self._same_people_clause()
+                                        + " "
+                                        + self._compose_background_prompt(edit_text)
+                                    )
+                                    try:
+                                        retry_result, retry_msg = fast_client.generate(
+                                            image=generation_image, prompt=retry_prompt,
+                                            negative_prompt=negative_prompt,
+                                            guidance_scale=1.0,
+                                            seed=seed,
+                                            prompt_authority=prompt_authority,
+                                            preserve_frame=preserve_frame,
+                                            mask_image=generation_mask,
+                                            keep_source_pixels=generation_mask is not None,
+                                            reference_image=vision_reference,
+                                            lora_name=lora_name, lora_strength=lora_strength,
+                                            progress_callback=progress_callback,
+                                            cancel_check=cancel_check,
+                                            **appearance_sample,
+                                        )
+                                    except Exception as retry_error:
+                                        retry_result, retry_msg = None, str(retry_error)
+                                    if retry_result is not None:
+                                        output = retry_result.image.convert("RGB")
+                                        if output.size == img.size:
+                                            output = self._restore_measured_people(
+                                                img, output, people_mask,
+                                            )
+                                        leftover = self._added_face_mask(
+                                            img, output, detected_faces or source_faces,
+                                        )
+                                        if leftover is not None:
+                                            output = Image.composite(
+                                                img, output, leftover,
+                                            )
+                                            fast_msg += (
+                                                "; persona añadida persistente; "
+                                                "esa región se restaura de la foto "
+                                                "original"
+                                            )
+                                            print(
+                                                "[ImgEditor] El segundo intento sigue "
+                                                "pintando una persona; esa región se "
+                                                "restaura de la foto original",
+                                                flush=True,
+                                            )
+                                    else:
+                                        fast_msg += f"; segundo intento falló: {retry_msg}"
+                                        print(
+                                            f"[ImgEditor] Segundo intento falló: {retry_msg}",
+                                            flush=True,
+                                        )
                             if (region_edit and generation_mask is not None
                                     and not (recolor_edit
                                              and any(item.get("requested_part") for item in subject_passes))):
@@ -8826,6 +9829,7 @@ class ImgEditorManager:
                                 )
                                 if repair_msg:
                                     fast_msg = f"{fast_msg}; {repair_msg}"
+
                             if body_edit and subject_mask is not None:
                                 zone_box = (
                                     local_box
@@ -8835,6 +9839,9 @@ class ImgEditorManager:
                                 body_zone = self._body_paste_zone(
                                     img, output, subject_mask, body_request_region,
                                     [score_raw, edit_text], zone_box,
+                                    queries=self._request_change_queries(
+                                        [score_raw, edit_text],
+                                    ),
                                 )
                                 output = (
                                     self._integrate_local_generation(
@@ -8869,7 +9876,7 @@ class ImgEditorManager:
                                         f"zona corporal={body_zone is not None}",
                                         flush=True,
                                     )
-                            elif local_box is not None:
+                            elif local_box is not None and subject_mask is not None:
                                 keep_request = bool(
                                     len(subject_passes) == 1
                                     and (
@@ -8984,6 +9991,7 @@ class ImgEditorManager:
                             )
                             if (multi_output is None
                                     and (no_op or ghost or added_face)
+                                    and passes_used < max_passes
                                     and not (cancel_check and cancel_check())):
                                 if added_face:
                                     print(
@@ -9179,6 +10187,19 @@ class ImgEditorManager:
                                     fast_msg = f"{fast_msg}; segundo intento: {retry_msg}"
                                     print(f"[ImgEditor] Segundo intento aplicado: {retry_msg}", flush=True)
                                     no_op = self._edit_is_nearly_unchanged(img, output)
+                                    passes_used += 1
+                                    pass_budget["used"] = passes_used
+                            elif (multi_output is None
+                                    and (no_op or ghost or added_face)):
+                                # v5.1357 (P3): el tope de pasadas se alcanzó;
+                                # no se alarga la espera. El resultado se
+                                # entrega y el log dice que no se verificó.
+                                print(
+                                    f"[ImgEditor] Tope de {max_passes} pasadas "
+                                    "alcanzado: se entrega el resultado sin más "
+                                    "reintentos",
+                                    flush=True,
+                                )
                                 if body_edit and body_zone is None:
                                     fast_msg = (
                                         f"{fast_msg}; «{edit_text}» sin cambio "
@@ -9226,7 +10247,16 @@ class ImgEditorManager:
                                     else:
                                         no_op_warning = f" | ADVERTENCIA: {reason}"
                                 else:
-                                    no_op_warning = " | validación visual aprobada"
+                                    # v5.1357 (P13): el acabado puede cambiar la
+                                    # foto y aun así el pedido NO se cumplió
+                                    # (el generativo apenas movió nada). El
+                                    # aviso del cambio pedible no se pierde
+                                    # debajo del «validación visual aprobada».
+                                    no_op_warning = (
+                                        " | validación visual aprobada, pero el "
+                                        "cambio solicitado apenas visible"
+                                        if no_op else " | validación visual aprobada"
+                                    )
                                 return output, f"{fast_msg} | Turbo + {finish_note}{authority_note}{no_op_warning}{pov_warning}", None
                         if prompt_authority:
                             no_op = self._edit_is_nearly_unchanged(img, output)
@@ -12188,6 +13218,50 @@ class ImgEditorManager:
                     if _hair_masker is not None:
                         _hair_masker.unload()
 
+            # v5.1365 (P6, P7, P8): verificación MEDIDA de lo pedido, antes
+            # de la opinión del VLM. Una persona u objeto añadido tiene que
+            # dejar rastro medible (caras, evidencia nueva del concepto) y
+            # un cambio de apariencia local tiene que medirse dentro de la
+            # zona pedida. Sin esto, «cambió algo» era el único criterio.
+            if result is not None and prompt_raw and not quality_only:
+                try:
+                    _measured_zone = final_mask
+                    if _measured_zone is None:
+                        _measured_zone = locals().get("_longcat_focal_mask")
+                    if _measured_zone is None:
+                        _measured_zone = locals().get("_head_hole_zone")
+                    _measured = self._measure_requested_change(
+                        img, result, prompt_raw, prompt, _measured_zone,
+                    )
+                    if _measured is not None:
+                        _measured_detail = _measured.get("detail") or {}
+                        print(
+                            "[ImgEditor] Verificación medida: "
+                            f"{'cumple' if _measured['ok'] else 'NO cumple'} "
+                            f"({_measured.get('unmet') or 'sin avisos'}) "
+                            f"{_measured_detail}",
+                            flush=True,
+                        )
+                        if not _measured["ok"]:
+                            _unmet_measured = str(_measured.get("unmet") or "")
+                            if (self._last_instruction_compliance or {}).get(
+                                "compliant") is not False:
+                                self._last_instruction_compliance = {
+                                    "available": True, "compliant": False,
+                                    "unmet": _unmet_measured,
+                                    "source": "measured_request",
+                                    "detail": _measured_detail,
+                                }
+                            msg = (
+                                f"{msg} | Aviso: {_unmet_measured}"
+                                if msg else f"Aviso: {_unmet_measured}"
+                            )
+                except Exception as _measured_error:
+                    print(
+                        f"[ImgEditor] Verificación medida omitida: {_measured_error}",
+                        flush=True,
+                    )
+
             # A diffusion sample is not evidence that it followed the request.
             # Verify the rendered candidate against the full instruction, with
             # an independent local VLM.  Failure is reported to the retry loop;
@@ -12395,6 +13469,48 @@ class ImgEditorManager:
             target = match.group("target")
             target = re.sub(
                 r"\s+(?:completely|entirely|at\s+all|anymore|por\s+completo)$",
+                "", target, flags=re.IGNORECASE,
+            )
+            target = re.sub(r"\s+", " ", target).strip(" \t\r\n\"'")
+            if len(target) >= 2:
+                return target
+        return ""
+
+    @staticmethod
+    def _extract_addition_target(clause: str) -> str:
+        """Extract the complement of an "add" request, by grammar.
+
+        Mirrors `_extract_removal_target`: the verb and the article are
+        grammar, not an object vocabulary. The determiner is dropped so the
+        segmenter receives the noun phrase («another astronaut» →
+        «astronaut»), and the trailing prepositional phrase («beside the
+        first one») is removed because it describes the place, not the thing.
+        """
+        text = str(clause or "").strip()
+        if not text:
+            return ""
+        scope = ImgEditorManager._requested_change_scope(text) or text
+        patterns = (
+            r"\b(?:add|adds|adding|place|places|placing|put|puts|insert|inserts|"
+            r"include|includes|añade|añadir|agrega|agregar|pon|poner|coloca|colocar|"
+            r"inserta|insertar|incluye|incluir)\s+(?P<target>.+?)"
+            r"(?:\s+(?:beside|next\s+to|near|in\s+front\s+of|behind|under|over|on|"
+            r"at|to\s+the\s+\w+\s+of|al\s+lado\s+de(?:l)?|junto\s+a|cerca\s+de|"
+            r"detrás\s+de|debajo\s+de|sobre|en\s+el\s+fondo|en\s+la\s+fondo)"
+            r"\s+.+)?\s*$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, scope, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = match.group("target")
+            target = re.sub(
+                r"^\s*(?:the|a|an|any|another|some|my|your|his|her|their|its|el|la|los|"
+                r"las|un|una|unos|unas|otro|otra|mi|tu|su|sus)\s+",
+                "", target, flags=re.IGNORECASE,
+            )
+            target = re.sub(
+                r"\s+(?:completely|entirely|at\s+all|por\s+completo)$",
                 "", target, flags=re.IGNORECASE,
             )
             target = re.sub(r"\s+", " ", target).strip(" \t\r\n\"'")

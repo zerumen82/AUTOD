@@ -45,7 +45,16 @@ def wire_animate_events(ui):
         if not AnimatePhoto().check_comfyui_status():
             yield None, _status("ComfyUI no está activo. Inicia ComfyUI primero."), *btn_idle()
             return
-        img = img_data if not isinstance(img_data, dict) else img_data.get("background")
+        if isinstance(img_data, dict):
+            img = img_data.get("background") or img_data.get("image")
+            if img is None and img_data.get("path"):
+                try:
+                    from PIL import Image as _PILImage
+                    img = _PILImage.open(img_data["path"])
+                except Exception:
+                    img = None
+        else:
+            img = img_data
         if img is None:
             yield None, _status("Imagen no válida"), *btn_idle()
             return
@@ -53,17 +62,6 @@ def wire_animate_events(ui):
         state.is_animating = True
         updates = queue.Queue()
         result = {"video": None, "msg": "Error desconocido"}
-
-        # AN-3 (MEDIO): Calcular resolución sugerida según VRAM
-        try:
-            from roop.animate.animate_photo import get_vram_gb, suggest_resolution
-            vram_gb = get_vram_gb()
-            current_res, _ = suggest_resolution(frames, vram_gb)
-            res_status = f'<div style="text-align:center; color:#22c55e; font-size:13px; padding:6px; background:#0f172a; border-radius:8px;">'
-            res_status += f'🖼 <strong>Resolución sugerida:</strong> {current_res} '
-            res_status += f'(<strong>{vram_gb} GB</strong> VRAM)</div>'
-        except Exception:
-            res_status = ""
 
         def progress_callback(message):
             updates.put(message)

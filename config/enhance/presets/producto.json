@@ -1,0 +1,21 @@
+{
+  "name": "Producto",
+  "description": "Brillo, textura y color equilibrados",
+  "sliders": {
+    "denoise_strength": 40,
+    "sharpen_strength": 50,
+    "recover_faces_strength": 0.8,
+    "exposure": 1.0,
+    "shadow": 0.8,
+    "highlight": 1.0,
+    "temperature": 50,
+    "grain_strength": 15,
+    "grain_size": 12
+  },
+  "models": {
+    "denoise": "models/scunet-onnx",
+    "sharpen": "models/nafnet-onnx",
+    "recover_faces": "models/GFPGANv1.4.onnx",
+    "upscale": "models/real_esrgan_x4.onnx"
+  }
+}

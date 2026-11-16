@@ -8,6 +8,7 @@ after optional classical finishing.
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -96,6 +97,34 @@ def _lab_mean(image, mask):
     return lab[mask].mean(axis=0)
 
 
+def _clothing_residual_threshold() -> float:
+    """Umbral de residual de ROPA (configuración, no constante en el código).
+
+    Distinto del residual de un objeto nombrado (`residual_failure_fraction`):
+    aquí la pregunta es «queda ropa puesta en la zona», y la verificación por
+    piel es la que decide el estado. El valor vigente no se cambia sin
+    medición; vive en `config/editor_selection.json`.
+    """
+    try:
+        settings = selection.load_settings()["edit"]
+        value = settings.get("clothing_residual_failure_fraction", 0.4)
+        return _residual_fraction(
+            value, "clothing_residual_failure_fraction", positive=True,
+        )
+    except Exception:
+        return 0.4
+
+
+def _harmonization_settings() -> dict:
+    """Ajustes de armonización de tono (configuración, no constantes)."""
+    try:
+        from roop.img_editor.measured_verification import load_verification_settings
+
+        return load_verification_settings().get("harmonization", {})
+    except Exception:
+        return {}
+
+
 def _harmonize_patch(patch, image, box, write_crop, skin, ring_px=28, person_mask=None):
     """Match the patch's skin tone to the ring of original skin around it.
 
@@ -113,6 +142,10 @@ def _harmonize_patch(patch, image, box, write_crop, skin, ring_px=28, person_mas
     import cv2
     if skin is None or not skin.any():
         return patch
+    # v5.1365 (P11): el tope del shift de piel vive en la configuración y el
+    # tono entregado se mide después de armonizar (abajo).
+    _harmonization = _harmonization_settings()
+    _shift_limit = float(_harmonization.get("max_shift_l", 80.0))
     full_write = np.zeros((image.height, image.width), dtype=bool)
     full_write[box[1]:box[3], box[0]:box[2]] = write_crop
     
@@ -157,7 +190,7 @@ def _harmonize_patch(patch, image, box, write_crop, skin, ring_px=28, person_mas
     # truncaba el shift real, así que la zona quedaba a decenas de niveles del
     # entorno. El tope sube a ±80: sigue acotando un anillo de referencia sin
     # contenido, pero ya no corta un desplazamiento medido de piel real.
-    shift = np.clip(ring_mean - patch_mean, -80.0, 80.0)
+    shift = np.clip(ring_mean - patch_mean, -_shift_limit, _shift_limit)
     if float(np.linalg.norm(shift)) > 1.5:
         print(
             f"[ImgEditor] Armonización de tono Lab shift="
@@ -240,6 +273,38 @@ def _harmonize_patch(patch, image, box, write_crop, skin, ring_px=28, person_mas
                 gen_lab + _bg_w[..., None] * _bg_shift.reshape(1, 1, 3), 0, 255,
             )
     harmonized = Image.fromarray(cv2.cvtColor(gen_lab.astype(np.uint8), cv2.COLOR_LAB2RGB))
+    # v5.1365 (P11): el tono ENTREGADO se mide después de armonizar. Antes
+    # solo se medía el parche del motor (antes de armonizar) y la imagen
+    # entregada llevaba un shift que nadie verificaba (medido −29 L en un
+    # caso). Ahora se mide el tono final dentro de la zona y se avisa si se
+    # aleja del esperado; el tope del shift de piel pasa a configuración.
+    _harmonization = _harmonization_settings()
+    _shift_limit = float(_harmonization.get("max_shift_l", 80.0))
+    try:
+        _delivered_lab = cv2.cvtColor(
+            np.asarray(harmonized.convert("RGB")), cv2.COLOR_RGB2LAB,
+        ).astype(np.float32)
+        _delivered_skin = _skin_pixels(harmonized) & write_crop
+        if _delivered_skin.any():
+            _delivered_mean = _delivered_lab[_delivered_skin].mean(axis=0)
+            _residual = ring_mean - _delivered_mean
+            print(
+                f"[ImgEditor] Tono entregado: L={_delivered_mean[0]:.1f} "
+                f"(referencia L={ring_mean[0]:.1f}, "
+                f"residual={_residual[0]:+.1f})",
+                flush=True,
+            )
+            _max_residual = float(
+                _harmonization.get("max_skin_l_residual", 12.0))
+            if abs(float(_residual[0])) > _max_residual:
+                print(
+                    f"[ImgEditor] Aviso: el tono entregado se aleja "
+                    f"{abs(float(_residual[0])):.1f} L del esperado "
+                    f"(tope {_max_residual:.0f} L)",
+                    flush=True,
+                )
+    except Exception as _tone_error:
+        print(f"[ImgEditor] Tono entregado no medido: {_tone_error}", flush=True)
     # Smooth the boundary transition to avoid visible seam
     return _smooth_boundary_transition(harmonized, image, box, write_crop, blend_px=12)
 
@@ -534,7 +599,8 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
                       cancel_check, recipe=None, label="motor con visión",
                       analysis=None, faces=None, is_vision_zone=True,
                       target_query="", verify_zone=None,
-                      check_clothing_residual=False, reference_image=None,
+                      check_clothing_residual=False, check_state_skin=False,
+                      reference_image=None,
                       no_hole=False, auto_cover=True, write_mask=None):
     """Measured zone on the vision engine, at the person's own resolution.
 
@@ -765,6 +831,11 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
         return None, f"el motor no produjo una imagen: {note}"
     import cv2
     patch = generated.image.convert("RGB").resize(crop.size, Image.Resampling.LANCZOS)
+    # v5.1353 — copia sin armonizar: la verificación del estado mide lo que
+    # produjo el MOTOR. La armonización de tono puede bajar la piel ~29 niveles
+    # (log 2026-11-13 23:21) y `_skin_pixels` la lee como no-piel, disparando
+    # un reintento de 60 s por un artefacto del post-proceso.
+    raw_patch = patch.copy()
     write_crop = write_zone[box[1]:box[3], box[0]:box[2]]
     if not write_crop.any():
         write_crop = zone_crop
@@ -884,7 +955,9 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
                     if bz.shape == original_zone.shape and az.shape == original_zone.shape:
                         before_count = int((bz & original_zone).sum())
                         after_count = int((az & original_zone).sum())
-                        if before_count > 0 and (float(after_count) / float(before_count)) >= 0.4:
+                        if before_count > 0 and (
+                            float(after_count) / float(before_count)
+                        ) >= _clothing_residual_threshold():
                             message = (
                                 f"la ropa sigue medida en la zona "
                                 f"({after_count} px, "
@@ -893,6 +966,52 @@ def _vision_zone_pass(manager, client, image, zone, support, prompt,
                             )
                             print(f"[ImgEditor] Verificación del objetivo: {message}", flush=True)
                             note = f"{note} | {message}" if note else message
+        except Exception:
+            pass
+    if check_state_skin:
+        # v5.1351 — un estado («descalza», «topless») se cumple cuando el área
+        # medida MUESTRA PIEL. Antes solo se comprobaba «cambió algo», así que
+        # un render que conservaba el zapato o el calcetín salía como
+        # «Validación visual OK» (log 2026-11-13 22:05). Se compara la piel
+        # del PARCHE DEL MOTOR en la zona escrita, antes y después.
+        #
+        # v5.1365 (P11): el parche del motor es PRE-armonización; la imagen
+        # entregada lleva la armonización de tono aplicada (medido −29 L en un
+        # caso). Ahora también se mide la piel de la imagen ENTREGADA dentro
+        # de la zona: si la armonización se llevó la evidencia de piel, el
+        # estado ya no se cumple aunque el parche la tuviera.
+        try:
+            if write_crop.any():
+                _before = np.asarray(crop.convert("RGB"))
+                _after = np.asarray(raw_patch.convert("RGB"))
+                _area = max(1, int(write_crop.sum()))
+                before_share = float(
+                    (_skin_pixels(_before) & write_crop).sum()) / _area
+                after_share = float(
+                    (_skin_pixels(_after) & write_crop).sum()) / _area
+                _delivered_zone = write_limit & original_zone
+                _delivered_area = max(1, int(_delivered_zone.sum()))
+                delivered_share = float(
+                    (_skin_pixels(np.asarray(composed.convert("RGB")))
+                     & _delivered_zone).sum()) / _delivered_area
+                print(
+                    f"[ImgEditor] Piel en la zona: parche {before_share:.0%} → "
+                    f"{after_share:.0%}; entregada {delivered_share:.0%}",
+                    flush=True,
+                )
+                _effective_share = min(after_share, delivered_share)
+                if _effective_share < 0.55 and _effective_share < before_share + 0.10:
+                    message = (
+                        "el área medida no muestra piel descubierta "
+                        f"(parche {before_share:.0%} → {after_share:.0%}, "
+                        f"entregada {delivered_share:.0%}): "
+                        f"{TARGET_RESIDUAL_FAIL}"
+                    )
+                    print(
+                        f"[ImgEditor] Verificación del estado: {message}",
+                        flush=True,
+                    )
+                    note = f"{note} | {message}" if note else message
         except Exception:
             pass
     return composed, note
@@ -1298,6 +1417,98 @@ def _described_subject_mask(manager, image, queries, max_coverage=0.70):
         if arr.any() and 0.02 <= coverage <= max_coverage:
             return arr, query
     return None, ""
+
+
+def _measured_state_zone(manager, image, subject_mask, raw_prompt, instruction):
+    """Segmenter zone of the STATE the instruction asks for.
+
+    A state («descalza», «topless») is skin by definition and
+    `_request_region_on_subject` drops it (skin_share >= 0.50). It is measured
+    here accepting skin, clause by clause, and the measured parts are united:
+    «descalza y sin medias» is feet + stockings, and keeping only the largest
+    part left the footwear out (log 2026-11-13 23:18).
+
+    Returns (mask, query_label, part_of_person) or (None, "", 0.0).
+    """
+    if subject_mask is None:
+        return None, "", 0.0
+    try:
+        masker = manager._get_clipseg_masker()
+    except Exception:
+        masker = None
+    if masker is None:
+        return None, "", 0.0
+    import cv2
+    subj = np.asarray(subject_mask, dtype=bool)
+    subject_area = max(1, int(subj.sum()))
+    queries, clause_queries, seen = [], [], set()
+    for text in (raw_prompt, instruction):
+        if not text:
+            continue
+        for clause in re.split(
+            r"\s*(?:[,;]|\band\b|\by\b|\bwhile\b|\bmientras\b)\s*",
+            text, flags=re.I,
+        ):
+            clause = (clause or "").strip()
+            if not clause:
+                continue
+            try:
+                scope = manager._requested_change_scope(clause)
+            except Exception:
+                scope = ""
+            query = (scope or clause).strip()
+            if query and query not in seen:
+                seen.add(query)
+                queries.append(query)
+                clause_queries.append(query)
+    try:
+        queries.extend(manager._visual_request_queries([raw_prompt, instruction]))
+    except Exception:
+        pass
+    for extra in (instruction, raw_prompt):
+        if extra and extra not in seen:
+            seen.add(extra)
+            queries.append(extra)
+
+    def _measure(query):
+        try:
+            found = masker.generate_mask(image, query)
+        except Exception:
+            return None
+        if found is None:
+            return None
+        arr = np.asarray(found.convert("L"))
+        if arr.shape[:2] != subj.shape:
+            arr = cv2.resize(arr, (subj.shape[1], subj.shape[0]),
+                             interpolation=cv2.INTER_LINEAR)
+        part_mask = (arr >= 96) & subj
+        part = float(part_mask.sum()) / subject_area
+        if 0.01 <= part <= 0.55:
+            return part_mask, part
+        return None
+
+    parts = []
+    for query in clause_queries:
+        found = _measure(query)
+        if found is not None:
+            parts.append((found[0], query, found[1]))
+    if parts:
+        union = np.zeros(subj.shape, dtype=bool)
+        for part_mask, _query, _part in parts:
+            union |= part_mask
+        union_part = float(union.sum()) / subject_area
+        if 0.01 <= union_part <= 0.60:
+            return union, " + ".join(item[1] for item in parts[:3]), union_part
+        best = max(parts, key=lambda item: item[2])
+        return best[0], best[1], best[2]
+    best, best_part, best_query = None, 0.0, ""
+    for query in queries:
+        found = _measure(query)
+        if found is not None and found[1] > best_part:
+            best, best_part, best_query = found[0], found[1], query
+    if best is None:
+        return None, "", 0.0
+    return best, best_query, best_part
 
 
 def _measured_target_zone(manager, image, support, query, faces=(),
@@ -1789,23 +2000,17 @@ def edit_selected_region(
             if not full_body:
                 clothing = _measured_clothing_zone(
                     manager, image, support, analysis)
-                # v5.1247 — el vocabulario no siempre dice hasta dónde llega
-                # un «quitar» («sin pantalón, sin blusa» puntúa 0). Entonces
-                # decide la foto: si la ropa medida es una parte pequeña de
-                # la persona, escribir ahí no quita la ropa (medido: 21568
-                # px, el chaleco se volvió camiseta y el pantalón quedó).
-                # v5.1247 — para cambios locales de ropa («zapatos», «calcetines»)
-                # no se expande a cuerpo completo aunque el fragmento sea pequeño;
-                # se mantiene la zona local para que el motor localice el cambio.
+                # Coordinated body removals can name more than the clothing
+                # segmenter measured. Give the motor the selected person below
+                # the head while keeping the requested state local in the text.
                 if (clothing is not None and uncover
-                        and not manager.measured_full_body_exposure(
-                            instruction)):
-                    # Zona local de ropa, sin expansión a cuerpo completo
-                    full_body = False
+                        and manager.measured_uncover_is_whole_person(
+                            instruction, int(support.sum()), int(clothing.sum()))):
+                    generation_zone = _person_without_head(support, analysis)
+                    zone_label = "persona medida menos la cabeza"
                     print(
-                        "[ImgEditor] Selección: la ropa medida cubre poco de "
-                        "la persona; la zona es la persona medida menos la "
-                        "cabeza",
+                        "[ImgEditor] Selección: retirada corporal coordinada; "
+                        f"zona ampliada a {zone_label}",
                         flush=True,
                     )
             if full_body:
@@ -2194,7 +2399,7 @@ def edit_described_subject(
     manager, image, raw_prompt, translated_prompt, faces, *, engine,
     automatic=False, negative_prompt="", seed=None, progress_callback=None, quality_mode=False,
     auto_upscale=False, enhance_tier="hd", quality_preserve_faces=True,
-    quality_steps=None, cancel_check=None,
+    quality_steps=None, cancel_check=None, pass_budget=None,
 ):
     """One vision pass on the person the prompt names, when nobody is selected.
 
@@ -2203,7 +2408,29 @@ def edit_described_subject(
     the photo: the global route was redrawing the whole frame. Auto may use
     this measured route before its general LongCat pass; manual LongCat keeps
     its separate dispatcher.
+
+    `pass_budget` is the shared counter of generation passes of the request
+    (v5.1357, P3): this route may spend a pass only while the budget allows
+    it, so a request that does not comply stops instead of chaining three
+    passes and the direct route.
     """
+
+    def _budget_left() -> bool:
+        if not isinstance(pass_budget, dict):
+            return True
+        try:
+            used = int(pass_budget.get("used", 0))
+            limit = int(pass_budget.get("max", 0))
+        except (TypeError, ValueError):
+            return True
+        return used < limit
+
+    def _spend_pass() -> None:
+        if isinstance(pass_budget, dict):
+            try:
+                pass_budget["used"] = int(pass_budget.get("used", 0)) + 1
+            except (TypeError, ValueError):
+                pass_budget["used"] = 1
     automatic_longcat = automatic and engine == "longcat"
     if engine != "kontext" and not automatic_longcat:
         return None
@@ -2354,7 +2581,7 @@ def edit_described_subject(
     # local (conceptos, sin hardcode de usuario). Antes la señal uncover
     # lo promovía a exposición completa: prompt «fully nude» y zona de toda
     # la persona, con los zapatos fuera del recorte.
-    if (not full_body and zone is None
+    if (not full_body
             and str(regime.get("direction", "")).lower() == "uncover"):
         target_query = manager._requested_removal_target(
             raw_prompt, instruction)
@@ -2418,43 +2645,37 @@ def edit_described_subject(
                     flush=True,
                 )
             if zone is None:
-                # v5.1348 — un ESTADO («descalza», «topless») es piel por
-                # definición y el medidor de objetos lo descarta («cae en piel
-                # del sujeto»). Se mide la consulta sobre el sujeto aceptando
-                # piel, acotada a una parte de la persona (1–55 %).
-                try:
-                    _masker = manager._get_clipseg_masker()
-                except Exception:
-                    _masker = None
-                if _masker is not None:
-                    import cv2
-                    _subj = np.asarray(subject, dtype=bool)
-                    _best, _best_part = None, 0.0
-                    for _q in (instruction, raw_prompt):
-                        try:
-                            _m = _masker.generate_mask(image, _q)
-                        except Exception:
-                            continue
-                        if _m is None:
-                            continue
-                        _a = np.asarray(_m.convert("L"))
-                        if _a.shape[:2] != _subj.shape:
-                            _a = cv2.resize(
-                                _a, (_subj.shape[1], _subj.shape[0]),
-                                interpolation=cv2.INTER_LINEAR)
-                        _z = (_a >= 96) & _subj
-                        _part = float(_z.sum()) / max(1, int(_subj.sum()))
-                        if 0.01 <= _part <= 0.55 and _part > _best_part:
-                            _best, _best_part = _z, _part
-                    if _best is not None:
-                        zone = _best
-                        zone_label = "zona medida del estado (piel del sujeto)"
-                        print(
-                            "[ImgEditor] Sin selección: el estado mide su "
-                            f"propia zona ({int(zone.sum())} px, "
-                            f"{_best_part:.0%} de la persona)",
-                            flush=True,
-                        )
+                # v5.1348/v5.1351/v5.1353 — un ESTADO («descalza», «topless»)
+                # es piel y el medidor de objetos lo descarta; se mide aquí
+                # aceptando piel, cláusula a cláusula, y se unen las partes.
+                _state_zone, _state_query, _state_part = _measured_state_zone(
+                    manager, image, subject, raw_prompt, instruction)
+                if _state_zone is not None:
+                    zone = _state_zone
+                    zone_label = "zona medida del estado (piel del sujeto)"
+                    print(
+                        "[ImgEditor] Sin selección: el estado mide su propia "
+                        f"zona «{_state_query}» ({int(zone.sum())} px, "
+                        f"{_state_part:.0%} de la persona)",
+                        flush=True,
+                    )
+        elif target_zone is not None:
+            # v5.1353 — «descalza y sin medias» mide objetivo Y estado: la zona
+            # es la unión medida (pies + medias), no solo la prenda nombrada.
+            _state_zone, _state_query, _state_part = _measured_state_zone(
+                manager, image, subject, raw_prompt, instruction)
+            if _state_zone is not None:
+                _union = np.asarray(target_zone, dtype=bool) | _state_zone
+                _person_px = max(1, int(np.asarray(subject, dtype=bool).sum()))
+                _union_part = float(_union.sum()) / _person_px
+                if _union_part <= 0.60:
+                    zone = _union
+                    print(
+                        "[ImgEditor] Sin selección: objetivo medido + estado "
+                        f"«{_state_query}» → zona unida ({int(zone.sum())} px)",
+                        flush=True,
+                    )
+
     if full_body and manager.measured_full_body_exposure(instruction):
         clothing = _measured_clothing_zone(manager, image, subject, None)
         person_px = int(subject.sum())
@@ -2680,13 +2901,34 @@ def edit_described_subject(
                 "zona de ropa medida", "persona medida menos la cabeza",
             )
         )
+        # Un estado medido por el segmentador («descalza») se verifica por la
+        # piel descubierta en su propia zona. Un objetivo que se lleva PUESTO
+        # («sin medias», «sin zapatos»: ≥80 % dentro de la persona) se verifica
+        # igual: quitar la prenda debe dejar piel, no otra prenda. Medido
+        # 2026-11-13 21:49 («descalza y sin medias»): residuo de «stockings»
+        # al 16 % aceptado como «Validación visual OK» y las medias seguían.
+        _target_on_body = bool(
+            initial_target_zone is not None
+            and int((np.asarray(initial_target_zone, dtype=bool)
+                     & np.asarray(subject, dtype=bool)).sum())
+            >= 0.8 * max(1, int(np.asarray(initial_target_zone, dtype=bool).sum()))
+        )
+        _check_state_skin = bool(
+            str(regime.get("direction", "")).lower() == "uncover"
+            and (
+                zone_label == "zona medida del estado (piel del sujeto)"
+                or _target_on_body
+            )
+        )
         result, note = _vision_zone_pass(
             manager, client, image, zone, compose_support, body_prompt,
             measured_negative, seed, settings, progress_callback, cancel_check,
             recipe=vision_recipe, label="motor con visión (LongCat)",
             is_vision_zone=True, target_query=target_query,
             check_clothing_residual=_check_clothing,
+            check_state_skin=_check_state_skin,
         )
+        _spend_pass()
         if result is None:
             return kept(note)
         # v5.1311 — residual alto: un reintento con la zona crecida dentro
@@ -2695,9 +2937,10 @@ def edit_described_subject(
         # v5.1345c — el reintento también cubre la exposición completa medida
         # (antes solo con target_query, así que «sin ropa» no reintentaba).
         if (
-            (target_query or _check_clothing)
+            (target_query or _check_clothing or _check_state_skin)
             and _note_reports_residual_failure(note)
             and not (cancel_check and cancel_check())
+            and _budget_left()
         ):
             expanded = _expand_zone_within_support(zone, compose_support)
             grew = int(expanded.sum()) > int(np.asarray(zone, dtype=bool).sum())
@@ -2714,12 +2957,23 @@ def edit_described_subject(
                     progress_callback, cancel_check,
                     recipe=vision_recipe, label="motor con visión (LongCat, residual)",
                     is_vision_zone=True, target_query=target_query,
-                    verify_zone=initial_target_zone,
-                    write_mask=initial_target_zone,
+                    # v5.1351 — el reintento también verifica: antes solo se
+                    # verificaba el primer pase (o nada si el chequeo era la
+                    # ropa medida, `target_query` vacío) y el reintento salía
+                    # como «Validación visual OK: cambio real» sin comprobar
+                    # el objetivo (log 2026-11-13 22:05 «descalza»).
+                    verify_zone=(initial_target_zone if initial_target_zone is not None else zone),
+                    # v5.1352 — el recorte ampliado solo da contexto: se escribe
+                    # lo MEDIDO (v5.1323). Antes, sin objetivo, el reintento
+                    # escribía la zona ampliada y rehacía pierna/torso.
+                    write_mask=(initial_target_zone if initial_target_zone is not None else zone),
+                    check_clothing_residual=_check_clothing,
+                    check_state_skin=_check_state_skin,
                 )
                 if result2 is not None:
                     result, note = result2, note2
                     effective = Image.fromarray(expanded.astype(np.uint8) * 255, "L")
+                _spend_pass()
         # Segundo reintento con zona aún más amplia dentro del soporte medido.
         # v5.1336: este reintento se comparaba con `zone` (la zona ORIGINAL),
         # así que se disparaba aunque produjera EXACTAMENTE la misma máscara
@@ -2737,6 +2991,7 @@ def edit_described_subject(
             target_query
             and _note_reports_residual_failure(note)
             and not (cancel_check and cancel_check())
+            and _budget_left()
         ):
             _growth_2 = _residual_policy()[2]
             expanded2 = _expand_zone_within_support(
@@ -2756,12 +3011,18 @@ def edit_described_subject(
                     progress_callback, cancel_check,
                     recipe=vision_recipe, label="motor con visión (LongCat, residual 2)",
                     is_vision_zone=True, target_query=target_query,
-                    verify_zone=initial_target_zone,
-                    write_mask=initial_target_zone,
+                    verify_zone=(initial_target_zone if initial_target_zone is not None else zone),
+                    # v5.1352 — el recorte ampliado solo da contexto: se escribe
+                    # lo MEDIDO (v5.1323). Antes, sin objetivo, el reintento
+                    # escribía la zona ampliada y rehacía pierna/torso.
+                    write_mask=(initial_target_zone if initial_target_zone is not None else zone),
+                    check_clothing_residual=_check_clothing,
+                    check_state_skin=_check_state_skin,
                 )
                 if result3 is not None:
                     result, note = result3, note3
                     effective = Image.fromarray(expanded2.astype(np.uint8) * 255, "L")
+                _spend_pass()
     else:
         # v5.1251 — SIN ancla: la receta medida para «quitar» es img2img puro
         # sobre el latente de la foto con el ruido acotado a la zona medida.

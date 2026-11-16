@@ -602,6 +602,24 @@ class AnimateManager:
         cap.release()
         writer.release()
         print(f"\n[Stabilize] Done. {frame_count} frames")
+        # Transcodificar a H.264 para que el vídeo se reproduzca en el navegador/UI
+        try:
+            from roop.utils import get_ffmpeg_path
+            ffmpeg = get_ffmpeg_path()
+            final_path = out_path.replace("_stab.mp4", "_stab_h264.mp4")
+            cmd = [ffmpeg, "-hide_banner", "-y", "-i", out_path,
+                   "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                   "-pix_fmt", "yuv420p", "-movflags", "+faststart", final_path]
+            import subprocess
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if r.returncode == 0 and os.path.exists(final_path) and os.path.getsize(final_path) > 0:
+                try:
+                    os.remove(out_path)
+                except OSError:
+                    pass
+                return final_path
+        except Exception as e:
+            print(f"[Stabilize] Transcode ffmpeg falló, se conserva mp4v: {e}")
         return out_path
 
 

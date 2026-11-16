@@ -139,6 +139,8 @@ def main():
     )
     source = Image.new("RGB", (48, 32), "white")
     manager = ImgEditorManager()
+    measured_room = Image.new("L", source.size, 0)
+    measured_room.paste(255, (5, 5, 25, 20))
 
     class FailingTurboClient(FakeClient):
         def __init__(self, fail_on):
@@ -162,6 +164,9 @@ def main():
               patch("roop.face_util.get_face_analyser", return_value=None),
               patch("roop.img_editor.img_editor_manager.get_vram_gb", return_value=8.0),
               patch.object(manager, "_release_local_gpu_before_comfy"),
+              patch.object(manager, "_region_proposals", return_value=["room"]),
+              patch.object(manager, "_get_clipseg_masker", return_value=SimpleNamespace(
+                  generate_mask=lambda *_args: measured_room)),
               patch.object(manager, "_select_longcat_version") as legacy_selector,
               patch("roop.img_editor.prompt_translator.translate_prompt",
                     return_value="Change the lighting in the room"),
@@ -317,9 +322,13 @@ def main():
                     assert all(item["no_kontext"] is False for item in generations), (prompt, generations)
                 print(f"OK: {prompt} -> un solo pase Turbo anclado con las cláusulas juntas")
                 continue
-            if facts.get("local_appearance") or facts.get("local_region") or facts.get("region_ambiguous"):
+            if (facts.get("local_appearance") or facts.get("local_region")
+                    or facts.get("region_ambiguous")
+                    or "no se sustituye" in message.lower()
+                    or "se conserva la foto" in message.lower()):
                 assert output is not None and list(output.getdata()) == list(source.getdata())
-                assert "no se sustituye" in message, (prompt, message)
+                assert ("no se sustituye" in message
+                        or "se conserva la foto" in message), (prompt, message)
                 assert not any(name == "generate" for name, _ in client.calls), client.calls
                 print(f"OK: {prompt} -> {message}")
                 continue
@@ -363,23 +372,50 @@ def main():
         def fake_finish(image, original, **kwargs):
             finish_calls.append((image.size, original.size, kwargs))
             return Image.new("RGB", (64, 42), "red"), "acabado simulado", {"scores": {}}
+        # v5.1357 (P13): la sección de calidad necesita una región MEDIDA. La
+        # foto blanca de 48×32 no tiene superficie medible (CLIPSeg la ve
+        # saturada al 97,8 %) y la ruta conservadora devuelve la foto sin
+        # tocar («región no medida; no se sustituye la foto»). Con la zona
+        # medida inyectada se ejercita el camino real: Turbo + acabado.
         with (patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Make the wall blue"),
               patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=client),
-              patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish)):
+              patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish),
+              patch.object(manager, "_get_clipseg_masker", return_value=SimpleNamespace(
+                  generate_mask=lambda *_args: measured_room))):
             output, message, mask = manager.generate_intelligent(
                 image=source, prompt="Pon la pared azul", engine="qwen_camera",
                 quality_mode=True, enhance_tier="4k", quality_preserve_faces=False,
             )
         assert output is not None and output.size == (64, 42) and mask is None
         assert [name for name, _ in client.calls] == ["load", "generate"]
-        assert "Keep every person, object, room detail" in client.calls[-1][1]["prompt"]
-        assert "Keep people anatomically coherent" in client.calls[-1][1]["prompt"]
-        assert finish_calls[0][0:2] == ((32, 20), source.size)
+        # Con la región medida, el prompt despachado es el de la zona medida
+        # («Región: solo la zona medida…»), no el genérico de Modo Calidad.
+        assert "Make the wall blue" in client.calls[-1][1]["prompt"]
+        # El acabado recibe la foto al tamaño de la entrada (la miniatura que
+        # se medía antes era de la imagen stub del cliente, 32×20).
+        assert finish_calls[0][0:2] == (source.size, source.size)
         assert finish_calls[0][2]["enhance_tier"] == "4k"
         assert finish_calls[0][2]["preserve_faces"] is False
         assert finish_calls[0][2]["use_generative"] is False
         assert "Turbo" in message
         print("OK: Calidad con prompt -> Turbo único + acabado clásico, sin restauración facial")
+
+        # v5.1357 (P13): una región NO medible conserva la foto y no llama al
+        # motor. La ruta no inventa una superficie que el segmentador no ve.
+        unmeasured_client = FakeClient()
+        with (patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Make the wall blue"),
+              patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=unmeasured_client),
+              patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish),
+              patch.object(manager, "_get_clipseg_masker", return_value=SimpleNamespace(
+                  generate_mask=lambda *_args: Image.new("L", source.size, 0)))):
+            kept_output, kept_message, kept_mask = manager.generate_intelligent(
+                image=source, prompt="Pon la pared azul", engine="qwen_camera",
+                quality_mode=True, enhance_tier="4k", quality_preserve_faces=False,
+            )
+        assert kept_output is not None and kept_output.size == source.size
+        assert "no se sustituye la foto" in kept_message, kept_message
+        assert not any(name == "generate" for name, _ in unmeasured_client.calls)
+        print(f"OK: región no medida -> la foto se conserva sin llamar al motor ({kept_message})")
 
         retry_client = RetryClient()
         import contextlib
@@ -388,6 +424,8 @@ def main():
         with (patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Make the wall blue"),
               patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=retry_client),
               patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish),
+              patch.object(manager, "_get_clipseg_masker", return_value=SimpleNamespace(
+                  generate_mask=lambda *_args: measured_room)),
               contextlib.redirect_stdout(retry_log)):
             retried, retry_message, _ = manager.generate_intelligent(
                 image=source, prompt="Pon la pared azul", engine="qwen_camera",
@@ -409,7 +447,9 @@ def main():
         unchanged_client = RetryClient(always_white=True)
         with (patch("roop.img_editor.prompt_translator.translate_prompt", return_value="Make the wall blue"),
               patch("roop.img_editor.flux_edit_comfy_client.get_flux_edit_comfy_client", return_value=unchanged_client),
-              patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish)):
+              patch("roop.img_editor.top_tier_finish.run_quality_enhance_after_edit", side_effect=fake_finish),
+              patch.object(manager, "_get_clipseg_masker", return_value=SimpleNamespace(
+                  generate_mask=lambda *_args: measured_room))):
             unchanged, warning, _ = manager.generate_intelligent(
                 image=source, prompt="Pon la pared azul", engine="qwen_camera",
                 quality_mode=True, quality_preserve_faces=False,
@@ -479,6 +519,12 @@ def main():
                 arr[8:28, 8:40] = 255
             elif re.search(r"\bman\b|\bhombre\b", text):
                 arr[40:110, 40:200] = 255
+            elif re.search(r"\bwoman\b|\bmujer\b", text):
+                # v5.1357 (P13): el caso compuesto pide «la mujer descalza» y
+                # «el hombre calvo». Sin una zona para la mujer, la cláusula
+                # no se mide y el compuesto se abstiene (no hay una sola
+                # pasada que pueda llevar los dos cambios).
+                arr[10:60, 10:60] = 255
             return Image.fromarray(arr, "L")
 
     photo = Image.new("RGB", (240, 140), "white")

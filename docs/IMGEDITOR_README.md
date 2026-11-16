@@ -1,5 +1,9 @@
 # ImgEditor - Editor de Imagenes con FLUX
 
+> Documentación vigente del Image Editor (v5.1354):
+> - Selector «Tipo de edición»: `docs/IMG_EDITOR_SELECTOR_CATEGORIAS_2026-11-13.md`
+> - Pendientes abiertos: `docs/PENDIENTES_2026-11-13.md`
+
 ## Descripcion
 
 ImgEditor es un modulo para editar imagenes usando **FLUX Fill Pipeline** de Black Forest Labs. Permite:

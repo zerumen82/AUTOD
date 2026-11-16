@@ -2,3 +2,5 @@
 - [x] **AN-3** Exponer 720p (1280×704) en la UI de Animate cuando la VRAM > 8 GB, manteniendo los controles actuales para 540p en 8 GB.
 - [x] **AN-4** Alinear el slider de pasos con lo que el grafo LTX-2 realmente usa (8 pasos destilados): deshabilitar o ocultar el slider de pasos para `ltx2_audio` o documentar que el grafo ignora ese control.
 - [x] **IE-3** Mover los valores hardcoded `threshold=0.45` y `grow_frac=0.70` en `selected_region_edit.py` a la configuración (`config/editor_selection.json`).
+- [ ] **IE-4 (v5.1355)** Las instrucciones de cámara de una sola palabra no activan Qwen Cámara; una petición corta con dos palabras sigue midiéndose. Verificar con `probe_editor_viewpoint_dispatch` y `probe_editor_camera_caps_20261110`.
+- [ ] **IE-5 (v5.1355)** Dos retiradas corporales locales coordinadas no implican desnudez completa. Si la máscara de ropa solo cubre un fragmento de la persona seleccionada, la generación recibe soporte corporal bajo la cabeza y conserva el exterior exacto. Verificar con el probe de régimen y una foto real antes de declarar hecho.

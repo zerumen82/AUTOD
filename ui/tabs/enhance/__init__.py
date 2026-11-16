@@ -1,0 +1,1 @@
+"""Configuración de la pestaña «✨ Mejorar fotos» (local)."""

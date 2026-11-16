@@ -12,6 +12,7 @@ from roop.img_editor.img_editor_manager import get_img_editor_manager
 from roop.img_editor.edit_execution import begin_execution, end_execution, format_execution_status
 from roop.output_paths import get_img_editor_output_dir
 from . import state
+from .ui import CATEGORY_CHOICES
 from .selection_events import (
     normalize_image, on_analyze, on_new_image, on_point_select, on_select,
     use_result_as_input as _use_result_as_input,
@@ -179,7 +180,13 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                 quality_deposter=True, quality_upscale=True,
                 quality_color=True, quality_realism=True,
                 progress=gr.Progress(), source="?", selection_state=None,
-                manual_editor_value=None):
+                manual_editor_value=None, quality_only_finish=False,
+                scope_hint="auto"):
+    scope_hint = (scope_hint or "auto").strip().lower()
+    if scope_hint != "auto":
+        # La categoría fija el modelo; la ruta sigue siendo Auto para no perder
+        # las rutas medidas (sujeto descrito, apariencia, cámara).
+        engine_val = "auto"
     with state._generation_lock:
         if state.is_generating:
             _txt = "Ya hay una transformacion en proceso"
@@ -207,7 +214,8 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
         print(
             f"[ImgEditor] Solicitud recibida prompt={p_text[:60]!r} "
             f"engine={engine_val} calidad={bool(quality_mode)} "
-            f"origen={source}",
+            f"acabado={bool(quality_only_finish)} "
+            f"categoria={scope_hint} origen={source}",
             flush=True,
         )
         progress(0, desc="Preparando")
@@ -330,6 +338,10 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                     enhance_faces=True,
                     quality_mode=quality_mode,
                     enhance_tier=enhance_tier,
+                    quality_enhance_style=(
+                        "solo_mejora"
+                        if (quality_mode and quality_only_finish) else "auto"
+                    ),
                     quality_preserve_faces=quality_preserve_faces,
                     quality_steps=(
                         {
@@ -337,9 +349,11 @@ def on_generate(img_data, p_text, engine_val, denoise_val,
                             "upscale": bool(quality_upscale),
                             "color": bool(quality_color),
                             "realism": bool(quality_realism),
+                            "only_finish": bool(quality_only_finish),
                         }
                         if quality_mode else None
                     ),
+                    scope_hint=scope_hint,
                     # Rewriter real: el manager lo activa solo si mag/pose/structural/recolor
                     # lo piden (sin hardcode de intención). use_rewriter=True = permitir.
                     use_rewriter=True,
@@ -493,9 +507,58 @@ def _show_quality_options(enabled):
     return gr.update(visible=bool(enabled))
 
 
+CATEGORY_LABELS = dict(
+    (value, label) for label, value in CATEGORY_CHOICES
+)
+
+# Solo ayuda en la caja: ninguna categoría escribe el prompt del usuario.
+CATEGORY_EXAMPLES = {
+    "pose": "«ponla de pie», «sentada en el suelo», «de espaldas»",
+    "clothing": "«sin zapatos», «vestido rojo», «en topless»",
+    "body": "«más delgada», «más musculosa»",
+    "features": "«calvo», «10 años mayor», «piel más suave»",
+    "background": "«fondo de playa al atardecer»",
+    "camera": "«vista desde arriba», «primer plano», «gran angular»",
+    "add": "«añade un sombrero rojo»",
+    "remove": "«quita el coche del fondo»",
+    "people": "«añade otra persona», «quita la del fondo»",
+}
+
+
+def on_category_change(category):
+    """Fija el motor de la categoría y muestra ejemplos sin tocar la caja."""
+    from roop.img_editor.img_editor_manager import _PINNED_ENGINE_BY_HINT
+
+    category = (category or "auto").strip().lower()
+    pinned = _PINNED_ENGINE_BY_HINT.get(category)
+    examples = CATEGORY_EXAMPLES.get(category)
+    label = CATEGORY_LABELS.get(category, category)
+    if examples:
+        text = f"**{label}** — ejemplos: {examples}"
+    elif category == "auto":
+        text = (
+            "**♻️ Auto** — decide lo que el prompt mide. El motor se elige "
+            "con el desplegable de Opciones."
+        )
+    else:
+        text = f"**{label}**"
+    if pinned:
+        return gr.update(interactive=False, value=pinned), text
+    from roop.img_editor.gen_prompt_config import get_editor_ui_config
+
+    default_engine = get_editor_ui_config().get("default_engine") or "auto"
+    return gr.update(interactive=True, value=default_engine), text
+
+
 def _on_generate_desktop(*args, **kwargs):
     """Botón ✨ TRANSFORMAR del escritorio; el origen va al log."""
-    if len(args) == 15:
+    if len(args) == 17:
+        kwargs["scope_hint"] = args[-1]
+        kwargs["selection_state"] = args[-3]
+        kwargs["manual_editor_value"] = args[-2]
+        kwargs["quality_only_finish"] = args[-4]
+        args = args[:-4]
+    elif len(args) == 15:
         kwargs["selection_state"] = args[-2]
         kwargs["manual_editor_value"] = args[-1]
         args = args[:-2]
@@ -604,9 +667,13 @@ def wire_events(ui_comp):
             return btn.click(fn, inputs, outputs, api_name=api_name)
 
     if "selection_state" in ui_comp:
+        desktop_full = desktop_inputs + [
+            ui_comp["quality_only_finish"], ui_comp["selection_state"],
+            ui_comp["manual_mask_editor"], ui_comp["category"],
+        ]
         _bind_generate(
             ui_comp["gen_btn"],
-            desktop_inputs + [ui_comp["selection_state"], ui_comp["manual_mask_editor"]],
+            desktop_full,
             _on_generate_desktop, "edit_manual_region",
         )
         _bind_generate(
@@ -639,6 +706,13 @@ def wire_events(ui_comp):
         inputs=[ui_comp["quality_mode"]],
         outputs=[ui_comp["quality_options"]],
     )
+    if "category" in ui_comp and "category_help" in ui_comp:
+        ui_comp["category"].change(
+            fn=on_category_change,
+            inputs=[ui_comp["category"]],
+            outputs=[ui_comp["engine"], ui_comp["category_help"]],
+            queue=False, api_name=False,
+        )
     if "quality_estimate" in ui_comp:
         for _trigger in (
             ui_comp["quality_mode"], ui_comp["enhance_tier"], ui_comp["input_img"],

@@ -1,0 +1,27 @@
+{
+  "_doc": "Umbrales de la verificación medida del Image Editor (P6, P7, P8, P9). Todo se mide sobre píxeles, landmarks o segmentación: no hay listas de palabras ni umbrales mágicos en el código.",
+  "camera": {
+    "min_face_center_shift": 0.012,
+    "min_face_area_ratio_change": 0.15,
+    "min_forehead_ratio_change": 0.02,
+    "landmark_shift_reference": 0.1,
+    "landmark_score_threshold": 0.15,
+    "min_change_score": 0.35
+  },
+  "addition": {
+    "min_presence_gain": 0.010,
+    "min_area_gain": 0.004,
+    "min_person_count_gain": 1,
+    "min_person_area_gain": 0.015,
+    "min_fresh_area": 0.001
+  },
+  "zone": {
+    "min_zone_change": 0.02,
+    "max_outside_change": 0.12
+  },
+  "harmonization": {
+    "_doc": "P11: el tono entregado se mide después de armonizar. max_shift_l acota el shift de piel; max_skin_l_residual avisa cuando el tono final se aleja de la referencia.",
+    "max_shift_l": 80.0,
+    "max_skin_l_residual": 12.0
+  }
+}

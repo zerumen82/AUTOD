@@ -316,6 +316,14 @@ def create_ui():
                     settings_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
+
+            # Tab 6: Mejorar fotos (Topaz-style)
+            with gr.Tab("✨ Mejorar fotos"):
+                try:
+                    from ui.tabs.enhance.tab import create_enhance_tab
+                    create_enhance_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
         
 
 
@@ -473,6 +481,14 @@ def create_ui():
                 try:
                     from ui.tabs.settings_tab import settings_tab
                     settings_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+
+            # Tab 6: Mejorar fotos (Topaz-style)
+            with gr.Tab("✨ Mejorar fotos"):
+                try:
+                    from ui.tabs.enhance.tab import create_enhance_tab
+                    create_enhance_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
         

@@ -1,0 +1,1 @@
+"""Editor selection configuration helpers."""

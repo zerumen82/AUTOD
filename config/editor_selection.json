@@ -55,10 +55,10 @@
     "full_exposure_local_ratio": 1.15,
     "body_state_min_intensity": 0.3,
     "body_detection_threshold": 0.45,
-    "region_growth_fraction": 0.70,
-    "multi_clause_uncover_enabled": true,
+    "region_growth_fraction": 0.7,
+    "multi_clause_uncover_enabled": false,
     "multi_clause_uncover_min_clauses": 2,
-    "clothing_zone_min_ratio": 0.30
+    "clothing_zone_min_ratio": 0.3
   },
   "preview": {
     "outline_color": [
@@ -93,11 +93,15 @@
     "head_blend_method": "normal_clone",
     "head_hair_margin_ratio": 0.15,
     "head_inclusion_coverage": 0.5,
-    "residual_failure_fraction": 0.4,
+    "max_passes": 2,
+    "residual_failure_fraction": 0.15,
     "residual_retry_growth_fraction": 0.35,
-    "residual_retry_growth_fraction_2": 0.70,
+    "residual_retry_growth_fraction_2": 0.7,
     "residual_retry_min_radius_pixels": 8,
     "prompt_template": "Edit this exact image region: {instruction}. Apply the complete requested change to the selected element. Make only the requested change; preserve every other feature of the subject and the surrounding photograph.",
-    "removal_reconstruction_prompt": "Naturally reconstruct the area it occupied to match the surrounding photograph, with continuous background, surfaces, texture and lighting. Preserve everything else; leave no translucent, faded or darkened remnant of the removed target."
+    "removal_reconstruction_prompt": "Naturally reconstruct the area it occupied to match the surrounding photograph, with continuous background, surfaces, texture and lighting. The rebuilt area must be plain and continuous: do not copy, repeat or mirror any emblem, badge, logo, printed text, label or piece of hardware that appears elsewhere in the photograph, and do not add new objects there. Preserve everything else; leave no translucent, faded or darkened remnant of the removed target.",
+    "background_template": "Instruction: {instruction}. Replace only the scenery behind the people. Keep every person exactly as in the photo: the same face, the same hair, the same clothes, the same pose, the same position and size. Keep the same framing and camera. Apply the requested change to the background as completely, strongly and obviously as possible.",
+    "_doc_residual": "v5.1365 (P4): residual_failure_fraction 0,40 -> 0,15. Medido el 2026-11-15 con fotos reales y el mismo segmentador del editor: una eliminacion CORRECTA (zapatos, 2026-11-07) deja 1,5 % de residuo y un caso donde el objeto sigue visible (casco con LaMa, 2026-11-14) mide 91,8 %. Con 40 % el umbral daba por bueno un objeto que seguia a la vista; 15 % es 10x el residuo real de una eliminacion correcta y 6x por debajo del caso en que el objeto sigue presente. clothing_residual_failure_fraction: residual de ROPA, otro criterio (el estado lo decide la verificacion por piel); se mueve de codigo a configuracion sin cambiar su valor.",
+    "clothing_residual_failure_fraction": 0.4
   }
 }

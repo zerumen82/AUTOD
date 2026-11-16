@@ -1,0 +1,21 @@
+{
+  "name": "Nocturna",
+  "description": "Bajo luz, realce sombras y luces",
+  "sliders": {
+    "denoise_strength": 80,
+    "sharpen_strength": 30,
+    "recover_faces_strength": 0.5,
+    "exposure": 1.5,
+    "shadow": 1.5,
+    "highlight": 0.5,
+    "temperature": 30,
+    "grain_strength": 25,
+    "grain_size": 8
+  },
+  "models": {
+    "denoise": "models/scunet-onnx",
+    "sharpen": "models/nafnet-onnx",
+    "recover_faces": "models/GFPGANv1.4.onnx",
+    "upscale": "models/real_esrgan_x4.onnx"
+  }
+}

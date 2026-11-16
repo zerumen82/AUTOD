@@ -76,9 +76,20 @@ CONCEPTS: Dict[str, list] = {
     ],
     "structural_add": [
         "add insert put include new element prop accessory hat glasses bag into scene",
-        "add one or more people or objects to an existing photo",
-        "añadir insertar poner agregar objeto accesorio sombrero gafas bolso en escena",
-        "añadir una o varias personas u objetos a una foto existente",
+        # v5.1357 — el SOPORTE no es una acción. Medido: «Remove the black
+        # helmet from the photo» puntuaba add 0,2458 > remove 0,2313 solo por
+        # la palabra «photo» del ancla, y el pedido «quitar» acababa en la
+        # ruta de AÑADIR (misma causa que el «from image» de v5.1239 en remove).
+        # «Add a flag to the photo» baja de 0,6167 a 0,3083: sigue por encima
+        # del suelo 0,14 y la acción la dice el verbo, no el soporte.
+        "add one or more people or objects into the scene",
+        # v5.1357 — imperativos del español: «pon» no casa con «poner» (la
+        # regla de raíz exige 4 letras) y «añade» no casa con «añadir».
+        # Medido: «Pon una bandera pequeña al lado del astronauta» medía add
+        # 0,0000 (nadie lo editaba) y «Añade una bandera a la foto» 0,3083
+        # gracias solo al vocablo «foto». El verbo es la acción.
+        "añadir inserta poner agrega añade pon pone objeto accesorio sombrero gafas bolso en escena",
+        "añadir una o varias personas u objetos en la escena",
     ],
     "structural_remove": [
         # v5.1239 — «from image»/«de la imagen» quitado: el sustantivo del
@@ -406,7 +417,10 @@ def is_camera_view_request(prompt: str) -> bool:
     # ningún concepto puntúa por encima de cámara; las frases más largas
     # siguen exigiendo dos tokens.
     content = _camera_scorer._tokenize(prompt)
-    if evidence >= 1 and len(content) <= 2:
+    # A lone concept label ("view") describes a topic, not a requested edit.
+    # Count the original words: short requests such as "from behind" may
+    # have only one content token after the scorer removes stop words.
+    if evidence >= 1 and len(content) <= 2 and len(re.findall(r"\b\w+\b", prompt)) >= 2:
         return not any(
             value >= camera_score
             for name, value in scores.items()

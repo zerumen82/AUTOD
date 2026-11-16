@@ -563,25 +563,19 @@ def ordinary_edit_exterior_stays_pixel_exact():
         "pixels outside the explicit selection changed")
 
 
-def multi_clause_uncover_writes_full_body_suffix():
-    """«sin zapatos, sin pantalones» (sin «desnuda/naked») → cuerpo completo.
-
-    Ninguna cláusula mide body_exposure_full >= 0.3 individualmente, pero dos
-    cláusulas de uncover juntas piden desnudar a la persona. El sufijo de
-    estado final debe escribirse y la zona debe ser toda la persona.
-    """
+def multi_clause_uncover_preserves_requested_scope():
+    """Two local removals must not invent complete nudity."""
     manager = ImgEditorManager()
-    # Full-body exposure is confirmed by the multi-clause uncover fallback.
-    assert manager.measured_full_body_exposure("debe ir descalza y sin pantalones"), (
-        "multi-clause uncover did not confirm full body exposure")
-    assert manager.measured_full_body_exposure("sin zapatos, sin pantalones"), (
-        "multi-clause uncover (ES) did not confirm full body exposure")
-    # The end-state sentence is written from the measured clauses.
+    assert not manager.measured_full_body_exposure("debe ir descalza y sin pantalones"), (
+        "coordinated local removals were promoted to full body exposure")
+    assert not manager.measured_full_body_exposure("sin zapatos, sin pantalones"), (
+        "comma-separated removals were promoted to full body exposure")
     suffix = manager._body_state_clause(
         "debe ir descalza y sin pantalones", "uncover", 0.74)
-    assert "is fully nude" in suffix, f"full-body suffix missing: {suffix!r}"
-    assert "bare skin" in suffix, f"bare skin sentence missing: {suffix!r}"
-    # A single uncover clause is NOT promoted to full exposure (regression guard).
+    assert "is fully nude" not in suffix, f"unrequested full-body suffix: {suffix!r}"
+    assert manager.measured_full_body_exposure("debe ir sin ropa"), (
+        "explicit full-body request stopped measuring as full body")
+    # A single uncover clause also stays local.
     assert not manager.measured_full_body_exposure("sin zapatos"), (
         "single uncover clause was promoted to full body exposure")
     single_suffix = manager._body_state_clause(
@@ -597,7 +591,7 @@ def main():
              body_change_with_other_people_preserves_the_frame,
              body_change_without_other_people_writes_the_measured_zone,
              garment_fragment_widens_to_the_person,
-             multi_clause_uncover_writes_full_body_suffix,
+             multi_clause_uncover_preserves_requested_scope,
              appearance_change_on_a_head_uses_the_focal_recipe,
              pose_change_reinterprets_the_frame,
              clothing_change_does_not_reinterpret_the_frame,

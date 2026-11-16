@@ -157,7 +157,7 @@ def build_faceswap_ui():
                         source_path_input = gr.Textbox(label="Rutas de origen", elem_id="source_path_input", elem_classes=["native-drop-control"])
                         bt_add_source_paths = gr.Button("Añadir rutas de origen", elem_id="bt_add_source_paths", elem_classes=["native-drop-control"])
                     with gr.Column():
-                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", file_types=["image", "video"], height=200, elem_id="destfiles")
+                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", height=200, elem_id="destfiles")
                         with gr.Row():
                             bt_browse_path = gr.Button("📂 Buscar\nen el PC", size="sm", scale=1)
                             target_path_input = gr.Textbox(label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)", placeholder='D:\\videos\\video.mp4  o  \\\\servidor\\share\\video.mp4', scale=4, elem_id="target_path_input")

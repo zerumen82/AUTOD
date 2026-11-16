@@ -449,10 +449,11 @@ def set_console_icon():
         return False
 
 
-if __name__ == "__main__":
+def main():
+    """Punto de entrada compartido: `python run.py` y launcher del exe."""
     _open_ui_session_log()
     print("\n" + "="*70)
-    print("  AutoAuto v5.1348 (2026-11-13)")
+    print("  AutoAuto v5.1371 (2026-11-16)")
     print("="*70 + "\n")
     if set_console_icon():
         print("[INFO] Icono de AutoAuto aplicado a la ventana de consola")
@@ -497,10 +498,6 @@ if __name__ == "__main__":
         print(f"  - PyTorch: NO DISPONIBLE ({e})")
         print("  - [INFO] Continuando sin PyTorch (usando ONNX Runtime)...")
     
-    # LOG DE VERIFICACION
-    with open(r'D:\PROJECTS\AUTOAUTO\debug_swap.log', 'a') as _lf:
-        _lf.write("[RUNPY] ENTER step3 - about to import roop.core\n")
-    
     print("\n[STEP 3] Lanzando interfaz Gradio...")
     try:
         # Importamos roop.core al final para que vea todos los parches anteriores
@@ -523,3 +520,7 @@ if __name__ == "__main__":
             time.sleep(10)
     except KeyboardInterrupt:
         pass
+
+
+if __name__ == "__main__":
+    main()

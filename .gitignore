@@ -20,12 +20,30 @@ wheels/
 .installed.cfg
 *.egg
 
+# Generated outputs
+generate/
+
+# IDE tools
+.kilo/
+
+# Temp scripts
+t.py
+_check_build.py
+check_processes.py
+build_enhance.py
+test_prompt.py
+
 # Virtual environments
 .venv/
 venv/
 venv_ext/
 ENV/
 env/
+
+# Ejecutables empaquetados (PyInstaller onefile, GB de tamaño)
+AutoAuto.exe
+dist/
+kill_autoo.exe
 
 # Python packages (large wheel files)
 *.whl

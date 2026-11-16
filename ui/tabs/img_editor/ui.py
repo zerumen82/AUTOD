@@ -18,6 +18,22 @@ else:
     gr.ImageEditor = ImageEditorWidget
 
 
+# Única fuente de la lista «Tipo de edición»: el desplegable y la ayuda de la
+# caja (events.CATEGORY_LABELS) salen de aquí para no divergir.
+CATEGORY_CHOICES = [
+    ("♻️ Auto (medido)", "auto"),
+    ("🧍 Postura / posición", "pose"),
+    ("👗 Ropa / vestimenta", "clothing"),
+    ("🫀 Cuerpo / anatomía", "body"),
+    ("💇 Rasgos (pelo, edad, piel)", "features"),
+    ("🏞️ Fondo / escenario", "background"),
+    ("📷 Cámara / ángulo / POV", "camera"),
+    ("➕ Añadir objeto", "add"),
+    ("➖ Quitar objeto", "remove"),
+    ("👥 Personas (añadir/quitar/varias)", "people"),
+]
+
+
 CSS_STYLE = """
     .img-editor-container {
         background: #020617;
@@ -115,6 +131,17 @@ def build_img_editor_ui():
                         image_mode="RGBA", format="png", layers=True, height=380,
                     )
 
+                category = gr.Dropdown(
+                    choices=list(CATEGORY_CHOICES),
+                    value="auto",
+                    label="Tipo de edición",
+                    info=(
+                        "Prior de ruta: con Auto manda lo que el prompt mida. "
+                        "Con una categoría se eleva ese eje y se fija su motor; "
+                        "una señal muy alta del prompt sigue ganando."
+                    ),
+                )
+
                 prompt = gr.Textbox(
                     label="¿Qué quieres cambiar?",
                     placeholder=(
@@ -125,6 +152,7 @@ def build_img_editor_ui():
                     lines=4,
                     elem_classes=["prompt-box-img"]
                 )
+                category_help = gr.Markdown("")
 
                 # Oculto por decisión del usuario (2026-11-03): la zona se delimita
                 # pintando. Los componentes siguen construidos para que el contrato
@@ -162,6 +190,14 @@ def build_img_editor_ui():
                     )
 
                 with gr.Group(visible=False) as quality_options:
+                    quality_only_finish = gr.Checkbox(
+                        label="🧼 Solo acabado",
+                        value=False,
+                        info=(
+                            "No edita la foto; aplica solo los pasos marcados "
+                            "aunque escribas un prompt."
+                        ),
+                    )
                     quality_deposter = gr.Checkbox(
                         label="Desposterizar",
                         value=True,
@@ -264,6 +300,8 @@ def build_img_editor_ui():
     return {
         "input_img": input_img,
         "manual_mask_editor": manual_mask_editor,
+        "category": category,
+        "category_help": category_help,
         "prompt": prompt,
         "gen_btn": gen_btn,
         "output_img": output_img,
@@ -275,6 +313,7 @@ def build_img_editor_ui():
         "auto_iterations": auto_iterations,
         "quality_mode": quality_mode,
         "quality_options": quality_options,
+        "quality_only_finish": quality_only_finish,
         "quality_deposter": quality_deposter,
         "quality_upscale": quality_upscale,
         "quality_color": quality_color,

@@ -1,0 +1,21 @@
+{
+  "name": "Archivo",
+  "description": "Versión neutra, sin ajustes extremos",
+  "sliders": {
+    "denoise_strength": 20,
+    "sharpen_strength": 20,
+    "recover_faces_strength": 0.5,
+    "exposure": 1.0,
+    "shadow": 1.0,
+    "highlight": 1.0,
+    "temperature": 50,
+    "grain_strength": 5,
+    "grain_size": 10
+  },
+  "models": {
+    "denoise": "models/scunet-onnx",
+    "sharpen": "models/nafnet-onnx",
+    "recover_faces": "models/GFPGANv1.4.onnx",
+    "upscale": "models/real_esrgan_x4.onnx"
+  }
+}

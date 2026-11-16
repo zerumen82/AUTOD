@@ -1,11 +1,12 @@
 # AGENTS.md — AutoAuto
 
 ## Versión vigente
-- **v5.1348 (2026-11-13)**
+- **v5.1371 (2026-11-16)**
 
 ## Objetivo
 - Mejorar FaceSwap: eliminar el halo o blur elíptico fuera de la cara, seguir perfiles y oclusiones con estabilidad y aumentar nitidez y parecido con la fuente.
 - Mantener Image Editor, Generate y Android funcionales al cambiar el procesamiento.
+- Pendientes vigentes y criterio de cierre: docs/PENDIENTES_2026-11-13.md (ninguna categoría se declara resuelta sin PASS visual).
 
 ## Requisito permanente — versatilidad del Image Editor (2026-11-02)
 - El usuario exige editar cualquier foto con la misma naturalidad: cambiar postura, posición, ropa, características físicas (pelo, edad, piel), ángulo de cámara, POV, decorado; añadir o quitar cosas y añadir o quitar personas; una o varias. Sin censura.

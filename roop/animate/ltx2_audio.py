@@ -123,43 +123,52 @@ def fit_frames(frames):
 
 
 def _trim_last_frame(video_path, output_path):
-    """Extrae todos los fotogramas excepto el último para evitar el defecto de fundido en 49f.
+    """Recorta el último fotograma (defecto de fundido en 49f) preservando audio.
 
-    Solo se usa cuando frames < 97 (caso defectuoso). El último fotograma a 49f sale
-    fundido e ilegible (confirmado con la misma semilla 1234). Recortar el último
-    frame asegura el fotograma final visible, o el usuario puede elegir 97f.
+    Solo se usa cuando frames < 97. Se re-codifica con ffmpeg (libx264) para
+    mantener la pista de audio del MP4 de LTX-2, que el recorte anterior con
+    OpenCV destruía (vídeo silencioso).
     """
     import cv2
+    import subprocess
 
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    # Contar fotogramas
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if total_frames <= 1:
-        cap.release()
-        return False
-
-    # Escribir todos excepto el último
-    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
-    if not out.isOpened():
-        print(f"[LTX2] OpenCV no puede reescribir {os.path.basename(output_path)}")
-        cap.release()
-        return False
-
-    written = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if written < total_frames - 1:
-            out.write(frame)
-        written += 1
-
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     cap.release()
-    out.release()
+    if total_frames <= 1:
+        return False
+
+    keep = total_frames - 1
+    try:
+        from roop.utils import get_ffmpeg_path
+        ffmpeg = get_ffmpeg_path()
+    except Exception:
+        return False
+
+    cmd = [
+        ffmpeg, "-hide_banner", "-y",
+        "-i", video_path,
+        "-frames:v", str(keep),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        "-shortest",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except Exception as e:
+        print(f"[LTX2] Trim ffmpeg error: {e}")
+        return False
+    if r.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        print(f"[LTX2] Trim ffmpeg failed: {r.stderr[-400:]}")
+        try:
+            if os.path.exists(output_path):
+                os.remove(output_path)
+        except OSError:
+            pass
+        return False
     return True
 
 
@@ -333,12 +342,9 @@ def generate(image_path, prompt, output_path, width=DEFAULT_WIDTH, height=DEFAUL
     # Recorte del último fotograma si frames < 97: el frame 49 fundido e
     # ilegible (misma semilla 1234 da el mismo defecto). Se recorta el último
     # fotograma para conservar el anterior visible; o elegir 97f para calidad.
-    trim_output = None
+    # Se preserva la pista de audio (ffmpeg), no OpenCV.
     if frames < 97:
-        trim_output = output_path + ".trim"
-        if _trim_last_frame(source, trim_output):
-            shutil.copy2(trim_output, output_path)
-            os.unlink(trim_output)
+        if _trim_last_frame(source, output_path):
             elapsed = time.time() - started
             _say(f"Listo en {elapsed:.0f}s: {os.path.basename(output_path)} (último frame recortado para evitar fundido)")
         else:

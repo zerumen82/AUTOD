@@ -1,0 +1,20 @@
+{
+  "name": "Retrato",
+  "description": "Suave, realista, ideal para retratos",
+  "sliders": {
+    "denoise_strength": 30,
+    "sharpen_strength": 20,
+    "recover_faces_strength": 0.7,
+    "exposure": 1.0,
+    "shadow": 0.8,
+    "highlight": 1.2,
+    "temperature": 45,
+    "grain_strength": 10,
+    "grain_size": 5
+  },
+  "models": {
+    "denoise": "models/scunet-onnx",
+    "sharpen": "models/nafnet-onnx",
+    "recover_faces": "models/GFPGANv1.4.onnx"
+  }
+}

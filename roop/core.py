@@ -93,7 +93,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1348 (2026-11-13)"
+APP_VERSION = "v5.1371 (2026-11-16)"
 
 
 def _active_server_path():
@@ -311,6 +311,40 @@ def run():
         except Exception:
             pass
 
+        # Parche Gradio UTF-8: orjson rechaza cadenas con surrogates y rompe "/" y /config
+        # con HTTP 500. Sanea el config de Blocks y reporta la ruta del campo corrupto.
+        try:
+            import gradio.routes as _gr_routes
+
+            def _sanitize_surrogates(obj, path="config"):
+                if isinstance(obj, str):
+                    try:
+                        obj.encode("utf-8")
+                        return obj
+                    except UnicodeEncodeError:
+                        limpia = obj.encode("utf-8", "surrogatepass").decode("utf-8", "replace")
+                        print(f"[WARNING] Patch Gradio UTF-8: campo {path} saneado: {obj[:120]!r}")
+                        return limpia
+                if isinstance(obj, dict):
+                    return {k: _sanitize_surrogates(v, f"{path}.{k}") for k, v in obj.items()}
+                if isinstance(obj, (list, tuple)):
+                    return [_sanitize_surrogates(v, f"{path}[{i}]") for i, v in enumerate(obj)]
+                return obj
+
+            _orig_toorjson = _gr_routes.toorjson
+
+            def _toorjson_utf8_safe(value):
+                try:
+                    return _orig_toorjson(value)
+                except (TypeError, UnicodeEncodeError):
+                    return _orig_toorjson(_sanitize_surrogates(value))
+
+            _gr_routes.toorjson = _toorjson_utf8_safe
+            _gr_routes.templates.env.filters["toorjson"] = _toorjson_utf8_safe
+            print("[OK] Patch Gradio UTF-8 aplicado")
+        except Exception as e:
+            print(f"[WARNING] No se pudo aplicar Patch Gradio UTF-8: {e}")
+
         if existing_server_url:
             server_url = existing_server_url
         else:
@@ -440,7 +474,7 @@ def run():
                 print(f"[DEBUG] Error forzando icono: {e}")
 
         window = webview.create_window(
-            "AutoAuto v5.1348",
+            "AutoAuto v5.1365",
             url=server_url,
             width=1400,
             height=900
