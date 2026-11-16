@@ -1,9 +1,9 @@
-"""UI de la pestaña «✨ Mejorar fotos» estilo Topaz, compacta.
+"""UI de la pestaña «✨ Mejorar fotos» estilo Topaz, compacta y continua.
 
-Layout de una sola pantalla (según docs/PLAN_PESTAÑA_TOPAZ_2026-11-15.md §4.2):
-  Importación -> Antes/Después -> Pila de mejoras -> Presets -> Modo y Exportación.
-Paleta Topaz: grises oscuros planos + azul de acento. Versión compacta: paddings
-y tipografías reducidos sin quitar ningún control.
+Layout (docs/PLAN_PESTAÑA_TOPAZ_2026-11-15.md §4.2): vista de trabajo tipo Topaz:
+  Foto protagonista (antes/después) a la izquierda, columna continua de
+  controles (importar + mejoras) a la derecha, banda de presets/exportación abajo.
+Sin cajas por categoría: solo separadores finos. Paleta Topaz plana + azul.
 
 El código se registra UNA sola vez en ui/main.py (sin duplicado de pestaña).
 Todas las claves del dict de retorno son el contrato con events.py; no
@@ -36,23 +36,26 @@ ENHANCE_CSS = """
 .img-enhance-header p { color: #9a9a9a; font-size: 11px; margin: 0; }
 .enhance-section {
     color: #e8e8e8 !important;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 800;
     letter-spacing: 1.1px;
     text-transform: uppercase;
-    margin: 9px 0 4px 0;
+    margin: 8px 0 4px 0;
     border-bottom: 1px solid #2a2a2a;
     padding-bottom: 3px;
 }
-.enhance-card {
+.enhance-hero {
     background: #1c1c1c;
     border: 1px solid #2a2a2a;
-    border-radius: 8px;
-    padding: 6px 10px;
-    margin-bottom: 5px;
+    border-radius: 10px;
+    padding: 10px;
 }
-.enhance-card-h { color: #fafafa !important; font-size: 12.5px; font-weight: 700; margin: 0 0 1px 0; }
-.enhance-card-p { color: #7a7a7a; font-size: 10px; margin: 0 0 3px 0; }
+.enhance-panel {
+    background: #181818;
+    border: 1px solid #262626;
+    border-radius: 10px;
+    padding: 10px;
+}
 .enhance-slider-wrap {
     display: flex;
     align-items: center;
@@ -116,12 +119,6 @@ ENHANCE_CSS = """
     padding: 2px 8px !important;
     font-size: 10px !important;
 }
-.enhance-preview {
-    background: #1c1c1c;
-    border: 1px solid #2a2a2a;
-    border-radius: 8px;
-    padding: 6px;
-}
 .enhance-status {
     text-align: center;
     color: #9a9a9a;
@@ -136,10 +133,9 @@ ENHANCE_CSS = """
 
 
 def _slider(label, emoji, color, minimum, maximum, step, value, info, slider_key):
-    """Slider con etiqueta HTML (emoji + texto) y acento por tarjeta.
+    """Slider con etiqueta HTML (emoji + texto). Readout nativo de Gradio.
 
-    Devuelve el gr.Slider; el readout del valor es el nativo de Gradio
-    (sin valores falsos). slider_key solo etiqueta la clase CSS.
+    slider_key solo etiqueta la clase CSS.
     """
     gr.HTML(
         f'<div class="enhance-slider-wrap">'
@@ -169,65 +165,56 @@ def build_enhance_ui():
         # ---------- Cabecera ----------
         with gr.Group(elem_classes=["img-enhance-header"]):
             gr.Markdown("## ✨ MEJORAR FOTOS")
-            gr.Markdown("_Ajusta cada mejora, compara al instante y exporta el lote. 100 % local._")
+            gr.Markdown("_Ajusta a la derecha, mira el resultado al instante, exporta el lote. 100 % local._")
 
-        # ---------- Importación ----------
-        gr.Markdown("### 📥 Importación", elem_classes=["enhance-section"])
+        # ---------- Vista de trabajo: foto protagonista + panel de control ----------
         with gr.Row():
-            input_files = gr.Files(
-                label="\U0001F4C1 Seleccionar fotos (varias)",
-                file_types=["image"],
-                scale=2,
-            )
-            input_folder = gr.File(
-                label="\U0001F4C2 O carpeta entera",
-                file_count="directory",
-                file_types=["image"],
-                scale=2,
-            )
-            btn_load_sample = gr.Button("📦 Ejemplo", variant="secondary", size="sm", elem_classes=["btn-secondary"], scale=1)
-        queue_table = gr.Dataframe(
-            headers=["Archivo", "Estado", "Tamaño"],
-            interactive=False,
-            label="Cola de imágenes a procesar",
-            elem_classes=["enhance-dataframe"],
-        )
+            with gr.Column(scale=5, elem_classes=["enhance-hero"]):
+                preview_slider = gr.ImageSlider(label="Antes / después — arrastra el comparador", type="pil", height=380)
+                with gr.Row():
+                    btn_preview = gr.Button("🔍 Vista previa", variant="secondary", scale=1, elem_classes=["btn-secondary"])
+                    preview_status = gr.Markdown("_Carga una foto y mueve los sliders_")
+                status_msg = gr.HTML("<div class='enhance-status'>Listo para importar y ajustar.</div>")
 
-        # ---------- Vista antes / después ----------
-        gr.Markdown("### 👁️ Antes / Después", elem_classes=["enhance-section"])
-        with gr.Column(elem_classes=["enhance-preview"]):
-            preview_slider = gr.ImageSlider(label="Arrastra: izquierda = original · derecha = mejorada", type="pil", height=300)
-            with gr.Row():
-                btn_preview = gr.Button("🔍 Vista previa", variant="secondary", scale=1, elem_classes=["btn-secondary"])
-                preview_status = gr.Markdown("_Carga una foto y mueve los sliders_")
+            with gr.Column(scale=4, elem_classes=["enhance-panel"]):
+                gr.Markdown("📥 Importar", elem_classes=["enhance-section"])
+                input_files = gr.Files(
+                    label="\U0001F4C1 Seleccionar fotos (varias)",
+                    file_types=["image"],
+                )
+                input_folder = gr.File(
+                    label="\U0001F4C2 O carpeta entera",
+                    file_count="directory",
+                    file_types=["image"],
+                )
+                with gr.Row():
+                    btn_load_sample = gr.Button("📦 Ejemplo", variant="secondary", size="sm", elem_classes=["btn-secondary"])
+                queue_table = gr.Dataframe(
+                    headers=["Archivo", "Estado", "Tamaño"],
+                    interactive=False,
+                    label="Cola",
+                    elem_classes=["enhance-dataframe"],
+                )
 
-        # ---------- Pila de mejoras ----------
-        gr.Markdown("### 🧩 Pila de mejoras", elem_classes=["enhance-section"])
-        with gr.Row():
-            with gr.Column(scale=1):
-                with gr.Group(elem_classes=["enhance-card"]):
-                    gr.Markdown("### 🧹 Denoise", elem_classes=["enhance-card-h"])
-                    denoise_slider = _slider("Denoise (fuerza)", "🧹", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = reducción agresiva.", slider_key="denoise")
-                    upscale_factor = gr.Dropdown(choices=[1, 2, 4, 6], value=int(defaults.get("upscale_factor", 2)), label="⬆️ Factor de upscale", show_label=True)
-                with gr.Group(elem_classes=["enhance-card"]):
-                    gr.Markdown("### 💡 Luz y Color", elem_classes=["enhance-card-h"])
-                    exposure_slider = _slider("Exposición", "💡", "#4da3ff", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio · mayor = más claro.", slider_key="exposure")
-                    shadow_slider = _slider("Sombras", "🌑", "#4da3ff", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio · recupera zonas oscuras.", slider_key="shadow")
-                    highlight_slider = _slider("Luces", "✨", "#4da3ff", minimum=0.0, maximum=2.0, step=0.05, value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio · intensifica las luces.", slider_key="highlight")
-                    temperature_slider = _slider("Temperatura", "🌡️", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("temperature", 50)), info="0 = neutra · + = más cálida.", slider_key="temperature")
-            with gr.Column(scale=1):
-                with gr.Group(elem_classes=["enhance-card"]):
-                    gr.Markdown("### 🔎 Nitidez y Caras", elem_classes=["enhance-card-h"])
-                    sharpen_slider = _slider("Sharpen (nitidez)", "🔎", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo realce.", slider_key="sharpen")
-                    recover_slider = _slider("Recover Faces (GFPGAN)", "🧑", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = restauración total.", slider_key="recover")
-                with gr.Group(elem_classes=["enhance-card"]):
-                    gr.Markdown("### 🎞️ Grano Fotográfico", elem_classes=["enhance-card-h"])
-                    grain_strength_slider = _slider("Grano (fuerza)", "🎞️", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano · 100 = grano intenso.", slider_key="grain_strength")
-                    grain_size_slider = _slider("Grano (tamaño)", "🎞️", "#4da3ff", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = grueso.", slider_key="grain_size")
-        status_msg = gr.HTML("<div class='enhance-status'>Listo para importar y ajustar.</div>")
+                gr.Markdown("🧩 Mejoras", elem_classes=["enhance-section"])
+                with gr.Row():
+                    denoise_slider = _slider("Denoise", "🧹", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = agresivo.", slider_key="denoise")
+                    sharpen_slider = _slider("Sharpen", "🔎", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo.", slider_key="sharpen")
+                with gr.Row():
+                    recover_slider = _slider("Recover Faces", "🧑", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = total.", slider_key="recover")
+                    upscale_factor = gr.Dropdown(choices=[1, 2, 4, 6], value=int(defaults.get("upscale_factor", 2)), label="⬆️ Factor upscale", show_label=True)
+                with gr.Row():
+                    exposure_slider = _slider("Exposición", "💡", "#4da3ff", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio.", slider_key="exposure")
+                    shadow_slider = _slider("Sombras", "🌑", "#4da3ff", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio.", slider_key="shadow")
+                with gr.Row():
+                    highlight_slider = _slider("Luces", "✨", "#4da3ff", minimum=0.0, maximum=2.0, step=0.05, value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio.", slider_key="highlight")
+                    temperature_slider = _slider("Temperatura", "🌡️", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("temperature", 50)), info="0 = neutra · + = cálida.", slider_key="temperature")
+                with gr.Row():
+                    grain_strength_slider = _slider("Grano (fuerza)", "🎞️", "#4da3ff", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength")
+                    grain_size_slider = _slider("Grano (tamaño)", "🎞️", "#4da3ff", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size")
 
-        # ---------- Presets de estilo ----------
-        gr.Markdown("### 🎛️ Presets · Exportación", elem_classes=["enhance-section"])
+        # ---------- Banda de presets y exportación ----------
+        gr.Markdown("🎛️ Presets · Exportación", elem_classes=["enhance-section"])
         with gr.Row():
             preset_dropdown = gr.Dropdown(choices=["Retrato", "Paisaje", "Nocturna", "Producto", "Archivo"], value="Retrato", label="Preset de fábrica")
             preset_apply_btn = gr.Button("✅ Aplicar preset", variant="primary", elem_classes=["btn-apply"])
@@ -237,8 +224,7 @@ def build_enhance_ui():
         with gr.Row():
             auto_mode = gr.Checkbox(label="🤖 Modo automático (medido por foto)", value=False)
             apply_filters_to_filename = gr.Checkbox(label="Filtros en el nombre del archivo", value=bool(config.get("export", {}).get("add_applied_filters_to_filename", True)))
-        with gr.Row():
-            output_path = gr.Textbox(label="Carpeta de destino", value=get_enhance_output_dir(), interactive=False)
+            output_path = gr.Textbox(label="Carpeta de destino", value=get_enhance_output_dir(), interactive=False, scale=2)
             format_dropdown = gr.Dropdown(choices=["png", "jpg", "jpeg"], value=config.get("export", {}).get("default_format", "png"), label="Formato", scale=1)
         result_table = gr.Dataframe(headers=["Entrada", "Salida", "Notas", "OK"], interactive=False, label="Resultado del lote", elem_classes=["enhance-dataframe"])
         with gr.Row():
