@@ -80,9 +80,9 @@ ENHANCE_CSS = """
 .enhance-compare-row > .enhance-view { min-width: 0 !important; width: 0 !important; flex: 1 1 0 !important; }
 .enhance-view {
     background: #0a0a0a;
-    border: 1px solid #262626;
+    border: 1px solid #1f1f1f;
     border-radius: 10px;
-    padding: 8px;
+    padding: 4px;
     height: 100%;
     min-width: 0;
 }
@@ -92,7 +92,7 @@ ENHANCE_CSS = """
     font-weight: 800;
     letter-spacing: 1.2px;
     text-align: center;
-    padding: 2px 0 6px 0;
+    padding: 0 0 4px 0;
 }
 .enhance-view-title-after { color: #4da3ff; }
 .enhance-img { background: #0a0a0a; border-radius: 8px; overflow: hidden; min-width: 0; max-width: 100%; height: auto !important; }
@@ -273,7 +273,7 @@ def build_enhance_ui():
                             show_label=False,
                             buttons=["fullscreen"],
                             elem_classes=["enhance-img"],
-                            height=420,
+                            height=560,
                         )
                     with gr.Column(scale=1, elem_classes=["enhance-view"]):
                         gr.HTML('<div class="enhance-view-title enhance-view-title-after">DESPUÉS</div>')
@@ -284,7 +284,7 @@ def build_enhance_ui():
                             show_label=False,
                             buttons=["fullscreen"],
                             elem_classes=["enhance-img"],
-                            height=420,
+                            height=560,
                         )
                 with gr.Row():
                     preview_photo = gr.Dropdown(

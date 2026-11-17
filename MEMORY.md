@@ -1,3 +1,7 @@
+- **v5.1390 (2026-11-17) - Enhance: antes/después más grandes con menos marco.**
+  - `ui/tabs/enhance/ui.py`: altura de las dos imágenes ANTES/DESPUÉS subida de 420 a 560 px; padding del marco `.enhance-view` reducido de 8 a 4 px y borde suavizado; título con menos separación.
+  - Verificación: `py_compile` OK.
+
 - **v5.1389 (2026-11-17) - Enhance: pestaña más profesional, mejor uso del espacio.**
   - `ui/tabs/enhance/ui.py`: importación compacta con Tabs (Archivos/Carpeta) en vez de dos inputs apilados de 150px; botón «↺ Reset sliders» para volver a defaults.
   - `ui/tabs/enhance/events.py`: handler `reset_sliders` que lee `config/enhance/enhance.json` y restablece los 13 controles + status.
