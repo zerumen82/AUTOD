@@ -440,6 +440,42 @@ def wire_events(ui_components):
         queue=False,
     )
 
+    # Reset sliders a valores por defecto
+    def reset_sliders():
+        from .logic import load_enhance_config
+        d = load_enhance_config().get("default_slider_values", {})
+        recover = d.get("recover_faces_strength", 0.8)
+        recover_pct = (recover * 100) if isinstance(recover, (int, float)) and recover <= 1.0 else float(recover)
+        return (
+            float(d.get("denoise_strength", 20)),
+            float(d.get("sharpen_strength", 10)),
+            recover_pct,
+            int(d.get("upscale_factor", 1)),
+            float(d.get("exposure", 1.0)),
+            float(d.get("shadow", 1.0)),
+            float(d.get("highlight", 1.0)),
+            float(d.get("temperature", 50)),
+            float(d.get("grain_strength", 0)),
+            float(d.get("grain_size", 10)),
+            float(d.get("deband_strength", 0)),
+            float(d.get("vibrance", 100)),
+            str(d.get("face_model", "GFPGAN")),
+            "Sliders restablecidos a valores por defecto.",
+        )
+
+    btn_reset_sliders = ui_components.get("btn_reset_sliders")
+    if btn_reset_sliders is not None:
+        btn_reset_sliders.click(
+            fn=reset_sliders,
+            outputs=[
+                denoise_slider, sharpen_slider, recover_slider, upscale_factor,
+                exposure_slider, shadow_slider, highlight_slider, temperature_slider,
+                grain_strength_slider, grain_size_slider,
+                deband_slider, vibrance_slider, face_model, preset_status,
+            ],
+            queue=False,
+        )
+
     # ------------------------------------------------------------------
     # Guardar preset personalizado en config/enhance/presets/
     # ------------------------------------------------------------------

@@ -1,3 +1,8 @@
+- **v5.1389 (2026-11-17) - Enhance: pestaña más profesional, mejor uso del espacio.**
+  - `ui/tabs/enhance/ui.py`: importación compacta con Tabs (Archivos/Carpeta) en vez de dos inputs apilados de 150px; botón «↺ Reset sliders» para volver a defaults.
+  - `ui/tabs/enhance/events.py`: handler `reset_sliders` que lee `config/enhance/enhance.json` y restablece los 13 controles + status.
+  - Verificación: `py_compile` OK, pestaña Enhance construye OK con Gradio 6.32.0.
+
 - **v5.1388 (2026-11-17) - Animate: caché de modelos y prompts para evitar saturación de CPU.**
   - `roop/animate/animate_manager.py`: `_check_models` ahora cachea el resultado del walk del filesystem (TTL 60 s) en `self._models_cache`; antes recorría todo el directorio de modelos en cada llamada (UI valida modelos antes de cada animación).
   - `rewrite_prompt` cachea el resultado de NLP + traducción en `self._rewrite_cache` (máx 50 entradas); antes re-ejecutaba el analizador semántico y la traducción en cada animación aunque el prompt no cambiara.

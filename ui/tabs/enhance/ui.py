@@ -262,7 +262,7 @@ def build_enhance_ui():
 
         # ---------- Vista de trabajo: ANTES | DESPUÉS + panel de control ----------
         with gr.Row():
-            with gr.Column(scale=5, elem_classes=["enhance-hero"]):
+            with gr.Column(scale=6, elem_classes=["enhance-hero"]):
                 with gr.Row(elem_classes=["enhance-compare-row"], equal_height=True):
                     with gr.Column(scale=1, elem_classes=["enhance-view"]):
                         gr.HTML('<div class="enhance-view-title">ANTES</div>')
@@ -273,6 +273,7 @@ def build_enhance_ui():
                             show_label=False,
                             buttons=["fullscreen"],
                             elem_classes=["enhance-img"],
+                            height=420,
                         )
                     with gr.Column(scale=1, elem_classes=["enhance-view"]):
                         gr.HTML('<div class="enhance-view-title enhance-view-title-after">DESPUÉS</div>')
@@ -283,6 +284,7 @@ def build_enhance_ui():
                             show_label=False,
                             buttons=["fullscreen"],
                             elem_classes=["enhance-img"],
+                            height=420,
                         )
                 with gr.Row():
                     preview_photo = gr.Dropdown(
@@ -297,17 +299,20 @@ def build_enhance_ui():
 
             with gr.Column(scale=4, elem_classes=["enhance-panel"]):
                 gr.Markdown("Importar", elem_classes=["enhance-section"])
-                input_files = gr.Files(
-                    label="Seleccionar fotos (varias)",
-                    file_types=["image"],
-                    height=150,
-                )
-                input_folder = gr.File(
-                    label="O carpeta entera",
-                    file_count="directory",
-                    file_types=["image"],
-                    height=150,
-                )
+                with gr.Tabs():
+                    with gr.Tab("Archivos"):
+                        input_files = gr.Files(
+                            label="Seleccionar fotos (varias)",
+                            file_types=["image"],
+                            height=120,
+                        )
+                    with gr.Tab("Carpeta"):
+                        input_folder = gr.File(
+                            label="Carpeta entera",
+                            file_count="directory",
+                            file_types=["image"],
+                            height=120,
+                        )
                 with gr.Row():
                     with gr.Column(scale=4, min_width=200):
                         queue_summary = gr.Markdown("_Sin fotos en cola._", elem_classes=["enhance-summary"])
@@ -342,6 +347,8 @@ def build_enhance_ui():
                 with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
                     face_model = _dropdown("Motor de caras", "#f472b6", choices=["GFPGAN", "CodeFormer", "RestoreFormer++", "GPEN"], value=str(config.get("face_model", "GFPGAN")), key="face_model")
                     gr.Markdown("GFPGAN = rápido · CodeFormer/RestoreFormer++ = más detalle · GPEN = suaviza.", elem_classes=["enhance-summary"])
+                with gr.Row():
+                    btn_reset_sliders = gr.Button("↺ Reset sliders", variant="secondary", size="sm", elem_classes=["btn-secondary"])
 
         # ---------- Banda de presets y exportación ----------
         gr.Markdown("Presets · Exportación", elem_classes=["enhance-section"])
@@ -384,6 +391,7 @@ def build_enhance_ui():
         "deband_slider": deband_slider,
         "vibrance_slider": vibrance_slider,
         "face_model": face_model,
+        "btn_reset_sliders": btn_reset_sliders,
         "preset_dropdown": preset_dropdown,
         "preset_apply_btn": preset_apply_btn,
         "preset_save_name": preset_save_name,

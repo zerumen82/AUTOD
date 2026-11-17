@@ -1,8 +1,8 @@
 # spec/00 — Principios y Definición de Listo
 
 ## Versión vigente
+- **v5.1389 (2026-11-17)**
 - **v5.1388 (2026-11-17)**
-- **v5.1387 (2026-11-17)**
 
 Fuente: `AGENTS.md` (proyecto) + `C:/Users/INdaHouse/.agents/AGENTS.md` (global) + `MEMORY.md`.
 
