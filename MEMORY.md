@@ -1,3 +1,7 @@
+- **v5.1395 (2026-11-17) - Enhance: ajustes por foto (preset por imagen).**
+  - `ui/tabs/enhance/events.py`: mapa `_PER_IMAGE_SETTINGS` (ruta→settings); `make_pair` carga/guarda ajustes por foto y sincroniza sliders; `make_after` guarda; `apply_preset` aplica al foto seleccionada y re-renderiza; `process_batch` usa settings por foto; `refresh_queue` limpia el mapa.
+  - Verificación: `py_compile` OK y probe Enhance PASS.
+
 - **v5.1394 (2026-11-17) - Enhance presets + Generate: más opciones de iluminación/planos/color.**
   - `ui/tabs/enhance/events.py`: 6 presets nuevos (Blanco y negro, HDR, Selfie, Vintage, Noche clara).
   - `ui/tabs/enhance/ui.py`: dropdown de presets ampliado.

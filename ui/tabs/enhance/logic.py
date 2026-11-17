@@ -666,6 +666,7 @@ def process_batch(
     progress_cb: Optional[Callable] = None,
     cancel_check: Optional[Callable] = None,
     autopilot: bool = False,
+    settings_by_path: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Procesa una lista de archivos de forma secuencial (VRAM segura).
 
@@ -684,7 +685,7 @@ def process_batch(
                 progress_cb({"phase": "batch", "progress": idx / total,
                              "detail": f"{path.name} ({idx + 1}/{total})"})
 
-            img_settings = settings
+            img_settings = (settings_by_path or {}).get(str(path), settings)
             if autopilot:
                 try:
                     with Image.open(path) as _img:

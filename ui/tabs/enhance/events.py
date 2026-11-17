@@ -26,6 +26,9 @@ from . import logic as enh_logic
 from .logic import process_batch, process_single_image
 
 
+# Presets/ajustes por foto: ruta -> settings dict
+_PER_IMAGE_SETTINGS: dict = {}
+
 PRESET_DEFAULTS = {
     "Realista": {
         "denoise": 25, "sharpen": 30, "recover": 60, "upscale": 1,
@@ -313,6 +316,7 @@ def wire_events(ui_components):
     # seleccionar la PRIMERA foto para la vista previa.
     # ------------------------------------------------------------------
     def refresh_queue(files_val, folder_val):
+        _PER_IMAGE_SETTINGS.clear()
         paths = _queue_paths(files_val, folder_val)
         if not paths:
             return (
@@ -334,21 +338,46 @@ def wire_events(ui_components):
     # ------------------------------------------------------------------
     # Vista previa ANTES / DESPUÉS
     # ------------------------------------------------------------------
+    _N_SLIDERS = 13
+
+    def _slider_updates_from_settings(s: dict):
+        return (
+            gr.update(value=s["denoise_strength"]),
+            gr.update(value=s["sharpen_strength"]),
+            gr.update(value=float(s["recover_faces_strength"]) * 100.0),
+            gr.update(value=int(s["upscale_factor"])),
+            gr.update(value=s["exposure"]),
+            gr.update(value=s["shadow"]),
+            gr.update(value=s["highlight"]),
+            gr.update(value=s["temperature"]),
+            gr.update(value=s["grain_strength"]),
+            gr.update(value=s["grain_size"]),
+            gr.update(value=s["deband_strength"]),
+            gr.update(value=s["vibrance"]),
+            gr.update(value=s["face_model"]),
+        )
+
     def make_pair(files_val, folder_val, selected, *slider_vals):
         paths = _queue_paths(files_val, folder_val)
         if not paths:
-            return None, None, "_Sube al menos una foto para ver el antes/después._"
+            return (None, None, "_Sube al menos una foto para ver el antes/después._") + tuple(gr.update() for _ in range(_N_SLIDERS))
         path = _pick_path(paths, selected)
-        settings = _settings(*slider_vals)
+        if str(path) in _PER_IMAGE_SETTINGS:
+            settings = dict(_PER_IMAGE_SETTINGS[str(path)])
+            updates = _slider_updates_from_settings(settings)
+        else:
+            settings = _settings(*slider_vals)
+            _PER_IMAGE_SETTINGS[str(path)] = settings
+            updates = tuple(gr.update() for _ in range(_N_SLIDERS))
         try:
             before = _load_before(path)
             after, notes = _render_after(before, settings, return_notes=True)
             status = _status_line(path.name, settings)
             if notes:
                 status = f"{status}\n\n{notes}"
-            return before, after, status
+            return (before, after, status) + updates
         except Exception as e:
-            return None, None, f"Vista previa falló: {e}"
+            return (None, None, f"Vista previa falló: {e}") + tuple(gr.update() for _ in range(_N_SLIDERS))
 
     def make_after(files_val, folder_val, selected, *slider_vals):
         paths = _queue_paths(files_val, folder_val)
@@ -356,6 +385,8 @@ def wire_events(ui_components):
             return None, "_Sube al menos una foto para ver el antes/después._"
         path = _pick_path(paths, selected)
         settings = _settings(*slider_vals)
+        if path is not None:
+            _PER_IMAGE_SETTINGS[str(path)] = settings
         try:
             before = _load_before(path)
             after, notes = _render_after(before, settings, return_notes=True)
@@ -377,10 +408,12 @@ def wire_events(ui_components):
             outputs=[queue_summary, preview_photo, preview_status],
             queue=False,
         )
+        _mp_outputs = [preview_before, preview_after, preview_status, denoise_slider, sharpen_slider, recover_slider, upscale_factor, exposure_slider, shadow_slider, highlight_slider, temperature_slider, grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider, face_model]
+
         event.then(
             fn=make_pair,
             inputs=pair_inputs,
-            outputs=[preview_before, preview_after, preview_status],
+            outputs=_mp_outputs,
             queue=True,
             concurrency_limit=1,
             trigger_mode="always_last",
@@ -390,7 +423,7 @@ def wire_events(ui_components):
     preview_photo.change(
         fn=make_pair,
         inputs=pair_inputs,
-        outputs=[preview_before, preview_after, preview_status],
+        outputs=_mp_outputs,
         queue=True,
         concurrency_limit=1,
         trigger_mode="always_last",
@@ -400,7 +433,7 @@ def wire_events(ui_components):
     btn_preview.click(
         fn=make_pair,
         inputs=pair_inputs,
-        outputs=[preview_before, preview_after, preview_status],
+        outputs=_mp_outputs,
         queue=True,
         concurrency_limit=1,
         show_progress="minimal",
@@ -448,19 +481,24 @@ def wire_events(ui_components):
     # ------------------------------------------------------------------
     # Aplicar preset de fábrica a los sliders
     # ------------------------------------------------------------------
-    def apply_preset(name: str):
+    def apply_preset(name: str, files_val, folder_val, selected):
         vals = PRESET_DEFAULTS.get(name, PRESET_DEFAULTS["Retrato"])
-        return (
+        settings = _settings(
             vals["denoise"], vals["sharpen"], vals["recover"], vals["upscale"],
             vals["exposure"], vals["shadow"], vals["highlight"], vals["temperature"],
             vals["grain_strength"], vals["grain_size"],
             vals.get("deband", 0), vals.get("vibrance", 100), vals.get("face_model", "GFPGAN"),
-            f"Preset «{name}» aplicado a los sliders.",
         )
+        paths = _queue_paths(files_val, folder_val)
+        path = _pick_path(paths, selected) if paths else None
+        if path is not None:
+            _PER_IMAGE_SETTINGS[str(path)] = settings
+        updates = _slider_updates_from_settings(settings)
+        return updates + (f"Preset «{name}» aplicado a esta foto.",)
 
     preset_apply_btn.click(
         fn=apply_preset,
-        inputs=preset_dropdown,
+        inputs=[preset_dropdown, input_files, input_folder, preview_photo],
         outputs=[
             denoise_slider, sharpen_slider, recover_slider, upscale_factor,
             exposure_slider, shadow_slider, highlight_slider, temperature_slider,
@@ -468,6 +506,19 @@ def wire_events(ui_components):
             deband_slider, vibrance_slider, face_model, preset_status,
         ],
         queue=False,
+    ).then(
+        fn=make_pair,
+        inputs=pair_inputs,
+        outputs=[preview_before, preview_after, preview_status] + [
+            denoise_slider, sharpen_slider, recover_slider, upscale_factor,
+            exposure_slider, shadow_slider, highlight_slider, temperature_slider,
+            grain_strength_slider, grain_size_slider,
+            deband_slider, vibrance_slider, face_model,
+        ],
+        queue=True,
+        concurrency_limit=1,
+        trigger_mode="always_last",
+        show_progress="default",
     )
 
     # Reset sliders a valores por defecto
@@ -621,6 +672,7 @@ def wire_events(ui_components):
                     progress_cb=progress_cb,
                     cancel_check=enh_logic.is_cancel_requested,
                     autopilot=bool(auto_mode),
+                    settings_by_path={str(p): _PER_IMAGE_SETTINGS.get(str(p)) for p in paths},
                 )
             except Exception as exc:
                 result["error"] = exc
