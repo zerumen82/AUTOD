@@ -21,7 +21,7 @@ from .state import EnhanceSessionState
 ENHANCE_CSS = """
 .img-enhance-container {
     background: #131313;
-    padding: 14px;
+    padding: 8px;
     border-radius: 12px;
     border: 1px solid #262626;
     --color-accent: #0f82ff;
@@ -71,7 +71,7 @@ ENHANCE_CSS = """
     background: #181818;
     border: 1px solid #262626;
     border-radius: 10px;
-    padding: 10px;
+    padding: 8px;
 }
 /* ANTES | DESPUÉS lado a lado, misma altura y sin deformación.
    `flex-wrap: nowrap` + `min-width: 0` evita que la imagen fuerce el ancho
@@ -82,7 +82,7 @@ ENHANCE_CSS = """
     background: #0a0a0a;
     border: 1px solid #1f1f1f;
     border-radius: 10px;
-    padding: 4px;
+    padding: 2px;
     height: 100%;
     min-width: 0;
 }
@@ -271,7 +271,7 @@ def build_enhance_ui():
                     show_label=False,
                     buttons=["fullscreen"],
                     elem_classes=["enhance-img"],
-                    height=480,
+                    height=420,
                 )
             with gr.Column(scale=1, elem_classes=["enhance-view"]):
                 gr.HTML('<div class="enhance-view-title enhance-view-title-after">DESPUÉS</div>')
@@ -282,7 +282,7 @@ def build_enhance_ui():
                     show_label=False,
                     buttons=["fullscreen"],
                     elem_classes=["enhance-img"],
-                    height=480,
+                    height=420,
                 )
         with gr.Row():
             preview_photo = gr.Dropdown(
@@ -303,14 +303,14 @@ def build_enhance_ui():
                     input_files = gr.Files(
                         label="Seleccionar fotos (varias)",
                         file_types=["image"],
-                        height=120,
+                        height=90,
                     )
                 with gr.Tab("Carpeta"):
                     input_folder = gr.File(
                         label="Carpeta entera",
                         file_count="directory",
                         file_types=["image"],
-                        height=120,
+                        height=90,
                     )
             with gr.Row():
                 with gr.Column(scale=4, min_width=200):
@@ -323,6 +323,14 @@ def build_enhance_ui():
                 btn_open_folder = gr.Button("Abrir carpeta", variant="secondary", elem_classes=["btn-open"], scale=1)
                 format_dropdown = gr.Dropdown(choices=["png", "jpg", "jpeg"], value=config.get("export", {}).get("default_format", "png"), label="Formato", scale=1)
             folder_status = gr.Markdown("", elem_classes=["enhance-summary"])
+
+            gr.Markdown("Presets", elem_classes=["enhance-section"])
+            with gr.Row():
+                preset_dropdown = gr.Dropdown(choices=["Realista", "Ultra realista", "Sin ruido", "Sin bandas", "Color vivo", "Retrato", "Paisaje", "Nocturna", "Producto", "Archivo"], value="Realista", label="Preset de fábrica", scale=2)
+                preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"], scale=1)
+                preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
+                preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
+            preset_status = gr.Markdown("")
 
             gr.Markdown("Mejoras", elem_classes=["enhance-section"])
             with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
@@ -349,14 +357,8 @@ def build_enhance_ui():
             with gr.Row():
                 btn_reset_sliders = gr.Button("↺ Reset sliders", variant="secondary", size="sm", elem_classes=["btn-secondary"])
 
-        # ---------- Banda de presets y exportación ----------
-        gr.Markdown("Presets · Exportación", elem_classes=["enhance-section"])
-        with gr.Row():
-            preset_dropdown = gr.Dropdown(choices=["Realista", "Ultra realista", "Sin ruido", "Sin bandas", "Color vivo", "Retrato", "Paisaje", "Nocturna", "Producto", "Archivo"], value="Realista", label="Preset de fábrica", scale=2)
-            preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"], scale=1)
-            preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
-            preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
-        preset_status = gr.Markdown("")
+        # ---------- Exportación ----------
+        gr.Markdown("Exportación", elem_classes=["enhance-section"])
         with gr.Row():
             auto_mode = gr.Checkbox(label="Modo automático (medido por foto)", value=False)
             apply_filters_to_filename = gr.Checkbox(label="Filtros en el nombre del archivo", value=bool(config.get("export", {}).get("add_applied_filters_to_filename", True)))

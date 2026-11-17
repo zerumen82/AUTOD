@@ -1,3 +1,7 @@
+- **v5.1393 (2026-11-17) - Enhance: presets antes que sliders; tamaños optimizados.**
+  - `ui/tabs/enhance/ui.py`: bloque de presets movido antes de los sliders; previews a 420 px, importación a 90 px, paddings reducidos (contenedor 8, panel 8, vista 2) para mejor uso de pantalla.
+  - Verificación: `py_compile` OK y probe Enhance PASS.
+
 - **v5.1392 (2026-11-17) - Enhance: previews arriba, sliders en horizontal ancho completo.**
   - `ui/tabs/enhance/ui.py`: se elimina la columna lateral de sliders; previews ANTES/DESPUÉS ocupan todo el ancho arriba y el panel de control (importar/destino/mejoras) queda debajo, con los sliders en filas horizontales como en el resto de pestañas.
   - Verificación: `py_compile` OK y probe Enhance PASS.
