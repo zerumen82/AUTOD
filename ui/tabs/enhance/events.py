@@ -87,6 +87,36 @@ PRESET_DEFAULTS = {
         "grain_strength": 3, "grain_size": 10, "deband": 15, "vibrance": 100,
         "face_model": "GFPGAN",
     },
+    "Blanco y negro": {
+        "denoise": 30, "sharpen": 25, "recover": 0, "upscale": 1,
+        "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
+        "grain_strength": 15, "grain_size": 10, "deband": 20, "vibrance": 0,
+        "face_model": "GFPGAN",
+    },
+    "HDR": {
+        "denoise": 15, "sharpen": 45, "recover": 30, "upscale": 1,
+        "exposure": 1.1, "shadow": 0.7, "highlight": 1.2, "temperature": 50,
+        "grain_strength": 5, "grain_size": 8, "deband": 10, "vibrance": 115,
+        "face_model": "GFPGAN",
+    },
+    "Selfie": {
+        "denoise": 40, "sharpen": 20, "recover": 70, "upscale": 1,
+        "exposure": 1.05, "shadow": 0.9, "highlight": 1.0, "temperature": 52,
+        "grain_strength": 0, "grain_size": 10, "deband": 15, "vibrance": 108,
+        "face_model": "GFPGAN",
+    },
+    "Vintage": {
+        "denoise": 25, "sharpen": 15, "recover": 20, "upscale": 1,
+        "exposure": 0.95, "shadow": 1.1, "highlight": 0.9, "temperature": 60,
+        "grain_strength": 25, "grain_size": 12, "deband": 10, "vibrance": 90,
+        "face_model": "GFPGAN",
+    },
+    "Noche clara": {
+        "denoise": 70, "sharpen": 30, "recover": 40, "upscale": 2,
+        "exposure": 1.5, "shadow": 1.5, "highlight": 0.5, "temperature": 38,
+        "grain_strength": 12, "grain_size": 8, "deband": 45, "vibrance": 102,
+        "face_model": "GFPGAN",
+    },
 }
 
 # Vista previa: el original se guarda ya escalado y el resultado se acota para

@@ -38,6 +38,9 @@ MODIFIERS: Dict[str, List[ModifierOption]] = {
         ("smartphone", "smartphone RAW photo"),
         ("cinematic", "cinematic film still"),
         ("glamour", "glamour beauty photo"),
+        ("documentary", "documentary photo, authentic"),
+        ("fashion", "fashion editorial photo"),
+        ("portrait", "studio portrait photo"),
     ],
     "lighting": [
         ("auto", ""),
@@ -46,6 +49,11 @@ MODIFIERS: Dict[str, List[ModifierOption]] = {
         ("studio", "soft studio light"),
         ("dramatic", "dramatic shadows"),
         ("neon", "neon night light, cinematic realism"),
+        ("overcast", "soft overcast light"),
+        ("backlight", "backlit, rim light"),
+        ("moonlight", "moonlight, cool night"),
+        ("ring_light", "ring light, even illumination"),
+        ("candlelight", "warm candlelight"),
     ],
     "skin_finish": [
         ("auto", ""),
@@ -53,6 +61,8 @@ MODIFIERS: Dict[str, List[ModifierOption]] = {
         ("detailed", "detailed skin pores"),
         ("smooth", "smooth beauty skin"),
         ("sweaty", "sweaty skin"),
+        ("porcelain", "porcelain skin"),
+        ("weathered", "weathered skin"),
     ],
     "framing": [
         ("auto", ""),
@@ -60,6 +70,10 @@ MODIFIERS: Dict[str, List[ModifierOption]] = {
         ("full_body", "full body shot"),
         ("close_up", "close-up shot"),
         ("wide", "wide angle shot"),
+        ("medium", "medium shot"),
+        ("cowboy", "cowboy shot"),
+        ("extreme_closeup", "extreme close-up"),
+        ("landscape", "landscape shot"),
     ],
     "color_grade": [
         ("auto", ""),
@@ -67,6 +81,11 @@ MODIFIERS: Dict[str, List[ModifierOption]] = {
         ("cool", "cool tones"),
         ("vibrant", "vibrant colors"),
         ("film", "film grain look"),
+        ("bw", "black and white"),
+        ("sepia", "sepia tones"),
+        ("teal_orange", "teal and orange"),
+        ("vintage", "vintage look"),
+        ("high_contrast", "high contrast"),
     ],
 }
 
@@ -78,6 +97,9 @@ UI_LABELS: Dict[str, Dict[str, str]] = {
         "smartphone": "Foto de móvil",
         "cinematic": "Cinematográfico",
         "glamour": "Glamour / estudio",
+        "documentary": "Documental",
+        "fashion": "Moda / editorial",
+        "portrait": "Retrato de estudio",
     },
     "lighting": {
         "auto": "Automático",
@@ -86,6 +108,11 @@ UI_LABELS: Dict[str, Dict[str, str]] = {
         "studio": "Estudio",
         "dramatic": "Dramática",
         "neon": "Neón nocturna",
+        "overcast": "Nublado suave",
+        "backlight": "Contraluz",
+        "moonlight": "Luz de luna",
+        "ring_light": "Anillo de luz",
+        "candlelight": "Vela / cálido",
     },
     "skin_finish": {
         "auto": "Automático",
@@ -93,6 +120,8 @@ UI_LABELS: Dict[str, Dict[str, str]] = {
         "detailed": "Hiperdetallada",
         "smooth": "Suave / beauty",
         "sweaty": "Sudor / brillo",
+        "porcelain": "Porcelana",
+        "weathered": "Curtida",
     },
     "framing": {
         "auto": "Automático",
@@ -100,6 +129,10 @@ UI_LABELS: Dict[str, Dict[str, str]] = {
         "full_body": "Cuerpo completo",
         "close_up": "Primer plano",
         "wide": "Plano amplio",
+        "medium": "Plano medio",
+        "cowboy": "Plano vaquero",
+        "extreme_closeup": "Primerísimo plano",
+        "landscape": "Paisaje / horizontal",
     },
     "color_grade": {
         "auto": "Automático",
@@ -107,6 +140,11 @@ UI_LABELS: Dict[str, Dict[str, str]] = {
         "cool": "Tonos fríos",
         "vibrant": "Colores vivos",
         "film": "Película / grano",
+        "bw": "Blanco y negro",
+        "sepia": "Sepia",
+        "teal_orange": "Teal y naranja",
+        "vintage": "Vintage",
+        "high_contrast": "Alto contraste",
     },
 }
 

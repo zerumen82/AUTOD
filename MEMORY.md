@@ -1,3 +1,9 @@
+- **v5.1394 (2026-11-17) - Enhance presets + Generate: más opciones de iluminación/planos/color.**
+  - `ui/tabs/enhance/events.py`: 6 presets nuevos (Blanco y negro, HDR, Selfie, Vintage, Noche clara).
+  - `ui/tabs/enhance/ui.py`: dropdown de presets ampliado.
+  - `roop/img_editor/gen_prompt_modifiers.py`: ampliados iluminación (+5), planos (+5), color (+5), piel (+2) e imagen (+3).
+  - Verificación: `py_compile` OK.
+
 - **v5.1393 (2026-11-17) - Enhance: presets antes que sliders; tamaños optimizados.**
   - `ui/tabs/enhance/ui.py`: bloque de presets movido antes de los sliders; previews a 420 px, importación a 90 px, paddings reducidos (contenedor 8, panel 8, vista 2) para mejor uso de pantalla.
   - Verificación: `py_compile` OK y probe Enhance PASS.

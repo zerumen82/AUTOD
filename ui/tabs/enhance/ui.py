@@ -326,7 +326,7 @@ def build_enhance_ui():
 
             gr.Markdown("Presets", elem_classes=["enhance-section"])
             with gr.Row():
-                preset_dropdown = gr.Dropdown(choices=["Realista", "Ultra realista", "Sin ruido", "Sin bandas", "Color vivo", "Retrato", "Paisaje", "Nocturna", "Producto", "Archivo"], value="Realista", label="Preset de fábrica", scale=2)
+                preset_dropdown = gr.Dropdown(choices=["Realista", "Ultra realista", "Sin ruido", "Sin bandas", "Color vivo", "Retrato", "Paisaje", "Nocturna", "Producto", "Archivo", "Blanco y negro", "HDR", "Selfie", "Vintage", "Noche clara"], value="Realista", label="Preset de fábrica", scale=2)
                 preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"], scale=1)
                 preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
                 preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
