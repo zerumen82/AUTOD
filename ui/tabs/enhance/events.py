@@ -1,16 +1,21 @@
-"""Eventos de la pestaña «✨ Mejorar fotos» (estilo local).
+"""Eventos de la pestaña «Mejorar fotos» (estilo local).
 
 Reglas Gradio 6:
 - No se escribe `.value` sobre un componente desde un handler; se devuelven
   valores y se declaran en `outputs`.
 - `gr.Files` devuelve lista de rutas (str) u objetos con `.name`; se normaliza.
+- La primera foto de la cola se selecciona y renderiza sola al importar.
 """
 
 import json
+import os
+import subprocess
 import tempfile
 import time
+from collections import OrderedDict
 from pathlib import Path
 
+import gradio as gr
 from PIL import Image
 
 from roop.output_paths import get_enhance_output_dir
@@ -47,6 +52,20 @@ PRESET_DEFAULTS = {
     },
 }
 
+# Vista previa: el original se guarda ya escalado y el resultado se acota para
+# que mover un slider sea inmediato; el lote sigue a resolución completa.
+_PREVIEW_BEFORE_MAX = 1024
+_PREVIEW_AFTER_MAX = 2048
+_BEFORE_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+_BEFORE_CACHE_MAX = 12
+
+# Fotografías de ejemplo locales (sin contenido sensible).
+_SAMPLE_CANDIDATES = (
+    "diagnostics/out/editor_categories_20261115/remove.png",
+    "diagnostics/out/office/window.png",
+    "diagnostics/out/couch_check/window.png",
+)
+
 
 def _resolve_path(item) -> str:
     """gr.Files puede dar str, dict o objeto con .name/.path."""
@@ -66,13 +85,116 @@ def _normalize_files(raw) -> list:
     return [single] if single else []
 
 
+def _queue_paths(files_val, folder_val) -> list:
+    """Rutas de la cola, sin duplicados (misma foto en archivos y carpeta)."""
+    out = []
+    seen = set()
+    for p in _normalize_files(files_val) + _normalize_files(folder_val):
+        key = os.path.normcase(os.path.abspath(p))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
+def _pick_path(paths: list, selected) -> Path:
+    """Ruta de la foto elegida; si no hay selección, la primera de la cola."""
+    if selected:
+        target = os.path.normcase(os.path.abspath(_resolve_path(selected)))
+        for p in paths:
+            if os.path.normcase(os.path.abspath(p)) == target:
+                return Path(p)
+    return Path(paths[0])
+
+
+def _load_before(path: Path) -> Image.Image:
+    """Original ya escalado, cacheado por ruta+mtime (no re-decodifica)."""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0
+    key = str(path)
+    cached = _BEFORE_CACHE.get(key)
+    if cached and cached.get("mtime") == mtime:
+        _BEFORE_CACHE.move_to_end(key)
+        return cached["image"]
+    image = Image.open(path).convert("RGB")
+    w, h = image.size
+    if max(w, h) > _PREVIEW_BEFORE_MAX:
+        s = _PREVIEW_BEFORE_MAX / max(w, h)
+        image = image.resize((max(1, int(w * s)), max(1, int(h * s))), Image.LANCZOS)
+    _BEFORE_CACHE[key] = {"mtime": mtime, "image": image}
+    _BEFORE_CACHE.move_to_end(key)
+    while len(_BEFORE_CACHE) > _BEFORE_CACHE_MAX:
+        _BEFORE_CACHE.popitem(last=False)
+    return image
+
+
+def _cap_size(image: Image.Image, max_side: int) -> Image.Image:
+    w, h = image.size
+    if max(w, h) <= max_side:
+        return image
+    s = max_side / max(w, h)
+    return image.resize((max(1, int(w * s)), max(1, int(h * s))), Image.LANCZOS)
+
+
+def _settings(denoise, sharpen, recover, upscale, exposure, shadow, highlight,
+              temperature, grain_strength, grain_size) -> dict:
+    return {
+        "denoise_strength": denoise,
+        "sharpen_strength": sharpen,
+        "recover_faces_strength": recover / 100.0,
+        "upscale_factor": int(upscale or 1),
+        "exposure": exposure,
+        "shadow": shadow,
+        "highlight": highlight,
+        "temperature": temperature,
+        "grain_strength": grain_strength,
+        "grain_size": grain_size,
+    }
+
+
+def _render_after(before: Image.Image, settings: dict) -> Image.Image:
+    """Procesa la vista previa sobre el original ya escalado.
+
+    El upscale se omite en la vista previa: el panel se muestra reducido, no
+    aporta nada visual y es el paso más lento. Se aplica íntegro en el lote.
+    """
+    preview_settings = dict(settings)
+    preview_settings["upscale_factor"] = 1
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+        before.save(tf.name, "PNG")
+        tmp_path = Path(tf.name)
+    try:
+        after, _notes, _metrics = process_single_image(tmp_path, preview_settings)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return _cap_size(after, _PREVIEW_AFTER_MAX)
+
+
+def _status_line(name: str, s: dict) -> str:
+    return (
+        f"Vista previa: **{name}** · denoise {float(s['denoise_strength']):g}"
+        f" · sharpen {float(s['sharpen_strength']):g}"
+        f" · caras {float(s['recover_faces_strength']) * 100:g}"
+        f" · upscale {s['upscale_factor']}x al exportar"
+    )
+
+
 def wire_events(ui_components):
     """Conecta todos los eventos de la pestaña de mejora de fotos."""
 
     input_files = ui_components["input_files"]
     input_folder = ui_components["input_folder"]
-    queue_table = ui_components["queue_table"]
-    preview_slider = ui_components["preview_slider"]
+    btn_load_sample = ui_components["btn_load_sample"]
+    queue_summary = ui_components["queue_summary"]
+    preview_before = ui_components["preview_before"]
+    preview_after = ui_components["preview_after"]
+    preview_photo = ui_components["preview_photo"]
     btn_preview = ui_components["btn_preview"]
     preview_status = ui_components["preview_status"]
     denoise_slider = ui_components["denoise_slider"]
@@ -91,33 +213,142 @@ def wire_events(ui_components):
     preset_save_btn = ui_components["preset_save_btn"]
     preset_status = ui_components["preset_status"]
     auto_mode = ui_components["auto_mode"]
+    output_path = ui_components["output_path"]
+    btn_open_folder = ui_components["btn_open_folder"]
+    folder_status = ui_components["folder_status"]
     format_dropdown = ui_components["format_dropdown"]
     apply_filters_ck = ui_components["apply_filters_to_filename"]
     batch_btn = ui_components["batch_btn"]
     cancel_btn = ui_components["cancel_btn"]
     status_msg = ui_components["status_msg"]
-    result_table = ui_components["result_table"]
+    result_summary = ui_components["result_summary"]
+
+    slider_inputs = [
+        denoise_slider, sharpen_slider, recover_slider,
+        upscale_factor, exposure_slider, shadow_slider, highlight_slider,
+        temperature_slider, grain_strength_slider, grain_size_slider,
+    ]
 
     # ------------------------------------------------------------------
-    # Cola: cuando llegan archivos (sueltos o carpeta), llenar la tabla
+    # Cola: cuando llegan archivos (sueltos o carpeta), llenar la tabla y
+    # seleccionar la PRIMERA foto para la vista previa.
     # ------------------------------------------------------------------
     def refresh_queue(files_val, folder_val):
-        paths = _normalize_files(files_val) + _normalize_files(folder_val)
-        rows = []
-        for p in paths:
-            fp = Path(p)
-            try:
-                size_kb = round(fp.stat().st_size / 1024, 1)
-            except Exception:
-                size_kb = 0
-            rows.append([fp.name, "en cola", f"{size_kb} KB"])
-        return rows[:50], f"{len(rows)} foto(s) en cola"
+        paths = _queue_paths(files_val, folder_val)
+        if not paths:
+            return (
+                "_Sin fotos en cola._",
+                gr.update(choices=[], value=None),
+                "_Importa fotos para ver el antes/después._",
+            )
+        first_name = Path(paths[0]).name
+        summary = (
+            f"**{len(paths)} foto(s) en cola** · vista previa: `{first_name}`"
+        )
+        choices = [(Path(p).name, p) for p in paths]
+        return (
+            summary,
+            gr.update(choices=choices, value=paths[0]),
+            f"Generando vista previa de {len(paths)} foto(s)…",
+        )
+
+    # ------------------------------------------------------------------
+    # Vista previa ANTES / DESPUÉS
+    # ------------------------------------------------------------------
+    def make_pair(files_val, folder_val, selected, *slider_vals):
+        paths = _queue_paths(files_val, folder_val)
+        if not paths:
+            return None, None, "_Sube al menos una foto para ver el antes/después._"
+        path = _pick_path(paths, selected)
+        settings = _settings(*slider_vals)
+        try:
+            before = _load_before(path)
+            after = _render_after(before, settings)
+            return before, after, _status_line(path.name, settings)
+        except Exception as e:
+            return None, None, f"Vista previa falló: {e}"
+
+    def make_after(files_val, folder_val, selected, *slider_vals):
+        paths = _queue_paths(files_val, folder_val)
+        if not paths:
+            return None, "_Sube al menos una foto para ver el antes/después._"
+        path = _pick_path(paths, selected)
+        settings = _settings(*slider_vals)
+        try:
+            before = _load_before(path)
+            after = _render_after(before, settings)
+            return after, _status_line(path.name, settings)
+        except Exception as e:
+            return None, f"Vista previa falló: {e}"
+
+    pair_inputs = [input_files, input_folder, preview_photo] + slider_inputs
 
     for comp in (input_files, input_folder):
-        comp.upload(fn=refresh_queue, inputs=[input_files, input_folder],
-                    outputs=[queue_table, preview_status], queue=False)
-        comp.change(fn=refresh_queue, inputs=[input_files, input_folder],
-                    outputs=[queue_table, preview_status], queue=False)
+        event = comp.change(
+            fn=refresh_queue,
+            inputs=[input_files, input_folder],
+            outputs=[queue_summary, preview_photo, preview_status],
+            queue=False,
+        )
+        event.then(
+            fn=make_pair,
+            inputs=pair_inputs,
+            outputs=[preview_before, preview_after, preview_status],
+            queue=True,
+            concurrency_limit=1,
+            trigger_mode="always_last",
+            show_progress="default",
+        )
+
+    preview_photo.change(
+        fn=make_pair,
+        inputs=pair_inputs,
+        outputs=[preview_before, preview_after, preview_status],
+        queue=True,
+        concurrency_limit=1,
+        trigger_mode="always_last",
+        show_progress="default",
+    )
+
+    btn_preview.click(
+        fn=make_pair,
+        inputs=pair_inputs,
+        outputs=[preview_before, preview_after, preview_status],
+        queue=True,
+        concurrency_limit=1,
+        show_progress="minimal",
+    )
+
+    # Cambiar cualquier ajuste re-renderiza SOLO el panel «Después».
+    # always_last + concurrencia 1: al mover varios sliders solo corre el último
+    # valor y no se encolan renders pesados.
+    for slider in slider_inputs:
+        slider.change(
+            fn=make_after,
+            inputs=pair_inputs,
+            outputs=[preview_after, preview_status],
+            queue=True,
+            concurrency_limit=1,
+            trigger_mode="always_last",
+            show_progress="default",
+        )
+
+    # ------------------------------------------------------------------
+    # Cargar fotos de ejemplo (evita un botón sin función)
+    # ------------------------------------------------------------------
+    def load_sample():
+        root = Path(__file__).resolve().parents[3]
+        found = [str(root / rel) for rel in _SAMPLE_CANDIDATES if (root / rel).exists()]
+        if not found:
+            return gr.update(), "No hay fotos de ejemplo disponibles en diagnostics/out."
+        return gr.update(value=found), f"Ejemplo cargado: {len(found)} foto(s)."
+
+    btn_load_sample.click(
+        fn=load_sample,
+        inputs=[],
+        outputs=[input_files, preview_status],
+        queue=False,
+    )
 
     # ------------------------------------------------------------------
     # Aplicar preset de fábrica a los sliders
@@ -191,78 +422,26 @@ def wire_events(ui_components):
     )
 
     # ------------------------------------------------------------------
-    # Vista previa antes/después de la PRIMERA foto de la cola
+    # Abrir la carpeta de destino en el explorador
     # ------------------------------------------------------------------
-    def make_preview(
-        files, folder, denoise, sharpen, recover, upscale, exposure, shadow,
-        highlight, temperature, grain_strength, grain_size,
-    ):
-        paths = _normalize_files(files) + _normalize_files(folder)
-        if not paths:
-            return None, "_Sube al menos una foto para ver el antes/después._"
-        path = Path(paths[0])
+    def open_output_folder():
+        path = get_enhance_output_dir()
         try:
-            settings = {
-                "denoise_strength": denoise,
-                "sharpen_strength": sharpen,
-                "recover_faces_strength": recover / 100.0,
-                "upscale_factor": int(upscale),
-                "exposure": exposure,
-                "shadow": shadow,
-                "highlight": highlight,
-                "temperature": temperature,
-                "grain_strength": grain_strength,
-                "grain_size": grain_size,
-            }
-            # Vista previa a tamaño seguro para UI (máx 1024 de lado)
-            _max_side = 1024
-            before = Image.open(path).convert("RGB")
-            w, h = before.size
-            if max(w, h) > _max_side:
-                s = _max_side / max(w, h)
-                before = before.resize((int(w * s), int(h * s)), Image.LANCZOS)
-            # process_single_image abre el archivo otra vez; para preview usamos
-            # la imagen ya redimensionada como entrada temporal.
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
-                before.save(tf.name, "PNG")
-                tmp_path = Path(tf.name)
-            after, _notes, _m = process_single_image(tmp_path, settings)
-            return (before, after), f"Vista previa: {path.name}"
+            if os.name == "nt":
+                os.startfile(path)
+            else:
+                subprocess.Popen(["xdg-open", path])
+            msg = f"Carpeta abierta: {path}"
         except Exception as e:
-            return None, f"Vista previa falló: {e}"
+            msg = f"No se pudo abrir la carpeta: {e}"
+        return msg
 
-    btn_preview.click(
-        fn=make_preview,
-        inputs=[
-            input_files, input_folder, denoise_slider, sharpen_slider, recover_slider,
-            upscale_factor, exposure_slider, shadow_slider, highlight_slider,
-            temperature_slider, grain_strength_slider, grain_size_slider,
-        ],
-        outputs=[preview_slider, preview_status],
-        queue=True,
+    btn_open_folder.click(
+        fn=open_output_folder,
+        inputs=[],
+        outputs=folder_status,
+        queue=False,
     )
-
-    # ------------------------------------------------------------------
-    # Previsualización en tiempo real al mover cualquier slider
-    # (denoise, sharpen, luz, grano, etc.) sin necesidad de pulsar el botón
-    # ------------------------------------------------------------------
-    preview_inputs = [
-        input_files, input_folder, denoise_slider, sharpen_slider, recover_slider,
-        upscale_factor, exposure_slider, shadow_slider, highlight_slider,
-        temperature_slider, grain_strength_slider, grain_size_slider,
-    ]
-
-    for slider in (
-        denoise_slider, sharpen_slider, recover_slider, upscale_factor,
-        exposure_slider, shadow_slider, highlight_slider,
-        temperature_slider, grain_strength_slider, grain_size_slider,
-    ):
-        slider.change(
-            fn=make_preview,
-            inputs=preview_inputs,
-            outputs=[preview_slider, preview_status],
-            queue=False,
-        )
 
     # ------------------------------------------------------------------
     # Procesar lote completo
@@ -274,24 +453,19 @@ def wire_events(ui_components):
         export_format, apply_filters_to_filename, auto_mode,
     ):
         t0 = time.time()
-        paths = _normalize_files(files) + _normalize_files(folder)
+        paths = _queue_paths(files, folder)
         if not paths:
-            return "No se seleccionaron archivos.", []
+            return (
+                "<div class='enhance-status'>No se seleccionaron archivos.</div>",
+                "",
+            )
 
         enh_logic.clear_cancel()
 
-        settings = {
-            "denoise_strength": denoise,
-            "sharpen_strength": sharpen,
-            "recover_faces_strength": recover / 100.0,
-            "upscale_factor": upscale,
-            "exposure": exposure,
-            "shadow": shadow,
-            "highlight": highlight,
-            "temperature": temperature,
-            "grain_strength": grain_strength,
-            "grain_size": grain_size,
-        }
+        settings = _settings(
+            denoise, sharpen, recover, upscale, exposure, shadow, highlight,
+            temperature, grain_strength, grain_size,
+        )
 
         output_dir = Path(get_enhance_output_dir())
 
@@ -307,22 +481,27 @@ def wire_events(ui_components):
             autopilot=bool(auto_mode),
         )
 
-        table_data = []
         ok_count = 0
+        errors = []
         for res in results:
+            if res.get("success"):
+                ok_count += 1
+                continue
             entry = Path(res.get("input", "")).name
-            output = Path(res.get("output", "")).name if res.get("output") else "—"
-            notes = res.get("notes", "")
+            notes = res.get("notes", "") or "error"
             if isinstance(notes, (list, tuple)):
                 notes = "; ".join(str(n) for n in notes)
-            notes = str(notes) if notes else "OK"
-            ok = "✅" if res.get("success") else "❌"
-            ok_count += 1 if res.get("success") else 0
-            table_data.append([entry, output, notes, ok])
+            errors.append(f"{entry}: {notes}")
 
         elapsed = time.time() - t0
         msg = f"Procesados {ok_count}/{len(results)} archivos en {elapsed:.1f} s."
-        return msg, table_data
+        summary = (
+            f"**{ok_count}/{len(results)} fotos procesadas** en {elapsed:.1f} s"
+            f" · salida: `{output_dir.name}/`"
+        )
+        if errors:
+            summary += " · errores: " + "; ".join(errors[:5])
+        return f"<div class='enhance-status'>{msg}</div>", summary
 
     batch_btn.click(
         fn=do_batch,
@@ -333,7 +512,7 @@ def wire_events(ui_components):
             grain_strength_slider, grain_size_slider,
             format_dropdown, apply_filters_ck, auto_mode,
         ],
-        outputs=[status_msg, result_table],
+        outputs=[status_msg, result_summary],
         queue=True,
     )
 
@@ -342,6 +521,6 @@ def wire_events(ui_components):
     # ------------------------------------------------------------------
     def do_cancel():
         enh_logic.request_cancel()
-        return "Cancelado por el usuario."
+        return "<div class='enhance-status'>Cancelado por el usuario.</div>"
 
     cancel_btn.click(fn=do_cancel, inputs=[], outputs=status_msg, queue=False)

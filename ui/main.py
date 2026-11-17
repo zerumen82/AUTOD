@@ -318,7 +318,7 @@ def create_ui():
                     gr.Markdown(f"Error: {e}")
 
             # Tab 6: Mejorar fotos (Topaz-style)
-            with gr.Tab("✨ Mejorar fotos"):
+            with gr.Tab("Mejorar fotos"):
                 try:
                     from ui.tabs.enhance.tab import create_enhance_tab
                     create_enhance_tab()
@@ -485,7 +485,7 @@ def create_ui():
                     gr.Markdown(f"Error: {e}")
 
             # Tab 6: Mejorar fotos (Topaz-style)
-            with gr.Tab("✨ Mejorar fotos"):
+            with gr.Tab("Mejorar fotos"):
                 try:
                     from ui.tabs.enhance.tab import create_enhance_tab
                     create_enhance_tab()
