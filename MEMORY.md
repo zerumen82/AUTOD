@@ -1,3 +1,8 @@
+- **v5.1391 (2026-11-17) - UI: Mejorar fotos junto a Animate Image; sliders al lado de las previews.**
+  - `ui/main.py`: pestaña «Mejorar fotos» movida para quedar entre «Animate Image» y «Settings» (en ambas funciones `create_ui`).
+  - `ui/tabs/enhance/ui.py`: previews ANTES/DESPUÉS a 560 px con marco reducido, para que los sliders queden al lado y no debajo.
+  - Verificación: `py_compile` OK.
+
 - **v5.1390 (2026-11-17) - Enhance: antes/después más grandes con menos marco.**
   - `ui/tabs/enhance/ui.py`: altura de las dos imágenes ANTES/DESPUÉS subida de 420 a 560 px; padding del marco `.enhance-view` reducido de 8 a 4 px y borde suavizado; título con menos separación.
   - Verificación: `py_compile` OK.

@@ -308,20 +308,20 @@ def create_ui():
                     wire_animate_events(animate_components)
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
-            
-            # Tab 5: Settings
-            with gr.Tab("Settings"):
-                try:
-                    from ui.tabs.settings_tab import settings_tab
-                    settings_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
 
-            # Tab 6: Mejorar fotos (Topaz-style)
+            # Tab 5: Mejorar fotos (Topaz-style)
             with gr.Tab("Mejorar fotos"):
                 try:
                     from ui.tabs.enhance.tab import create_enhance_tab
                     create_enhance_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+
+            # Tab 6: Settings
+            with gr.Tab("Settings"):
+                try:
+                    from ui.tabs.settings_tab import settings_tab
+                    settings_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
         
@@ -475,20 +475,20 @@ def create_ui():
                     wire_animate_events(animate_components)
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
-            
-            # Tab 5: Settings
-            with gr.Tab("Settings"):
-                try:
-                    from ui.tabs.settings_tab import settings_tab
-                    settings_tab()
-                except Exception as e:
-                    gr.Markdown(f"Error: {e}")
 
-            # Tab 6: Mejorar fotos (Topaz-style)
+            # Tab 5: Mejorar fotos (Topaz-style)
             with gr.Tab("Mejorar fotos"):
                 try:
                     from ui.tabs.enhance.tab import create_enhance_tab
                     create_enhance_tab()
+                except Exception as e:
+                    gr.Markdown(f"Error: {e}")
+
+            # Tab 6: Settings
+            with gr.Tab("Settings"):
+                try:
+                    from ui.tabs.settings_tab import settings_tab
+                    settings_tab()
                 except Exception as e:
                     gr.Markdown(f"Error: {e}")
         
