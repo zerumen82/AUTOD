@@ -3490,11 +3490,13 @@ class ProcessMgr:
                         
                         # Save tracking embedding as recovery fallback
                         # v5.1053: EXQUISITO — solo actualizar el embedding de recuperación
-                        # con identidad SÓLIDA (score>=0.55). Antes se actualizaba con
-                        # CUALQUIER aceptación → el fallback de validación se convertía
-                        # en la otra persona y las siguientes validaciones la aceptaban.
+                        # con identidad SÓLIDA. v5.1384: umbral 0.55 → 0.50 porque el 0.55
+                        # era demasiado estricto para caras de baja calidad/perfiles; perdía
+                        # el track y acumulaba Lost Count. Calibrado con datos reales: caras
+                        # reales → 0.65-0.99 (mediana 0.98); FP ambiguas → <0.36. Umbral 0.50
+                        # (margen bajo la mediana, muy por encima de los FP).
                         tracking_emb_attr = f'_tracking_embedding_{video_basename}'
-                        if hasattr(best_match, 'embedding') and best_match.embedding is not None and best_score >= 0.55:
+                        if hasattr(best_match, 'embedding') and best_match.embedding is not None and best_score >= 0.50:
                             emb_arr = np.array(best_match.embedding, dtype=np.float32)
                             norm = np.linalg.norm(emb_arr)
                             if norm > 0:

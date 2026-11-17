@@ -177,7 +177,7 @@ def build_faceswap_ui():
                             bt_jump_fwd_10 = gr.Button("+10", size="sm", elem_classes=["frame-btn"])
                             bt_jump_fwd_100 = gr.Button("+100", size="sm", elem_classes=["frame-btn"])
                     with gr.Column(scale=3):
-                        preview_frame_num = gr.Slider(1, 1, value=1, label="🎬 Timeline del Video", step=1.0)
+                        preview_frame_num = gr.Slider(1, 2, value=1, label="🎬 Timeline del Video", step=1.0)
                 
                 previewimage = gr.Image(label="Vista Previa", height=480)
                 
@@ -210,7 +210,7 @@ def build_faceswap_ui():
                                 preview_result = gr.Image(label="Comparativa (Antes | Después)", visible=False)
 
                         with gr.Row(visible=False): # Ocultamos el slider viejo
-                            face_selector_slider = gr.Slider(minimum=1, maximum=1, value=1, step=1, label="Selecciona el número de cara")
+                            face_selector_slider = gr.Slider(minimum=1, maximum=2, value=1, step=1, label="Selecciona el número de cara")
                             bt_use_selected_face = gr.Button("✅ AÑADIR")
 
                 with gr.Accordion("⚙️ Ajustes Expertos (Fidelidad)", open=False):
@@ -235,6 +235,7 @@ def build_faceswap_ui():
                     bt_start = gr.Button("🚀 INICIAR PROCESAMIENTO", variant="primary", elem_classes=["btn-faceswap-main"], scale=2)
                     bt_stop = gr.Button("⏹ CANCELAR", variant="stop", interactive=False, scale=1)
                     bt_open_output = gr.Button("📂", variant="secondary")
+                    bt_use_result_as_source = gr.Button("🔄 Usar resultado como origen", variant="secondary", size="sm")
                 
                 metrics_display = gr.HTML(logic.get_metrics_html(0, 0, 0, "00:00", "--:--", "Listo"))
 
@@ -252,7 +253,7 @@ def build_faceswap_ui():
         "dynamic_face_selection": dynamic_face_selection,
         "face_selection": face_selection, "face_selector_slider": face_selector_slider, "bt_use_selected_face": bt_use_selected_face,
         "autorotate": autorotate, "smoothing": smoothing, "source_random": source_random, "face_distance": face_distance, "blend_ratio": blend_ratio, "enhancer_blend": enhancer_blend, "enhancer": enhancer,
-        "bt_start": bt_start, "bt_stop": bt_stop, "bt_open_output": bt_open_output,
+        "bt_start": bt_start, "bt_stop": bt_stop, "bt_open_output": bt_open_output, "bt_use_result_as_source": bt_use_result_as_source,
         "metrics_display": metrics_display, "input_page_info": input_page_info, "target_page_info": target_page_info,
         "bt_input_prev": bt_input_prev, "bt_input_next": bt_input_next, "bt_target_prev": bt_target_prev, "bt_target_next": bt_target_next,
         "bt_clear_source": bt_clear_source, "bt_clear_target": bt_clear_target,

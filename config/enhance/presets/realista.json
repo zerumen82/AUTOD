@@ -1,0 +1,20 @@
+{
+  "name": "Realista",
+  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
+  "sliders": {
+    "denoise_strength": 25,
+    "sharpen_strength": 30,
+    "recover_faces_strength": 0.6,
+    "upscale_factor": 1,
+    "exposure": 1.0,
+    "shadow": 0.95,
+    "highlight": 1.03,
+    "temperature": 50,
+    "grain_strength": 6,
+    "grain_size": 8,
+    "deband_strength": 20,
+    "vibrance": 104,
+    "face_model": "GFPGAN"
+  },
+  "models": {}
+}

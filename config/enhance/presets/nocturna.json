@@ -1,21 +1,20 @@
 {
   "name": "Nocturna",
-  "description": "Bajo luz, realce sombras y luces",
+  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
   "sliders": {
     "denoise_strength": 80,
-    "sharpen_strength": 30,
-    "recover_faces_strength": 0.5,
-    "exposure": 1.5,
-    "shadow": 1.5,
-    "highlight": 0.5,
-    "temperature": 30,
-    "grain_strength": 25,
-    "grain_size": 8
+    "sharpen_strength": 25,
+    "recover_faces_strength": 0.4,
+    "upscale_factor": 2,
+    "exposure": 1.4,
+    "shadow": 1.4,
+    "highlight": 0.6,
+    "temperature": 35,
+    "grain_strength": 20,
+    "grain_size": 8,
+    "deband_strength": 50,
+    "vibrance": 105,
+    "face_model": "GFPGAN"
   },
-  "models": {
-    "denoise": "models/scunet-onnx",
-    "sharpen": "models/nafnet-onnx",
-    "recover_faces": "models/GFPGANv1.4.onnx",
-    "upscale": "models/real_esrgan_x4.onnx"
-  }
+  "models": {}
 }

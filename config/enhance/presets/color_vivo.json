@@ -1,0 +1,20 @@
+{
+  "name": "Color vivo",
+  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
+  "sliders": {
+    "denoise_strength": 20,
+    "sharpen_strength": 28,
+    "recover_faces_strength": 0.4,
+    "upscale_factor": 1,
+    "exposure": 1.05,
+    "shadow": 1.08,
+    "highlight": 0.96,
+    "temperature": 53,
+    "grain_strength": 4,
+    "grain_size": 8,
+    "deband_strength": 10,
+    "vibrance": 115,
+    "face_model": "GFPGAN"
+  },
+  "models": {}
+}

@@ -12,13 +12,14 @@ Optimización para RTX 3060 Ti 8 GB:
 import json
 import time
 import threading
+import zlib
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 import roop.globals
 from roop.processors.Frame_Upscale import Frame_Upscale
@@ -91,11 +92,22 @@ def measure_noise_laplacian(image: Image.Image) -> float:
     return var / 255.0
 
 
-def detect_faces_count(image: Image.Image) -> int:
-    """Cuenta caras con InsightFace (CPU)."""
+def _get_face_analyser():
+    """Analizador facial CUDA si está disponible; si no, CPU."""
+    import roop.face_util as fu
     try:
-        import roop.face_util as fu
-        analyser = fu.get_face_analyser_cpu()
+        analyser = fu.get_face_analyser()
+        if analyser is not None:
+            return analyser
+    except Exception:
+        pass
+    return fu.get_face_analyser_cpu()
+
+
+def detect_faces_count(image: Image.Image) -> int:
+    """Cuenta caras con InsightFace (CUDA si está disponible)."""
+    try:
+        analyser = _get_face_analyser()
         if analyser is None:
             return 0
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
@@ -145,9 +157,11 @@ def apply_lighting_color_cv2(
     if exposure != 1.0:
         img = img * exposure
     if shadow != 1.0:
-        img = np.where(img < 0.5, img * shadow, img)
+        mask = np.clip((0.5 - img) / 0.5, 0.0, 1.0)
+        img = img * (1.0 + (shadow - 1.0) * mask)
     if highlight != 1.0:
-        img = np.where(img > 0.5, img * highlight, img)
+        mask = np.clip((img - 0.5) / 0.5, 0.0, 1.0)
+        img = img * (1.0 + (highlight - 1.0) * mask)
     if temperature != 50:
         lab = cv2.cvtColor(np.clip(img, 0, 1), cv2.COLOR_RGB2LAB)
         temp_factor = (temperature - 50) / 50.0
@@ -163,21 +177,23 @@ def apply_grain_cv2(
     strength: float,
     grain_size: float,
     grain_type: str = "gaussian",
+    seed: Optional[int] = None,
 ) -> Image.Image:
-    """Añade grano fotográfico."""
+    """Añade grano fotográfico (determinista si se pasa `seed`)."""
     if strength <= 0:
         return image
+    rng = np.random.default_rng(seed)
     img = np.array(image.convert("RGB"), dtype=np.float32) / 255.0
     h, w = img.shape[:2]
     if grain_type == "grey":
-        g = np.random.normal(0, strength / 100.0 * 0.04, (h, w))
+        g = rng.normal(0, strength / 100.0 * 0.04, (h, w))
         grain = np.stack([g, g, g], axis=2)
     elif grain_type == "silver_rich":
-        grain = np.random.normal(0, strength / 100.0 * 0.06, (h, w, 3))
+        grain = rng.normal(0, strength / 100.0 * 0.06, (h, w, 3))
         grain[:, :, 0] *= 1.1
         grain[:, :, 2] *= 0.9
     else:
-        grain = np.random.normal(0, strength / 100.0 * 0.05, (h, w, 3))
+        grain = rng.normal(0, strength / 100.0 * 0.05, (h, w, 3))
     if grain_size > 1.0:
         gh, gw = max(1, int(h / grain_size)), max(1, int(w / grain_size))
         small_grain = cv2.resize(grain, (gw, gh), interpolation=cv2.INTER_LINEAR)
@@ -186,14 +202,76 @@ def apply_grain_cv2(
     return Image.fromarray((out * 255).astype(np.uint8))
 
 
+def apply_deband_cv2(image: Image.Image, strength: float, seed: Optional[int] = None) -> Image.Image:
+    """Suaviza bandas de cuantización en LAB y añade dither fino.
+
+    strength 0-100. No reemplaza un denoise fuerte: elimina la posterización
+    de degradados (cielos, sombras) sin destruir el detalle.
+    """
+    if strength <= 0:
+        return image
+    rng = np.random.default_rng(seed)
+    img = np.array(image.convert("RGB"))
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+    d = 3 + int(strength / 100 * 9)
+    sigma_color = 8 + int(strength / 100 * 30)
+    sigma_space = 8 + int(strength / 100 * 30)
+    a = cv2.bilateralFilter(a, d, sigma_color, sigma_space)
+    b = cv2.bilateralFilter(b, d, sigma_color, sigma_space)
+    noise = rng.normal(0.0, strength / 100 * 1.5, l.shape).astype(np.float32)
+    l = np.clip(l.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    out = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2RGB)
+    return Image.fromarray(out)
+
+
+def apply_vibrance_cv2(image: Image.Image, vibrance: float) -> Image.Image:
+    """Sube la saturación protegiendo los tonos ya saturados y la piel."""
+    if abs(vibrance - 100.0) < 1e-6:
+        return image
+    img = np.array(image.convert("RGB"), dtype=np.float32) / 255.0
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    h = hsv[:, :, 0]
+    s = hsv[:, :, 1]
+    skin = ((h <= 25.0) | (h >= 330.0)).astype(np.float32)
+    factor = 1.0 + (vibrance - 100.0) / 100.0 * (1.0 - s)
+    factor = 1.0 + (factor - 1.0) * (1.0 - 0.6 * skin)
+    hsv[:, :, 1] = np.clip(s * factor, 0.0, 1.0)
+    out = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    return Image.fromarray((np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8))
+
+
 # ---------------------------------------------------------------------------
 # Procesadores ONNX (singletons, CUDA EP)
 # ---------------------------------------------------------------------------
 _UPSCALE_PROCESSORS: Dict[str, Frame_Upscale] = {}
-_GFPGAN_PROCESSOR: Optional[Enhance_GFPGAN] = None
+_FACE_PROCESSORS: Dict[str, Any] = {}
 _PROCESSORS_LOCK = threading.Lock()
 
 _UPSCALE_SUBTYPES = {"esrganx2": 2, "esrganx4": 4, "lsdirx4": 4}
+
+_FACE_MODEL_ALIASES = {
+    "gfpgan": "GFPGAN",
+    "codeformer": "CodeFormer",
+    "restoreformer": "RestoreFormer++",
+    "restoreformer++": "RestoreFormer++",
+    "restoreformerpp": "RestoreFormer++",
+    "gpen": "GPEN",
+}
+
+
+def _normalize_face_model(name: str) -> str:
+    key = str(name or "GFPGAN").strip().lower()
+    return _FACE_MODEL_ALIASES.get(key, "GFPGAN")
+
+
+def _ensure_execution_providers() -> None:
+    if not getattr(roop.globals, "execution_providers", None):
+        import onnxruntime
+        if "CUDAExecutionProvider" in onnxruntime.get_available_providers():
+            roop.globals.execution_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        else:
+            roop.globals.execution_providers = ["CPUExecutionProvider"]
 
 
 def _cuda_available() -> bool:
@@ -208,6 +286,7 @@ def get_upscale_processor(subtype: str = "esrganx4") -> Frame_Upscale:
     with _PROCESSORS_LOCK:
         proc = _UPSCALE_PROCESSORS.get(subtype)
         if proc is None:
+            _ensure_execution_providers()
             dev = "cuda" if _cuda_available() else "cpu"
             proc = Frame_Upscale()
             proc.Initialize({"devicename": dev, "subtype": subtype})
@@ -216,19 +295,52 @@ def get_upscale_processor(subtype: str = "esrganx4") -> Frame_Upscale:
     return proc
 
 
-def get_gfpgan_processor() -> Enhance_GFPGAN:
-    global _GFPGAN_PROCESSOR
+def get_face_processor(name: str = "GFPGAN"):
+    """Devuelve un procesador de caras (GFPGAN/CodeFormer/RestoreFormer++/GPEN).
+
+    Solo hay uno activo: al cambiar de modelo se libera el anterior para no
+    acumular VRAM en una RTX 3060 Ti de 8 GB.
+    """
+    model = _normalize_face_model(name)
     with _PROCESSORS_LOCK:
-        if _GFPGAN_PROCESSOR is None:
-            dev = "cuda" if _cuda_available() else "cpu"
-            _GFPGAN_PROCESSOR = Enhance_GFPGAN()
-            _GFPGAN_PROCESSOR.Initialize({"devicename": dev})
-            print(f"[Enhance] GFPGAN listo ({dev})", flush=True)
-    return _GFPGAN_PROCESSOR
+        active = _FACE_PROCESSORS.get("active")
+        if active and active[0] == model:
+            return active[1]
+        if active:
+            try:
+                active[1].Release()
+            except Exception:
+                pass
+            _FACE_PROCESSORS.pop("active", None)
+        _ensure_execution_providers()
+        dev = "cuda" if _cuda_available() else "cpu"
+        if model == "GFPGAN":
+            proc = Enhance_GFPGAN()
+        elif model == "CodeFormer":
+            from roop.processors.Enhance_CodeFormer import Enhance_CodeFormer
+            proc = Enhance_CodeFormer()
+        elif model == "RestoreFormer++":
+            from roop.processors.Enhance_RestoreFormerPPlus import Enhance_RestoreFormerPPlus
+            proc = Enhance_RestoreFormerPPlus()
+        else:
+            from roop.processors.Enhance_GPEN import Enhance_GPEN
+            proc = Enhance_GPEN()
+        proc.Initialize({"devicename": dev})
+        _FACE_PROCESSORS["active"] = (model, proc)
+        print(f"[Enhance] Motor de caras listo ({model}, {dev})", flush=True)
+        return proc
+
+
+def get_gfpgan_processor():
+    """Compatibilidad: devuelve el motor GFPGAN."""
+    return get_face_processor("GFPGAN")
 
 
 def apply_upscale_onnx(image: Image.Image, factor: int) -> Image.Image:
     """Upscale con Real-ESRGAN por tiles (CUDA). Fallback Lanczos si falla."""
+    if factor == 6:
+        out = apply_upscale_onnx(image, 4)
+        return out.resize((out.width * 3 // 2, out.height * 3 // 2), Image.LANCZOS)
     subtype = "esrganx2" if factor == 2 else "esrganx4"
     try:
         proc = get_upscale_processor(subtype)
@@ -241,12 +353,11 @@ def apply_upscale_onnx(image: Image.Image, factor: int) -> Image.Image:
         return image.resize((image.width * factor, image.height * factor), Image.LANCZOS)
 
 
-def apply_recover_faces_onnx(image: Image.Image, blend: float) -> Image.Image:
-    """Recupera caras con GFPGAN v1.4 (CUDA). blend 0-1."""
+def apply_recover_faces_onnx(image: Image.Image, blend: float, model_name: str = "GFPGAN") -> Image.Image:
+    """Recupera caras con el motor elegido (GFPGAN/CodeFormer/RestoreFormer++/GPEN)."""
     try:
-        proc = get_gfpgan_processor()
-        import roop.face_util as fu
-        analyser = fu.get_face_analyser_cpu()
+        proc = get_face_processor(model_name)
+        analyser = _get_face_analyser()
         if analyser is None:
             return image
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
@@ -267,7 +378,7 @@ def apply_recover_faces_onnx(image: Image.Image, blend: float) -> Image.Image:
                 enhanced = cv2.resize(enhanced, (crop.shape[1], crop.shape[0]),
                                       interpolation=cv2.INTER_LANCZOS4)
             det = float(getattr(face, "det_score", 0.9) or 0.9)
-            blend_factor = float(np.clip(det * 0.18 * blend, 0.06, 0.30))
+            blend_factor = float(np.clip(det * 0.35 * blend, 0.08, 0.50))
             mask = _create_face_mask(crop, blend_factor)
             if mask is None:
                 continue
@@ -310,7 +421,8 @@ _NOISE_GUARD_STEPS = {"denoise"}
 def quality_gate_check(before: Image.Image, after: Image.Image, name: str) -> Tuple[Image.Image, str]:
     """Gate de calidad por paso. Revierte solo daño real, no mejoras legítimas.
 
-    - Recorte de tonos: se revierte si empeora >0.8 pp (aplica a todos).
+    - Recorte de tonos: se revierte si empeora >0.8 pp (2.5 pp en lighting_color,
+      que sube contraste a propósito y no debe descartarse por un recorte menor).
     - Nitidez: solo en pasos que no cambian escala ni suavizan por diseño;
       se revierte si cae >25% (desastre). La comparación es a la misma escala.
     - Ruido: en denoise, se revierte si el ruido aumenta >15%.
@@ -327,7 +439,8 @@ def quality_gate_check(before: Image.Image, after: Image.Image, name: str) -> Tu
         after_cmp = after
 
     c_before, c_after = clip(before), clip(after_cmp)
-    if c_after - c_before > 0.008:
+    clip_limit = 0.025 if name == "lighting_color" else 0.008
+    if c_after - c_before > clip_limit:
         return before, f"{name} revertido (recorte de tonos +{c_after - c_before:.1%})"
 
     if name in _SHARP_GUARD_STEPS:
@@ -367,6 +480,9 @@ def autopilot_propose(image: Image.Image) -> Dict[str, Any]:
     exposure = 1.3 if brightness < 0.35 else (0.9 if brightness > 0.75 else 1.0)
     shadow = 1.3 if brightness < 0.35 else 1.0
     highlight = 0.7 if brightness > 0.75 else 1.0
+    deband = 35 if noise > noise_th else 15
+    vibrance = 105 if 0.35 <= brightness <= 0.75 else 100
+    face_model = "GFPGAN"
 
     reasons = []
     if noise > noise_th:
@@ -395,6 +511,9 @@ def autopilot_propose(image: Image.Image) -> Dict[str, Any]:
         "temperature": 50,
         "grain_strength": 0,
         "grain_size": 10,
+        "deband_strength": deband,
+        "vibrance": vibrance,
+        "face_model": face_model,
         "metrics": {
             "noise": noise,
             "sharpness": sharp,
@@ -419,7 +538,9 @@ def process_single_image(
     notes: List[str] = []
     metrics: Dict[str, Any] = {}
 
-    original = Image.open(input_path).convert("RGB")
+    with Image.open(input_path) as _img:
+        original = ImageOps.exif_transpose(_img).convert("RGB")
+    seed = zlib.crc32(original.tobytes()) & 0xFFFFFFFF
     if progress_cb:
         progress_cb({"phase": "cargando", "progress": 0.0, "detail": input_path.name})
 
@@ -435,35 +556,50 @@ def process_single_image(
     if ds > 0:
         if progress_cb:
             progress_cb({"phase": "denoise", "progress": 0.1, "detail": f"strength={ds}"})
+        step_before = current
         current = apply_denoise_cv2(current, ds)
-        current, note = quality_gate_check(original, current, "denoise")
+        current, note = quality_gate_check(step_before, current, "denoise")
         notes.append(note if note else f"denoise {ds:g}")
+
+    # 1b. Deband (posterización de degradados)
+    db = float(settings.get("deband_strength", 0) or 0)
+    if db > 0:
+        if progress_cb:
+            progress_cb({"phase": "deband", "progress": 0.15, "detail": f"strength={db}"})
+        step_before = current
+        current = apply_deband_cv2(current, db, seed)
+        current, note = quality_gate_check(step_before, current, "deband")
+        notes.append(note if note else f"deband {db:g}")
 
     # 2. Sharpen
     ss = float(settings.get("sharpen_strength", 0) or 0)
     if ss > 0:
         if progress_cb:
             progress_cb({"phase": "sharpen", "progress": 0.2, "detail": f"strength={ss}"})
+        step_before = current
         current = apply_sharpen_cv2(current, ss)
-        current, note = quality_gate_check(original, current, "sharpen")
+        current, note = quality_gate_check(step_before, current, "sharpen")
         notes.append(note if note else f"sharpen {ss:g}")
 
     # 3. Recover Faces
     rfs = float(settings.get("recover_faces_strength", 0) or 0)
+    model_name = str(settings.get("face_model", "GFPGAN") or "GFPGAN")
     if rfs > 0:
         if progress_cb:
-            progress_cb({"phase": "recover_faces", "progress": 0.3, "detail": f"blend={rfs}"})
-        current = apply_recover_faces_onnx(current, rfs)
-        current, note = quality_gate_check(original, current, "recover_faces")
-        notes.append(note if note else f"recover_faces {rfs:.0%}")
+            progress_cb({"phase": "recover_faces", "progress": 0.3, "detail": f"{model_name} blend={rfs}"})
+        step_before = current
+        current = apply_recover_faces_onnx(current, rfs, model_name)
+        current, note = quality_gate_check(step_before, current, "recover_faces")
+        notes.append(note if note else f"recover_faces {model_name} {rfs:.0%}")
 
     # 4. Upscale
     uf = int(settings.get("upscale_factor", 1) or 1)
     if uf > 1:
         if progress_cb:
             progress_cb({"phase": "upscale", "progress": 0.5, "detail": f"{uf}x"})
+        step_before = current
         current = apply_upscale_onnx(current, uf)
-        current, note = quality_gate_check(original, current, "upscale")
+        current, note = quality_gate_check(step_before, current, "upscale")
         notes.append(note if note else f"upscale {uf}x")
 
     # 5. Luz y color
@@ -475,9 +611,20 @@ def process_single_image(
         if progress_cb:
             progress_cb({"phase": "lighting_color", "progress": 0.7,
                          "detail": f"exp={exp} shd={shd} hlg={hlg} temp={temp}"})
+        step_before = current
         current = apply_lighting_color_cv2(current, exp, shd, hlg, temp)
-        current, note = quality_gate_check(original, current, "lighting_color")
+        current, note = quality_gate_check(step_before, current, "lighting_color")
         notes.append(note if note else "lighting_color")
+
+    # 5b. Vibrance (color)
+    vib = float(settings.get("vibrance", 100) or 100)
+    if abs(vib - 100.0) > 1e-6:
+        if progress_cb:
+            progress_cb({"phase": "vibrance", "progress": 0.75, "detail": f"vibrance={vib:g}"})
+        step_before = current
+        current = apply_vibrance_cv2(current, vib)
+        current, note = quality_gate_check(step_before, current, "vibrance")
+        notes.append(note if note else f"color {vib:g}")
 
     # 6. Grano
     gs = float(settings.get("grain_strength", 0) or 0)
@@ -485,8 +632,9 @@ def process_single_image(
     if gs > 0:
         if progress_cb:
             progress_cb({"phase": "grain", "progress": 0.85, "detail": f"strength={gs}"})
-        current = apply_grain_cv2(current, gs, gsize)
-        current, note = quality_gate_check(original, current, "grain")
+        step_before = current
+        current = apply_grain_cv2(current, gs, gsize, seed=seed + 1)
+        current, note = quality_gate_check(step_before, current, "grain")
         notes.append(note if note else f"grain {gs:g}")
 
     metrics["sharpness_after"] = measure_sharpness_laplacian(current)
@@ -539,7 +687,8 @@ def process_batch(
             img_settings = settings
             if autopilot:
                 try:
-                    probe_img = Image.open(path).convert("RGB")
+                    with Image.open(path) as _img:
+                        probe_img = ImageOps.exif_transpose(_img).convert("RGB")
                     img_settings = autopilot_propose(probe_img)
                 except Exception as exc:
                     if progress_cb:
@@ -551,14 +700,18 @@ def process_batch(
             stem = path.stem
             if apply_filters_to_filename:
                 filters = []
-                if settings.get("denoise_strength", 0) > 0:
+                if img_settings.get("denoise_strength", 0) > 0:
                     filters.append("dn")
-                if settings.get("sharpen_strength", 0) > 0:
+                if img_settings.get("sharpen_strength", 0) > 0:
                     filters.append("sh")
-                if settings.get("recover_faces_strength", 0) > 0:
+                if img_settings.get("recover_faces_strength", 0) > 0:
                     filters.append("rf")
-                if settings.get("upscale_factor", 1) > 1:
-                    filters.append(f"up{settings['upscale_factor']}x")
+                if img_settings.get("upscale_factor", 1) > 1:
+                    filters.append(f"up{img_settings['upscale_factor']}x")
+                if img_settings.get("deband_strength", 0) > 0:
+                    filters.append("db")
+                if abs(float(img_settings.get("vibrance", 100) or 100) - 100.0) > 1e-6:
+                    filters.append("co")
                 if filters:
                     stem += "_" + "-".join(filters)
 

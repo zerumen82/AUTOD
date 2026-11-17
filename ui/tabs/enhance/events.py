@@ -9,14 +9,16 @@ Reglas Gradio 6:
 
 import json
 import os
+import queue
 import subprocess
 import tempfile
+import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
 
 import gradio as gr
-from PIL import Image
+from PIL import Image, ImageOps
 
 from roop.output_paths import get_enhance_output_dir
 
@@ -25,30 +27,65 @@ from .logic import process_batch, process_single_image
 
 
 PRESET_DEFAULTS = {
+    "Realista": {
+        "denoise": 25, "sharpen": 30, "recover": 60, "upscale": 1,
+        "exposure": 1.0, "shadow": 0.95, "highlight": 1.03, "temperature": 50,
+        "grain_strength": 6, "grain_size": 8, "deband": 20, "vibrance": 104,
+        "face_model": "GFPGAN",
+    },
+    "Ultra realista": {
+        "denoise": 30, "sharpen": 45, "recover": 75, "upscale": 2,
+        "exposure": 1.02, "shadow": 0.9, "highlight": 1.05, "temperature": 51,
+        "grain_strength": 10, "grain_size": 6, "deband": 15, "vibrance": 108,
+        "face_model": "CodeFormer",
+    },
+    "Sin ruido": {
+        "denoise": 75, "sharpen": 18, "recover": 30, "upscale": 1,
+        "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
+        "grain_strength": 0, "grain_size": 10, "deband": 40, "vibrance": 100,
+        "face_model": "GFPGAN",
+    },
+    "Sin bandas": {
+        "denoise": 55, "sharpen": 20, "recover": 0, "upscale": 1,
+        "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
+        "grain_strength": 4, "grain_size": 12, "deband": 75, "vibrance": 100,
+        "face_model": "GFPGAN",
+    },
+    "Color vivo": {
+        "denoise": 20, "sharpen": 28, "recover": 40, "upscale": 1,
+        "exposure": 1.05, "shadow": 1.08, "highlight": 0.96, "temperature": 53,
+        "grain_strength": 4, "grain_size": 8, "deband": 10, "vibrance": 115,
+        "face_model": "GFPGAN",
+    },
     "Retrato": {
-        "denoise": 30, "sharpen": 20, "recover": 70, "upscale": 2,
-        "exposure": 1.0, "shadow": 0.8, "highlight": 1.2, "temperature": 45,
-        "grain_strength": 10, "grain_size": 5,
+        "denoise": 30, "sharpen": 25, "recover": 65, "upscale": 1,
+        "exposure": 1.02, "shadow": 0.95, "highlight": 1.02, "temperature": 51,
+        "grain_strength": 5, "grain_size": 10, "deband": 20, "vibrance": 104,
+        "face_model": "GFPGAN",
     },
     "Paisaje": {
-        "denoise": 50, "sharpen": 60, "recover": 60, "upscale": 4,
-        "exposure": 1.0, "shadow": 0.5, "highlight": 1.2, "temperature": 55,
-        "grain_strength": 15, "grain_size": 15,
+        "denoise": 45, "sharpen": 55, "recover": 0, "upscale": 2,
+        "exposure": 1.0, "shadow": 0.7, "highlight": 1.1, "temperature": 54,
+        "grain_strength": 8, "grain_size": 12, "deband": 30, "vibrance": 112,
+        "face_model": "GFPGAN",
     },
     "Nocturna": {
-        "denoise": 80, "sharpen": 30, "recover": 50, "upscale": 2,
-        "exposure": 1.5, "shadow": 1.5, "highlight": 0.5, "temperature": 30,
-        "grain_strength": 25, "grain_size": 8,
+        "denoise": 80, "sharpen": 25, "recover": 40, "upscale": 2,
+        "exposure": 1.4, "shadow": 1.4, "highlight": 0.6, "temperature": 35,
+        "grain_strength": 20, "grain_size": 8, "deband": 50, "vibrance": 105,
+        "face_model": "GFPGAN",
     },
     "Producto": {
-        "denoise": 40, "sharpen": 50, "recover": 80, "upscale": 4,
-        "exposure": 1.0, "shadow": 0.8, "highlight": 1.0, "temperature": 50,
-        "grain_strength": 15, "grain_size": 12,
+        "denoise": 35, "sharpen": 50, "recover": 0, "upscale": 2,
+        "exposure": 1.0, "shadow": 0.85, "highlight": 1.0, "temperature": 50,
+        "grain_strength": 8, "grain_size": 10, "deband": 25, "vibrance": 106,
+        "face_model": "GFPGAN",
     },
     "Archivo": {
-        "denoise": 20, "sharpen": 20, "recover": 50, "upscale": 2,
+        "denoise": 20, "sharpen": 20, "recover": 30, "upscale": 1,
         "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
-        "grain_strength": 5, "grain_size": 10,
+        "grain_strength": 3, "grain_size": 10, "deband": 15, "vibrance": 100,
+        "face_model": "GFPGAN",
     },
 }
 
@@ -119,7 +156,8 @@ def _load_before(path: Path) -> Image.Image:
     if cached and cached.get("mtime") == mtime:
         _BEFORE_CACHE.move_to_end(key)
         return cached["image"]
-    image = Image.open(path).convert("RGB")
+    with Image.open(path) as _img:
+        image = ImageOps.exif_transpose(_img).convert("RGB")
     w, h = image.size
     if max(w, h) > _PREVIEW_BEFORE_MAX:
         s = _PREVIEW_BEFORE_MAX / max(w, h)
@@ -140,7 +178,8 @@ def _cap_size(image: Image.Image, max_side: int) -> Image.Image:
 
 
 def _settings(denoise, sharpen, recover, upscale, exposure, shadow, highlight,
-              temperature, grain_strength, grain_size) -> dict:
+              temperature, grain_strength, grain_size, deband=0, vibrance=100,
+              face_model="GFPGAN") -> dict:
     return {
         "denoise_strength": denoise,
         "sharpen_strength": sharpen,
@@ -152,10 +191,13 @@ def _settings(denoise, sharpen, recover, upscale, exposure, shadow, highlight,
         "temperature": temperature,
         "grain_strength": grain_strength,
         "grain_size": grain_size,
+        "deband_strength": float(deband) if deband is not None else 0.0,
+        "vibrance": float(vibrance) if vibrance is not None else 100.0,
+        "face_model": str(face_model or "GFPGAN"),
     }
 
 
-def _render_after(before: Image.Image, settings: dict) -> Image.Image:
+def _render_after(before: Image.Image, settings: dict, return_notes: bool = False):
     """Procesa la vista previa sobre el original ya escalado.
 
     El upscale se omite en la vista previa: el panel se muestra reducido, no
@@ -167,21 +209,24 @@ def _render_after(before: Image.Image, settings: dict) -> Image.Image:
         before.save(tf.name, "PNG")
         tmp_path = Path(tf.name)
     try:
-        after, _notes, _metrics = process_single_image(tmp_path, preview_settings)
+        after, notes, _metrics = process_single_image(tmp_path, preview_settings)
     finally:
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
             pass
-    return _cap_size(after, _PREVIEW_AFTER_MAX)
+    after = _cap_size(after, _PREVIEW_AFTER_MAX)
+    if return_notes:
+        return after, notes
+    return after
 
 
 def _status_line(name: str, s: dict) -> str:
     return (
         f"Vista previa: **{name}** · denoise {float(s['denoise_strength']):g}"
         f" · sharpen {float(s['sharpen_strength']):g}"
-        f" · caras {float(s['recover_faces_strength']) * 100:g}"
-        f" · upscale {s['upscale_factor']}x al exportar"
+        f" · caras {s.get('face_model', 'GFPGAN')} {float(s['recover_faces_strength']) * 100:g}"
+        f" · upscale {s['upscale_factor']}x al exportar (preview 1x)"
     )
 
 
@@ -207,6 +252,9 @@ def wire_events(ui_components):
     temperature_slider = ui_components["temperature_slider"]
     grain_strength_slider = ui_components["grain_strength_slider"]
     grain_size_slider = ui_components["grain_size_slider"]
+    deband_slider = ui_components["deband_slider"]
+    vibrance_slider = ui_components["vibrance_slider"]
+    face_model = ui_components["face_model"]
     preset_dropdown = ui_components["preset_dropdown"]
     preset_apply_btn = ui_components["preset_apply_btn"]
     preset_save_name = ui_components["preset_save_name"]
@@ -227,6 +275,7 @@ def wire_events(ui_components):
         denoise_slider, sharpen_slider, recover_slider,
         upscale_factor, exposure_slider, shadow_slider, highlight_slider,
         temperature_slider, grain_strength_slider, grain_size_slider,
+        deband_slider, vibrance_slider,
     ]
 
     # ------------------------------------------------------------------
@@ -263,8 +312,11 @@ def wire_events(ui_components):
         settings = _settings(*slider_vals)
         try:
             before = _load_before(path)
-            after = _render_after(before, settings)
-            return before, after, _status_line(path.name, settings)
+            after, notes = _render_after(before, settings, return_notes=True)
+            status = _status_line(path.name, settings)
+            if notes:
+                status = f"{status}\n\n{notes}"
+            return before, after, status
         except Exception as e:
             return None, None, f"Vista previa falló: {e}"
 
@@ -276,13 +328,18 @@ def wire_events(ui_components):
         settings = _settings(*slider_vals)
         try:
             before = _load_before(path)
-            after = _render_after(before, settings)
-            return after, _status_line(path.name, settings)
+            after, notes = _render_after(before, settings, return_notes=True)
+            status = _status_line(path.name, settings)
+            if notes:
+                status = f"{status}\n\n{notes}"
+            return after, status
         except Exception as e:
             return None, f"Vista previa falló: {e}"
 
-    pair_inputs = [input_files, input_folder, preview_photo] + slider_inputs
+    pair_inputs = [input_files, input_folder, preview_photo] + slider_inputs + [face_model]
 
+    # Gradio 6.x soporta concurrency_limit y trigger_mode: se re-añaden para
+    # evitar renders encolados al mover sliders (always_last = solo corre el último).
     for comp in (input_files, input_folder):
         event = comp.change(
             fn=refresh_queue,
@@ -320,8 +377,6 @@ def wire_events(ui_components):
     )
 
     # Cambiar cualquier ajuste re-renderiza SOLO el panel «Después».
-    # always_last + concurrencia 1: al mover varios sliders solo corre el último
-    # valor y no se encolan renders pesados.
     for slider in slider_inputs:
         slider.change(
             fn=make_after,
@@ -332,6 +387,16 @@ def wire_events(ui_components):
             trigger_mode="always_last",
             show_progress="default",
         )
+
+    face_model.change(
+        fn=make_after,
+        inputs=pair_inputs,
+        outputs=[preview_after, preview_status],
+        queue=True,
+        concurrency_limit=1,
+        trigger_mode="always_last",
+        show_progress="default",
+    )
 
     # ------------------------------------------------------------------
     # Cargar fotos de ejemplo (evita un botón sin función)
@@ -359,6 +424,7 @@ def wire_events(ui_components):
             vals["denoise"], vals["sharpen"], vals["recover"], vals["upscale"],
             vals["exposure"], vals["shadow"], vals["highlight"], vals["temperature"],
             vals["grain_strength"], vals["grain_size"],
+            vals.get("deband", 0), vals.get("vibrance", 100), vals.get("face_model", "GFPGAN"),
             f"Preset «{name}» aplicado a los sliders.",
         )
 
@@ -368,7 +434,8 @@ def wire_events(ui_components):
         outputs=[
             denoise_slider, sharpen_slider, recover_slider, upscale_factor,
             exposure_slider, shadow_slider, highlight_slider, temperature_slider,
-            grain_strength_slider, grain_size_slider, preset_status,
+            grain_strength_slider, grain_size_slider,
+            deband_slider, vibrance_slider, face_model, preset_status,
         ],
         queue=False,
     )
@@ -378,7 +445,7 @@ def wire_events(ui_components):
     # ------------------------------------------------------------------
     def save_preset(
         name, denoise, sharpen, recover, upscale, exposure, shadow, highlight,
-        temperature, grain_strength, grain_size,
+        temperature, grain_strength, grain_size, deband, vibrance, face_model,
     ):
         name = (name or "").strip()
         if not name:
@@ -397,6 +464,9 @@ def wire_events(ui_components):
                 "temperature": temperature,
                 "grain_strength": grain_strength,
                 "grain_size": grain_size,
+                "deband_strength": deband,
+                "vibrance": vibrance,
+                "face_model": face_model,
             },
             "models": {},
         }
@@ -416,6 +486,7 @@ def wire_events(ui_components):
             preset_save_name, denoise_slider, sharpen_slider, recover_slider,
             upscale_factor, exposure_slider, shadow_slider, highlight_slider,
             temperature_slider, grain_strength_slider, grain_size_slider,
+            deband_slider, vibrance_slider, face_model,
         ],
         outputs=preset_status,
         queue=False,
@@ -449,49 +520,96 @@ def wire_events(ui_components):
     def do_batch(
         files, folder, preset_name,
         denoise, sharpen, recover, upscale, exposure, shadow, highlight,
-        temperature, grain_strength, grain_size,
+        temperature, grain_strength, grain_size, deband, vibrance, face_model,
         export_format, apply_filters_to_filename, auto_mode,
     ):
-        t0 = time.time()
         paths = _queue_paths(files, folder)
         if not paths:
-            return (
-                "<div class='enhance-status'>No se seleccionaron archivos.</div>",
-                "",
-            )
+            yield "<div class='enhance-status'>No se seleccionaron archivos.</div>", ""
+            return
 
+        t0 = time.time()
         enh_logic.clear_cancel()
 
         settings = _settings(
             denoise, sharpen, recover, upscale, exposure, shadow, highlight,
-            temperature, grain_strength, grain_size,
+            temperature, grain_strength, grain_size, deband, vibrance, face_model,
         )
-
         output_dir = Path(get_enhance_output_dir())
+        total = len(paths)
+        updates: "queue.Queue" = queue.Queue()
+        result: dict = {"results": None, "error": None}
 
-        results = process_batch(
-            file_paths=[Path(p) for p in paths],
-            settings=settings,
-            output_dir=output_dir,
-            export_format=str(export_format or "png"),
-            apply_filters_to_filename=bool(apply_filters_to_filename),
-            allow_overwrite=True,
-            progress_cb=None,
-            cancel_check=enh_logic.is_cancel_requested,
-            autopilot=bool(auto_mode),
+        def progress_cb(payload):
+            updates.put(payload)
+
+        def worker():
+            try:
+                result["results"] = process_batch(
+                    file_paths=[Path(p) for p in paths],
+                    settings=settings,
+                    output_dir=output_dir,
+                    export_format=str(export_format or "png"),
+                    apply_filters_to_filename=bool(apply_filters_to_filename),
+                    allow_overwrite=True,
+                    progress_cb=progress_cb,
+                    cancel_check=enh_logic.is_cancel_requested,
+                    autopilot=bool(auto_mode),
+                )
+            except Exception as exc:
+                result["error"] = exc
+            finally:
+                updates.put(None)
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        yield (
+            f"<div class='enhance-status'>Procesando lote (0/{total})…</div>",
+            "",
         )
 
+        try:
+            while True:
+                try:
+                    payload = updates.get(timeout=0.5)
+                except queue.Empty:
+                    yield gr.skip(), gr.skip()
+                    continue
+                if payload is None:
+                    break
+                phase = str(payload.get("phase", ""))
+                detail = str(payload.get("detail", ""))
+                if phase == "batch":
+                    pct = int(float(payload.get("progress", 0.0)) * 100)
+                    status = f"<div class='enhance-status'>Procesando {pct}% · {detail}</div>"
+                else:
+                    status = f"<div class='enhance-status'>{phase}: {detail}</div>"
+                yield status, gr.skip()
+        finally:
+            if result["results"] is None:
+                enh_logic.request_cancel()
+
+        if result["error"] is not None:
+            yield (
+                f"<div class='enhance-status'>Error en el lote: {result['error']}</div>",
+                "",
+            )
+            return
+
+        results = result["results"] or []
         ok_count = 0
         errors = []
+        reverted = 0
         for res in results:
+            notes = str(res.get("notes", "") or "")
+            if "revertido" in notes:
+                reverted += 1
             if res.get("success"):
                 ok_count += 1
                 continue
             entry = Path(res.get("input", "")).name
-            notes = res.get("notes", "") or "error"
-            if isinstance(notes, (list, tuple)):
-                notes = "; ".join(str(n) for n in notes)
-            errors.append(f"{entry}: {notes}")
+            errors.append(f"{entry}: {notes or 'error'}")
 
         elapsed = time.time() - t0
         msg = f"Procesados {ok_count}/{len(results)} archivos en {elapsed:.1f} s."
@@ -499,9 +617,11 @@ def wire_events(ui_components):
             f"**{ok_count}/{len(results)} fotos procesadas** en {elapsed:.1f} s"
             f" · salida: `{output_dir.name}/`"
         )
+        if reverted:
+            summary += f" · {reverted} foto(s) con pasos revertidos"
         if errors:
             summary += " · errores: " + "; ".join(errors[:5])
-        return f"<div class='enhance-status'>{msg}</div>", summary
+        yield f"<div class='enhance-status'>{msg}</div>", summary
 
     batch_btn.click(
         fn=do_batch,
@@ -510,6 +630,7 @@ def wire_events(ui_components):
             denoise_slider, sharpen_slider, recover_slider, upscale_factor,
             exposure_slider, shadow_slider, highlight_slider, temperature_slider,
             grain_strength_slider, grain_size_slider,
+            deband_slider, vibrance_slider, face_model,
             format_dropdown, apply_filters_ck, auto_mode,
         ],
         outputs=[status_msg, result_summary],

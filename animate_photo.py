@@ -360,6 +360,19 @@ class AnimatePhoto:
                 "load_device": "offload_device"
             }
         }
+
+        # 8 GB: block swap (20 de 30 bloques) en vez de offload completo.
+        # Mantiene la mayor parte del modelo en CPU pero evita el bloqueo
+        # del muestreo por tener que mover todo el modelo en cada paso.
+        nodes["13"] = {
+            "class_type": "WanVideoBlockSwap",
+            "inputs": {
+                "blocks_to_swap": 20 if 0 < get_vram_gb() <= 8 else 0,
+                "offload_img_emb": False,
+                "offload_txt_emb": False,
+            }
+        }
+        nodes["2"]["inputs"]["block_swap_args"] = ["13", 0]
         
         # Soporte para LoRA
         node_model_ref = ["2", 0]
@@ -548,7 +561,7 @@ class AnimatePhoto:
         latent_window_size = 9
 
         use_fp8 = vram_gb <= 12
-        gpu_memory_preservation = max(1.0, vram_gb - 4.0) if vram_gb > 0 else 6.0
+        gpu_memory_preservation = max(0.5, vram_gb - 7.0) if vram_gb > 0 else 1.0
 
         nodes = {}
 

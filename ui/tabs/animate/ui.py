@@ -1,5 +1,6 @@
 import gradio as gr
 from roop.output_paths import get_animate_output_dir
+from roop.utils import get_vram_gb
 
 
 def open_animations_folder():
@@ -51,12 +52,12 @@ def build_animate_ui():
                     from animate_photo import AnimatePhoto
                     animator = AnimatePhoto()
                     lora_list = ["None"] + animator.get_available_loras()
+                    default_engine = "ltx2_audio" if get_vram_gb() <= 8 else "framepack"
                     engine = gr.Dropdown(
                         label="Motor de animación",
                         choices=["framepack", "wan_video", "ltx2_audio"],
-                        value="framepack",
-                        info="ltx2_audio: LTX-2 destilado Q4 con audio nativo (960x544, 25 fps, 8 pasos). FramePack/Wan no generan audio nativo.",
-                        # "ltx2_audio"  # prueba en el probe del cableado
+                        value=default_engine,
+                        info="ltx2_audio: LTX-2 destilado Q4 con audio nativo (960x544, 25 fps, 8 pasos). FramePack/Wan no generan audio nativo. En GPUs de ≤8 GB, FramePack/Wan usan offload a CPU y pueden bloquear; ltx2_audio es la opción ligera.",
                     )
                     with gr.Row():
                         autoregressive_chunks = gr.Slider(

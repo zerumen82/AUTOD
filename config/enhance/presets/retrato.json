@@ -1,20 +1,20 @@
 {
   "name": "Retrato",
-  "description": "Suave, realista, ideal para retratos",
+  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
   "sliders": {
     "denoise_strength": 30,
-    "sharpen_strength": 20,
-    "recover_faces_strength": 0.7,
-    "exposure": 1.0,
-    "shadow": 0.8,
-    "highlight": 1.2,
-    "temperature": 45,
-    "grain_strength": 10,
-    "grain_size": 5
+    "sharpen_strength": 25,
+    "recover_faces_strength": 0.65,
+    "upscale_factor": 1,
+    "exposure": 1.02,
+    "shadow": 0.95,
+    "highlight": 1.02,
+    "temperature": 51,
+    "grain_strength": 5,
+    "grain_size": 10,
+    "deband_strength": 20,
+    "vibrance": 104,
+    "face_model": "GFPGAN"
   },
-  "models": {
-    "denoise": "models/scunet-onnx",
-    "sharpen": "models/nafnet-onnx",
-    "recover_faces": "models/GFPGANv1.4.onnx"
-  }
+  "models": {}
 }

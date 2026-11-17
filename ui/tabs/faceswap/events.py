@@ -13,7 +13,7 @@ import ui.tabs.faceswap.logic as logic
 import roop.utilities as util
 import roop.face_util as face_util
 
-DETECTED_FACES_GALLERY_COLUMNS = 10
+DETECTED_FACES_GALLERY_COLUMNS = 4
 is_deleting_input_face = False
 is_deleting_target_face = False
 
@@ -38,7 +38,13 @@ _log("[TEST_CONSOLE] _write_console desde module-level de events.py OK")
 
 
 def _resolve_gallery_index(raw_index, total_items, columns=DETECTED_FACES_GALLERY_COLUMNS):
-    """Convierte el índice de Gradio (int o fila/columna) a índice lineal."""
+    """Convierte el índice de Gradio (int o fila/columna) a índice lineal.
+
+    v5.1384: `columns` es el número REAL de columnas de la galería (min(4, len(thumbs))).
+    Usar DETECTED_FACES_GALLERY_COLUMNS fijo (4) desalineaba el click cuando la
+    galería mostraba menos de 4 caras (ej. 2 caras filtradas → columns=2, pero
+    el cálculo usaba 4 → índice lineal equivocado → cara incorrecta en el swap).
+    """
     if raw_index is None:
         return None
 
@@ -234,7 +240,8 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
         return gr.update(), gr.update()
 
     total_faces = len(state.SELECTION_FACES_DATA) if state.SELECTION_FACES_DATA else 0
-    face_index = _resolve_gallery_index(evt.index, total_faces, columns=4)
+    _gallery_columns = min(4, max(1, total_faces)) if state.SELECTION_FACES_DATA else 4
+    face_index = _resolve_gallery_index(evt.index, total_faces, columns=_gallery_columns)
     
     if face_index is None or state.SELECTION_FACES_DATA is None:
         return gr.update(), gr.update()
@@ -778,7 +785,7 @@ def wire_events(ui_comp):
         return str(f) if f is not None else None
 
     def _target_empty_outputs():
-        return (gr.update(maximum=1, value=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
+        return (gr.update(maximum=2, value=1), None, gr.update(interactive=False), gr.update(interactive=False), gr.update(visible=False), [], [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False))
 
     def _target_unchanged_outputs():
         return tuple(gr.update() for _ in range(10))
@@ -1012,7 +1019,7 @@ def wire_events(ui_comp):
                 gr.update(value=None, visible=False),
                 "### ✨ Busca caras en el frame",
                 gr.update(value="🔍 BUSCAR CARAS EN ESTE FRAME"),
-                gr.update(maximum=1, value=1))
+                gr.update(maximum=2, value=1))
 
     ui_comp["bt_clear_source"].click(
         fn=clear_source,
@@ -1050,6 +1057,32 @@ def wire_events(ui_comp):
     ui_comp["bt_stop"].click(fn=None, cancels=[start_event], queue=False)
     if "bt_open_output" in ui_comp:
         ui_comp["bt_open_output"].click(fn=lambda: ui.globals.open_output_folder())
+
+    if "bt_use_result_as_source" in ui_comp:
+        def _use_result_as_source():
+            output_dir = getattr(roop.globals, 'output_path', None)
+            if not output_dir or not os.path.isdir(output_dir):
+                return [], "❌ No hay directorio de salida", gr.update(interactive=False), gr.update(interactive=False)
+            # Buscar el archivo más reciente en el directorio de salida
+            files = []
+            for f in os.listdir(output_dir):
+                fp = os.path.join(output_dir, f)
+                if os.path.isfile(fp) and _is_image_path(fp):
+                    files.append((fp, os.path.getmtime(fp)))
+            if not files:
+                return [], "❌ No hay resultados para usar como origen", gr.update(interactive=False), gr.update(interactive=False)
+            files.sort(key=lambda x: x[1], reverse=True)
+            latest = files[0][0]
+            # Cargar como source
+            try:
+                return _safe_on_src_changed([latest])
+            except Exception as e:
+                return [], f"❌ Error: {e}", gr.update(interactive=False), gr.update(interactive=False)
+
+        ui_comp["bt_use_result_as_source"].click(
+            fn=_use_result_as_source,
+            outputs=_src_outputs,
+        )
 
 def on_input_page_change(delta):
     total = len(ui.globals.ui_input_thumbs)

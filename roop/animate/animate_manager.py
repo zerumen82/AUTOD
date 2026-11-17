@@ -19,6 +19,9 @@ class AnimateManager:
     def __init__(self):
         self.face_swapper = None
         self.face_analyzer = None
+        self._models_cache = {}  # cache for _check_models results
+        self._models_cache_time = 0
+        self._rewrite_cache = {}  # cache for rewrite_prompt results
 
     def _emit_progress(self, callback, message):
         if callback is None:
@@ -29,6 +32,12 @@ class AnimateManager:
             print(f"[AnimateManager] Progress callback error: {e}")
 
     def _check_models(self, engine):
+        # Cache: avoid re-walking the filesystem on every call (CPU saturation).
+        import time as _t
+        now = _t.time()
+        cache_key = engine
+        if cache_key in self._models_cache and (now - self._models_cache_time) < 60:
+            return self._models_cache[cache_key]
         available = []
         model_files = []
         models_dir = get_models_dir()
@@ -54,7 +63,10 @@ class AnimateManager:
             needed = ["svd", "stablevideo"]
         elif engine == "ltx2_audio":
             from roop.animate import ltx2_audio
-            return [f"LTX-2: {name}" for name in ltx2_audio.missing_models()]
+            _res = [f"LTX-2: {name}" for name in ltx2_audio.missing_models()]
+            self._models_cache[cache_key] = _res
+            self._models_cache_time = now
+            return _res
         elif engine == "ltx_video":
             needed = ["ltx"]
         else:
@@ -82,6 +94,8 @@ class AnimateManager:
             missing = []
         else:
             missing = [n for n in needed if not any(n in a for a in available)]
+        self._models_cache[cache_key] = missing
+        self._models_cache_time = now
         return missing
 
     def resolve_params(self, engine, motion=127, frames=33, fps=16, magnitude=0.5, steps=None, cfg=None):
@@ -162,6 +176,15 @@ class AnimateManager:
 
     def rewrite_prompt(self, prompt, image_context=""):
         prompt = (prompt or "").strip()
+        # Cache: avoid re-running NLP + translation for identical prompts (CPU).
+        cache_key = (prompt, image_context)
+        if cache_key in self._rewrite_cache:
+            cached = self._rewrite_cache[cache_key]
+            self._last_magnitude = cached.get("mag", 0.5)
+            self._last_speech_intensity = cached.get("speech", 0.0)
+            self._last_user_motion_prompt = cached.get("composed", "")
+            self._last_user_prompt_raw = prompt
+            return cached.get("composed", "")
         from roop.img_editor.prompt_translator import translate_prompt
         translated = translate_prompt(prompt)
 
@@ -197,6 +220,15 @@ class AnimateManager:
         print(f"[AnimateManager] Motion prompt: {composed[:120]}...")
         self._last_user_motion_prompt = translated
         self._last_user_prompt_raw = prompt
+        # Cache the result to avoid re-running NLP + translation.
+        self._rewrite_cache[cache_key] = {
+            "mag": mag,
+            "speech": self._last_speech_intensity,
+            "composed": composed,
+        }
+        # Limit cache size to avoid memory growth.
+        if len(self._rewrite_cache) > 50:
+            self._rewrite_cache.pop(next(iter(self._rewrite_cache)))
         return composed
 
     def _compose_motion_prompt(self, user_prompt: str, mag: float = 0.5) -> str:

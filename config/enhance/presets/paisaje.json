@@ -1,21 +1,20 @@
 {
   "name": "Paisaje",
-  "description": "Detalles nítidos, colores equilibrados",
+  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
   "sliders": {
-    "denoise_strength": 50,
-    "sharpen_strength": 60,
-    "recover_faces_strength": 0.6,
+    "denoise_strength": 45,
+    "sharpen_strength": 55,
+    "recover_faces_strength": 0.0,
+    "upscale_factor": 2,
     "exposure": 1.0,
-    "shadow": 0.5,
-    "highlight": 1.2,
-    "temperature": 55,
-    "grain_strength": 15,
-    "grain_size": 15
+    "shadow": 0.7,
+    "highlight": 1.1,
+    "temperature": 54,
+    "grain_strength": 8,
+    "grain_size": 12,
+    "deband_strength": 30,
+    "vibrance": 112,
+    "face_model": "GFPGAN"
   },
-  "models": {
-    "denoise": "models/scunet-onnx",
-    "sharpen": "models/nafnet-onnx",
-    "recover_faces": "models/GFPGANv1.4.onnx",
-    "upscale": "models/real_esrgan_x4.onnx"
-  }
+  "models": {}
 }

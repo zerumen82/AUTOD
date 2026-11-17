@@ -1,21 +1,20 @@
 {
   "name": "Archivo",
-  "description": "Versión neutra, sin ajustes extremos",
+  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
   "sliders": {
     "denoise_strength": 20,
     "sharpen_strength": 20,
-    "recover_faces_strength": 0.5,
+    "recover_faces_strength": 0.3,
+    "upscale_factor": 1,
     "exposure": 1.0,
     "shadow": 1.0,
     "highlight": 1.0,
     "temperature": 50,
-    "grain_strength": 5,
-    "grain_size": 10
+    "grain_strength": 3,
+    "grain_size": 10,
+    "deband_strength": 15,
+    "vibrance": 100,
+    "face_model": "GFPGAN"
   },
-  "models": {
-    "denoise": "models/scunet-onnx",
-    "sharpen": "models/nafnet-onnx",
-    "recover_faces": "models/GFPGANv1.4.onnx",
-    "upscale": "models/real_esrgan_x4.onnx"
-  }
+  "models": {}
 }

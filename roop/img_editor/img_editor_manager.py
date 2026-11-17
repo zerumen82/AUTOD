@@ -245,8 +245,8 @@ class ImgEditorManager:
         caza a primera pasada).
         """
         try:
-            from roop.face_util import get_face_analyser_cpu, preprocess_image_for_detection
-            analyser = get_face_analyser_cpu()
+            from roop.face_util import get_face_analyser, preprocess_image_for_detection
+            analyser = get_face_analyser()
             if analyser is None:
                 return []
             bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
@@ -7257,8 +7257,8 @@ class ImgEditorManager:
         if result_image.size != work_image.size:
             result_image = result_image.resize(work_image.size, Image.Resampling.LANCZOS)
         try:
-            from roop.face_util import detect_faces_robust, get_face_analyser_cpu
-            analyser = get_face_analyser_cpu()
+            from roop.face_util import detect_faces_robust, get_face_analyser
+            analyser = get_face_analyser()
             if analyser is None:
                 return result_image, None
             found = detect_faces_robust(
@@ -7714,9 +7714,9 @@ class ImgEditorManager:
         faces = []
         face_count = 0
         try:
-            from roop.face_util import get_face_analyser_cpu, preprocess_image_for_detection
+            from roop.face_util import get_face_analyser, preprocess_image_for_detection
             img_bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
-            analyser = get_face_analyser_cpu()
+            analyser = get_face_analyser()
             faces = analyser.get(img_bgr) or []
             if len(faces) < 2:
                 enhanced = preprocess_image_for_detection(img_bgr)
@@ -7799,9 +7799,9 @@ class ImgEditorManager:
         faces = []
         face_count = 0
         try:
-            from roop.face_util import get_face_analyser_cpu, preprocess_image_for_detection
+            from roop.face_util import get_face_analyser, preprocess_image_for_detection
             img_bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
-            analyser = get_face_analyser_cpu()
+            analyser = get_face_analyser()
             faces = analyser.get(img_bgr) or []
             if len(faces) < 2:
                 enhanced = preprocess_image_for_detection(img_bgr)

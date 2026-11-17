@@ -1,4 +1,4 @@
-"""Probe UI v5.1378 — pestaña «Mejorar fotos» rediseñada (ANTES | DESPUÉS).
+"""Probe UI v5.1383 — pestaña «Mejorar fotos» con presets IA, Deband y Vibrance.
 
 Verifica, con ejecución real:
 1. El Blocks se construye y el contrato con events.py tiene todas las claves.
@@ -30,7 +30,8 @@ EXPECTED_KEYS = [
     "preview_photo", "btn_preview", "preview_status", "denoise_slider",
     "sharpen_slider", "recover_slider", "upscale_factor", "exposure_slider",
     "shadow_slider", "highlight_slider", "temperature_slider",
-    "grain_strength_slider", "grain_size_slider", "preset_dropdown",
+    "grain_strength_slider", "grain_size_slider", "deband_slider",
+    "vibrance_slider", "face_model", "preset_dropdown",
     "preset_apply_btn", "preset_save_name", "preset_save_btn", "preset_status",
     "auto_mode", "output_path", "btn_open_folder", "folder_status", "format_dropdown",
     "apply_filters_to_filename", "batch_btn", "cancel_btn", "status_msg",
@@ -111,6 +112,7 @@ def check_api() -> None:
         files_val=[f], folder_val=[f], selected=None,
         param_3=20, param_4=10, param_5=0, param_6=1, param_7=1.0,
         param_8=1.0, param_9=1.0, param_10=50, param_11=0, param_12=10,
+        param_13=20, param_14=104, param_15="GFPGAN",
     )
     pair = client.predict(api_name="/make_pair", **base)
     assert pair[0] and pair[1], "antes/después vacíos"
@@ -119,7 +121,8 @@ def check_api() -> None:
 
     tuned = dict(base)
     tuned.update(param_3=80, param_4=70, param_7=1.4, param_8=1.3,
-                 param_9=0.7, param_10=65, param_11=20, param_12=5)
+                 param_9=0.7, param_10=65, param_11=20, param_12=5,
+                 param_13=60, param_14=120, param_15="CodeFormer")
     changed = client.predict(api_name="/make_after", **tuned)
     assert changed[0] and changed[0] != pair[1], "el panel Después no cambió"
     print(f"[API] Panel Después reactivo: {changed[1]}")
@@ -130,6 +133,7 @@ def check_api() -> None:
             files=[f], folder=[f], preset_name="Retrato",
             denoise=20, sharpen=10, recover=0, upscale=1, exposure=1.0,
             shadow=1.0, highlight=1.0, temperature=50, grain_strength=0, grain_size=10,
+            deband=20, vibrance=104, face_model="GFPGAN",
             export_format="png", apply_filters_to_filename=False, auto_mode=False,
             api_name="/do_batch",
         )
@@ -141,12 +145,12 @@ def check_api() -> None:
 def check_realtime_preview() -> None:
     assert SAMPLE.exists(), f"falta la muestra {SAMPLE}"
     before = E._load_before(SAMPLE)
-    base = E._settings(20, 10, 0, 1, 1.0, 1.0, 1.0, 50, 0, 10)
+    base = E._settings(20, 10, 0, 1, 1.0, 1.0, 1.0, 50, 0, 10, deband=20, vibrance=104)
     t0 = time.time()
     after_base = E._render_after(before, base)
     t_base = time.time() - t0
 
-    tuned = E._settings(60, 45, 0, 1, 1.2, 1.1, 0.9, 60, 10, 6)
+    tuned = E._settings(60, 45, 0, 1, 1.2, 1.1, 0.9, 60, 10, 6, deband=60, vibrance=120)
     t0 = time.time()
     after_tuned = E._render_after(before, tuned)
     t_tuned = time.time() - t0
@@ -166,7 +170,7 @@ def main() -> int:
     check_build()
     check_server()
     check_realtime_preview()
-    print("PASS — probe UI enhance v5.1378")
+    print("PASS — probe UI enhance v5.1383")
     return 0
 
 

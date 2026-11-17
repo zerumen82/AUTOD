@@ -336,11 +336,17 @@ def build_enhance_ui():
                 with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
                     grain_strength_slider = _slider("Grano (fuerza)", "#818cf8", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength")
                     grain_size_slider = _slider("Grano (tamaño)", "#818cf8", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size")
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    deband_slider = _slider("Deband", "#34d399", minimum=0, maximum=100, step=1, value=float(defaults.get("deband_strength", 0)), info="0 = sin cambio · 100 = máximo.", slider_key="deband")
+                    vibrance_slider = _slider("Color (vibrance)", "#fb7185", minimum=0, maximum=200, step=1, value=float(defaults.get("vibrance", 100)), info="100 = sin cambio · + = más saturación.", slider_key="vibrance")
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    face_model = _dropdown("Motor de caras", "#f472b6", choices=["GFPGAN", "CodeFormer", "RestoreFormer++", "GPEN"], value=str(config.get("face_model", "GFPGAN")), key="face_model")
+                    gr.Markdown("GFPGAN = rápido · CodeFormer/RestoreFormer++ = más detalle · GPEN = suaviza.", elem_classes=["enhance-summary"])
 
         # ---------- Banda de presets y exportación ----------
         gr.Markdown("Presets · Exportación", elem_classes=["enhance-section"])
         with gr.Row():
-            preset_dropdown = gr.Dropdown(choices=["Retrato", "Paisaje", "Nocturna", "Producto", "Archivo"], value="Retrato", label="Preset de fábrica", scale=2)
+            preset_dropdown = gr.Dropdown(choices=["Realista", "Ultra realista", "Sin ruido", "Sin bandas", "Color vivo", "Retrato", "Paisaje", "Nocturna", "Producto", "Archivo"], value="Realista", label="Preset de fábrica", scale=2)
             preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"], scale=1)
             preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
             preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
@@ -375,6 +381,9 @@ def build_enhance_ui():
         "temperature_slider": temperature_slider,
         "grain_strength_slider": grain_strength_slider,
         "grain_size_slider": grain_size_slider,
+        "deband_slider": deband_slider,
+        "vibrance_slider": vibrance_slider,
+        "face_model": face_model,
         "preset_dropdown": preset_dropdown,
         "preset_apply_btn": preset_apply_btn,
         "preset_save_name": preset_save_name,
