@@ -1,3 +1,7 @@
+- **v5.1392 (2026-11-17) - Enhance: previews arriba, sliders en horizontal ancho completo.**
+  - `ui/tabs/enhance/ui.py`: se elimina la columna lateral de sliders; previews ANTES/DESPUÉS ocupan todo el ancho arriba y el panel de control (importar/destino/mejoras) queda debajo, con los sliders en filas horizontales como en el resto de pestañas.
+  - Verificación: `py_compile` OK y probe Enhance PASS.
+
 - **v5.1391 (2026-11-17) - UI: Mejorar fotos junto a Animate Image; sliders al lado de las previews.**
   - `ui/main.py`: pestaña «Mejorar fotos» movida para quedar entre «Animate Image» y «Settings» (en ambas funciones `create_ui`).
   - `ui/tabs/enhance/ui.py`: previews ANTES/DESPUÉS a 560 px con marco reducido, para que los sliders queden al lado y no debajo.
