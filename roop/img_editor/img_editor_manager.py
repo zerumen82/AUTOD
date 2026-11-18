@@ -9754,15 +9754,25 @@ class ImgEditorManager:
                                 added_face = self._added_face_mask(
                                     img, output, detected_faces or source_faces,
                                 )
-                                if added_face is not None and passes_used < max_passes and not (
-                                    cancel_check and cancel_check()
-                                ):
+                                if added_face is not None:
+                                    if cancel_check and cancel_check():
+                                        return img, "Cancelado; foto original conservada", None
+                                    if passes_used >= max_passes:
+                                        return (
+                                            img,
+                                            "Fondo no aplicado: apareció una persona nueva y "
+                                            "se agotó el presupuesto de intentos; foto original "
+                                            "conservada | cumplimiento visual no verificado",
+                                            None,
+                                        )
                                     print(
                                         "[ImgEditor] Persona nueva pintada en el "
                                         "fondo; segundo intento con las mismas "
                                         "personas",
                                         flush=True,
                                     )
+                                    passes_used += 1
+                                    pass_budget["used"] = passes_used
                                     retry_prompt = (
                                         "The previous edit painted a new person "
                                         "that is not in the input photo. "
@@ -9798,25 +9808,31 @@ class ImgEditorManager:
                                             img, output, detected_faces or source_faces,
                                         )
                                         if leftover is not None:
-                                            output = Image.composite(
-                                                img, output, leftover,
-                                            )
-                                            fast_msg += (
-                                                "; persona añadida persistente; "
-                                                "esa región se restaura de la foto "
-                                                "original"
-                                            )
                                             print(
                                                 "[ImgEditor] El segundo intento sigue "
-                                                "pintando una persona; esa región se "
-                                                "restaura de la foto original",
+                                                "pintando una persona; se rechaza la "
+                                                "edición de fondo",
                                                 flush=True,
                                             )
+                                            return (
+                                                img,
+                                                "Fondo no aplicado: el segundo intento "
+                                                "también añadió una persona; foto original "
+                                                "conservada | cumplimiento visual no verificado",
+                                                None,
+                                            )
+                                        fast_msg = f"{retry_msg}; escenario nuevo con las personas medidas conservadas"
                                     else:
-                                        fast_msg += f"; segundo intento falló: {retry_msg}"
                                         print(
                                             f"[ImgEditor] Segundo intento falló: {retry_msg}",
                                             flush=True,
+                                        )
+                                        return (
+                                            img,
+                                            f"Fondo no aplicado: el reintento falló "
+                                            f"({retry_msg}); foto original conservada "
+                                            "| cumplimiento visual no verificado",
+                                            None,
                                         )
                             if (region_edit and generation_mask is not None
                                     and not (recolor_edit

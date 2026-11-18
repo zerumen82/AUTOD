@@ -213,20 +213,22 @@ def apply_deband_cv2(image: Image.Image, strength: float, seed: Optional[int] = 
     rng = np.random.default_rng(seed)
     img = np.array(image.convert("RGB"))
     lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
-    l, a, b = cv2.split(lab)
+    luma, a, b = cv2.split(lab)
     d = 3 + int(strength / 100 * 9)
     sigma_color = 8 + int(strength / 100 * 30)
     sigma_space = 8 + int(strength / 100 * 30)
     a = cv2.bilateralFilter(a, d, sigma_color, sigma_space)
     b = cv2.bilateralFilter(b, d, sigma_color, sigma_space)
-    noise = rng.normal(0.0, strength / 100 * 1.5, l.shape).astype(np.float32)
-    l = np.clip(l.astype(np.float32) + noise, 0, 255).astype(np.uint8)
-    out = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2RGB)
+    noise = rng.normal(0.0, strength / 100 * 1.5, luma.shape).astype(np.float32)
+    luma = np.clip(luma.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    out = cv2.cvtColor(cv2.merge([luma, a, b]), cv2.COLOR_LAB2RGB)
     return Image.fromarray(out)
 
 
 def apply_vibrance_cv2(image: Image.Image, vibrance: float) -> Image.Image:
-    """Sube la saturación protegiendo los tonos ya saturados y la piel."""
+    """Ajusta la saturación; el extremo 0 es blanco y negro real."""
+    if vibrance <= 0:
+        return ImageOps.grayscale(image).convert("RGB")
     if abs(vibrance - 100.0) < 1e-6:
         return image
     img = np.array(image.convert("RGB"), dtype=np.float32) / 255.0
@@ -617,7 +619,7 @@ def process_single_image(
         notes.append(note if note else "lighting_color")
 
     # 5b. Vibrance (color)
-    vib = float(settings.get("vibrance", 100) or 100)
+    vib = float(settings.get("vibrance", 100))
     if abs(vib - 100.0) > 1e-6:
         if progress_cb:
             progress_cb({"phase": "vibrance", "progress": 0.75, "detail": f"vibrance={vib:g}"})
@@ -633,7 +635,10 @@ def process_single_image(
         if progress_cb:
             progress_cb({"phase": "grain", "progress": 0.85, "detail": f"strength={gs}"})
         step_before = current
-        current = apply_grain_cv2(current, gs, gsize, seed=seed + 1)
+        current = apply_grain_cv2(
+            current, gs, gsize,
+            grain_type="grey" if vib <= 0 else "gaussian", seed=seed + 1,
+        )
         current, note = quality_gate_check(step_before, current, "grain")
         notes.append(note if note else f"grain {gs:g}")
 
@@ -711,7 +716,7 @@ def process_batch(
                     filters.append(f"up{img_settings['upscale_factor']}x")
                 if img_settings.get("deband_strength", 0) > 0:
                     filters.append("db")
-                if abs(float(img_settings.get("vibrance", 100) or 100) - 100.0) > 1e-6:
+                if abs(float(img_settings.get("vibrance", 100)) - 100.0) > 1e-6:
                     filters.append("co")
                 if filters:
                     stem += "_" + "-".join(filters)

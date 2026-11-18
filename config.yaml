@@ -32,5 +32,5 @@ fal_token: ''
 # Servidor UI
 server_name: '0.0.0.0'
 server_port: 7861
-server_share: true
+server_share: false
 use_os_temp_folder: false

@@ -1,11 +1,13 @@
-import os, time, tempfile, subprocess, re
-from typing import Optional, Tuple
+import os
+import re
+import subprocess
+import tempfile
+import time
 from PIL import Image
 import numpy as np
 import cv2
 import roop.globals
 
-from roop.comfy_workflows import get_comfyui_url
 from roop.utils import get_vram_gb
 from roop.output_paths import get_animate_output_dir
 
@@ -126,12 +128,12 @@ class AnimateManager:
         elif engine == "ltx2_audio":
             # Destilado: 8 pasos y CFG 1,0 medidos; 25 fps es la tasa nativa del
             # audio de LTX-2 y los fotogramas deben ser múltiplo de 8 más 1.
-            if steps is None:
-                base["steps"] = 8
-            if cfg is None:
-                base["cfg"] = 1.0
-            base["fps"] = 25
+            # El grafo fija estos valores incluso si la UI genérica envía otros.
+            # Mantener el informe de parámetros igual que la ejecución real.
             from roop.animate import ltx2_audio
+            base["steps"] = ltx2_audio.DISTILLED_STEPS
+            base["cfg"] = ltx2_audio.DISTILLED_CFG
+            base["fps"] = ltx2_audio.DEFAULT_FPS
             base["frames"] = ltx2_audio.fit_frames(frames)
 
         vram_gb = get_vram_gb()
@@ -448,7 +450,7 @@ class AnimateManager:
 
         p = self.resolve_params(engine, motion_bucket, frames, fps, magnitude=magnitude, steps=steps, cfg=cfg)
 
-        print(f"[AnimateManager] Engine={engine} Frames={p['frames']} FPS={fps} Steps={p['steps']} CFG={p['cfg']} LoRA={lora_name}")
+        print(f"[AnimateManager] Engine={engine} Frames={p['frames']} FPS={p['fps']} Steps={p['steps']} CFG={p['cfg']} LoRA={lora_name}")
 
         missing = self._check_models(engine)
         if missing:
@@ -571,7 +573,6 @@ class AnimateManager:
         if self.face_analyzer is not None:
             return True
         try:
-            import insightface
             from insightface.app import FaceAnalysis
             from roop.processors.FaceSwap import FaceSwap
             self.face_analyzer = FaceAnalysis(allowed_modules=['detection', 'recognition'])

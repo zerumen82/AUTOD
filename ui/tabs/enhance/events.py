@@ -7,7 +7,6 @@ Reglas Gradio 6:
 - La primera foto de la cola se selecciona y renderiza sola al importar.
 """
 
-import json
 import os
 import queue
 import subprocess
@@ -24,103 +23,12 @@ from roop.output_paths import get_enhance_output_dir
 
 from . import logic as enh_logic
 from .logic import process_batch, process_single_image
+from .presets import load_presets, save_custom_preset
 
 
 # Presets/ajustes por foto: ruta -> settings dict
 _PER_IMAGE_SETTINGS: dict = {}
 
-PRESET_DEFAULTS = {
-    "Realista": {
-        "denoise": 25, "sharpen": 30, "recover": 60, "upscale": 1,
-        "exposure": 1.0, "shadow": 0.95, "highlight": 1.03, "temperature": 50,
-        "grain_strength": 6, "grain_size": 8, "deband": 20, "vibrance": 104,
-        "face_model": "GFPGAN",
-    },
-    "Ultra realista": {
-        "denoise": 30, "sharpen": 45, "recover": 75, "upscale": 2,
-        "exposure": 1.02, "shadow": 0.9, "highlight": 1.05, "temperature": 51,
-        "grain_strength": 10, "grain_size": 6, "deband": 15, "vibrance": 108,
-        "face_model": "CodeFormer",
-    },
-    "Sin ruido": {
-        "denoise": 75, "sharpen": 18, "recover": 30, "upscale": 1,
-        "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
-        "grain_strength": 0, "grain_size": 10, "deband": 40, "vibrance": 100,
-        "face_model": "GFPGAN",
-    },
-    "Sin bandas": {
-        "denoise": 55, "sharpen": 20, "recover": 0, "upscale": 1,
-        "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
-        "grain_strength": 4, "grain_size": 12, "deband": 75, "vibrance": 100,
-        "face_model": "GFPGAN",
-    },
-    "Color vivo": {
-        "denoise": 20, "sharpen": 28, "recover": 40, "upscale": 1,
-        "exposure": 1.05, "shadow": 1.08, "highlight": 0.96, "temperature": 53,
-        "grain_strength": 4, "grain_size": 8, "deband": 10, "vibrance": 115,
-        "face_model": "GFPGAN",
-    },
-    "Retrato": {
-        "denoise": 30, "sharpen": 25, "recover": 65, "upscale": 1,
-        "exposure": 1.02, "shadow": 0.95, "highlight": 1.02, "temperature": 51,
-        "grain_strength": 5, "grain_size": 10, "deband": 20, "vibrance": 104,
-        "face_model": "GFPGAN",
-    },
-    "Paisaje": {
-        "denoise": 45, "sharpen": 55, "recover": 0, "upscale": 2,
-        "exposure": 1.0, "shadow": 0.7, "highlight": 1.1, "temperature": 54,
-        "grain_strength": 8, "grain_size": 12, "deband": 30, "vibrance": 112,
-        "face_model": "GFPGAN",
-    },
-    "Nocturna": {
-        "denoise": 80, "sharpen": 25, "recover": 40, "upscale": 2,
-        "exposure": 1.4, "shadow": 1.4, "highlight": 0.6, "temperature": 35,
-        "grain_strength": 20, "grain_size": 8, "deband": 50, "vibrance": 105,
-        "face_model": "GFPGAN",
-    },
-    "Producto": {
-        "denoise": 35, "sharpen": 50, "recover": 0, "upscale": 2,
-        "exposure": 1.0, "shadow": 0.85, "highlight": 1.0, "temperature": 50,
-        "grain_strength": 8, "grain_size": 10, "deband": 25, "vibrance": 106,
-        "face_model": "GFPGAN",
-    },
-    "Archivo": {
-        "denoise": 20, "sharpen": 20, "recover": 30, "upscale": 1,
-        "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
-        "grain_strength": 3, "grain_size": 10, "deband": 15, "vibrance": 100,
-        "face_model": "GFPGAN",
-    },
-    "Blanco y negro": {
-        "denoise": 30, "sharpen": 25, "recover": 0, "upscale": 1,
-        "exposure": 1.0, "shadow": 1.0, "highlight": 1.0, "temperature": 50,
-        "grain_strength": 15, "grain_size": 10, "deband": 20, "vibrance": 0,
-        "face_model": "GFPGAN",
-    },
-    "HDR": {
-        "denoise": 15, "sharpen": 45, "recover": 30, "upscale": 1,
-        "exposure": 1.1, "shadow": 0.7, "highlight": 1.2, "temperature": 50,
-        "grain_strength": 5, "grain_size": 8, "deband": 10, "vibrance": 115,
-        "face_model": "GFPGAN",
-    },
-    "Selfie": {
-        "denoise": 40, "sharpen": 20, "recover": 70, "upscale": 1,
-        "exposure": 1.05, "shadow": 0.9, "highlight": 1.0, "temperature": 52,
-        "grain_strength": 0, "grain_size": 10, "deband": 15, "vibrance": 108,
-        "face_model": "GFPGAN",
-    },
-    "Vintage": {
-        "denoise": 25, "sharpen": 15, "recover": 20, "upscale": 1,
-        "exposure": 0.95, "shadow": 1.1, "highlight": 0.9, "temperature": 60,
-        "grain_strength": 25, "grain_size": 12, "deband": 10, "vibrance": 90,
-        "face_model": "GFPGAN",
-    },
-    "Noche clara": {
-        "denoise": 70, "sharpen": 30, "recover": 40, "upscale": 2,
-        "exposure": 1.5, "shadow": 1.5, "highlight": 0.5, "temperature": 38,
-        "grain_strength": 12, "grain_size": 8, "deband": 45, "vibrance": 102,
-        "face_model": "GFPGAN",
-    },
-}
 
 # Vista previa: el original se guarda ya escalado y el resultado se acota para
 # que mover un slider sea inmediato; el lote sigue a resolución completa.
@@ -293,8 +201,8 @@ def wire_events(ui_components):
     preset_save_name = ui_components["preset_save_name"]
     preset_save_btn = ui_components["preset_save_btn"]
     preset_status = ui_components["preset_status"]
+    preset_buttons = ui_components["preset_buttons"]
     auto_mode = ui_components["auto_mode"]
-    output_path = ui_components["output_path"]
     btn_open_folder = ui_components["btn_open_folder"]
     folder_status = ui_components["folder_status"]
     format_dropdown = ui_components["format_dropdown"]
@@ -482,19 +390,23 @@ def wire_events(ui_components):
     # Aplicar preset de fábrica a los sliders
     # ------------------------------------------------------------------
     def apply_preset(name: str, files_val, folder_val, selected):
-        vals = PRESET_DEFAULTS.get(name, PRESET_DEFAULTS["Retrato"])
+        preset = load_presets().get(name)
+        if preset is None:
+            return tuple(gr.update() for _ in range(_N_SLIDERS)) + (f"Preset desconocido: {name}",)
+        vals = preset["sliders"]
         settings = _settings(
-            vals["denoise"], vals["sharpen"], vals["recover"], vals["upscale"],
+            vals["denoise_strength"], vals["sharpen_strength"],
+            float(vals["recover_faces_strength"]) * 100.0, vals["upscale_factor"],
             vals["exposure"], vals["shadow"], vals["highlight"], vals["temperature"],
-            vals["grain_strength"], vals["grain_size"],
-            vals.get("deband", 0), vals.get("vibrance", 100), vals.get("face_model", "GFPGAN"),
+            vals["grain_strength"], vals["grain_size"], vals["deband_strength"],
+            vals["vibrance"], vals["face_model"],
         )
         paths = _queue_paths(files_val, folder_val)
         path = _pick_path(paths, selected) if paths else None
         if path is not None:
             _PER_IMAGE_SETTINGS[str(path)] = settings
         updates = _slider_updates_from_settings(settings)
-        return updates + (f"Preset «{name}» aplicado a esta foto.",)
+        return updates + (f"Preset «{name}» aplicado. {preset.get('description', '')}",)
 
     preset_apply_btn.click(
         fn=apply_preset,
@@ -520,6 +432,34 @@ def wire_events(ui_components):
         trigger_mode="always_last",
         show_progress="default",
     )
+
+    def _button_handler(name):
+        def select_and_apply(files_val, folder_val, selected):
+            return (name,) + apply_preset(name, files_val, folder_val, selected)
+        return select_and_apply
+
+    preset_outputs = [
+        denoise_slider, sharpen_slider, recover_slider, upscale_factor,
+        exposure_slider, shadow_slider, highlight_slider, temperature_slider,
+        grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider,
+        face_model, preset_status,
+    ]
+    pair_outputs = [preview_before, preview_after, preview_status] + slider_inputs + [face_model]
+    for name, button in preset_buttons.items():
+        button.click(
+            fn=_button_handler(name),
+            inputs=[input_files, input_folder, preview_photo],
+            outputs=[preset_dropdown] + preset_outputs,
+            queue=False,
+        ).then(
+            fn=make_pair,
+            inputs=pair_inputs,
+            outputs=pair_outputs,
+            queue=True,
+            concurrency_limit=1,
+            trigger_mode="always_last",
+            show_progress="default",
+        )
 
     # Reset sliders a valores por defecto
     def reset_sliders():
@@ -566,7 +506,7 @@ def wire_events(ui_components):
     ):
         name = (name or "").strip()
         if not name:
-            return "Escribe un nombre para el preset."
+            return gr.update(), "Escribe un nombre para el preset."
         data = {
             "name": name,
             "description": "Preset manual (pestaña Mejorar fotos)",
@@ -588,14 +528,10 @@ def wire_events(ui_components):
             "models": {},
         }
         try:
-            preset_dir = Path(__file__).resolve().parents[2] / "config" / "enhance" / "presets"
-            preset_dir.mkdir(parents=True, exist_ok=True)
-            preset_path = preset_dir / f"{name.lower().replace(' ', '_')}.json"
-            with open(preset_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            return f"Preset «{name}» guardado en {preset_path.name}."
+            preset_file = save_custom_preset(name, data["sliders"])
+            return gr.update(choices=list(load_presets()), value=name), f"Preset «{name}» guardado en {preset_file}."
         except Exception as e:
-            return f"Error al guardar preset: {e}"
+            return gr.update(), f"Error al guardar preset: {e}"
 
     preset_save_btn.click(
         fn=save_preset,
@@ -605,7 +541,7 @@ def wire_events(ui_components):
             temperature_slider, grain_strength_slider, grain_size_slider,
             deband_slider, vibrance_slider, face_model,
         ],
-        outputs=preset_status,
+        outputs=[preset_dropdown, preset_status],
         queue=False,
     )
 

@@ -8,6 +8,17 @@
 | ComfyUI (local) | 8188, fijo (`ui/tabs/comfy_launcher.py:18-21`) | Generate, Image Editor, Animate — **compartido** |
 | Android (APK nativa Kotlin) | HTTP contra la API Gradio | `MainActivity.kt` + `GradioClient.kt` en `android_app/autoapp/` |
 
+### Mejorar fotos
+
+`ui/tabs/enhance/ui.py` construye el comparador, la galería de presets con
+iconos SVG locales (`assets/enhance_presets/`) y un acordeón cerrado para los
+ajustes manuales. `ui/tabs/enhance/events.py` aplica cada receta a la foto
+seleccionada y guarda presets personalizados. `ui/tabs/enhance/presets.py` lee
+`config/enhance/presets/*.json`; el orden y los límites de controles proceden
+de `config/enhance/enhance.json`. `ui/tabs/enhance/logic.py` procesa cada foto
+y aplica el gate de calidad por paso. Los iconos son archivos del proyecto, sin
+dependencia de red.
+
 ## Módulos clave
 
 Selector visual aprobado 2026-10-18: `element_selection.py` propone regiones

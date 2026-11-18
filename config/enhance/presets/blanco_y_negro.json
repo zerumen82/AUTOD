@@ -1,0 +1,11 @@
+{
+  "name": "Blanco y negro",
+  "description": "Escala de grises con detalle moderado y grano fino",
+  "sliders": {
+    "denoise_strength": 30, "sharpen_strength": 25,
+    "recover_faces_strength": 0.0, "upscale_factor": 1,
+    "exposure": 1.0, "shadow": 1.0, "highlight": 1.0,
+    "temperature": 50, "grain_strength": 15, "grain_size": 10,
+    "deband_strength": 20, "vibrance": 0, "face_model": "GFPGAN"
+  }
+}

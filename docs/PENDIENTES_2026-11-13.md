@@ -1,5 +1,14 @@
 # Pendientes — Image Editor y selector «Tipo de edición» (2026-11-13)
 
+## Auditoría 2026-11-18 — v5.1396
+
+Se revisaron los estados frente a `spec/02`, `spec/03`, `MEMORY.md` y los logs
+actuales. **P1–P12 y P14–P15 permanecen abiertos**; P13 está cerrado solo por
+sus probes y evidencia técnica documentada. No se atribuye PASS visual a una
+categoría por el render de presets ni por contratos CPU. Las mejoras de
+«Mejorar fotos» y el diagnóstico de ComfyUI se registran en `spec/03` para no
+confundirlos con el cierre del Image Editor.
+
 ## Revisión 2026-11-14 — v5.1355 en curso
 
 El usuario autorizó revisar P1–P15 por prioridad. P1: matriz de nueve

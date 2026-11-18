@@ -1,9 +1,7 @@
 """UI de la pestaña «Mejorar fotos» estilo Topaz, compacta y continua.
 
-Layout (docs/PLAN_PESTAÑA_TOPAZ_2026-11-15.md §4.2): vista de trabajo tipo Topaz:
-  Foto protagonista ANTES | DESPUÉS a la izquierda, columna continua de
-  controles (importar + mejoras) a la derecha, banda de presets/exportación abajo.
-Sin cajas por categoría: solo separadores finos. Paleta Topaz plana + azul.
+Vista de trabajo: comparador ANTES | DESPUÉS arriba, importación y presets
+debajo, ajustes manuales plegados y exportación al final.
 
 El código se registra UNA sola vez en ui/main.py (sin duplicado de pestaña).
 Todas las claves del dict de retorno son el contrato con events.py; no
@@ -15,6 +13,7 @@ import gradio as gr
 from roop.output_paths import get_enhance_output_dir
 
 from .logic import load_enhance_config
+from .presets import icon_for_preset, load_presets
 from .state import EnhanceSessionState
 
 
@@ -157,7 +156,7 @@ ENHANCE_CSS = """
     font-size: 12px !important;
     min-height: 32px !important;
 }
-.btn-apply {
+.img-enhance-container .btn-apply {
     background: #0f82ff !important;
     color: #ffffff !important;
     font-weight: 700 !important;
@@ -206,6 +205,28 @@ ENHANCE_CSS = """
     font-size: 11px;
 }
 .enhance-dataframe { font-size: 10px; }
+.enhance-preset-grid { gap: 6px !important; }
+.img-enhance-container .enhance-preset-button {
+    background: #192232 !important;
+    color: #e9f3ff !important;
+    border: 1px solid #31445e !important;
+    border-radius: 9px !important;
+    min-height: 38px !important;
+    font-size: 11px !important;
+    font-weight: 650 !important;
+}
+.img-enhance-container .enhance-preset-button:hover {
+    background: #243a59 !important;
+    border-color: #5da8f4 !important;
+}
+.img-enhance-container .enhance-preset-button img { width: 19px !important; height: 19px !important; }
+.img-enhance-container .enhance-settings-accordion {
+    margin-top: 8px;
+    border-color: #31445e !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+}
+.img-enhance-container .enhance-settings-accordion > * { min-width: 0 !important; }
 """
 
 
@@ -253,12 +274,14 @@ def build_enhance_ui():
 
     config = load_enhance_config()
     defaults = config.get("default_slider_values", {})
+    limits = config["control_limits"]
+    presets = load_presets()
 
     with gr.Column(elem_classes=["img-enhance-container"]):
         # ---------- Cabecera ----------
         with gr.Column(elem_classes=["img-enhance-header"]):
             gr.Markdown("## MEJORAR FOTOS")
-            gr.Markdown("_Ajusta a la derecha, mira el resultado al instante, exporta el lote. 100 % local._")
+            gr.Markdown("_Importa, aplica un preset y compara el resultado. Ajusta y exporta el lote en local._")
 
         # ---------- Vista de trabajo: ANTES | DESPUÉS (ancho completo) ----------
         with gr.Row(elem_classes=["enhance-compare-row"], equal_height=True):
@@ -317,45 +340,55 @@ def build_enhance_ui():
                     queue_summary = gr.Markdown("_Sin fotos en cola._", elem_classes=["enhance-summary"])
                 btn_load_sample = gr.Button("Cargar ejemplo", variant="secondary", size="sm", scale=1, min_width=120, elem_classes=["btn-secondary"])
 
+            gr.Markdown("Presets", elem_classes=["enhance-section"])
+            preset_buttons = {}
+            factory_presets = [(name, data) for name, data in presets.items() if data["_factory"]]
+            for offset in range(0, len(factory_presets), 5):
+                with gr.Row(elem_classes=["enhance-preset-grid"]):
+                    for name, data in factory_presets[offset:offset + 5]:
+                        preset_buttons[name] = gr.Button(
+                            name, icon=str(icon_for_preset(data)), size="sm",
+                            scale=1, min_width=125,
+                            elem_classes=["enhance-preset-button"],
+                        )
+            with gr.Row():
+                preset_dropdown = gr.Dropdown(choices=list(presets), value=next(iter(presets), None), label="Preset seleccionado o personalizado", scale=2)
+                preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"], scale=1)
+                preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
+                preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
+            preset_status = gr.Markdown("")
+
+            with gr.Accordion("Ajustes manuales", open=False, elem_classes=["enhance-settings-accordion"]):
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    denoise_slider = _slider("Denoise", "#22d3ee", value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = agresivo.", slider_key="denoise", **limits["denoise_strength"])
+                    sharpen_slider = _slider("Sharpen", "#a855f7", value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo.", slider_key="sharpen", **limits["sharpen_strength"])
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    recover_slider = _slider("Recover Faces", "#f472b6", value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = total.", slider_key="recover", **limits["recover_faces_strength"])
+                    upscale_factor = _dropdown("Factor upscale", "#38bdf8", choices=limits["upscale_factor"]["choices"], value=int(defaults.get("upscale_factor", 2)), key="upscale")
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    exposure_slider = _slider("Exposición", "#fbbf24", value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio.", slider_key="exposure", **limits["exposure"])
+                    shadow_slider = _slider("Sombras", "#94a3b8", value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio.", slider_key="shadow", **limits["shadow"])
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    highlight_slider = _slider("Luces", "#facc15", value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio.", slider_key="highlight", **limits["highlight"])
+                    temperature_slider = _slider("Temperatura", "#38bdf8", value=float(defaults.get("temperature", 50)), info="50 = neutra · 0 = fría · 100 = cálida.", slider_key="temperature", **limits["temperature"])
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    grain_strength_slider = _slider("Grano (fuerza)", "#818cf8", value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength", **limits["grain_strength"])
+                    grain_size_slider = _slider("Grano (tamaño)", "#818cf8", value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size", **limits["grain_size"])
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    deband_slider = _slider("Deband", "#34d399", value=float(defaults.get("deband_strength", 0)), info="0 = sin cambio · 100 = máximo.", slider_key="deband", **limits["deband_strength"])
+                    vibrance_slider = _slider("Color (vibrance)", "#fb7185", value=float(defaults.get("vibrance", 100)), info="100 = sin cambio · + = más saturación.", slider_key="vibrance", **limits["vibrance"])
+                with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
+                    face_model = _dropdown("Motor de caras", "#f472b6", choices=limits["face_model"]["choices"], value=str(defaults.get("face_model", "GFPGAN")), key="face_model")
+                    gr.Markdown("GFPGAN = rápido · CodeFormer/RestoreFormer++ = más detalle · GPEN = suaviza.", elem_classes=["enhance-summary"])
+                with gr.Row():
+                    btn_reset_sliders = gr.Button("↺ Reset sliders", variant="secondary", size="sm", elem_classes=["btn-secondary"])
+
             gr.Markdown("Destino", elem_classes=["enhance-section"])
             with gr.Row():
                 output_path = gr.Textbox(label="Carpeta de destino", value=get_enhance_output_dir(), interactive=False, scale=5)
                 btn_open_folder = gr.Button("Abrir carpeta", variant="secondary", elem_classes=["btn-open"], scale=1)
                 format_dropdown = gr.Dropdown(choices=["png", "jpg", "jpeg"], value=config.get("export", {}).get("default_format", "png"), label="Formato", scale=1)
             folder_status = gr.Markdown("", elem_classes=["enhance-summary"])
-
-            gr.Markdown("Presets", elem_classes=["enhance-section"])
-            with gr.Row():
-                preset_dropdown = gr.Dropdown(choices=["Realista", "Ultra realista", "Sin ruido", "Sin bandas", "Color vivo", "Retrato", "Paisaje", "Nocturna", "Producto", "Archivo", "Blanco y negro", "HDR", "Selfie", "Vintage", "Noche clara"], value="Realista", label="Preset de fábrica", scale=2)
-                preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"], scale=1)
-                preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
-                preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
-            preset_status = gr.Markdown("")
-
-            gr.Markdown("Mejoras", elem_classes=["enhance-section"])
-            with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
-                denoise_slider = _slider("Denoise", "#22d3ee", minimum=0, maximum=100, step=1, value=float(defaults.get("denoise_strength", 65)), info="0 = sin cambio · 100 = agresivo.", slider_key="denoise")
-                sharpen_slider = _slider("Sharpen", "#a855f7", minimum=0, maximum=100, step=1, value=float(defaults.get("sharpen_strength", 40)), info="0 = sin cambio · 100 = máximo.", slider_key="sharpen")
-            with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
-                recover_slider = _slider("Recover Faces", "#f472b6", minimum=0, maximum=100, step=1, value=float(defaults.get("recover_faces_strength", 0.8) * 100), info="0 = sin tocar caras · 100 = total.", slider_key="recover")
-                upscale_factor = _dropdown("Factor upscale", "#38bdf8", choices=[1, 2, 4, 6], value=int(defaults.get("upscale_factor", 2)), key="upscale")
-            with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
-                exposure_slider = _slider("Exposición", "#fbbf24", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("exposure", 1.0)), info="1.0 = sin cambio.", slider_key="exposure")
-                shadow_slider = _slider("Sombras", "#94a3b8", minimum=0.5, maximum=2.0, step=0.1, value=float(defaults.get("shadow", 1.0)), info="1.0 = sin cambio.", slider_key="shadow")
-            with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
-                highlight_slider = _slider("Luces", "#facc15", minimum=0.0, maximum=2.0, step=0.05, value=float(defaults.get("highlight", 1.0)), info="1.0 = sin cambio.", slider_key="highlight")
-                temperature_slider = _slider("Temperatura", "#38bdf8", minimum=0, maximum=100, step=1, value=float(defaults.get("temperature", 50)), info="0 = neutra · + = cálida.", slider_key="temperature")
-            with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
-                grain_strength_slider = _slider("Grano (fuerza)", "#818cf8", minimum=0, maximum=100, step=1, value=float(defaults.get("grain_strength", 20)), info="0 = sin grano.", slider_key="grain_strength")
-                grain_size_slider = _slider("Grano (tamaño)", "#818cf8", minimum=1, maximum=20, step=1, value=float(defaults.get("grain_size", 10)), info="1 = fina · 20 = gruesa.", slider_key="grain_size")
-            with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
-                deband_slider = _slider("Deband", "#34d399", minimum=0, maximum=100, step=1, value=float(defaults.get("deband_strength", 0)), info="0 = sin cambio · 100 = máximo.", slider_key="deband")
-                vibrance_slider = _slider("Color (vibrance)", "#fb7185", minimum=0, maximum=200, step=1, value=float(defaults.get("vibrance", 100)), info="100 = sin cambio · + = más saturación.", slider_key="vibrance")
-            with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
-                face_model = _dropdown("Motor de caras", "#f472b6", choices=["GFPGAN", "CodeFormer", "RestoreFormer++", "GPEN"], value=str(config.get("face_model", "GFPGAN")), key="face_model")
-                gr.Markdown("GFPGAN = rápido · CodeFormer/RestoreFormer++ = más detalle · GPEN = suaviza.", elem_classes=["enhance-summary"])
-            with gr.Row():
-                btn_reset_sliders = gr.Button("↺ Reset sliders", variant="secondary", size="sm", elem_classes=["btn-secondary"])
 
         # ---------- Exportación ----------
         gr.Markdown("Exportación", elem_classes=["enhance-section"])
@@ -398,6 +431,7 @@ def build_enhance_ui():
         "preset_save_name": preset_save_name,
         "preset_save_btn": preset_save_btn,
         "preset_status": preset_status,
+        "preset_buttons": preset_buttons,
         "auto_mode": auto_mode,
         "output_path": output_path,
         "btn_open_folder": btn_open_folder,

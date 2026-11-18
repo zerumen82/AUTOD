@@ -52,6 +52,9 @@ def main():
           params["frames"] == 49 and params["steps"] == 8 and params["cfg"] == 1.0
           and params["fps"] == 25,
           str({k: params[k] for k in ("frames", "steps", "cfg", "fps")}))
+    explicit = manager.resolve_params("ltx2_audio", frames=97, fps=12, steps=8, cfg=5.5)
+    check("manager_ltx2_ignora_cfg_fps_ui",
+          explicit["steps"] == 8 and explicit["cfg"] == 1.0 and explicit["fps"] == 25)
     capped = manager.resolve_params("wan_video", frames=81, steps=28, cfg=6.0, magnitude=0.5)
     check("wan_sigue_capado", capped["frames"] == 49 and capped["steps"] == 20,
           f"{capped['frames']}f {capped['steps']}s")

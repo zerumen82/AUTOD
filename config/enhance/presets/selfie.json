@@ -1,0 +1,11 @@
+{
+  "name": "Selfie",
+  "description": "Retrato cercano con restauración moderada",
+  "sliders": {
+    "denoise_strength": 35, "sharpen_strength": 20,
+    "recover_faces_strength": 0.45, "upscale_factor": 1,
+    "exposure": 1.05, "shadow": 1.05, "highlight": 0.96,
+    "temperature": 52, "grain_strength": 0, "grain_size": 10,
+    "deband_strength": 15, "vibrance": 105, "face_model": "GFPGAN"
+  }
+}

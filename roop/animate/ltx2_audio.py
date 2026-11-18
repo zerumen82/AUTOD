@@ -53,6 +53,7 @@ DISTILLED_SIGMAS = [
     1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0,
 ]
 DISTILLED_STEPS = len(DISTILLED_SIGMAS) - 1
+DISTILLED_CFG = 1.0
 
 
 def _path(folder, name):
@@ -211,7 +212,7 @@ def resolve_generation(vram_gb, frames, width=None, height=None):
         "frames": fit_frames(frames),
         "fps": DEFAULT_FPS,
         "steps": DISTILLED_STEPS,
-        "cfg": 1.0,
+        "cfg": DISTILLED_CFG,
     }
 
 
@@ -406,7 +407,7 @@ def build_workflow(image_name, prompt, width=DEFAULT_WIDTH, height=DEFAULT_HEIGH
                "inputs": {"video_latent": ["12", 0], "audio_latent": ["13", 0]}},
         "15": {"class_type": "CFGGuider",
                "inputs": {"model": ["1", 0], "positive": ["10", 0],
-                          "negative": ["10", 1], "cfg": 1.0}},
+                          "negative": ["10", 1], "cfg": DISTILLED_CFG}},
         "16": {"class_type": "KSamplerSelect",
                "inputs": {"sampler_name": "euler"}},
         "17": {"class_type": "ManualSigmas",

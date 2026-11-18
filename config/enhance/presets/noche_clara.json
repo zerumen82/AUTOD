@@ -1,0 +1,11 @@
+{
+  "name": "Noche clara",
+  "description": "Levanta sombras nocturnas y protege altas luces",
+  "sliders": {
+    "denoise_strength": 70, "sharpen_strength": 25,
+    "recover_faces_strength": 0.4, "upscale_factor": 2,
+    "exposure": 1.18, "shadow": 1.25, "highlight": 0.8,
+    "temperature": 50, "grain_strength": 8, "grain_size": 8,
+    "deband_strength": 45, "vibrance": 102, "face_model": "GFPGAN"
+  }
+}

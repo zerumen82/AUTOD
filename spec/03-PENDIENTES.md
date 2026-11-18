@@ -1,5 +1,31 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## 2026-11-18 — v5.1396: auditoría de Mejorar fotos y logs
+
+- Los P1–P15 de `docs/PENDIENTES_2026-11-13.md` conservan sus estados. P13
+  figura cerrado por probes; P1 y las categorías visuales siguen abiertas hasta
+  PASS visual real. IE-4/IE-5 conservan la casilla abierta en `spec/02` por ese
+  criterio, aunque los probes de despacho históricos hayan pasado.
+- «Mejorar fotos»: 15 presets de fábrica cargan desde sus JSON, cinco nuevos
+  tienen render real en dos fotos (`diagnostics/out/enhance_presets_20261118/`).
+  La galería SVG, el acordeón y el guardado se verifican por UI/probe; falta
+  PASS visual del usuario sobre sus fotos y confirmar presets de escena con
+  imágenes representativas (en especial «Noche clara» y «HDR»).
+- El plan de Topaz de 2026-11-15 desaconseja CodeFormer/RestoreFormer++ por
+  condiciones de uso no comerciales. «Ultra realista» usa CodeFormer desde
+  v5.1379. No se cambia el modelo sin decisión del usuario; revisar el alcance
+  de uso y la documentación de licencia antes de distribuir esa receta.
+- SQLite de ComfyUI: los archivos `user/comfyui.db` y `.bkp` tenían DACL vacía;
+  se restauró herencia y `PRAGMA integrity_check` devolvió `ok`. Arranque
+  fresco de ComfyUI completado el 18/11: `Context impl SQLiteImpl`, servidor
+  HTTP en 8188 y cola vacía, sin el error de base de datos. Se cerró la prueba.
+- LTX-2: el log del 18/11 acaba en «Generando 425s» durante carga parcial; no
+  muestra excepción ni salida final. El benchmark previo de 97f en frío fue
+  748 s y en caliente 118 s. No se cambia el grafo ni la duración sin medir un
+  nuevo render completo y comparar calidad, RAM y VRAM. Se corrigió un informe
+  engañoso: la UI enviaba CFG 5,5/FPS 12, pero el grafo ya fijaba CFG 1,0/FPS
+  25; ahora el manager informa los parámetros reales (probe de wiring verde).
+
 ## 2026-11-10 — v5.1328: LTX-2 Q4 con audio nativo (prueba real en 8 GB)
 
 - Grafo y utilidades en `roop/animate/ltx2_audio.py`; probe de contrato
