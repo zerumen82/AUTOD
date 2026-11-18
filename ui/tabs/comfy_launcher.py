@@ -10,7 +10,6 @@ import subprocess
 import signal
 import time
 import requests
-import threading
 from typing import Tuple, Optional
 from roop.utils import get_vram_gb
 
@@ -183,7 +182,7 @@ def kill_process_on_port(port: int) -> bool:
             if not listening_pids:
                 print(f"[ComfyLauncher] No hay proceso LISTENING en puerto {port}")
                 if 'SYN_SENT' in result.stdout or 'SYN_RECEIVED' in result.stdout or 'ESTABLISHED' in result.stdout:
-                    print(f"[ComfyLauncher] Puerto ocupado por conexión, no por servicio")
+                    print("[ComfyLauncher] Puerto ocupado por conexión, no por servicio")
                 return False
             
             for pid in listening_pids:
@@ -263,7 +262,7 @@ def detect_comfyui_port() -> Optional[int]:
     anunciaba como «puerto ocupado por un proceso ajeno» y toda edición
     fallaba con «ComfyUI no disponible».
     """
-    print(f"[DEBUG] detect_comfyui_port() llamado")
+    print("[DEBUG] detect_comfyui_port() llamado")
     port = OUR_PORT
     print(f"[DEBUG] Verificando puerto {port} (fijo nuestro)...")
 
@@ -309,7 +308,7 @@ def is_comfyui_running() -> bool:
         url = get_comfy_url()
         response = requests.get(f"{url}/system_stats", timeout=2)
         return response.status_code == 200
-    except:
+    except Exception:
         return False
 
 
@@ -342,11 +341,9 @@ def start(
         return False, msg, port
     COMFYUI_PORT = port
     
-    comfy_url = get_comfy_url()
-    
-    print(f"\n[ComfyLauncher] ========================================")
+    print("\n[ComfyLauncher] ========================================")
     print(f"[ComfyLauncher] INICIANDO ComfyUI en puerto {port}")
-    print(f"[ComfyLauncher] ========================================\n")
+    print("[ComfyLauncher] ========================================\n")
     
     if is_comfyui_running():
         print(f"[ComfyLauncher] ComfyUI ya esta corriendo en puerto {port}")
@@ -398,7 +395,7 @@ def start(
         print(f"[ComfyLauncher] Ejecutando: {' '.join(cmd)}")
         print(f"[ComfyLauncher] Directorio: {COMFYUI_DIR}")
         print(f"[ComfyLauncher] Python: {python_exe}")
-        print(f"[ComfyLauncher] ---------------------------------------")
+        print("[ComfyLauncher] ---------------------------------------")
         
         if sys.platform == "win32":
             # Windows: capturar stdout y stderr para ver errores
@@ -484,7 +481,7 @@ def start(
             print(f"[ComfyLauncher] Proceso Unix creado (PID: {comfy_process.pid})")
         
         # Wait for startup
-        print(f"\n[ComfyLauncher] Esperando respuesta de ComfyUI...")
+        print("\n[ComfyLauncher] Esperando respuesta de ComfyUI...")
         start_time = time.time()
         timeout = 300  # 5 minutos timeout para ComfyUI
         
@@ -493,19 +490,19 @@ def start(
                 elapsed = time.time() - start_time
                 print(f"\n[ComfyLauncher] OK ComfyUI INICIADO (tiempo: {elapsed:.1f}s)")
                 print(f"[ComfyLauncher] URL: {get_comfy_url()}")
-                print(f"[ComfyLauncher] ========================================\n")
+                print("[ComfyLauncher] ========================================\n")
                 return True, "ComfyUI iniciado", port
             
             # Check if process died
             if comfy_process.poll() is not None:
                 stdout, _ = comfy_process.communicate(timeout=5)
-                error_msg = f"ERROR: El proceso de ComfyUI termino inesperadamente"
+                error_msg = "ERROR: El proceso de ComfyUI termino inesperadamente"
                 error_msg += f"\nCodigo de salida: {comfy_process.returncode}"
                 if stdout:
                     # Show last 50 lines of output
                     lines = stdout.strip().split('\n')
                     if len(lines) > 50:
-                        error_msg += f"\n\nUltimas 50 lineas del log:\n" + "\n".join(lines[-50:])
+                        error_msg += "\n\nUltimas 50 lineas del log:\n" + "\n".join(lines[-50:])
                     else:
                         error_msg += f"\n\nLog completo:\n{stdout}"
                 print(f"\n{error_msg}")
@@ -513,10 +510,10 @@ def start(
             
             time.sleep(2)
         
-        print(f"\n[ComfyLauncher] ERROR: Timeout esperando ComfyUI")
+        print("\n[ComfyLauncher] ERROR: Timeout esperando ComfyUI")
         return False, "Timeout", port
         
-    print(f"[ComfyLauncher] ComfyUI debe iniciarse manualmente")
+    print("[ComfyLauncher] ComfyUI debe iniciarse manualmente")
     return True, "ComfyUI debe iniciarse manualmente", port
 
 
@@ -632,7 +629,7 @@ def stop() -> Tuple[bool, str]:
     # Step 2: Determine port to clean
     current_port = COMFYUI_PORT
     if not current_port:
-        print(f"[DEBUG] No hay puerto conocido, escaneando...")
+        print("[DEBUG] No hay puerto conocido, escaneando...")
         for p in DEFAULT_PORTS:
             if is_port_in_use(p):
                 current_port = p
@@ -656,7 +653,7 @@ def stop() -> Tuple[bool, str]:
             print(f"[DEBUG] Puerto {current_port} ya no tiene LISTENING")
         COMFYUI_PORT = None
     else:
-        print(f"[DEBUG] No se encontró puerto LISTENING")
+        print("[DEBUG] No se encontró puerto LISTENING")
     
     # Step 4: Final orphan sweep (catches cases where port var was None or multiple)
     try:
@@ -675,15 +672,15 @@ def stop() -> Tuple[bool, str]:
         print(f"[ComfyLauncher] Acciones: {actions}")
         return True, msg
     
-    print(f"[DEBUG] No había nada que detener (o ya estaba limpio)")
+    print("[DEBUG] No había nada que detener (o ya estaba limpio)")
     return False, "No se encontró proceso en puertos ComfyUI (o ya limpio)"
 
 
 def restart() -> Tuple[bool, str]:
     """Restart ComfyUI - VERBOSE"""
-    print(f"\n[ComfyLauncher] ========================================")
-    print(f"[ComfyLauncher] REINICIANDO ComfyUI")
-    print(f"[ComfyLauncher] ========================================\n")
+    print("\n[ComfyLauncher] ========================================")
+    print("[ComfyLauncher] REINICIANDO ComfyUI")
+    print("[ComfyLauncher] ========================================\n")
     
     stop()
     time.sleep(3)

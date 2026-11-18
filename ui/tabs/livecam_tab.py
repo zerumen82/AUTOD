@@ -1,5 +1,4 @@
 import gradio as gr
-import roop.globals
 import ui.globals
 
 

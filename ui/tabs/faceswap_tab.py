@@ -1,8 +1,6 @@
-import gradio as gr
 import ui.tabs.faceswap.ui as faceswap_ui
 import ui.tabs.faceswap.events as faceswap_events
 import ui.tabs.faceswap.logic as logic
-import ui.tabs.faceswap.state as state
 
 def faceswap_tab():
     """

@@ -1,5 +1,3 @@
-import os
-import torch
 
 # Variables de estado para animación
 is_animating = False  # reset on app start; worker sets True/False per job

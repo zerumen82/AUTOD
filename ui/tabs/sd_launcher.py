@@ -1,14 +1,10 @@
 import queue
 import re
 import os
-import sys
 import subprocess
 import threading
 import time
-import urllib.request
 import socket
-import tempfile
-import webbrowser
 
 # Antes se bloqueaba la apertura del navegador; permitimos abrir en caso de fallback.
 # webbrowser.open = lambda *args, **kwargs: print("[sd_launcher] BLOQUEADO: Intento de abrir navegador")
@@ -43,7 +39,7 @@ def clean_corrupted_configs(webui_path):
                             with open(config_path, 'w', encoding='utf-8') as fw:
                                 fw.write('{}')
                             print(f"[sd_launcher] Archivo vacío reparado: {config_file}")
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 print(f"[sd_launcher] Archivo corrupto detectado: {config_file}, eliminando...")
                 try:
                     os.remove(config_path)
@@ -399,14 +395,11 @@ def run_script(script_path=None):
                 # Verificar si el servidor responde
                 max_wait = 120  # 2 minutos adicionales
                 waited = 0
-                server_ready = False
-                
                 while waited < max_wait:
                     try:
                         # Solo verificar si el puerto responde
                         with socket.create_connection(('127.0.0.1', port), timeout=2):
                             roop.core.update_status("¡Stable Diffusion WebUI listo!")
-                            server_ready = True
                             break
                     except Exception:
                         pass
@@ -529,7 +522,7 @@ def start(script_path=None):
                 print(f"Error liberando recursos: {str(e)}")
                 try:
                     _startup_lock.release()
-                except:
+                except Exception:
                     pass
 
     # Iniciar en background
