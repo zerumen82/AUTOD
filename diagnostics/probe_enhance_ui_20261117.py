@@ -20,6 +20,7 @@ sys.path.insert(0, r"D:\PROJECTS\AUTOAUTO")
 import gradio as gr  # noqa: E402
 
 from ui.tabs.enhance import events as E  # noqa: E402
+from ui.tabs.enhance.presets import load_presets  # noqa: E402
 from ui.tabs.enhance.ui import build_enhance_ui  # noqa: E402
 
 PORT = 7862
@@ -27,7 +28,8 @@ SAMPLE = Path(r"D:\PROJECTS\AUTOAUTO\diagnostics\out\office\window.png")
 EXPECTED_KEYS = [
     "session_state", "input_files", "input_folder", "btn_load_sample",
     "queue_summary", "preview_before", "preview_after",
-    "preview_photo", "btn_preview", "preview_status", "denoise_slider",
+    "preview_photo", "btn_prev_photo", "btn_next_photo", "preview_counter",
+    "btn_preview", "preview_status", "denoise_slider",
     "sharpen_slider", "recover_slider", "upscale_factor", "exposure_slider",
     "shadow_slider", "highlight_slider", "temperature_slider",
     "grain_strength_slider", "grain_size_slider", "deband_slider",
@@ -46,6 +48,16 @@ def check_build() -> None:
     missing = [k for k in EXPECTED_KEYS if k not in comps]
     assert not missing, f"claves faltantes: {missing}"
     assert len(demo.fns) > 20, f"pocos eventos: {len(demo.fns)}"
+    factory = {name for name, data in load_presets().items() if data["_factory"]}
+    assert set(comps["preset_buttons"]) == factory
+    assert not factory.intersection(choice[1] for choice in comps["preset_dropdown"].choices)
+    selector_id = comps["preview_photo"]._id
+    triggers = [target[1] for dep in demo.config["dependencies"] for target in dep["targets"] if target[0] == selector_id]
+    assert triggers == ["input"], f"el selector puede disparar renders duplicados: {triggers}"
+    for key in ("denoise_slider", "face_model"):
+        control_id = comps[key]._id
+        control_triggers = [target[1] for dep in demo.config["dependencies"] for target in dep["targets"] if target[0] == control_id]
+        assert control_triggers == ["input"], f"{key} puede disparar renders duplicados: {control_triggers}"
     print(f"[UI] Claves del contrato: {len(comps)}/{len(EXPECTED_KEYS)} OK · eventos: {len(demo.fns)}")
 
     # Estructura de alineación: cada slider vive en su columna con su etiqueta.
@@ -87,6 +99,9 @@ def check_api() -> None:
     from gradio_client import Client, handle_file
 
     client = Client(f"http://127.0.0.1:{PORT}", verbose=False)
+    loaded = client.predict(api_name="/load_sample")
+    assert loaded[0] and len(loaded[0]) >= 2, f"Cargar ejemplo no entregó fotos: {loaded}"
+    print(f"[API] Cargar ejemplo entregó {len(loaded[0])} fotos locales")
     sample = r"D:\PROJECTS\AUTOAUTO\diagnostics\out\office\window.png"
     f = handle_file(sample)
 
@@ -107,6 +122,13 @@ def check_api() -> None:
         f"el selector no distingue archivos con el mismo nombre: {choices}"
     )
     print("[API] Nombres duplicados: el selector distingue rutas (2 valores distintos)")
+
+    nav = client.predict([f, f2], None, q2[1]["value"], api_name="/move_next")
+    assert nav[0]["value"] != q2[1]["value"] and "2 / 2" in nav[1]
+    back = client.predict([f, f2], None, nav[0]["value"], api_name="/move_previous")
+    assert back[0]["value"] == q2[1]["value"] and "1 / 2" in back[1]
+    assert E._path_index([r"C:\temp\.\foto.png", r"C:\temp\otra.png"], r"C:\temp\foto.png") == 0
+    print("[API] Navegación anterior/siguiente y límites correctos; rutas equivalentes aceptadas")
 
     base = dict(
         files_val=[f], folder_val=[f], selected=None,

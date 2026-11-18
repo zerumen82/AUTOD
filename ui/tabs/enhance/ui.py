@@ -308,6 +308,7 @@ def build_enhance_ui():
                     height=420,
                 )
         with gr.Row():
+            btn_prev_photo = gr.Button("Anterior", variant="secondary", scale=1, min_width=90, interactive=False, elem_classes=["btn-secondary"])
             preview_photo = gr.Dropdown(
                 choices=[],
                 value=None,
@@ -315,7 +316,9 @@ def build_enhance_ui():
                 interactive=True,
                 scale=4,
             )
+            btn_next_photo = gr.Button("Siguiente", variant="secondary", scale=1, min_width=90, interactive=False, elem_classes=["btn-secondary"])
             btn_preview = gr.Button("Actualizar vista", variant="secondary", scale=1, elem_classes=["btn-secondary"])
+        preview_counter = gr.Markdown("_0 / 0 fotos_", elem_classes=["enhance-summary"])
         preview_status = gr.Markdown("_Importa fotos para ver el antes/después._")
 
         # ---------- Panel de control (ancho completo, sliders en horizontal) ----------
@@ -352,8 +355,9 @@ def build_enhance_ui():
                             elem_classes=["enhance-preset-button"],
                         )
             with gr.Row():
-                preset_dropdown = gr.Dropdown(choices=list(presets), value=next(iter(presets), None), label="Preset seleccionado o personalizado", scale=2)
-                preset_apply_btn = gr.Button("Aplicar preset", variant="primary", elem_classes=["btn-apply"], scale=1)
+                custom_presets = [name for name, data in presets.items() if not data["_factory"]]
+                preset_dropdown = gr.Dropdown(choices=custom_presets, value=None, allow_custom_value=True, label="Mis presets", scale=2)
+                preset_apply_btn = gr.Button("Aplicar mi preset", variant="primary", elem_classes=["btn-apply"], scale=1)
                 preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
                 preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
             preset_status = gr.Markdown("")
@@ -410,6 +414,9 @@ def build_enhance_ui():
         "preview_before": preview_before,
         "preview_after": preview_after,
         "preview_photo": preview_photo,
+        "btn_prev_photo": btn_prev_photo,
+        "btn_next_photo": btn_next_photo,
+        "preview_counter": preview_counter,
         "btn_preview": btn_preview,
         "preview_status": preview_status,
         "denoise_slider": denoise_slider,

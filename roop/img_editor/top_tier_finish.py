@@ -394,7 +394,12 @@ _FACE_OVAL_INDICES = (
     379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234,
     127, 162, 21, 54, 103, 67, 109, 151, 9, 8,
 )
-_MESH_STATE: Dict[str, Any] = {"app": None, "failed": False, "lock": threading.Lock()}
+_MESH_STATE: Dict[str, Any] = {
+    "app": None,
+    "failed": False,
+    "lock": threading.Lock(),
+    "process_lock": threading.Lock(),
+}
 
 
 def _get_face_mesh():
@@ -434,15 +439,18 @@ def _face_mesh_mask(crop_bgr: np.ndarray, blend: float) -> Optional[np.ndarray]:
     """
     import cv2 as _cv2
 
-    app = _get_face_mesh()
-    if app is None:
-        return None
     fh, fw = crop_bgr.shape[:2]
     if min(fh, fw) < 64:
         return None
     try:
         rgb = np.ascontiguousarray(_cv2.cvtColor(crop_bgr, _cv2.COLOR_BGR2RGB))
-        result = app.process(rgb)
+        # FaceMesh comparte un grafo con timestamps internos: process() debe
+        # ejecutarse de forma secuencial también entre máscara y landmarks.
+        with _MESH_STATE["process_lock"]:
+            app = _get_face_mesh()
+            if app is None:
+                return None
+            result = app.process(rgb)
         faces = getattr(result, "multi_face_landmarks", None) if result else None
         if not faces:
             return None
@@ -521,15 +529,16 @@ def _get_face_landmarks(image: Image.Image) -> Optional[np.ndarray]:
     """
     try:
         import cv2 as _cv2
-        app = _get_face_mesh()
-        if app is None:
-            return None
         bgr = _cv2.cvtColor(np.array(image.convert("RGB")), _cv2.COLOR_RGB2BGR)
         fh, fw = bgr.shape[:2]
         if min(fh, fw) < 64:
             return None
         rgb = np.ascontiguousarray(_cv2.cvtColor(bgr, _cv2.COLOR_BGR2RGB))
-        result = app.process(rgb)
+        with _MESH_STATE["process_lock"]:
+            app = _get_face_mesh()
+            if app is None:
+                return None
+            result = app.process(rgb)
         faces = getattr(result, "multi_face_landmarks", None) if result else None
         if not faces:
             return None

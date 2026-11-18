@@ -1,5 +1,14 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## 2026-11-18 — v5.1397: navegación de Mejorar fotos y FaceMesh
+
+- La UI aislada y sus endpoints pasan con fotos reales, pero falta comprobar en
+  pywebview tras el próximo arranque que «Cargar ejemplo» ya no parpadea y que
+  la navegación resulta cómoda con un lote del usuario. No declarar PASS visual
+  de la nueva navegación por la sola prueba de API.
+- `ruff check .` informa 433 errores anteriores en el repositorio; el lint de
+  los archivos modificados pasa. La limpieza global requiere alcance propio.
+
 ## 2026-11-18 — v5.1396: auditoría de Mejorar fotos y logs
 
 - Los P1–P15 de `docs/PENDIENTES_2026-11-13.md` conservan sus estados. P13

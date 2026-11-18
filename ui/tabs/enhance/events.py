@@ -76,14 +76,27 @@ def _queue_paths(files_val, folder_val) -> list:
     return out
 
 
-def _pick_path(paths: list, selected) -> Path:
-    """Ruta de la foto elegida; si no hay selección, la primera de la cola."""
+def _path_index(paths: list, selected) -> int:
+    """Índice de la ruta seleccionada, comparando rutas equivalentes."""
     if selected:
         target = os.path.normcase(os.path.abspath(_resolve_path(selected)))
-        for p in paths:
+        for index, p in enumerate(paths):
             if os.path.normcase(os.path.abspath(p)) == target:
-                return Path(p)
-    return Path(paths[0])
+                return index
+    return 0
+
+
+def _pick_path(paths: list, selected) -> Path:
+    """Ruta de la foto elegida; si no hay selección, la primera de la cola."""
+    return Path(paths[_path_index(paths, selected)])
+
+
+def _photo_position(paths: list, selected) -> str:
+    if not paths:
+        return "_0 / 0 fotos_"
+    index = _path_index(paths, selected) + 1
+    chosen = Path(paths[index - 1])
+    return f"**{index} / {len(paths)}** · `{chosen.name}`"
 
 
 def _load_before(path: Path) -> Image.Image:
@@ -181,6 +194,9 @@ def wire_events(ui_components):
     preview_before = ui_components["preview_before"]
     preview_after = ui_components["preview_after"]
     preview_photo = ui_components["preview_photo"]
+    btn_prev_photo = ui_components["btn_prev_photo"]
+    btn_next_photo = ui_components["btn_next_photo"]
+    preview_counter = ui_components["preview_counter"]
     btn_preview = ui_components["btn_preview"]
     preview_status = ui_components["preview_status"]
     denoise_slider = ui_components["denoise_slider"]
@@ -223,6 +239,13 @@ def wire_events(ui_components):
     # Cola: cuando llegan archivos (sueltos o carpeta), llenar la tabla y
     # seleccionar la PRIMERA foto para la vista previa.
     # ------------------------------------------------------------------
+    def _nav_updates(paths, selected):
+        index = _path_index(paths, selected) if paths else 0
+        return (
+            gr.update(interactive=bool(paths) and index > 0),
+            gr.update(interactive=bool(paths) and index < len(paths) - 1),
+        )
+
     def refresh_queue(files_val, folder_val):
         _PER_IMAGE_SETTINGS.clear()
         paths = _queue_paths(files_val, folder_val)
@@ -231,16 +254,17 @@ def wire_events(ui_components):
                 "_Sin fotos en cola._",
                 gr.update(choices=[], value=None),
                 "_Importa fotos para ver el antes/después._",
+                _photo_position(paths, None),
+                *_nav_updates(paths, None),
             )
-        first_name = Path(paths[0]).name
-        summary = (
-            f"**{len(paths)} foto(s) en cola** · vista previa: `{first_name}`"
-        )
-        choices = [(Path(p).name, p) for p in paths]
+        summary = f"**{len(paths)} foto(s) en cola**"
+        choices = [(f"{index}. {Path(p).name}", p) for index, p in enumerate(paths, start=1)]
         return (
             summary,
             gr.update(choices=choices, value=paths[0]),
             f"Generando vista previa de {len(paths)} foto(s)…",
+            _photo_position(paths, paths[0]),
+            *_nav_updates(paths, paths[0]),
         )
 
     # ------------------------------------------------------------------
@@ -268,7 +292,7 @@ def wire_events(ui_components):
     def make_pair(files_val, folder_val, selected, *slider_vals):
         paths = _queue_paths(files_val, folder_val)
         if not paths:
-            return (None, None, "_Sube al menos una foto para ver el antes/después._") + tuple(gr.update() for _ in range(_N_SLIDERS))
+            return (None, None, "_Sube al menos una foto para ver el antes/después._", _photo_position(paths, None), *_nav_updates(paths, None)) + tuple(gr.update() for _ in range(_N_SLIDERS))
         path = _pick_path(paths, selected)
         if str(path) in _PER_IMAGE_SETTINGS:
             settings = dict(_PER_IMAGE_SETTINGS[str(path)])
@@ -283,9 +307,9 @@ def wire_events(ui_components):
             status = _status_line(path.name, settings)
             if notes:
                 status = f"{status}\n\n{notes}"
-            return (before, after, status) + updates
+            return (before, after, status, _photo_position(paths, path), *_nav_updates(paths, path)) + updates
         except Exception as e:
-            return (None, None, f"Vista previa falló: {e}") + tuple(gr.update() for _ in range(_N_SLIDERS))
+            return (None, None, f"Vista previa falló: {e}", _photo_position(paths, path), *_nav_updates(paths, path)) + tuple(gr.update() for _ in range(_N_SLIDERS))
 
     def make_after(files_val, folder_val, selected, *slider_vals):
         paths = _queue_paths(files_val, folder_val)
@@ -313,10 +337,10 @@ def wire_events(ui_components):
         event = comp.change(
             fn=refresh_queue,
             inputs=[input_files, input_folder],
-            outputs=[queue_summary, preview_photo, preview_status],
+            outputs=[queue_summary, preview_photo, preview_status, preview_counter, btn_prev_photo, btn_next_photo],
             queue=False,
         )
-        _mp_outputs = [preview_before, preview_after, preview_status, denoise_slider, sharpen_slider, recover_slider, upscale_factor, exposure_slider, shadow_slider, highlight_slider, temperature_slider, grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider, face_model]
+        _mp_outputs = [preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo, denoise_slider, sharpen_slider, recover_slider, upscale_factor, exposure_slider, shadow_slider, highlight_slider, temperature_slider, grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider, face_model]
 
         event.then(
             fn=make_pair,
@@ -325,18 +349,47 @@ def wire_events(ui_components):
             queue=True,
             concurrency_limit=1,
             trigger_mode="always_last",
-            show_progress="default",
+            show_progress="minimal",
         )
 
-    preview_photo.change(
+    preview_photo.input(
         fn=make_pair,
         inputs=pair_inputs,
         outputs=_mp_outputs,
         queue=True,
         concurrency_limit=1,
         trigger_mode="always_last",
-        show_progress="default",
+        show_progress="minimal",
     )
+
+    def move_photo(files_val, folder_val, selected, direction):
+        paths = _queue_paths(files_val, folder_val)
+        if not paths:
+            return gr.update(), _photo_position(paths, None), *_nav_updates(paths, None)
+        index = max(0, min(len(paths) - 1, _path_index(paths, selected) + direction))
+        return gr.update(value=paths[index]), _photo_position(paths, paths[index]), *_nav_updates(paths, paths[index])
+
+    def move_previous(files_val, folder_val, selected):
+        return move_photo(files_val, folder_val, selected, -1)
+
+    def move_next(files_val, folder_val, selected):
+        return move_photo(files_val, folder_val, selected, 1)
+
+    for button, handler in ((btn_prev_photo, move_previous), (btn_next_photo, move_next)):
+        button.click(
+            fn=handler,
+            inputs=[input_files, input_folder, preview_photo],
+            outputs=[preview_photo, preview_counter, btn_prev_photo, btn_next_photo],
+            queue=False,
+        ).then(
+            fn=make_pair,
+            inputs=pair_inputs,
+            outputs=_mp_outputs,
+            queue=True,
+            concurrency_limit=1,
+            trigger_mode="always_last",
+            show_progress="minimal",
+        )
 
     btn_preview.click(
         fn=make_pair,
@@ -349,24 +402,24 @@ def wire_events(ui_components):
 
     # Cambiar cualquier ajuste re-renderiza SOLO el panel «Después».
     for slider in slider_inputs:
-        slider.change(
+        slider.input(
             fn=make_after,
             inputs=pair_inputs,
             outputs=[preview_after, preview_status],
             queue=True,
             concurrency_limit=1,
             trigger_mode="always_last",
-            show_progress="default",
+            show_progress="minimal",
         )
 
-    face_model.change(
+    face_model.input(
         fn=make_after,
         inputs=pair_inputs,
         outputs=[preview_after, preview_status],
         queue=True,
         concurrency_limit=1,
         trigger_mode="always_last",
-        show_progress="default",
+        show_progress="minimal",
     )
 
     # ------------------------------------------------------------------
@@ -377,7 +430,7 @@ def wire_events(ui_components):
         found = [str(root / rel) for rel in _SAMPLE_CANDIDATES if (root / rel).exists()]
         if not found:
             return gr.update(), "No hay fotos de ejemplo disponibles en diagnostics/out."
-        return gr.update(value=found), f"Ejemplo cargado: {len(found)} foto(s)."
+        return gr.update(value=found), gr.skip()
 
     btn_load_sample.click(
         fn=load_sample,
@@ -390,6 +443,8 @@ def wire_events(ui_components):
     # Aplicar preset de fábrica a los sliders
     # ------------------------------------------------------------------
     def apply_preset(name: str, files_val, folder_val, selected):
+        if not name:
+            return tuple(gr.update() for _ in range(_N_SLIDERS)) + ("Selecciona uno de tus presets guardados.",)
         preset = load_presets().get(name)
         if preset is None:
             return tuple(gr.update() for _ in range(_N_SLIDERS)) + (f"Preset desconocido: {name}",)
@@ -421,7 +476,7 @@ def wire_events(ui_components):
     ).then(
         fn=make_pair,
         inputs=pair_inputs,
-        outputs=[preview_before, preview_after, preview_status] + [
+        outputs=[preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo] + [
             denoise_slider, sharpen_slider, recover_slider, upscale_factor,
             exposure_slider, shadow_slider, highlight_slider, temperature_slider,
             grain_strength_slider, grain_size_slider,
@@ -430,12 +485,12 @@ def wire_events(ui_components):
         queue=True,
         concurrency_limit=1,
         trigger_mode="always_last",
-        show_progress="default",
+        show_progress="minimal",
     )
 
     def _button_handler(name):
         def select_and_apply(files_val, folder_val, selected):
-            return (name,) + apply_preset(name, files_val, folder_val, selected)
+            return apply_preset(name, files_val, folder_val, selected)
         return select_and_apply
 
     preset_outputs = [
@@ -444,12 +499,12 @@ def wire_events(ui_components):
         grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider,
         face_model, preset_status,
     ]
-    pair_outputs = [preview_before, preview_after, preview_status] + slider_inputs + [face_model]
+    pair_outputs = [preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo] + slider_inputs + [face_model]
     for name, button in preset_buttons.items():
         button.click(
             fn=_button_handler(name),
             inputs=[input_files, input_folder, preview_photo],
-            outputs=[preset_dropdown] + preset_outputs,
+            outputs=preset_outputs,
             queue=False,
         ).then(
             fn=make_pair,
@@ -458,16 +513,16 @@ def wire_events(ui_components):
             queue=True,
             concurrency_limit=1,
             trigger_mode="always_last",
-            show_progress="default",
+            show_progress="minimal",
         )
 
     # Reset sliders a valores por defecto
-    def reset_sliders():
+    def reset_sliders(files_val, folder_val, selected):
         from .logic import load_enhance_config
         d = load_enhance_config().get("default_slider_values", {})
         recover = d.get("recover_faces_strength", 0.8)
         recover_pct = (recover * 100) if isinstance(recover, (int, float)) and recover <= 1.0 else float(recover)
-        return (
+        values = (
             float(d.get("denoise_strength", 20)),
             float(d.get("sharpen_strength", 10)),
             recover_pct,
@@ -481,13 +536,17 @@ def wire_events(ui_components):
             float(d.get("deband_strength", 0)),
             float(d.get("vibrance", 100)),
             str(d.get("face_model", "GFPGAN")),
-            "Sliders restablecidos a valores por defecto.",
         )
+        paths = _queue_paths(files_val, folder_val)
+        if paths:
+            _PER_IMAGE_SETTINGS[str(_pick_path(paths, selected))] = _settings(*values)
+        return values + ("Sliders restablecidos a valores por defecto.",)
 
     btn_reset_sliders = ui_components.get("btn_reset_sliders")
     if btn_reset_sliders is not None:
         btn_reset_sliders.click(
             fn=reset_sliders,
+            inputs=[input_files, input_folder, preview_photo],
             outputs=[
                 denoise_slider, sharpen_slider, recover_slider, upscale_factor,
                 exposure_slider, shadow_slider, highlight_slider, temperature_slider,
@@ -495,6 +554,14 @@ def wire_events(ui_components):
                 deband_slider, vibrance_slider, face_model, preset_status,
             ],
             queue=False,
+        ).then(
+            fn=make_pair,
+            inputs=pair_inputs,
+            outputs=pair_outputs,
+            queue=True,
+            concurrency_limit=1,
+            trigger_mode="always_last",
+            show_progress="minimal",
         )
 
     # ------------------------------------------------------------------
@@ -529,7 +596,8 @@ def wire_events(ui_components):
         }
         try:
             preset_file = save_custom_preset(name, data["sliders"])
-            return gr.update(choices=list(load_presets()), value=name), f"Preset «{name}» guardado en {preset_file}."
+            customs = [key for key, preset in load_presets().items() if not preset["_factory"]]
+            return gr.update(choices=customs, value=name), f"Preset «{name}» guardado en {preset_file}."
         except Exception as e:
             return gr.update(), f"Error al guardar preset: {e}"
 

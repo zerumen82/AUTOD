@@ -1,5 +1,6 @@
 import sys
 import os
+from pathlib import Path
 # Reduce third-party console noise (llama.cpp / ggml / transformers) by default.
 # Detailed diagnostics remain available via AUTOAUTO_DEBUG=1.
 os.environ.setdefault("LLAMA_LOG_LEVEL", "ERROR")
@@ -250,7 +251,6 @@ if hasattr(os, 'unlink'):
     os.unlink = resilient_remove
 
 # Parchear Path.unlink específicamente
-from pathlib import Path
 Path._original_unlink = Path.unlink
 Path.unlink = resilient_unlink
 
@@ -453,7 +453,7 @@ def main():
     """Punto de entrada compartido: `python run.py` y launcher del exe."""
     _open_ui_session_log()
     print("\n" + "="*70)
-    print("  AutoAuto v5.1396 (2026-11-18)")
+    print("  AutoAuto v5.1397 (2026-11-18)")
     print("="*70 + "\n")
     if set_console_icon():
         print("[INFO] Icono de AutoAuto aplicado a la ventana de consola")
