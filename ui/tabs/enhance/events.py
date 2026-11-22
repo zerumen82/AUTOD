@@ -1010,6 +1010,7 @@ def wire_events(ui_components):
             "",
         )
 
+        _last_pct, _last_phase = -1, None
         try:
             while True:
                 try:
@@ -1022,6 +1023,12 @@ def wire_events(ui_components):
                 phase = str(payload.get("phase", ""))
                 detail = str(payload.get("detail", ""))
                 pct = int(float(payload.get("progress", 0.0)) * 100)
+                # Evita inundar la UI con un yield por cada paso; solo repinta
+                # cuando cambia el porcentaje o la fase.
+                if pct == _last_pct and phase == _last_phase:
+                    yield gr.skip(), gr.skip()
+                    continue
+                _last_pct, _last_phase = pct, phase
                 status = f"<div class='enhance-status'>Procesando {pct}% · {phase}: {detail}</div>"
                 yield status, gr.skip()
         finally:

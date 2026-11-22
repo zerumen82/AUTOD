@@ -1,3 +1,4 @@
+- **v5.1422 (2026-11-22) — Mejorar fotos: alivio de cuelgue en lotes.** Se limitan las actualizaciones de la barra de progreso a cambios reales de porcentaje/fase para no saturar la UI con 70+ fotos. Sin PASS visual.
 - **v5.1421 (2026-11-22) — Mejorar fotos: carpeta de destino persistente.** La carpeta de salida elegida se guarda entre sesiones (config/enhance/last_output_dir.txt) y se restaura al abrir. Sin PASS visual.
 - **v5.1420 (2026-11-22) — Mejorar fotos: corrección de acumulación de presets.** La pila ahora conserva y muestra todos los presets añadidos (no solo el último) y se mantiene al cambiar de foto. Sin PASS visual.
 - **v5.1419 (2026-11-22) — Mejorar fotos: pila visual de presets.** Los presets acumulados se muestran como iconos justo debajo de la vista previa (antes/después), con botón para limpiar la pila. Sin PASS visual.
