@@ -1013,11 +1013,18 @@ def wire_events(ui_components):
 
         _last_pct, _last_phase = -1, None
         try:
+            last_heartbeat = time.time()
             while True:
                 try:
                     payload = updates.get(timeout=0.5)
                 except queue.Empty:
-                    yield gr.skip(), gr.skip()
+                    # Heartbeat: yield periodically to keep UI alive
+                    if time.time() - last_heartbeat > 2.0:
+                        last_heartbeat = time.time()
+                        # Small yield to process events
+                        yield gr.skip(), gr.skip()
+                    else:
+                        yield gr.skip(), gr.skip()
                     continue
                 if payload is None:
                     break

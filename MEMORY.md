@@ -1,3 +1,4 @@
+- **v5.1425 (2026-11-22) — Mejorar fotos: heartbeat en lote.** Generador rinde cada 2 s aunque no haya progreso, para evitar bloqueo de UI en pasos largos (recuperación CodeFormer ~16 s). Sin PASS visual.
 - **v5.1424 (2026-11-22) — Mejorar fotos: preview ligero y recuperación responsive.** La vista previa ya no ejecuta recuperación de caras (más rápida) y la recuperación por lotes reporta progreso por cara/cancelable. Sin PASS visual.
 - **v5.1423 (2026-11-22) — Mejorar fotos: progreso por foto.** La barra muestra «Foto X/Y» y la fase actual, evitando la sensación de cuelgue en lotes grandes (Ultra realista puede tardar ~1 min/foto). Sin PASS visual.
 - **v5.1422 (2026-11-22) — Mejorar fotos: alivio de cuelgue en lotes.** Se limitan las actualizaciones de la barra de progreso a cambios reales de porcentaje/fase para no saturar la UI con 70+ fotos. Sin PASS visual.
