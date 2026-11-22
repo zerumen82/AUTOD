@@ -487,6 +487,10 @@ def wire_events(ui_components):
             return None, "_Sube al menos una foto para ver el antes/después._"
         path = _pick_path(paths, selected)
         settings = _settings(*slider_vals)
+        if path is not None and str(path) in _PER_IMAGE_SETTINGS:
+            settings["accumulated_presets"] = list(
+                _PER_IMAGE_SETTINGS[str(path)].get("accumulated_presets", [])
+            )
         if path is not None:
             _PER_IMAGE_SETTINGS[str(path)] = settings
         try:
@@ -659,6 +663,12 @@ def wire_events(ui_components):
             base_settings = _settings(*current_vals)
         else:
             base_settings = _neutral_settings()
+        paths = _queue_paths(files_val, folder_val)
+        path = _pick_path(paths, selected) if paths else None
+        if path is not None and str(path) in _PER_IMAGE_SETTINGS:
+            base_settings["accumulated_presets"] = list(
+                _PER_IMAGE_SETTINGS[str(path)].get("accumulated_presets", [])
+            )
         if name in (base_settings.get("accumulated_presets") or []):
             settings = base_settings
         else:
