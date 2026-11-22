@@ -205,6 +205,15 @@ ENHANCE_CSS = """
     font-size: 11px;
 }
 .enhance-dataframe { font-size: 10px; }
+.enhance-stack-row { align-items: center !important; gap: 8px !important; margin: 6px 0 !important; }
+.enhance-stack {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    background: #141414; border: 1px solid #2a2a2a; border-radius: 8px;
+    padding: 6px 10px; min-height: 34px; color: #cfcfcf; font-size: 11px;
+}
+.enhance-stack-item { display: inline-flex; align-items: center; gap: 4px; background: #1d2a3f; border: 1px solid #31445e; border-radius: 6px; padding: 2px 6px; }
+.enhance-stack-item svg { width: 18px; height: 18px; }
+.enhance-stack-item small { color: #dbeafe; font-size: 10px; }
 .enhance-preset-grid { gap: 6px !important; }
 .img-enhance-container .enhance-preset-button {
     background: #192232 !important;
@@ -329,6 +338,9 @@ def build_enhance_ui():
             btn_preview = gr.Button("Actualizar vista", variant="secondary", scale=1, elem_classes=["btn-secondary"])
         preview_counter = gr.Markdown("_0 / 0 fotos_", elem_classes=["enhance-summary"])
         preview_status = gr.Markdown("_Importa fotos para ver el antes/después._")
+        with gr.Row(elem_classes=["enhance-stack-row"]):
+            preset_stack = gr.HTML("<div class='enhance-stack'>Pila: (ninguna)</div>", elem_classes=["enhance-stack"])
+            btn_clear_stack = gr.Button("Limpiar pila", variant="secondary", size="sm", elem_classes=["btn-secondary"], scale=0)
 
         # ---------- Panel de control (ancho completo, sliders en horizontal) ----------
         with gr.Column(elem_classes=["enhance-panel"]):
@@ -377,9 +389,6 @@ def build_enhance_ui():
                 preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
                 preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
             preset_status = gr.Markdown("")
-            preset_stack = gr.Markdown("_Pila activa: (ninguna)_", elem_classes=["enhance-summary"])
-            with gr.Row():
-                btn_clear_stack = gr.Button("Limpiar pila de presets", variant="secondary", size="sm", elem_classes=["btn-secondary"], scale=0)
 
             with gr.Accordion("Ajustes manuales", open=False, elem_classes=["enhance-settings-accordion"]):
                 with gr.Row(elem_classes=["enhance-grid"], equal_height=True):

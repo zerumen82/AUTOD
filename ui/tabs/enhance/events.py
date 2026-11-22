@@ -23,7 +23,7 @@ from roop.output_paths import get_enhance_output_dir
 
 from . import logic as enh_logic
 from .logic import process_batch, process_single_image
-from .presets import load_presets, save_custom_preset
+from .presets import icon_for_preset, load_presets, save_custom_preset
 
 
 # Presets/ajustes por foto: ruta -> settings dict
@@ -247,6 +247,28 @@ def _merge_settings(base: dict, add: dict) -> dict:
             ap_base.append(n)
     out["accumulated_presets"] = ap_base
     return out
+
+
+
+def _stack_html(names):
+    names = list(names or [])
+    if not names:
+        return "<div class='enhance-stack'>Pila: (ninguna)</div>"
+    parts = []
+    for name in names:
+        data = load_presets().get(name)
+        svg = ""
+        if data is not None:
+            try:
+                svg = icon_for_preset(data).read_text(encoding="utf-8")
+            except Exception:
+                svg = ""
+        parts.append(
+            "<span class='enhance-stack-item' title='{}'>{}<small>{}</small></span>".format(
+                name, svg, name
+            )
+        )
+    return "<div class='enhance-stack'>Pila: " + "".join(parts) + "</div>"
 
 
 def _status_line(name: str, s: dict) -> str:
@@ -652,9 +674,8 @@ def wire_events(ui_components):
         suffix = " · mismo ajuste para todas" if select_all else ""
         pila = settings.get("accumulated_presets") or []
         pila_txt = (" · pila: " + " + ".join(pila)) if pila else ""
-        stack_txt = "_Pila activa: " + (" + ".join(pila) if pila else "(ninguna)") + "_"
         if preset_stack is not None:
-            return updates + (f"Preset «{name}» acumulado{suffix}. {preset.get('description', '')}{pila_txt}", gr.update(value=stack_txt))
+            return updates + (f"Preset «{name}» acumulado{suffix}. {preset.get('description', '')}{pila_txt}", gr.update(value=_stack_html(pila)))
         return updates + (f"Preset «{name}» acumulado{suffix}. {preset.get('description', '')}{pila_txt}",)
 
     preset_apply_btn.click(
@@ -734,9 +755,8 @@ def wire_events(ui_components):
         paths = _queue_paths(files_val, folder_val)
         if paths:
             _PER_IMAGE_SETTINGS[str(_pick_path(paths, selected))] = _neutral_settings()
-        stack_txt = "_Pila activa: (ninguna)_"
         if preset_stack is not None:
-            return values + ("Sliders restablecidos a valores por defecto.", gr.update(value=stack_txt))
+            return values + ("Sliders restablecidos a valores por defecto.", gr.update(value=_stack_html([])))
         return values + ("Sliders restablecidos a valores por defecto.",)
 
     if btn_clear_stack is not None:
