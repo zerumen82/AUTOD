@@ -1,3 +1,4 @@
+- **v5.1426 (2026-11-22) — Mejorar fotos: límite drag&drop + selector nativo.** Drag&drop limitado a 30 archivos con aviso; botón «Buscar fotos en el PC» usa diálogo nativo Windows y pasa rutas sin saturar WebView2. Sin PASS visual.
 - **v5.1425 (2026-11-22) — Mejorar fotos: heartbeat en lote.** Generador rinde cada 2 s aunque no haya progreso, para evitar bloqueo de UI en pasos largos (recuperación CodeFormer ~16 s). Sin PASS visual.
 - **v5.1424 (2026-11-22) — Mejorar fotos: preview ligero y recuperación responsive.** La vista previa ya no ejecuta recuperación de caras (más rápida) y la recuperación por lotes reporta progreso por cara/cancelable. Sin PASS visual.
 - **v5.1423 (2026-11-22) — Mejorar fotos: progreso por foto.** La barra muestra «Foto X/Y» y la fase actual, evitando la sensación de cuelgue en lotes grandes (Ultra realista puede tardar ~1 min/foto). Sin PASS visual.

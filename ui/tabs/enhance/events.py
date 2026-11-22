@@ -877,6 +877,40 @@ def wire_events(ui_components):
     )
 
     # ------------------------------------------------------------------
+    # Botón nativo "Buscar fotos en el PC"
+    # ------------------------------------------------------------------
+    def _browse_files_native():
+        """Diálogo nativo Windows para seleccionar múltiples archivos."""
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            files = filedialog.askopenfilenames(
+                title="Seleccionar fotos (máx. 30 recomendado)",
+                filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp"), ("Todos", "*.*")]
+            )
+            root.destroy()
+        except Exception as exc:
+            return gr.update(), f"Selector no disponible ({exc}). Usa arrastrar o carpeta."
+        if not files:
+            return gr.update(), "Selección cancelada."
+        paths = list(files)
+        if len(paths) > 30:
+            return gr.update(), f"Seleccionadas {len(paths)} fotos; se recomienda máx. 30. Usa 'Carpeta' para lotes grandes."
+        return gr.update(value=paths), f"{len(paths)} fotos seleccionadas nativamente."
+
+    if "btn_browse_files" in ui_components:
+        btn_browse_files = ui_components["btn_browse_files"]
+        btn_browse_files.click(
+            fn=_browse_files_native,
+            inputs=[],
+            outputs=[input_files, preview_status],
+            queue=False,
+        )
+
+    # ------------------------------------------------------------------
     # Elegir / abrir la carpeta de destino
     # ------------------------------------------------------------------
     def browse_output_folder():

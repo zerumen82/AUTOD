@@ -348,7 +348,7 @@ def build_enhance_ui():
             with gr.Tabs():
                 with gr.Tab("Archivos"):
                     input_files = gr.Files(
-                        label="Seleccionar fotos (varias)",
+                        label="Seleccionar fotos (varias) — máx. 30 por arrastrar",
                         file_count="multiple",
                         height=200,
                         elem_classes=["enhance-import-input"],
