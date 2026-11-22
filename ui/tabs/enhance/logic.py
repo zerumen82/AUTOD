@@ -745,12 +745,14 @@ def process_batch(
                     return
                 p = dict(payload or {})
                 phase = str(p.get("phase", ""))
+                detail = str(p.get("detail", ""))
                 if phase not in ("batch",):
                     try:
                         frac = float(p.get("progress", 0.0))
                     except (TypeError, ValueError):
                         frac = 0.0
                     p["progress"] = (idx + max(0.0, min(1.0, frac))) / max(1, total)
+                    p["detail"] = f"{path.name} ({idx + 1}/{total}) · {detail}".strip(" ·")
                 progress_cb(p)
 
             out_img, notes, metrics = process_single_image(path, img_settings, _cb)

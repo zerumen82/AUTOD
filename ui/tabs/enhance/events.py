@@ -1023,6 +1023,8 @@ def wire_events(ui_components):
                 phase = str(payload.get("phase", ""))
                 detail = str(payload.get("detail", ""))
                 pct = int(float(payload.get("progress", 0.0)) * 100)
+                if 0 < pct < 100:
+                    pct = max(1, pct)
                 # Evita inundar la UI con un yield por cada paso; solo repinta
                 # cuando cambia el porcentaje o la fase.
                 if pct == _last_pct and phase == _last_phase:
