@@ -172,6 +172,7 @@ def _render_after(before: Image.Image, settings: dict, return_notes: bool = Fals
     """
     preview_settings = dict(settings)
     preview_settings["upscale_factor"] = 1
+    preview_settings["recover_faces_strength"] = 0
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
         before.save(tf.name, "PNG")
         tmp_path = Path(tf.name)

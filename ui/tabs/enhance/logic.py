@@ -377,7 +377,7 @@ def get_gfpgan_processor():
     return get_face_processor("GFPGAN")
 
 
-def apply_upscale_onnx(image: Image.Image, factor: int) -> Image.Image:
+def apply_upscale_onnx(image: Image.Image, factor: int, progress_cb=None) -> Image.Image:
     """Upscale con Real-ESRGAN por tiles (CUDA). Fallback Lanczos si falla."""
     if factor == 6:
         out = apply_upscale_onnx(image, 4)
@@ -385,6 +385,8 @@ def apply_upscale_onnx(image: Image.Image, factor: int) -> Image.Image:
     subtype = "esrganx2" if factor == 2 else "esrganx4"
     try:
         proc = get_upscale_processor(subtype)
+        if progress_cb:
+            progress_cb({"phase": "upscale", "progress": 0.5, "detail": f"{factor}x"})
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
         out_bgr = proc.Run(bgr)
         out_rgb = cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
@@ -394,7 +396,7 @@ def apply_upscale_onnx(image: Image.Image, factor: int) -> Image.Image:
         return image.resize((image.width * factor, image.height * factor), Image.LANCZOS)
 
 
-def apply_recover_faces_onnx(image: Image.Image, blend: float, model_name: str = "GFPGAN") -> Image.Image:
+def apply_recover_faces_onnx(image: Image.Image, blend: float, model_name: str = "GFPGAN", progress_cb=None, cancel_check=None) -> Image.Image:
     """Recupera caras con el motor elegido (GFPGAN/CodeFormer/RestoreFormer++/GPEN)."""
     try:
         proc = get_face_processor(model_name)
@@ -406,7 +408,13 @@ def apply_recover_faces_onnx(image: Image.Image, blend: float, model_name: str =
         if not faces:
             return image
         out_bgr = bgr.copy()
-        for face in faces:
+        total_faces = len(faces)
+        for fi, face in enumerate(faces):
+            if cancel_check and cancel_check():
+                return image
+            if progress_cb:
+                progress_cb({"phase": "recover_faces", "progress": 0.3 + 0.1 * (fi / max(1, total_faces)),
+                            "detail": f"{model_name} cara {fi + 1}/{total_faces}"})
             x1, y1, x2, y2 = [int(v) for v in face.bbox]
             margin = int(max(x2 - x1, y2 - y1) * 0.3)
             x1, y1 = max(0, x1 - margin), max(0, y1 - margin)
@@ -573,6 +581,7 @@ def process_single_image(
     input_path: Path,
     settings: Dict[str, Any],
     progress_cb: Optional[Callable] = None,
+    cancel_check: Optional[Callable] = None,
 ) -> Tuple[Image.Image, str, Dict[str, float]]:
     """Procesa una imagen completa con la pila de mejoras."""
     start = time.time()
@@ -629,7 +638,7 @@ def process_single_image(
         if progress_cb:
             progress_cb({"phase": "recover_faces", "progress": 0.3, "detail": f"{model_name} blend={rfs}"})
         step_before = current
-        current = apply_recover_faces_onnx(current, rfs, model_name)
+        current = apply_recover_faces_onnx(current, rfs, model_name, progress_cb=progress_cb, cancel_check=cancel_check)
         current, note = quality_gate_check(step_before, current, "recover_faces")
         notes.append(note if note else f"recover_faces {model_name} {rfs:.0%}")
 
@@ -639,7 +648,7 @@ def process_single_image(
         if progress_cb:
             progress_cb({"phase": "upscale", "progress": 0.5, "detail": f"{uf}x"})
         step_before = current
-        current = apply_upscale_onnx(current, uf)
+        current = apply_upscale_onnx(current, uf, progress_cb=progress_cb)
         current, note = quality_gate_check(step_before, current, "upscale")
         notes.append(note if note else f"upscale {uf}x")
 
@@ -755,7 +764,7 @@ def process_batch(
                     p["detail"] = f"{path.name} ({idx + 1}/{total}) · {detail}".strip(" ·")
                 progress_cb(p)
 
-            out_img, notes, metrics = process_single_image(path, img_settings, _cb)
+            out_img, notes, metrics = process_single_image(path, img_settings, _cb, cancel_check=cancel_check)
 
             stem = path.stem
             if apply_filters_to_filename:
