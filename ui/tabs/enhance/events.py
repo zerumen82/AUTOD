@@ -346,12 +346,24 @@ def wire_events(ui_components):
         default = get_enhance_output_dir()
         text = str(raw or "").strip()
         if not text:
+            try:
+                enh_logic.save_persisted_output_dir(default)
+            except Exception:
+                pass
             return default, f"Destino: carpeta por defecto `{default}`."
         try:
             path = Path(os.path.abspath(os.path.expandvars(os.path.expanduser(text))))
             path.mkdir(parents=True, exist_ok=True)
         except (OSError, ValueError) as exc:
+            try:
+                enh_logic.save_persisted_output_dir(default)
+            except Exception:
+                pass
             return default, f"No se pudo usar `{text}` ({exc}). Se mantiene `{default}`."
+        try:
+            enh_logic.save_persisted_output_dir(str(path))
+        except Exception:
+            pass
         return str(path), f"Destino: `{path}`."
 
     # ------------------------------------------------------------------
@@ -882,6 +894,10 @@ def wire_events(ui_components):
             return gr.update(), f"Selector no disponible ({exc}). Escribe la ruta en el campo."
         if not chosen:
             return gr.update(), "Selección de carpeta cancelada."
+        try:
+            enh_logic.save_persisted_output_dir(chosen)
+        except Exception:
+            pass
         return gr.update(value=chosen), f"Carpeta elegida: `{chosen}`."
 
     if btn_browse_folder is not None:
@@ -911,6 +927,24 @@ def wire_events(ui_components):
         queue=False,
     )
 
+
+    # Persistir la carpeta de destino al cambiarla (de sesión en sesión).
+    def _persist_output_path(raw):
+        chosen_dir, _ = _resolve_output_dir(raw)
+        try:
+            enh_logic.save_persisted_output_dir(chosen_dir)
+        except Exception:
+            pass
+        return gr.update(value=chosen_dir)
+
+    if output_path is not None:
+        output_path.change(
+            fn=_persist_output_path,
+            inputs=[output_path],
+            outputs=[output_path],
+            queue=False,
+        )
+
     # ------------------------------------------------------------------
     # Procesar lote completo
     # ------------------------------------------------------------------
@@ -934,6 +968,10 @@ def wire_events(ui_components):
             temperature, grain_strength, grain_size, deband, vibrance, face_model,
         )
         chosen_dir, dest_msg = _resolve_output_dir(output_path)
+        try:
+            enh_logic.save_persisted_output_dir(chosen_dir)
+        except Exception:
+            pass
         output_dir = Path(chosen_dir)
         total = len(paths)
         updates: "queue.Queue" = queue.Queue()

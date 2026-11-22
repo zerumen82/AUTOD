@@ -818,3 +818,31 @@ def process_batch(
                                  "detail": f"Completado {len(results)}/{total}"})
 
     return results
+
+
+# Persistencia de la carpeta de destino entre sesiones.
+_PERSISTED_OUTPUT_FILE = Path(__file__).resolve().parents[3] / "config" / "enhance" / "last_output_dir.txt"
+
+
+def load_persisted_output_dir() -> str:
+    try:
+        text = _PERSISTED_OUTPUT_FILE.read_text(encoding="utf-8").strip()
+        if text:
+            p = Path(text)
+            if p.is_dir():
+                return str(p)
+    except Exception:
+        pass
+    try:
+        from roop.output_paths import get_enhance_output_dir
+        return get_enhance_output_dir()
+    except Exception:
+        return str(Path(__file__).resolve().parents[3] / 'enhance')
+
+
+def save_persisted_output_dir(path: str) -> None:
+    try:
+        _PERSISTED_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PERSISTED_OUTPUT_FILE.write_text(str(path or "").strip(), encoding="utf-8")
+    except Exception:
+        pass

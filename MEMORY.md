@@ -1,3 +1,4 @@
+- **v5.1421 (2026-11-22) — Mejorar fotos: carpeta de destino persistente.** La carpeta de salida elegida se guarda entre sesiones (config/enhance/last_output_dir.txt) y se restaura al abrir. Sin PASS visual.
 - **v5.1420 (2026-11-22) — Mejorar fotos: corrección de acumulación de presets.** La pila ahora conserva y muestra todos los presets añadidos (no solo el último) y se mantiene al cambiar de foto. Sin PASS visual.
 - **v5.1419 (2026-11-22) — Mejorar fotos: pila visual de presets.** Los presets acumulados se muestran como iconos justo debajo de la vista previa (antes/después), con botón para limpiar la pila. Sin PASS visual.
 - **v5.1418 (2026-11-22) — Mejorar fotos: barra de progreso realista.** El progreso ahora se calcula por imagen y por paso (denoise, sharpen, etc.) en lugar de saltos por foto; la UI muestra porcentaje continuo. Sin PASS visual.

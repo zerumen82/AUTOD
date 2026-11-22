@@ -12,7 +12,7 @@ import gradio as gr
 
 from roop.output_paths import get_enhance_output_dir
 
-from .logic import load_enhance_config
+from .logic import load_enhance_config, load_persisted_output_dir
 from .presets import icon_for_preset, load_presets
 from .state import EnhanceSessionState
 
@@ -417,7 +417,7 @@ def build_enhance_ui():
 
             gr.Markdown("Destino", elem_classes=["enhance-section"])
             with gr.Row():
-                output_path = gr.Textbox(label="Carpeta de destino", value=get_enhance_output_dir(), interactive=True, scale=5)
+                output_path = gr.Textbox(label="Carpeta de destino", value=load_persisted_output_dir(), interactive=True, scale=5)
                 btn_browse_folder = gr.Button("Examinar…", variant="secondary", elem_classes=["btn-secondary"], scale=1)
                 btn_open_folder = gr.Button("Abrir carpeta", variant="secondary", elem_classes=["btn-open"], scale=1)
                 format_dropdown = gr.Dropdown(choices=["png", "jpg", "jpeg"], value=config.get("export", {}).get("default_format", "png"), label="Formato", scale=1)
