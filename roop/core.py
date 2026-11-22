@@ -1,6 +1,7 @@
 import sys
 import os
 import socket
+import tempfile
 import threading
 import time
 import requests
@@ -93,7 +94,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1397 (2026-11-18)"
+APP_VERSION = "v5.1417 (2026-11-22)"
 
 
 def _active_server_path():
@@ -474,7 +475,7 @@ def run():
                 print(f"[DEBUG] Error forzando icono: {e}")
 
         window = webview.create_window(
-            "AutoAuto v5.1397",
+            "AutoAuto v5.1417",
             url=server_url,
             width=1400,
             height=900
@@ -486,7 +487,15 @@ def run():
         # atexit cubre las salidas que no pasan por la X (Ctrl+C, excepción).
         from roop.session_shutdown import register_shutdown_hook, shutdown_session
         register_shutdown_hook()
-        webview.start(debug=False, func=None)
+        # WebView2 comparte el proceso del navegador entre ventanas que usan
+        # el mismo user-data-dir. Si un renderer queda girando al 100 %, las
+        # ventanas SIGUIENTES heredan ese proceso atascado (causa confirmada
+        # del bloqueo al subir fotos). Un directorio único por lanzamiento
+        # fuerza un proceso de navegador nuevo y limpio.
+        webview_storage = os.path.join(
+            tempfile.gettempdir(), f"autoauto_webview_{os.getpid()}"
+        )
+        webview.start(debug=False, func=None, storage_path=webview_storage)
         
         report = shutdown_session("ventana-cerrada")
         _comfyui_report = report.get("comfyui") or {}
@@ -564,17 +573,27 @@ def batch_process_regular(
     batch_has_photos = any(not (util.is_video(e.filename) or e.filename.lower().endswith('.gif')) for e in list_files_process)
     if batch_has_photos:
         try:
-            os.makedirs(r'D:\PROJECTS\AUTOAUTO\logs', exist_ok=True)
+            log_dir = os.path.dirname(_active_server_path())
+            os.makedirs(log_dir, exist_ok=True)
             _log_name = f"process_{datetime.now():%Y%m%d_%H%M%S}.log"
-            _log_path = os.path.join(r'D:\PROJECTS\AUTOAUTO\logs', _log_name)
+            _log_path = os.path.join(log_dir, _log_name)
             _batch_log_file = open(_log_path, 'w', encoding='utf-8')
-            _batch_log_file.write("=== AUTO-AUTO v5.1190 — BATCH FOTOS ===\n")
+            _batch_log_file.write(f"=== AUTO-AUTO {APP_VERSION} — BATCH FOTOS ===\n")
             _batch_log_file.write(f"Start: {datetime.now()}\n")
             _batch_log_file.write(f"PID: {os.getpid()}\n")
             _batch_log_file.write(f"Files: {total_files}\n\n")
             _batch_log_file.flush()
         except Exception:
             _batch_log_file = None
+    if _batch_log_file:
+        try:
+            from roop.faceswap_config import get_faceswap_config
+
+            ProcessMgr._prune_process_logs(
+                log_dir, _log_path, get_faceswap_config()['process_log_retention_days'],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            print(f"[LOG] Retención no disponible; no se borran logs: {exc}")
 
     # Redirect stdout to tee into batch log
     _orig_stdout = sys.stdout

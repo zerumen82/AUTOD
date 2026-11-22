@@ -28,6 +28,8 @@ from .presets import load_presets, save_custom_preset
 
 # Presets/ajustes por foto: ruta -> settings dict
 _PER_IMAGE_SETTINGS: dict = {}
+# Cola resuelta por refresh_queue; el .then posterior no recibe los FileData.
+_LAST_QUEUE_PATHS: list = []
 
 
 # Vista previa: el original se guarda ya escalado y el resultado se acota para
@@ -64,10 +66,20 @@ def _normalize_files(raw) -> list:
 
 
 def _queue_paths(files_val, folder_val) -> list:
-    """Rutas de la cola, sin duplicados (misma foto en archivos y carpeta)."""
+    """Rutas de la cola: sin duplicados y solo imágenes (modo carpeta).
+
+    El selector de carpeta de Gradio entrega TODOS los archivos del directorio;
+    el registro de formatos de PIL decide qué es imagen sin listas escritas a
+    mano. Un archivo sin extensión se conserva para que el procesador lo juzgue.
+    """
+    image_exts = {ext.lower() for ext in Image.registered_extensions()}
     out = []
     seen = set()
-    for p in _normalize_files(files_val) + _normalize_files(folder_val):
+    sources = _normalize_files(files_val) + _normalize_files(folder_val)
+    for p in sources:
+        suffix = Path(p).suffix.lower()
+        if suffix and suffix not in image_exts:
+            continue
         key = os.path.normcase(os.path.abspath(p))
         if key in seen:
             continue
@@ -148,6 +160,7 @@ def _settings(denoise, sharpen, recover, upscale, exposure, shadow, highlight,
         "deband_strength": float(deband) if deband is not None else 0.0,
         "vibrance": float(vibrance) if vibrance is not None else 100.0,
         "face_model": str(face_model or "GFPGAN"),
+        "accumulated_presets": [],
     }
 
 
@@ -175,6 +188,67 @@ def _render_after(before: Image.Image, settings: dict, return_notes: bool = Fals
     return after
 
 
+def _neutral_settings() -> dict:
+    d = enh_logic.load_enhance_config().get("default_slider_values", {})
+    recover = d.get("recover_faces_strength", 0.8)
+    recover_pct = (recover * 100) if isinstance(recover, (int, float)) and recover <= 1.0 else float(recover)
+    s = _settings(
+        float(d.get("denoise_strength", 0)),
+        float(d.get("sharpen_strength", 0)),
+        recover_pct,
+        int(d.get("upscale_factor", 1)),
+        float(d.get("exposure", 1.0)),
+        float(d.get("shadow", 1.0)),
+        float(d.get("highlight", 1.0)),
+        float(d.get("temperature", 50)),
+        float(d.get("grain_strength", 0)),
+        float(d.get("grain_size", 10)),
+        deband=float(d.get("deband_strength", 0)),
+        vibrance=float(d.get("vibrance", 100)),
+        face_model=str(d.get("face_model", "GFPGAN")),
+    )
+    s["accumulated_presets"] = []
+    return s
+
+
+def _merge_settings(base: dict, add: dict) -> dict:
+    out = dict(base)
+    out.setdefault("accumulated_presets", list(base.get("accumulated_presets", [])))
+    limits = enh_logic.load_enhance_config().get("control_limits", {})
+
+    def _clamp(key, value):
+        rule = limits.get(key, {})
+        if "choices" in rule:
+            return value if value in rule["choices"] else base.get(key, value)
+        lo = float(rule.get("minimum", 0))
+        hi = float(rule.get("maximum", 100))
+        return float(min(hi, max(lo, value)))
+
+    for key in ("denoise_strength", "sharpen_strength", "deband_strength", "grain_strength"):
+        out[key] = _clamp(key, float(base.get(key, 0)) + float(add.get(key, 0)))
+    out["recover_faces_strength"] = min(
+        1.0, float(base.get("recover_faces_strength", 0)) + float(add.get("recover_faces_strength", 0))
+    )
+    out["upscale_factor"] = max(int(base.get("upscale_factor", 1)), int(add.get("upscale_factor", 1)))
+    for key in ("exposure", "shadow", "highlight"):
+        out[key] = _clamp(key, float(base.get(key, 1.0)) * float(add.get(key, 1.0)))
+    if float(add.get("temperature", 50)) != 50:
+        out["temperature"] = _clamp("temperature", float(add.get("temperature", 50)))
+    out["grain_size"] = max(float(base.get("grain_size", 10)), float(add.get("grain_size", 10)))
+    new_factor = (1.0 + (float(base.get("vibrance", 100)) - 100.0) / 100.0) * (
+        1.0 + (float(add.get("vibrance", 100)) - 100.0) / 100.0
+    )
+    out["vibrance"] = _clamp("vibrance", 100.0 + (new_factor - 1.0) * 100.0)
+    if str(add.get("face_model", "GFPGAN")) != "GFPGAN":
+        out["face_model"] = str(add.get("face_model", base.get("face_model", "GFPGAN")))
+    ap_base = list(base.get("accumulated_presets", []))
+    for n in add.get("accumulated_presets", []):
+        if n not in ap_base:
+            ap_base.append(n)
+    out["accumulated_presets"] = ap_base
+    return out
+
+
 def _status_line(name: str, s: dict) -> str:
     return (
         f"Vista previa: **{name}** · denoise {float(s['denoise_strength']):g}"
@@ -189,6 +263,7 @@ def wire_events(ui_components):
 
     input_files = ui_components["input_files"]
     input_folder = ui_components["input_folder"]
+    select_all = ui_components["select_all"]
     btn_load_sample = ui_components["btn_load_sample"]
     queue_summary = ui_components["queue_summary"]
     preview_before = ui_components["preview_before"]
@@ -217,8 +292,12 @@ def wire_events(ui_components):
     preset_save_name = ui_components["preset_save_name"]
     preset_save_btn = ui_components["preset_save_btn"]
     preset_status = ui_components["preset_status"]
+    preset_stack = ui_components.get("preset_stack")
+    btn_clear_stack = ui_components.get("btn_clear_stack")
     preset_buttons = ui_components["preset_buttons"]
     auto_mode = ui_components["auto_mode"]
+    output_path = ui_components["output_path"]
+    btn_browse_folder = ui_components.get("btn_browse_folder")
     btn_open_folder = ui_components["btn_open_folder"]
     folder_status = ui_components["folder_status"]
     format_dropdown = ui_components["format_dropdown"]
@@ -235,6 +314,24 @@ def wire_events(ui_components):
         deband_slider, vibrance_slider,
     ]
 
+    def _apply_settings_to_all(paths, settings):
+        """«Seleccionar todas»: la misma receta para cada foto de la cola."""
+        for p in paths:
+            _PER_IMAGE_SETTINGS[str(p)] = dict(settings)
+
+    def _resolve_output_dir(raw):
+        """Carpeta de destino elegida; se crea si falta y usa enhance/ si falla."""
+        default = get_enhance_output_dir()
+        text = str(raw or "").strip()
+        if not text:
+            return default, f"Destino: carpeta por defecto `{default}`."
+        try:
+            path = Path(os.path.abspath(os.path.expandvars(os.path.expanduser(text))))
+            path.mkdir(parents=True, exist_ok=True)
+        except (OSError, ValueError) as exc:
+            return default, f"No se pudo usar `{text}` ({exc}). Se mantiene `{default}`."
+        return str(path), f"Destino: `{path}`."
+
     # ------------------------------------------------------------------
     # Cola: cuando llegan archivos (sueltos o carpeta), llenar la tabla y
     # seleccionar la PRIMERA foto para la vista previa.
@@ -247,8 +344,10 @@ def wire_events(ui_components):
         )
 
     def refresh_queue(files_val, folder_val):
+        global _LAST_QUEUE_PATHS
         _PER_IMAGE_SETTINGS.clear()
         paths = _queue_paths(files_val, folder_val)
+        _LAST_QUEUE_PATHS = paths
         if not paths:
             return (
                 "_Sin fotos en cola._",
@@ -259,9 +358,15 @@ def wire_events(ui_components):
             )
         summary = f"**{len(paths)} foto(s) en cola**"
         choices = [(f"{index}. {Path(p).name}", p) for index, p in enumerate(paths, start=1)]
+        max_visible = int(
+            enh_logic.load_enhance_config().get("large_batch", {}).get("max_visible_choices", 100)
+        )
+        visible = choices[:max_visible]
+        if len(choices) > max_visible:
+            summary += f" · desplegable: {max_visible} de {len(choices)} (usa Anterior/Siguiente)"
         return (
             summary,
-            gr.update(choices=choices, value=paths[0]),
+            gr.update(choices=visible, value=paths[0]),
             f"Generando vista previa de {len(paths)} foto(s)…",
             _photo_position(paths, paths[0]),
             *_nav_updates(paths, paths[0]),
@@ -311,6 +416,49 @@ def wire_events(ui_components):
         except Exception as e:
             return (None, None, f"Vista previa falló: {e}", _photo_position(paths, path), *_nav_updates(paths, path)) + tuple(gr.update() for _ in range(_N_SLIDERS))
 
+    def make_pair_on_import(selected, *slider_vals):
+        """Tras importar, omite el render en lotes grandes (congela pywebview).
+
+        Las rutas ya las resolvió refresh_queue en el servidor: el navegador NO
+        reenvía los cientos de FileData del drag&drop a este segundo evento.
+        """
+        paths = _LAST_QUEUE_PATHS
+        limit = int(
+            enh_logic.load_enhance_config().get("large_batch", {}).get("auto_preview_max_files", 60)
+        )
+        if len(paths) > limit:
+            first = paths[0] if paths else None
+            # En lotes grandes se renderiza SOLO la primera foto: el usuario
+            # ve el antes/después, pero no se procesan las 400 ni se repintan
+            # los 13 sliders (gr.skip).
+            if first:
+                try:
+                    before = _load_before(Path(first))
+                    after, notes = _render_after(
+                        before, _settings(*slider_vals), return_notes=True
+                    )
+                    message = (
+                        f"**{len(paths)} fotos en cola.** Vista previa de la primera: "
+                        f"`{Path(first).name}`. Elige un preset y pulsa PROCESAR LOTE."
+                    )
+                    if notes:
+                        message = f"{message}\n\n{notes}"
+                    return (
+                        before, after, message,
+                        _photo_position(paths, first),
+                        *_nav_updates(paths, first),
+                    ) + tuple(gr.skip() for _ in range(_N_SLIDERS))
+                except Exception as exc:
+                    message = f"Vista previa no disponible: {exc}"
+            else:
+                message = "No hay fotos en cola."
+            return (
+                gr.skip(), gr.skip(), message,
+                _photo_position(paths, first),
+                *_nav_updates(paths, first),
+            ) + tuple(gr.skip() for _ in range(_N_SLIDERS))
+        return make_pair([selected] if selected else paths, None, selected, *slider_vals)
+
     def make_after(files_val, folder_val, selected, *slider_vals):
         paths = _queue_paths(files_val, folder_val)
         if not paths:
@@ -333,18 +481,26 @@ def wire_events(ui_components):
 
     # Gradio 6.x soporta concurrency_limit y trigger_mode: se re-añaden para
     # evitar renders encolados al mover sliders (always_last = solo corre el último).
-    for comp in (input_files, input_folder):
-        event = comp.change(
-            fn=refresh_queue,
-            inputs=[input_files, input_folder],
-            outputs=[queue_summary, preview_photo, preview_status, preview_counter, btn_prev_photo, btn_next_photo],
-            queue=False,
-        )
-        _mp_outputs = [preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo, denoise_slider, sharpen_slider, recover_slider, upscale_factor, exposure_slider, shadow_slider, highlight_slider, temperature_slider, grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider, face_model]
+    # Igual que FaceSwap: `upload` dispara una sola vez al terminar la subida.
+    _queue_inputs = [input_files, input_folder]
+    _refresh_outputs = [
+        queue_summary, preview_photo, preview_status, preview_counter,
+        btn_prev_photo, btn_next_photo,
+    ]
+    _mp_outputs = [preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo, denoise_slider, sharpen_slider, recover_slider, upscale_factor, exposure_slider, shadow_slider, highlight_slider, temperature_slider, grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider, face_model]
 
+    for comp in (input_files, input_folder):
+        event = comp.upload(
+            fn=refresh_queue,
+            inputs=_queue_inputs,
+            outputs=_refresh_outputs,
+            show_progress="full",
+        )
+        # El segundo evento solo recibe rutas (State), NO los FileData del
+        # drag&drop: el navegador no vuelve a procesar los 400 archivos.
         event.then(
-            fn=make_pair,
-            inputs=pair_inputs,
+            fn=make_pair_on_import,
+            inputs=[preview_photo] + slider_inputs + [face_model],
             outputs=_mp_outputs,
             queue=True,
             concurrency_limit=1,
@@ -422,6 +578,26 @@ def wire_events(ui_components):
         show_progress="minimal",
     )
 
+    # «Seleccionar todas»: la receta actual pasa a ser la de todas las fotos.
+    def on_select_all_changed(enabled, files_val, folder_val, *slider_vals):
+        paths = _queue_paths(files_val, folder_val)
+        if not paths:
+            return gr.update()
+        settings = _settings(*slider_vals)
+        if enabled:
+            _apply_settings_to_all(paths, settings)
+            return gr.update(
+                value=f"**Seleccionar todas** activo: el ajuste actual se aplicará a las {len(paths)} fotos."
+            )
+        return gr.update(value="**Seleccionar todas** desactivado: cada foto conserva su ajuste.")
+
+    select_all.change(
+        fn=on_select_all_changed,
+        inputs=[select_all, input_files, input_folder] + slider_inputs + [face_model],
+        outputs=[preset_status],
+        queue=False,
+    )
+
     # ------------------------------------------------------------------
     # Cargar fotos de ejemplo (evita un botón sin función)
     # ------------------------------------------------------------------
@@ -442,46 +618,61 @@ def wire_events(ui_components):
     # ------------------------------------------------------------------
     # Aplicar preset de fábrica a los sliders
     # ------------------------------------------------------------------
-    def apply_preset(name: str, files_val, folder_val, selected):
+    def apply_preset(name: str, files_val, folder_val, selected, select_all=False, *current_vals):
         if not name:
             return tuple(gr.update() for _ in range(_N_SLIDERS)) + ("Selecciona uno de tus presets guardados.",)
         preset = load_presets().get(name)
         if preset is None:
             return tuple(gr.update() for _ in range(_N_SLIDERS)) + (f"Preset desconocido: {name}",)
         vals = preset["sliders"]
-        settings = _settings(
+        preset_settings = _settings(
             vals["denoise_strength"], vals["sharpen_strength"],
             float(vals["recover_faces_strength"]) * 100.0, vals["upscale_factor"],
             vals["exposure"], vals["shadow"], vals["highlight"], vals["temperature"],
             vals["grain_strength"], vals["grain_size"], vals["deband_strength"],
             vals["vibrance"], vals["face_model"],
         )
+        preset_settings["accumulated_presets"] = [name]
+        if current_vals:
+            base_settings = _settings(*current_vals)
+        else:
+            base_settings = _neutral_settings()
+        if name in (base_settings.get("accumulated_presets") or []):
+            settings = base_settings
+        else:
+            settings = _merge_settings(base_settings, preset_settings)
         paths = _queue_paths(files_val, folder_val)
         path = _pick_path(paths, selected) if paths else None
-        if path is not None:
-            _PER_IMAGE_SETTINGS[str(path)] = settings
+        if paths:
+            if select_all:
+                _apply_settings_to_all(paths, settings)
+            elif path is not None:
+                _PER_IMAGE_SETTINGS[str(path)] = settings
         updates = _slider_updates_from_settings(settings)
-        return updates + (f"Preset «{name}» aplicado. {preset.get('description', '')}",)
+        suffix = " · mismo ajuste para todas" if select_all else ""
+        pila = settings.get("accumulated_presets") or []
+        pila_txt = (" · pila: " + " + ".join(pila)) if pila else ""
+        stack_txt = "_Pila activa: " + (" + ".join(pila) if pila else "(ninguna)") + "_"
+        if preset_stack is not None:
+            return updates + (f"Preset «{name}» acumulado{suffix}. {preset.get('description', '')}{pila_txt}", gr.update(value=stack_txt))
+        return updates + (f"Preset «{name}» acumulado{suffix}. {preset.get('description', '')}{pila_txt}",)
 
     preset_apply_btn.click(
         fn=apply_preset,
-        inputs=[preset_dropdown, input_files, input_folder, preview_photo],
-        outputs=[
-            denoise_slider, sharpen_slider, recover_slider, upscale_factor,
-            exposure_slider, shadow_slider, highlight_slider, temperature_slider,
-            grain_strength_slider, grain_size_slider,
-            deband_slider, vibrance_slider, face_model, preset_status,
-        ],
+        inputs=[preset_dropdown, input_files, input_folder, preview_photo, select_all] + slider_inputs + [face_model],
+        outputs=(
+            [denoise_slider, sharpen_slider, recover_slider, upscale_factor,
+             exposure_slider, shadow_slider, highlight_slider, temperature_slider,
+             grain_strength_slider, grain_size_slider,
+             deband_slider, vibrance_slider, face_model, preset_status]
+            + ([preset_stack] if preset_stack is not None else [])
+        ),
         queue=False,
     ).then(
-        fn=make_pair,
+        # Solo se repinta «DESPUÉS»: el «ANTES» es la foto original y no cambia.
+        fn=make_after,
         inputs=pair_inputs,
-        outputs=[preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo] + [
-            denoise_slider, sharpen_slider, recover_slider, upscale_factor,
-            exposure_slider, shadow_slider, highlight_slider, temperature_slider,
-            grain_strength_slider, grain_size_slider,
-            deband_slider, vibrance_slider, face_model,
-        ],
+        outputs=[preview_after, preview_status],
         queue=True,
         concurrency_limit=1,
         trigger_mode="always_last",
@@ -489,8 +680,8 @@ def wire_events(ui_components):
     )
 
     def _button_handler(name):
-        def select_and_apply(files_val, folder_val, selected):
-            return apply_preset(name, files_val, folder_val, selected)
+        def select_and_apply(files_val, folder_val, selected, select_all_value, *slider_vals):
+            return apply_preset(name, files_val, folder_val, selected, select_all_value, *slider_vals)
         return select_and_apply
 
     preset_outputs = [
@@ -499,17 +690,20 @@ def wire_events(ui_components):
         grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider,
         face_model, preset_status,
     ]
+    if preset_stack is not None:
+        preset_outputs = preset_outputs + [preset_stack]
     pair_outputs = [preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo] + slider_inputs + [face_model]
     for name, button in preset_buttons.items():
         button.click(
             fn=_button_handler(name),
-            inputs=[input_files, input_folder, preview_photo],
+            inputs=[input_files, input_folder, preview_photo, select_all] + slider_inputs + [face_model],
             outputs=preset_outputs,
             queue=False,
         ).then(
-            fn=make_pair,
+            # Al pulsar un preset solo cambia el preview de «cómo quedará».
+            fn=make_after,
             inputs=pair_inputs,
-            outputs=pair_outputs,
+            outputs=[preview_after, preview_status],
             queue=True,
             concurrency_limit=1,
             trigger_mode="always_last",
@@ -539,20 +733,46 @@ def wire_events(ui_components):
         )
         paths = _queue_paths(files_val, folder_val)
         if paths:
-            _PER_IMAGE_SETTINGS[str(_pick_path(paths, selected))] = _settings(*values)
+            _PER_IMAGE_SETTINGS[str(_pick_path(paths, selected))] = _neutral_settings()
+        stack_txt = "_Pila activa: (ninguna)_"
+        if preset_stack is not None:
+            return values + ("Sliders restablecidos a valores por defecto.", gr.update(value=stack_txt))
         return values + ("Sliders restablecidos a valores por defecto.",)
+
+    if btn_clear_stack is not None:
+        btn_clear_stack.click(
+            fn=reset_sliders,
+            inputs=[input_files, input_folder, preview_photo],
+            outputs=(
+                [denoise_slider, sharpen_slider, recover_slider, upscale_factor,
+                 exposure_slider, shadow_slider, highlight_slider, temperature_slider,
+                 grain_strength_slider, grain_size_slider,
+                 deband_slider, vibrance_slider, face_model, preset_status]
+                + ([preset_stack] if preset_stack is not None else [])
+            ),
+            queue=False,
+        ).then(
+            fn=make_pair,
+            inputs=pair_inputs,
+            outputs=pair_outputs,
+            queue=True,
+            concurrency_limit=1,
+            trigger_mode="always_last",
+            show_progress="minimal",
+        )
 
     btn_reset_sliders = ui_components.get("btn_reset_sliders")
     if btn_reset_sliders is not None:
         btn_reset_sliders.click(
             fn=reset_sliders,
             inputs=[input_files, input_folder, preview_photo],
-            outputs=[
-                denoise_slider, sharpen_slider, recover_slider, upscale_factor,
-                exposure_slider, shadow_slider, highlight_slider, temperature_slider,
-                grain_strength_slider, grain_size_slider,
-                deband_slider, vibrance_slider, face_model, preset_status,
-            ],
+            outputs=(
+                [denoise_slider, sharpen_slider, recover_slider, upscale_factor,
+                 exposure_slider, shadow_slider, highlight_slider, temperature_slider,
+                 grain_strength_slider, grain_size_slider,
+                 deband_slider, vibrance_slider, face_model, preset_status]
+                + ([preset_stack] if preset_stack is not None else [])
+            ),
             queue=False,
         ).then(
             fn=make_pair,
@@ -614,23 +834,49 @@ def wire_events(ui_components):
     )
 
     # ------------------------------------------------------------------
-    # Abrir la carpeta de destino en el explorador
+    # Elegir / abrir la carpeta de destino
     # ------------------------------------------------------------------
-    def open_output_folder():
-        path = get_enhance_output_dir()
+    def browse_output_folder():
+        """Diálogo nativo de Windows, mismo patrón que el selector de FaceSwap."""
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            chosen = filedialog.askdirectory(
+                title="Selecciona la carpeta de destino de las fotos mejoradas"
+            )
+            root.destroy()
+        except Exception as exc:
+            return gr.update(), f"Selector no disponible ({exc}). Escribe la ruta en el campo."
+        if not chosen:
+            return gr.update(), "Selección de carpeta cancelada."
+        return gr.update(value=chosen), f"Carpeta elegida: `{chosen}`."
+
+    if btn_browse_folder is not None:
+        btn_browse_folder.click(
+            fn=browse_output_folder,
+            inputs=[],
+            outputs=[output_path, folder_status],
+            queue=False,
+        )
+
+    def open_output_folder(raw_path):
+        target, _ = _resolve_output_dir(raw_path)
         try:
             if os.name == "nt":
-                os.startfile(path)
+                os.startfile(target)
             else:
-                subprocess.Popen(["xdg-open", path])
-            msg = f"Carpeta abierta: {path}"
+                subprocess.Popen(["xdg-open", target])
+            msg = f"Carpeta abierta: {target}"
         except Exception as e:
             msg = f"No se pudo abrir la carpeta: {e}"
         return msg
 
     btn_open_folder.click(
         fn=open_output_folder,
-        inputs=[],
+        inputs=[output_path],
         outputs=folder_status,
         queue=False,
     )
@@ -643,6 +889,7 @@ def wire_events(ui_components):
         denoise, sharpen, recover, upscale, exposure, shadow, highlight,
         temperature, grain_strength, grain_size, deband, vibrance, face_model,
         export_format, apply_filters_to_filename, auto_mode,
+        select_all=False, output_path=None,
     ):
         paths = _queue_paths(files, folder)
         if not paths:
@@ -656,7 +903,8 @@ def wire_events(ui_components):
             denoise, sharpen, recover, upscale, exposure, shadow, highlight,
             temperature, grain_strength, grain_size, deband, vibrance, face_model,
         )
-        output_dir = Path(get_enhance_output_dir())
+        chosen_dir, dest_msg = _resolve_output_dir(output_path)
+        output_dir = Path(chosen_dir)
         total = len(paths)
         updates: "queue.Queue" = queue.Queue()
         result: dict = {"results": None, "error": None}
@@ -675,8 +923,11 @@ def wire_events(ui_components):
                     allow_overwrite=True,
                     progress_cb=progress_cb,
                     cancel_check=enh_logic.is_cancel_requested,
-                    autopilot=bool(auto_mode),
-                    settings_by_path={str(p): _PER_IMAGE_SETTINGS.get(str(p)) for p in paths},
+                    # «Seleccionar todas» gana: una sola receta para todo el lote.
+                    autopilot=bool(auto_mode) and not bool(select_all),
+                    settings_by_path=None if select_all else {
+                        str(p): _PER_IMAGE_SETTINGS.get(str(p)) for p in paths
+                    },
                 )
             except Exception as exc:
                 result["error"] = exc
@@ -737,8 +988,12 @@ def wire_events(ui_components):
         msg = f"Procesados {ok_count}/{len(results)} archivos en {elapsed:.1f} s."
         summary = (
             f"**{ok_count}/{len(results)} fotos procesadas** en {elapsed:.1f} s"
-            f" · salida: `{output_dir.name}/`"
+            f" · salida: `{output_dir}`"
         )
+        if "Se mantiene" in dest_msg:
+            summary += f" · aviso: {dest_msg}"
+        if select_all:
+            summary += " · mismo ajuste para todas"
         if reverted:
             summary += f" · {reverted} foto(s) con pasos revertidos"
         if errors:
@@ -753,7 +1008,7 @@ def wire_events(ui_components):
             exposure_slider, shadow_slider, highlight_slider, temperature_slider,
             grain_strength_slider, grain_size_slider,
             deband_slider, vibrance_slider, face_model,
-            format_dropdown, apply_filters_ck, auto_mode,
+            format_dropdown, apply_filters_ck, auto_mode, select_all, output_path,
         ],
         outputs=[status_msg, result_summary],
         queue=True,

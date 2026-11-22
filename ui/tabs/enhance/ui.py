@@ -227,6 +227,12 @@ ENHANCE_CSS = """
     overflow-x: hidden !important;
 }
 .img-enhance-container .enhance-settings-accordion > * { min-width: 0 !important; }
+/* Lotes grandes: la lista sigue visible pero el navegador no maqueta las
+   filas fuera del area visible (content-visibility, soportado por WebView2). */
+.img-enhance-container .enhance-import-input .file-preview tr {
+    content-visibility: auto;
+    contain-intrinsic-size: 28px;
+}
 """
 
 
@@ -315,6 +321,9 @@ def build_enhance_ui():
                 label="Foto en vista previa",
                 interactive=True,
                 scale=4,
+                # Con lotes grandes el desplegable se limita; la navegación
+                # Anterior/Siguiente debe poder seleccionar rutas fuera de él.
+                allow_custom_value=True,
             )
             btn_next_photo = gr.Button("Siguiente", variant="secondary", scale=1, min_width=90, interactive=False, elem_classes=["btn-secondary"])
             btn_preview = gr.Button("Actualizar vista", variant="secondary", scale=1, elem_classes=["btn-secondary"])
@@ -328,16 +337,23 @@ def build_enhance_ui():
                 with gr.Tab("Archivos"):
                     input_files = gr.Files(
                         label="Seleccionar fotos (varias)",
-                        file_types=["image"],
-                        height=90,
+                        file_count="multiple",
+                        height=200,
+                        elem_classes=["enhance-import-input"],
                     )
                 with gr.Tab("Carpeta"):
                     input_folder = gr.File(
                         label="Carpeta entera",
                         file_count="directory",
                         file_types=["image"],
-                        height=90,
+                        height=200,
+                        elem_classes=["enhance-import-input"],
                     )
+            select_all = gr.Checkbox(
+                label="Seleccionar todas (mismo preset/ajustes para todas las fotos)",
+                value=False,
+                info="Si está activo, el preset o ajuste actual se aplica igual a todas las fotos del lote.",
+            )
             with gr.Row():
                 with gr.Column(scale=4, min_width=200):
                     queue_summary = gr.Markdown("_Sin fotos en cola._", elem_classes=["enhance-summary"])
@@ -361,6 +377,9 @@ def build_enhance_ui():
                 preset_save_name = gr.Textbox(label="Guardar como…", placeholder="Mi preset", scale=2)
                 preset_save_btn = gr.Button("Guardar", variant="secondary", elem_classes=["btn-save"], scale=1)
             preset_status = gr.Markdown("")
+            preset_stack = gr.Markdown("_Pila activa: (ninguna)_", elem_classes=["enhance-summary"])
+            with gr.Row():
+                btn_clear_stack = gr.Button("Limpiar pila de presets", variant="secondary", size="sm", elem_classes=["btn-secondary"], scale=0)
 
             with gr.Accordion("Ajustes manuales", open=False, elem_classes=["enhance-settings-accordion"]):
                 with gr.Row(elem_classes=["enhance-grid"], equal_height=True):
@@ -389,7 +408,8 @@ def build_enhance_ui():
 
             gr.Markdown("Destino", elem_classes=["enhance-section"])
             with gr.Row():
-                output_path = gr.Textbox(label="Carpeta de destino", value=get_enhance_output_dir(), interactive=False, scale=5)
+                output_path = gr.Textbox(label="Carpeta de destino", value=get_enhance_output_dir(), interactive=True, scale=5)
+                btn_browse_folder = gr.Button("Examinar…", variant="secondary", elem_classes=["btn-secondary"], scale=1)
                 btn_open_folder = gr.Button("Abrir carpeta", variant="secondary", elem_classes=["btn-open"], scale=1)
                 format_dropdown = gr.Dropdown(choices=["png", "jpg", "jpeg"], value=config.get("export", {}).get("default_format", "png"), label="Formato", scale=1)
             folder_status = gr.Markdown("", elem_classes=["enhance-summary"])
@@ -409,6 +429,7 @@ def build_enhance_ui():
         "session_state": session_state,
         "input_files": input_files,
         "input_folder": input_folder,
+        "select_all": select_all,
         "btn_load_sample": btn_load_sample,
         "queue_summary": queue_summary,
         "preview_before": preview_before,
@@ -438,9 +459,12 @@ def build_enhance_ui():
         "preset_save_name": preset_save_name,
         "preset_save_btn": preset_save_btn,
         "preset_status": preset_status,
+        "preset_stack": preset_stack,
+        "btn_clear_stack": btn_clear_stack,
         "preset_buttons": preset_buttons,
         "auto_mode": auto_mode,
         "output_path": output_path,
+        "btn_browse_folder": btn_browse_folder,
         "btn_open_folder": btn_open_folder,
         "folder_status": folder_status,
         "format_dropdown": format_dropdown,
