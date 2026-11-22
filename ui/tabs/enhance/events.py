@@ -953,11 +953,8 @@ def wire_events(ui_components):
                     break
                 phase = str(payload.get("phase", ""))
                 detail = str(payload.get("detail", ""))
-                if phase == "batch":
-                    pct = int(float(payload.get("progress", 0.0)) * 100)
-                    status = f"<div class='enhance-status'>Procesando {pct}% · {detail}</div>"
-                else:
-                    status = f"<div class='enhance-status'>{phase}: {detail}</div>"
+                pct = int(float(payload.get("progress", 0.0)) * 100)
+                status = f"<div class='enhance-status'>Procesando {pct}% · {phase}: {detail}</div>"
                 yield status, gr.skip()
         finally:
             if result["results"] is None:

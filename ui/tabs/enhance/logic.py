@@ -16,10 +16,16 @@ import zlib
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
+
+try:
+    from PIL import ImageCms
+except ImportError:  # littlecms no disponible: se guarda el PPP igualmente
+    ImageCms = None
 
 import roop.globals
 from roop.processors.Frame_Upscale import Frame_Upscale
@@ -64,6 +70,39 @@ def load_enhance_config() -> Dict[str, Any]:
             print(f"[Enhance] No se pudo cargar config: {e}")
             _ENHANCE_CONFIG = {}
     return _ENHANCE_CONFIG
+
+
+# ---------------------------------------------------------------------------
+# Exportación: perfil de color y resolución desde configuración (no hardcode)
+# ---------------------------------------------------------------------------
+@lru_cache(maxsize=1)
+def _srgb_icc_profile() -> bytes:
+    """Perfil ICC sRGB creado en local (sin ficheros externos ni red)."""
+    if ImageCms is None:
+        return b""
+    return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+
+
+def _export_save_kwargs(fmt: str) -> Dict[str, Any]:
+    """Opciones de guardado del lote: sRGB + PPP y compresión por formato."""
+    cfg = load_enhance_config().get("export", {})
+    dpi = int(cfg.get("dpi", 254) or 254)
+    kwargs: Dict[str, Any] = {"dpi": (dpi, dpi)}
+    profile = str(cfg.get("color_profile", "sRGB") or "").strip().casefold()
+    if profile == "srgb":
+        try:
+            icc = _srgb_icc_profile()
+        except Exception as exc:
+            icc = b""
+            print(f"[Enhance] No se pudo crear el perfil sRGB: {exc}", flush=True)
+        if icc:
+            kwargs["icc_profile"] = icc
+    if fmt in ("jpg", "jpeg"):
+        kwargs["quality"] = 95
+        kwargs["subsampling"] = 0
+    elif fmt == "png":
+        kwargs["compress_level"] = 3
+    return kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -701,7 +740,20 @@ def process_batch(
                         progress_cb({"phase": "autopilot", "progress": idx / total,
                                      "detail": f"autopilot fallback ({exc})"})
 
-            out_img, notes, metrics = process_single_image(path, img_settings, progress_cb)
+            def _cb(payload):
+                if not progress_cb:
+                    return
+                p = dict(payload or {})
+                phase = str(p.get("phase", ""))
+                if phase not in ("batch",):
+                    try:
+                        frac = float(p.get("progress", 0.0))
+                    except (TypeError, ValueError):
+                        frac = 0.0
+                    p["progress"] = (idx + max(0.0, min(1.0, frac))) / max(1, total)
+                progress_cb(p)
+
+            out_img, notes, metrics = process_single_image(path, img_settings, _cb)
 
             stem = path.stem
             if apply_filters_to_filename:
@@ -733,14 +785,8 @@ def process_batch(
                 stem = f"{base_stem}_{n}"
             used_outputs.add(out_path)
 
-            save_kwargs: Dict[str, Any] = {}
             fmt = export_format.lower()
-            if fmt in ("jpg", "jpeg"):
-                save_kwargs["quality"] = 95
-                save_kwargs["subsampling"] = 0
-            elif fmt == "png":
-                save_kwargs["compress_level"] = 3
-            out_img.save(out_path, **save_kwargs)
+            out_img.save(out_path, **_export_save_kwargs(fmt))
 
             return {
                 "input": str(path),
