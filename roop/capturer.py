@@ -5,8 +5,10 @@ import threading
 import time
 import cv2
 import numpy as np
-
+from PIL import Image
 from roop.types import Frame
+
+Image.MAX_IMAGE_PIXELS = None
 
 
 def _find_ffprobe() -> Optional[str]:

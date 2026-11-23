@@ -1,4 +1,5 @@
 from typing import List
+import threading
 
 import sys
 
@@ -227,3 +228,14 @@ use_gender_filter = False
 
 # Aplicar configuración conservadora automáticamente
 apply_conservative_defaults()
+
+
+# Drop nativo (pywebview): rutas completas entregadas por el navegador nativo,
+# sin subir File objects por el renderer de WebView2. Una cola por zona de drop
+# para que cada pestaña consuma solo lo que se soltó sobre ella.
+NATIVE_DROP_LOCK = threading.Lock()
+NATIVE_DROP_QUEUES = {
+    "enhance": [],
+    "faceswap_src": [],
+    "faceswap_dest": [],
+}

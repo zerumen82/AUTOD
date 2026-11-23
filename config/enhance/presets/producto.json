@@ -1,19 +1,19 @@
 {
   "name": "Producto",
-  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
+  "description": "Preset de fábrica v5.1437 — bordes limpios sin textura de plástico",
   "sliders": {
-    "denoise_strength": 35,
-    "sharpen_strength": 50,
+    "denoise_strength": 28,
+    "sharpen_strength": 35,
     "recover_faces_strength": 0.0,
     "upscale_factor": 2,
     "exposure": 1.0,
-    "shadow": 0.85,
+    "shadow": 0.88,
     "highlight": 1.0,
     "temperature": 50,
-    "grain_strength": 8,
-    "grain_size": 10,
-    "deband_strength": 25,
-    "vibrance": 106,
+    "grain_strength": 5,
+    "grain_size": 2,
+    "deband_strength": 20,
+    "vibrance": 104,
     "face_model": "GFPGAN"
   },
   "models": {}

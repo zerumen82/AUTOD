@@ -31,6 +31,8 @@ import roop.globals
 from roop.processors.Frame_Upscale import Frame_Upscale
 from roop.processors.Enhance_GFPGAN import Enhance_GFPGAN
 
+Image.MAX_IMAGE_PIXELS = None
+
 # ---------------------------------------------------------------------------
 # Configuración
 # ---------------------------------------------------------------------------
@@ -160,27 +162,62 @@ def detect_faces_count(image: Image.Image) -> int:
 # Mejoras clásicas (OpenCV vectorizado)
 # ---------------------------------------------------------------------------
 def apply_denoise_cv2(image: Image.Image, strength: float) -> Image.Image:
-    """Denoise bilateral (OpenCV). strength 0-100."""
+    """Denoise que conserva el poro y el detalle fino. strength 0-100.
+
+    v5.1437 — un bilateral único a fuerza alta (d=14, sigma=36) borraba el
+    poro y el pelo fino y, con el sharpen posterior, dejaba piel de cera
+    («muy muñeco»). Ahora se separa croma de luminancia: el croma se suaviza
+    (manchas de color) y en la luminancia se devuelve una fracción del detalle
+    que el filtro se llevó, así la textura de la piel sobrevive.
+    """
     if strength <= 0:
         return image
+    s = float(np.clip(strength, 0, 100)) / 100.0
     img = np.array(image.convert("RGB"))
-    d = 5 + int(strength / 100 * 15)
-    sigma_color = 10 + int(strength / 100 * 40)
-    sigma_space = 10 + int(strength / 100 * 40)
-    denoised = cv2.bilateralFilter(img, d, sigma_color, sigma_space)
-    return Image.fromarray(denoised)
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+    luma, a, b = cv2.split(lab)
+    lf = luma.astype(np.float32)
+
+    # Croma: aquí sí conviene un suavizado fuerte (ruido de color, blotches).
+    d_c = 5 + int(round(9 * s))
+    sigma_c = 12 + 38 * s
+    space_c = 8 + 18 * s
+    a = cv2.bilateralFilter(a, d_c, sigma_c, space_c)
+    b = cv2.bilateralFilter(b, d_c, sigma_c, space_c)
+
+    # Luminancia: filtro moderado + reinyección de textura.
+    d_l = 5 + int(round(5 * s))
+    sigma_l = 8 + 22 * s
+    space_l = 6 + 10 * s
+    l_dn = cv2.bilateralFilter(lf, d_l, sigma_l, space_l)
+    keep = 0.55 - 0.23 * s  # 55% de detalle a fuerza baja, 32% a máxima
+    l_out = np.clip(l_dn + keep * (lf - l_dn), 0, 255).astype(np.uint8)
+
+    out = cv2.cvtColor(cv2.merge([l_out, a, b]), cv2.COLOR_LAB2RGB)
+    return Image.fromarray(out)
 
 
 def apply_sharpen_cv2(image: Image.Image, strength: float) -> Image.Image:
-    """Unsharp mask adaptativo. strength 0-100."""
+    """Unsharp mask con umbral y recorte de halo. strength 0-100.
+
+    v5.1437 — el unsharp clásico (amount hasta 1.5) amplificaba el ruido de la
+    piel lisa y dejaba bordes duros con halo, que es la mitad del aspecto de
+    muñeco. Ahora se descarta el microdetalle por debajo de un umbral (piel,
+    cielo) y se recorta el exceso del halo antes de sumar.
+    """
     if strength <= 0:
         return image
+    s = float(np.clip(strength, 0, 100)) / 100.0
     img = np.array(image.convert("RGB"), dtype=np.float32) / 255.0
-    sigma = 1.0 + strength / 100 * 2.0
-    blur = cv2.GaussianBlur(img, (3, 3), sigma)
-    amount = 0.3 + strength / 100 * 1.2
-    sharpened = img + amount * (img - blur)
-    sharpened = np.clip(sharpened, 0, 1)
+    sigma = 0.8 + 1.2 * s
+    blur = cv2.GaussianBlur(img, (0, 0), sigma)
+    detail = img - blur
+    threshold = 0.004 + 0.012 * s
+    detail = np.sign(detail) * np.maximum(np.abs(detail) - threshold, 0.0)
+    limit = 0.05 + 0.05 * s
+    detail = np.clip(detail, -limit, limit)
+    amount = 0.25 + 0.85 * s
+    sharpened = np.clip(img + amount * detail, 0, 1)
     return Image.fromarray((sharpened * 255).astype(np.uint8))
 
 
@@ -237,7 +274,13 @@ def apply_grain_cv2(
         gh, gw = max(1, int(h / grain_size)), max(1, int(w / grain_size))
         small_grain = cv2.resize(grain, (gw, gh), interpolation=cv2.INTER_LINEAR)
         grain = cv2.resize(small_grain, (w, h), interpolation=cv2.INTER_LINEAR)
-    out = np.clip(img + grain, 0, 1)
+    # v5.1437 — el grano pesa más en medios tonos: en luces y sombras apenas
+    # se nota, como en una foto real, en vez de ensuciar toda la imagen.
+    luma = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    weight = 1.0 - 0.55 * np.abs(luma - 0.5) * 2.0
+    if grain.ndim == 3:
+        weight = weight[..., None]
+    out = np.clip(img + grain * weight, 0, 1)
     return Image.fromarray((out * 255).astype(np.uint8))
 
 
@@ -274,7 +317,8 @@ def apply_vibrance_cv2(image: Image.Image, vibrance: float) -> Image.Image:
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     h = hsv[:, :, 0]
     s = hsv[:, :, 1]
-    skin = ((h <= 25.0) | (h >= 330.0)).astype(np.float32)
+    # OpenCV usa H en 0-180: la piel cae en ~0-30 y ~165-180, no en 330.
+    skin = ((h <= 30.0) | (h >= 165.0)).astype(np.float32)
     factor = 1.0 + (vibrance - 100.0) / 100.0 * (1.0 - s)
     factor = 1.0 + (factor - 1.0) * (1.0 - 0.6 * skin)
     hsv[:, :, 1] = np.clip(s * factor, 0.0, 1.0)
@@ -377,10 +421,17 @@ def get_gfpgan_processor():
     return get_face_processor("GFPGAN")
 
 
-def apply_upscale_onnx(image: Image.Image, factor: int, progress_cb=None) -> Image.Image:
-    """Upscale con Real-ESRGAN por tiles (CUDA). Fallback Lanczos si falla."""
+def apply_upscale_onnx(image: Image.Image, factor: int, progress_cb=None, resample_mix: float = 0.25) -> Image.Image:
+    """Upscale con Real-ESRGAN por tiles (CUDA). Fallback Lanczos si falla.
+
+    v5.1438 — Real-ESRGAN sintetiza detalle pero se come el grano real de la
+    foto: medido a 2x nativo, la barba y el poro desaparecen y la piel queda
+    con brillo de plástico. Se conserva una fracción (``resample_mix``) del
+    escalado Lanczos del original, que sí trae esa textura, manteniendo los
+    bordes del modelo. Sin mezcla (0.0) se comporta como antes.
+    """
     if factor == 6:
-        out = apply_upscale_onnx(image, 4)
+        out = apply_upscale_onnx(image, 4, resample_mix=resample_mix)
         return out.resize((out.width * 3 // 2, out.height * 3 // 2), Image.LANCZOS)
     subtype = "esrganx2" if factor == 2 else "esrganx4"
     try:
@@ -390,14 +441,41 @@ def apply_upscale_onnx(image: Image.Image, factor: int, progress_cb=None) -> Ima
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
         out_bgr = proc.Run(bgr)
         out_rgb = cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
+        if resample_mix > 0:
+            # OJO: bgr está en BGR y out_rgb en RGB; mezclar sin convertir
+            # intercambia rojo y azul (la piel sale azul).
+            plain = cv2.resize(bgr, (out_rgb.shape[1], out_rgb.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+            plain = cv2.cvtColor(plain, cv2.COLOR_BGR2RGB)
+            plain_f = plain.astype(np.float32)
+            mixed = out_rgb.astype(np.float32) * (1.0 - resample_mix) + plain_f * resample_mix
+            # El modelo también aclara y desplaza el color (medido: +1.5 pp de
+            # blancos). Se le devuelve la luz/color a gran escala del escalado
+            # limpio y se queda con su detalle: sin tinte ni velo.
+            tone_sigma = float(np.clip(0.004 * max(out_rgb.shape[:2]), 3.0, 12.0))
+            mixed = mixed + cv2.GaussianBlur(plain_f, (0, 0), tone_sigma) - cv2.GaussianBlur(mixed, (0, 0), tone_sigma)
+            out_rgb = np.clip(mixed, 0, 255).astype(np.uint8)
         return Image.fromarray(out_rgb)
     except Exception as e:
         print(f"[Enhance] Upscale falló ({e}); fallback Lanczos", flush=True)
         return image.resize((image.width * factor, image.height * factor), Image.LANCZOS)
 
 
-def apply_recover_faces_onnx(image: Image.Image, blend: float, model_name: str = "GFPGAN", progress_cb=None, cancel_check=None) -> Image.Image:
-    """Recupera caras con el motor elegido (GFPGAN/CodeFormer/RestoreFormer++/GPEN)."""
+def apply_recover_faces_onnx(
+    image: Image.Image,
+    blend: float,
+    model_name: str = "GFPGAN",
+    progress_cb=None,
+    cancel_check=None,
+    tone_match: bool = True,
+) -> Image.Image:
+    """Recupera caras con el motor elegido (GFPGAN/CodeFormer/RestoreFormer++/GPEN).
+
+    v5.1438 — con ``tone_match`` se conserva la luz y el color del original
+    dentro de la cara y solo se toma del modelo la estructura: el modelo ya no
+    puede imponer su propio brillo (en caras con otra iluminación aclara la
+    piel y los dientes, que es la otra mitad del aspecto «muñeco»). En la
+    muestra del probe no había blanqueo medible; esto lo previene.
+    """
     try:
         proc = get_face_processor(model_name)
         analyser = _get_face_analyser()
@@ -433,7 +511,19 @@ def apply_recover_faces_onnx(image: Image.Image, blend: float, model_name: str =
                 continue
             m3 = mask[..., None]
             roi = out_bgr[y1:y2, x1:x2].astype(np.float32)
-            out_bgr[y1:y2, x1:x2] = (roi * (1.0 - m3) + enhanced.astype(np.float32) * m3).astype(np.uint8)
+            blended = roi * (1.0 - m3) + enhanced.astype(np.float32) * m3
+            # v5.1437 — el modelo repinta la piel lisa (aspecto de muñeco). Se
+            # devuelve el poro/microdetalle del original dentro de la máscara.
+            texture = roi - cv2.GaussianBlur(roi, (0, 0), 1.0)
+            blended = blended + texture * m3 * 0.6
+            if tone_match:
+                # Intercambio de frecuencias: el modelo aporta detalle, el
+                # original aporta la luz y el color a gran escala.
+                tone_sigma = max(4.0, 0.04 * min(crop.shape[:2]))
+                low_blend = cv2.GaussianBlur(blended, (0, 0), tone_sigma)
+                low_roi = cv2.GaussianBlur(roi, (0, 0), tone_sigma)
+                blended = blended - low_blend + low_roi
+            out_bgr[y1:y2, x1:x2] = np.clip(blended, 0, 255).astype(np.uint8)
         out_rgb = cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
         return Image.fromarray(out_rgb)
     except Exception as e:
@@ -488,7 +578,15 @@ def quality_gate_check(before: Image.Image, after: Image.Image, name: str) -> Tu
         after_cmp = after
 
     c_before, c_after = clip(before), clip(after_cmp)
-    clip_limit = 0.025 if name == "lighting_color" else 0.008
+    # v5.1438 — el upscale no puede caer por el recorte del propio modelo: en
+    # fotos con fondo claro (cielo, pared blanca) ESRGAN sube ~1.5 pp de
+    # blancos y el paso se revertía EN SILENCIO, así que «up2x» no escalaba.
+    if name == "upscale":
+        clip_limit = 0.04
+    elif name == "lighting_color":
+        clip_limit = 0.025
+    else:
+        clip_limit = 0.008
     if c_after - c_before > clip_limit:
         return before, f"{name} revertido (recorte de tonos +{c_after - c_before:.1%})"
 
@@ -522,15 +620,17 @@ def autopilot_propose(image: Image.Image) -> Dict[str, Any]:
     sharp_th = float(cfg.get("sharpness_threshold", 0.10))
     min_size = int(cfg.get("min_image_size", 640))
 
-    denoise = 65 if noise > noise_th else 20
-    sharpen = 55 if sharp < sharp_th * 100 else 25
-    recover = 80 if faces > 0 else 0
+    # v5.1437 — menos denoise/sharpen y recuperación de caras más suave: la
+    # receta anterior (65/55/80) era la que dejaba la piel de cera.
+    denoise = 45 if noise > noise_th else 15
+    sharpen = 35 if sharp < sharp_th * 100 else 18
+    recover = 55 if faces > 0 else 0
     upscale = 2 if max(w, h) < min_size * 2 else 1
     exposure = 1.3 if brightness < 0.35 else (0.9 if brightness > 0.75 else 1.0)
     shadow = 1.3 if brightness < 0.35 else 1.0
     highlight = 0.7 if brightness > 0.75 else 1.0
-    deband = 35 if noise > noise_th else 15
-    vibrance = 105 if 0.35 <= brightness <= 0.75 else 100
+    deband = 30 if noise > noise_th else 12
+    vibrance = 103 if 0.35 <= brightness <= 0.75 else 100
     face_model = "GFPGAN"
 
     reasons = []
@@ -558,8 +658,8 @@ def autopilot_propose(image: Image.Image) -> Dict[str, Any]:
         "shadow": shadow,
         "highlight": highlight,
         "temperature": 50,
-        "grain_strength": 0,
-        "grain_size": 10,
+        "grain_strength": 6,
+        "grain_size": 2,
         "deband_strength": deband,
         "vibrance": vibrance,
         "face_model": face_model,
@@ -596,7 +696,8 @@ def process_single_image(
 
     metrics["sharpness_before"] = measure_sharpness_laplacian(original)
     metrics["noise_before"] = measure_noise_laplacian(original)
-    metrics["faces"] = detect_faces_count(original)
+    rfs_check = float(settings.get("recover_faces_strength", 0) or 0)
+    metrics["faces"] = detect_faces_count(original) if rfs_check > 0 else 0
     metrics["size_before"] = list(original.size)
 
     current = original
@@ -622,7 +723,11 @@ def process_single_image(
         notes.append(note if note else f"deband {db:g}")
 
     # 2. Sharpen
-    ss = float(settings.get("sharpen_strength", 0) or 0)
+    # v5.1438 — si además se escala, Real-ESRGAN ya aporta microcontraste:
+    # afinar antes duplica el borde (medido: banda 2.0× frente a un escalado
+    # limpio) y saca halo. Se afina al 60% para compensarlo.
+    uf = int(settings.get("upscale_factor", 1) or 1)
+    ss = float(settings.get("sharpen_strength", 0) or 0) * (0.6 if uf > 1 else 1.0)
     if ss > 0:
         if progress_cb:
             progress_cb({"phase": "sharpen", "progress": 0.2, "detail": f"strength={ss}"})
@@ -643,7 +748,6 @@ def process_single_image(
         notes.append(note if note else f"recover_faces {model_name} {rfs:.0%}")
 
     # 4. Upscale
-    uf = int(settings.get("upscale_factor", 1) or 1)
     if uf > 1:
         if progress_cb:
             progress_cb({"phase": "upscale", "progress": 0.5, "detail": f"{uf}x"})
@@ -678,7 +782,7 @@ def process_single_image(
 
     # 6. Grano
     gs = float(settings.get("grain_strength", 0) or 0)
-    gsize = float(settings.get("grain_size", 10) or 10)
+    gsize = float(settings.get("grain_size", 2) or 2)
     if gs > 0:
         if progress_cb:
             progress_cb({"phase": "grain", "progress": 0.85, "detail": f"strength={gs}"})

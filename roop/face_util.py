@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 from roop.capturer import get_image_frame, get_video_frame  # noqa: E402 -- native DLL setup above
 from roop.faceswap_config import get_faceswap_config, landmarks_fit_bbox  # noqa: E402 -- native DLL setup above
 from roop.stdio_safety import ensure_utf8_stdio  # noqa: E402 -- native DLL setup above
+from PIL import Image  # noqa: E402
+Image.MAX_IMAGE_PIXELS = None
 
 # v5.1335: stdout/stderr a UTF-8 ANTES de cualquier print de este módulo.
 # En consola cp1252 un mensaje con ❌/⚠️/→ lanzaba UnicodeEncodeError, y
@@ -722,6 +724,19 @@ def extract_face_images(
             img = img[:, :, :3]
         
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # Clamping de resolución para detección y embeddings:
+        # Imágenes gigantes (>2048px) causan OOM en CUDA, allocations masivas en padding/rotaciones
+        # y fallo de anchors en RetinaFace.
+        h_orig, w_orig = img_rgb.shape[:2]
+        max_dim = max(h_orig, w_orig)
+        scale_factor = 1.0
+        if max_dim > 2048:
+            scale_factor = 2048.0 / max_dim
+            new_w = max(1, int(round(w_orig * scale_factor)))
+            new_h = max(1, int(round(h_orig * scale_factor)))
+            img_rgb = cv2.resize(img_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
         
         # ============ SOURCE FACES: USAR TODA LA IMAGEN ============
         if is_source_face:
@@ -1264,6 +1279,12 @@ def extract_face_images(
 
                     # Guardar el recorte en el objeto
                     face_obj.face_img = face_img
+                    if scale_factor != 1.0:
+                        face_obj.bbox = [int(round(c / scale_factor)) for c in face_obj.bbox]
+                        if face_obj.kps is not None:
+                            face_obj.kps = [[p[0] / scale_factor, p[1] / scale_factor] for p in face_obj.kps]
+                        face_obj.source_image_size = (w_orig, h_orig)
+                        face_obj.face_img_origin = (int(round(x1p / scale_factor)), int(round(y1p / scale_factor)))
                     
                     results.append([face_obj, face_img])
                 
@@ -1450,6 +1471,13 @@ def extract_face_images(
                 
                 if face_img is None or face_img.size == 0:
                     continue
+
+                if scale_factor != 1.0:
+                    face_obj.bbox = [int(round(c / scale_factor)) for c in face_obj.bbox]
+                    if face_obj.kps is not None:
+                        face_obj.kps = [[p[0] / scale_factor, p[1] / scale_factor] for p in face_obj.kps]
+                    if face_obj.landmark_106 is not None:
+                        face_obj.landmark_106 = [[p[0] / scale_factor, p[1] / scale_factor] for p in face_obj.landmark_106]
                 
                 results.append([face_obj, face_img])
                 

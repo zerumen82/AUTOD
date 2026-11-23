@@ -503,7 +503,7 @@ def create_ui():
         sd_btn_stop.click(fn=stop_sd, outputs=[sd_status])
         
         sd_btn_open.click(fn=open_sd_webview, outputs=[sd_msg])
-    
+
     return demo
 
 

@@ -2,10 +2,18 @@
   "name": "Vintage",
   "description": "Contraste suave, calidez y grano visible",
   "sliders": {
-    "denoise_strength": 25, "sharpen_strength": 15,
-    "recover_faces_strength": 0.0, "upscale_factor": 1,
-    "exposure": 0.95, "shadow": 1.1, "highlight": 0.9,
-    "temperature": 60, "grain_strength": 25, "grain_size": 12,
-    "deband_strength": 10, "vibrance": 90, "face_model": "GFPGAN"
+    "denoise_strength": 20,
+    "sharpen_strength": 12,
+    "recover_faces_strength": 0.0,
+    "upscale_factor": 1,
+    "exposure": 0.96,
+    "shadow": 1.1,
+    "highlight": 0.9,
+    "temperature": 60,
+    "grain_strength": 18,
+    "grain_size": 4,
+    "deband_strength": 10,
+    "vibrance": 92,
+    "face_model": "GFPGAN"
   }
 }

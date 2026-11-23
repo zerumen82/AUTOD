@@ -839,17 +839,15 @@ class ImgEditorManager:
         # Seleccionar engine según dirección del cambio
         if body_direction == "uncover":
             # Desnudo: bypass no_kontext (Qwen-VL ve la foto, sin ancla de
-            # latentes) con Kontext Q4 (adherencia real medida).
-            # v5.1120 — FULL también en 8GB (mismo veredicto del change:
-            # Turbo 12 pasos/CFG 1.0 no ejecuta cambios complejos; Full 35 NFE
-            # sí; el "cuelga" de v5.1090 era sin --disable-async-offload).
-            target_e, target_v = "kontext", _KONTEXT_VERSION
+            # latentes) con LongCat Full (mayor exactitud corporal en 8GB).
+            target_e, target_v = "longcat_full", _LONGCAT_FULL_VERSION
         elif body_direction == "cover":
-            # Vestir: Kontext preserva estructura y añade ropa bien.
-            target_e, target_v = "kontext", _KONTEXT_VERSION
+            # Vestir: LongCat Full preserva estructura y añade ropa con mejor
+            # adherencia que Turbo en cambios complejos de cuerpo/ropa.
+            target_e, target_v = "longcat_full", _LONGCAT_FULL_VERSION
         else:
-            # change: flexible. Kontext rápido + buen following de instrucciones.
-            target_e, target_v = "kontext", _KONTEXT_VERSION
+            # change: flexible. LongCat Full + buen following de instrucciones.
+            target_e, target_v = "longcat_full", _LONGCAT_FULL_VERSION
 
         if preferred_engine == target_e:
             return None, None, ""
@@ -884,10 +882,12 @@ class ImgEditorManager:
                  (None, None, "") si el engine preferido ya es correcto.
         """
         # v5.1102: Q4_K_M — el Q2_K era una "copy machine".
-        # LongCat retirado (sustituido por Kontext): los alias legacy se
-        # normalizan a kontext; las versiones se conservan para no romper
-        # logs ni UIs/APKs que aún los envíen.
+        # Editor vuelve a LongCat Turbo (v5.1440): Kontext dev tarda ~5 min/paso
+        # en RTX 3060 Ti 8 GB; LongCat Turbo (8 pasos, Qwen-VL con visión) es
+        # ~2,5 min por edición y ya da resultados realistas.
         _KONTEXT_VERSION = get_kontext_model_config()["model_file"]
+        _LONGCAT_VERSION = get_longcat_model_config()["model_file"]
+        _LONGCAT_FULL_VERSION = get_longcat_full_model_config()["model_file"]
 
         body_transform = bool(analysis.get("body_transform", False))
         body_direction = str(analysis.get("body_direction", "change")).lower()

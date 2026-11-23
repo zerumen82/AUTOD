@@ -10,18 +10,18 @@ class EnhanceSessionState:
     def _reset(self):
         self.is_generating = False
         self.processing_queue = []
-        self.current_preset = "Retrato"
+        self.current_preset = ""  # al abrir no hay preset: se usan los valores de enhance.json
         self.enhancement_settings = {
-            "denoise_strength": 65,
-            "sharpen_strength": 40,
-            "recover_faces_strength": 0.8,
+            "denoise_strength": 35,
+            "sharpen_strength": 20,
+            "recover_faces_strength": 0.4,
             "upscale_factor": 2,
             "exposure": 1.0,
             "shadow": 1.0,
             "highlight": 1.0,
             "temperature": 50,
-            "grain_strength": 20,
-            "grain_size": 10,
+            "grain_strength": 6,
+            "grain_size": 2,
         }
         self.current_file = None
         self.result_image = None

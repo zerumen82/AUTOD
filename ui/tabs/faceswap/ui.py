@@ -154,14 +154,13 @@ def build_faceswap_ui():
                 with gr.Row(variant="panel"):
                     with gr.Column():
                         bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", height=200, elem_id="srcfiles")
-                        source_path_input = gr.Textbox(label="Rutas de origen", elem_id="source_path_input", elem_classes=["native-drop-control"])
-                        bt_add_source_paths = gr.Button("Añadir rutas de origen", elem_id="bt_add_source_paths", elem_classes=["native-drop-control"])
+                        source_path_input = gr.Textbox(visible=False, elem_id="source_path_input")
+                        bt_add_source_paths = gr.Button(visible=False, elem_id="bt_add_source_paths")
                     with gr.Column():
                         bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", height=200, elem_id="destfiles")
-                        with gr.Row():
-                            bt_browse_path = gr.Button("📂 Buscar\nen el PC", size="sm", scale=1)
-                            target_path_input = gr.Textbox(label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)", placeholder='D:\\videos\\video.mp4  o  \\\\servidor\\share\\video.mp4', scale=4, elem_id="target_path_input")
-                            bt_add_target_path = gr.Button("➕ Añadir", size="sm", scale=1, elem_id="bt_add_target_path")
+                        bt_browse_path = gr.Button(visible=False, elem_id="bt_browse_path")
+                        target_path_input = gr.Textbox(visible=False, elem_id="target_path_input")
+                        bt_add_target_path = gr.Button(visible=False, elem_id="bt_add_target_path")
 
             # COLUMNA DERECHA: Preview y Control
             with gr.Column(scale=3):

@@ -109,7 +109,7 @@ def build_animate_ui():
                 )
 
             with gr.Column(scale=1):
-                video_output = gr.Video(label="Resultado (duración automática)", height=520)
+                video_output = gr.Video(label="Resultado (duración automática)", height=520, autoplay=True, loop=True)
                 with gr.Row():
                     bt_open_folder = gr.Button("📂 ABRIR SALIDA")
                     bt_open_folder.click(fn=open_animations_folder)

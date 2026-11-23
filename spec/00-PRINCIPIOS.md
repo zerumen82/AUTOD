@@ -1,7 +1,7 @@
 # spec/00 — Principios y Definición de Listo
 
 ## Versión vigente
-- **v5.1426 (2026-11-22)**
+- **v5.1441 (2026-11-23)**
 
 Fuente: `AGENTS.md` (proyecto) + `C:/Users/INdaHouse/.agents/AGENTS.md` (global) + `MEMORY.md`.
 
@@ -12,8 +12,8 @@ Fuente: `AGENTS.md` (proyecto) + `C:/Users/INdaHouse/.agents/AGENTS.md` (global)
 3. **Conservar los motores elegidos por el usuario.** El Editor tiene Auto como
    predeterminado (`editor_ui.default_engine=auto`); su ruta general configura
    LongCat (`route_editor.default_engine`) y la apariencia pura medida configura
-   Kontext (`editor_ui.automatic_appearance_engine`). La elección explícita de
-   Kontext Q4_K_M conserva el modelo de `kontext.model_file`. Los
+   LongCat Full (`editor_ui.automatic_appearance_engine`). La elección explícita de
+   LongCat Full conserva el modelo de `longcat_full.model_file`. Los
    nombres/versiones legacy resuelven a Kontext, sin borrar archivos históricos.
    La prohibición absoluta de LongCat del 18/10 quedó superada por la autorización
    posterior registrada el 25–28/10 en MEMORY.md: existe una excepción explícita

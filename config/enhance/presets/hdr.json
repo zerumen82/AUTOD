@@ -2,10 +2,18 @@
   "name": "HDR",
   "description": "Recupera sombras y contiene luces sin exagerar el color",
   "sliders": {
-    "denoise_strength": 15, "sharpen_strength": 35,
-    "recover_faces_strength": 0.0, "upscale_factor": 1,
-    "exposure": 1.0, "shadow": 1.18, "highlight": 0.86,
-    "temperature": 50, "grain_strength": 4, "grain_size": 8,
-    "deband_strength": 10, "vibrance": 108, "face_model": "GFPGAN"
+    "denoise_strength": 12,
+    "sharpen_strength": 25,
+    "recover_faces_strength": 0.0,
+    "upscale_factor": 1,
+    "exposure": 1.0,
+    "shadow": 1.15,
+    "highlight": 0.88,
+    "temperature": 50,
+    "grain_strength": 4,
+    "grain_size": 2,
+    "deband_strength": 10,
+    "vibrance": 106,
+    "face_model": "GFPGAN"
   }
 }

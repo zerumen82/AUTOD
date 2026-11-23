@@ -1,5 +1,95 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## 2026-11-20 — Lote FaceSwap de 11 vídeos: identidad errónea en el quinto
+
+- `logs/process_20261120_011957.log` a `...021602.log`: cuatro MP4 completos (1784, 1884, 1204 y 170 frames); el quinto se interrumpió en 1736/3192 y los otros seis no empezaron. Comparativas original/salida: `diagnostics/out/faceswap_latest_20261120/`. Son muestras visuales, no PASS de los vídeos completos.
+- **Bloqueante H-FS-TRACK en el render anterior:** el parcial del quinto vídeo cambiaba la cara del hombre en f1698–1717 tras readquisición registrada f1699 (`sim=0.33`), aunque la mujer estaba seleccionada al inicio. Su bbox caía justo dentro del límite de salto: 466,2 px frente a 477,1 px. Al fotograma siguiente la similitud adaptable subió a 0,99 por contaminación del track. La referencia primaria real reconstruida desde f0 da similitud 0,028 al hombre y 0,143/0,265 a retornos válidos de la mujer (f1329/f1729). v5.1402 corrige este caso en un render acotado; falta el banco UI original y PASS visual del vídeo completo.
+- **v5.1402 PASS técnico/visual acotado (tester independiente):** `diagnostics/probe_faceswap_recent_reacquire_20261120.py` pasó de FAIL a PASS con detecciones reales y un banco reconstruido que incluye una referencia de perfil favorable al hombre (max-sim 0,370). El gate exige similitud ≥0,10 a la primera referencia fija si no hay corte visual y el salto supera `max(120 px, 1,1 × extensión)`; conserva f1329, f1729 y la cara ocluida f1661 del segundo vídeo. El render integrado `diagnostics/out/faceswap_latest_20261120/video5_1640_1736_v51402_refs3.mp4` tiene 96 frames. En ROI facial del hombre, el anterior alteraba 4457–11565 píxeles (>20) en f1698–1717 y el nuevo altera 0 en f1698–1722; la cara de la mujer vuelve a cambiar en f1729/1730. Evidencia visual y métricas junto al MP4. **Sigue pendiente** eliminar suavizado/artefactos visibles en el retorno femenino y revisar todo el lote con referencias representativas.
+- **H-FS-LOGS:** el banner `v5.1202` era antiguo; el log nuevo `logs/process_20261120_120527.log` indica `v5.1402`. La retención configurable es 30 días, aprobada por el usuario; al iniciar vídeo o lote de fotos solo se eliminan logs `process_YYYYMMDD_HHMMSS.log` más antiguos, preservando log activo y enlaces. Probe aislado: 31 días eliminado, 29 días/activo/otro tipo conservados; los 11 logs actuales permanecen. Falta veredicto final del reviewer y comprobar la llamada de lote de fotos con un lote real si se desea cerrar ese criterio para ambos flujos.
+- Ruff de los Python tocados, `py_compile`, probe anterior de tracking y build PyInstaller fresco PASS. Ruff global conserva 433 errores previos; no se declara lint global verde. Los pendientes de perfiles, oclusiones, mini máscaras, halo, nitidez, parecido y revisión completa conservan su estado.
+
+## 2026-11-19 — FaceSwap: tracking y parpadeo en los siete vídeos recientes
+
+- **v5.1401 (2026-11-20), vídeo 5:** el usuario confirmó que no conserva el banco
+  destino original. Se localizó la fuente #79. El probe nuevo con esa fuente
+  reproduce en f431 un parche de 6177 píxeles cambiados y alfa media 0,245
+  dentro de la bbox visible, pero fuerza composición sin verificar identidad.
+  El gate actual rechaza esa detección con la referencia reconstruida; el render
+  integrado con una sola referencia pierde el destino antes de f431. El análisis
+  posterior del log original y la imagen entregada sitúa 5097/5103 píxeles del
+  parche f431 en el fondo, dentro de una falsa readquisición cercana en tiempo
+  (sim 0,56; det_score medido 0,124). El usuario aprobó un suelo configurable
+  de confianza 0,25 para readquisiciones lejanas sin corte visual; v5.1401 lo
+  aplica y el probe con detección real rechaza el candidato también por la
+  ruta `_apply_reacquired_face`. Reviewer: APPROVE técnico; tester: PASS técnico
+  acotado. Sigue pendiente un render integrado con banco destino representativo
+  y PASS visual del vídeo
+  completo (`MEMORY.md`).
+- **Abierto para el lote completo; dos fallos visuales corregidos en tramos y
+  un anclaje inicial inseguro eliminado.**
+  En el caso 3 (`process_20261119_015653.log`), el primer anclaje falso aparece
+  en f270 y persiste en muestras 300–304. El render de diagnóstico v5.1399 de
+  f185–310 elimina el swap sobre esa región y conserva el de la cara elegida en
+  f190 (`MEMORY.md`, evidencia visual y métricas). En el caso 6
+  (`process_20261119_023506.log`), la cara
+  seleccionada se ve junto al borde izquierdo en muestras de los frames 2115,
+  2121, 2141, 2201 y 2295, pero el guard `cortada` impide el swap hasta 2302:
+  el frame 2303 vuelve a mostrarlo de golpe. El primer render v5.1399 de
+  f2109–2142 mostró dos parpadeos originales en f2112/f2114 pese a 31
+  `Success`: el límite de visibilidad de 55 % rechazaba la misma cara en
+  53,9 %/54,5 %. El render v5.1400 tiene 33 `Success`, 0 `Lost` y cambio facial
+  en los 33 fotogramas; la comparación visual está en
+  `diagnostics/out/faceswap_tracking_20261119/samples_partial_flicker_fix.jpg`.
+  El render ampliado f2109–2303 tiene 195 `Success`, 0 `Lost` y cambio facial
+  medible en los 195 frames; el tester revisó ocho muestras visuales
+  (`partial_extended_samples.jpg`) y dio PASS acotado de ese tramo.
+  El caso 4 pierde continuidad 402–793 y el caso 5 registra 17 resets por
+  saltos de bbox y 86 recuperaciones. La auditoría adicional de muestras reales
+  (`video4_gap_audit.jpg`) muestra la cara elegida tapada por otra persona o
+  de espaldas durante gran parte del tramo 405–800; no se atribuye todo el
+  hueco al tracker. En el caso 5 (`video5_flicker_audit.jpg`), los intercambios
+  de f190/210/280 alternan con originales en f200/248/290 mientras un objeto
+  tapa gran parte del rostro o este sale del encuadre. Con la política de
+  identidad y geometría verificadas, esos huecos requieren una solución de
+  oclusión segura antes de forzar el swap. La serie de diferencias está en
+  `video5_pixel_audit.json`.
+- La auditoría completa de 1421 frames del caso 5
+  (`video5_full_pixel_audit.json`) encuentra 24 episodios de cambio de solo
+  1–2 frames con el umbral diagnóstico de >5000 píxeles distintos; no todos
+  equivalen a errores. Las comparativas visuales `video5_pops_early.jpg` y
+  `video5_pops_late.jpg` sí muestran cambios aislados de área muy pequeña en
+  nariz/ojos (p. ej. f431, f552, f1096) que pueden producir destellos. Sigue
+  pendiente decidir y validar un tratamiento seguro de máscaras pequeñas
+  durante oclusiones, sin pegar cara sobre el objeto ni perder swaps válidos.
+- Caso 7: una reproducción iniciada en f800 mostró una ruta adicional de
+  anclaje incorrecto: si quedaba una sola cara ajena, el setup la aceptaba
+  pese a una similitud de 0,085 con la referencia elegida. v5.1400 elimina
+  esa excepción y aplica un suelo configurable de identidad 0,35 al setup y
+  a la readquisición sin primer swap real, incluso con distancia UI 0,9; el
+  probe con la cara real de f808 confirma que espera a la persona seleccionada
+  y que esta sí puede anclarse después. El banco de referencias UI original no se conservó:
+  los renders cortos f800–831 con referencias reconstruidas de f0/f1 no
+  reproducen el match del log original en f811 y no son PASS visual del retorno.
+- La revisión de imágenes y logs está detallada en `MEMORY.md` (2026-11-19).
+  Pendiente: revisión visual del lote completo, especialmente perfiles,
+  oclusiones, multicara y los retornos del caso 7; los tramos y probes acotados
+  no certifican los siete MP4. El banco original de referencias de la UI no se
+  conservó, así que los renders de diagnóstico usan caras reales del vídeo.
+
+## 2026-11-19 — Animate Image: revisión del último vídeo
+
+- `animate/video_1795018500.mp4` contiene 97 fotogramas a 25 fps, vídeo H.264
+  de 960×544 y audio AAC; se generó por la ruta LTX-2 local según
+  `logs/ui_start_20261118_171043.log`. La comparativa de cinco fotogramas
+  (`diagnostics/out/animate_review_20261119/latest_frames.jpg`) muestra
+  movimiento de cabeza/hombros y encuadre; la acción completa pedida en la UI
+  no se aprecia. El primer fotograma coincide con la foto de entrada y puede
+  parecer una imagen fija si el reproductor no arranca.
+- La UI v5.1398 solicita `autoplay=True` y `loop=True`, pero todavía falta
+  comprobar la reproducción real en pywebview con el archivo que tiene audio.
+  El proceso UI registrado en `logs/active_server.json` ya no está activo.
+  No se declara PASS de obediencia del vídeo ni del autoplay.
+
 ## 2026-11-18 — v5.1397: navegación de Mejorar fotos y FaceMesh
 
 - La UI aislada y sus endpoints pasan con fotos reales, pero falta comprobar en

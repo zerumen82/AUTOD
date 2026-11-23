@@ -126,33 +126,37 @@ def load_folder_history():
         pass
 
 def initialize_thread_pools():
+    workers = max(1, min(4, os.cpu_count() or 4))
     if state._source_thread_pool is None or state._source_thread_pool._shutdown:
-        state._source_thread_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="SourceLoader")
+        state._source_thread_pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="SourceLoader")
     if state._target_thread_pool is None or state._target_thread_pool._shutdown:
-        state._target_thread_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="TargetLoader")
+        state._target_thread_pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="TargetLoader")
 
-def process_target_file_async(file_path):
+def process_target_file_async(file_path, generate_preview=True):
     try:
         filename = file_path
         list_entry = ProcessEntry(filename, 0, 0, 0)
         if util.is_video(filename) or filename.lower().endswith("gif"):
             from roop.capturer import get_video_frame, get_video_frame_total
             total_frames = get_video_frame_total(filename)
-            current_frame = get_video_frame(filename, 1)
+            current_frame = get_video_frame(filename, 1) if generate_preview else None
             list_entry.endframe = total_frames
         else:
-            from roop.capturer import get_image_frame
             total_frames = 1
+            list_entry.endframe = total_frames
+            if not generate_preview:
+                return list_entry, None, total_frames
+            from roop.capturer import get_image_frame
             current_frame = get_image_frame(filename)
             if current_frame is None:
                 return None, None, 0
-            list_entry.endframe = total_frames
         if current_frame is None:
-            return None, None, 0
+            return list_entry, None, total_frames
         h, w = current_frame.shape[:2]
-        if w > 1280:
-            scale = 1280.0 / w
-            current_frame = cv2.resize(current_frame, (1280, max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
+        max_d = max(h, w)
+        if max_d > 1280:
+            scale = 1280.0 / max_d
+            current_frame = cv2.resize(current_frame, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
         preview_img = util.convert_to_gradio(current_frame)
         return list_entry, preview_img, total_frames
     except BaseException:
