@@ -94,7 +94,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1426 (2026-11-22)"
+APP_VERSION = "v5.1438 (2026-11-23)"
 
 
 def _active_server_path():
@@ -474,11 +474,149 @@ def run():
             except Exception as e:
                 print(f"[DEBUG] Error forzando icono: {e}")
 
+        def _bind_native_drop(window):
+            """Captura el drop con rutas completas, sin subir los archivos.
+
+            pywebview solo entrega ``pywebviewFullPath`` si hay un listener
+            ``drop`` registrado por la DOM API. Se registra uno por zona
+            (Mejorar fotos, origen y destino de FaceSwap) y se anula el drop
+            por defecto para que Gradio no vuelva a subir los File objects:
+            ese era el bloqueo de la UI con lotes grandes.
+            """
+            try:
+                from webview.dom import DOMEventHandler
+            except Exception as ex:
+                print(f"[NATIVE-DROP] No disponible: {ex}")
+                return
+
+            def _make_on_drop(queue_name):
+                def _on_drop(e):
+                    try:
+                        files = (e.get("dataTransfer") or {}).get("files") or []
+                    except Exception:
+                        return
+                    paths = []
+                    for f in files:
+                        pth = f.get("pywebviewFullPath") if isinstance(f, dict) else None
+                        if pth:
+                            paths.append(pth)
+                    if not paths:
+                        reason = "evento sin dataTransfer" if not (e.get("dataTransfer") or {}) else "drop sin rutas nativas"
+                        print(f"[NATIVE-DROP] {queue_name}: {reason}")
+                        return
+                    print(f"[NATIVE-DROP] {queue_name}: {len(paths)} ruta(s) recibidas")
+                    try:
+                        import roop.globals as _g
+                        with _g.NATIVE_DROP_LOCK:
+                            _g.NATIVE_DROP_QUEUES.setdefault(queue_name, []).extend(paths)
+                    except Exception:
+                        pass
+                return _on_drop
+
+            # Gradio se queda el drop de sus File y empieza a subir los bytes.
+            # Se intercepta SOLO dentro de las zonas de Mejorar fotos y
+            # FaceSwap (capture, antes de React) y el drop se reenvía a un
+            # receptor oculto que pywebview sí escucha: ahí llega la ruta real
+            # del archivo y no se sube nada. Fuera de esas zonas, Gradio sigue
+            # con su drop normal (Generate, Animate, Image Editor).
+            js = """
+            (function(){
+              var zones = [
+                ['enhance_input_files', 'enhance'],
+                ['srcfiles', 'faceswap_src'],
+                ['destfiles', 'faceswap_dest']
+              ];
+              zones.forEach(function(z){
+                if (!document.getElementById('autoauto_drop_' + z[1])) {
+                  var sink = document.createElement('div');
+                  sink.id = 'autoauto_drop_' + z[1];
+                  sink.style.display = 'none';
+                  document.body.appendChild(sink);
+                }
+              });
+              if (window.__autoautoDropCapture) { return; }
+              window.__autoautoDropCapture = true;
+              function zoneFor(e){
+                var t = e.target;
+                if (!t || !t.closest) { return null; }
+                // En Mejorar fotos vale toda la pestaña: Gradio no aplica
+                // elem_id a las filas de layout y exigir acertar en la línea
+                // de cola hacía que el drop se perdiera fuera de ella.
+                return t.closest('#enhance_input_files,#srcfiles,#destfiles,.img-enhance-container');
+              }
+              document.addEventListener('dragover', function(e){
+                if (window.__autoautoDropEnabled && zoneFor(e)) { e.preventDefault(); }
+              }, true);
+              document.addEventListener('drop', function(e){
+                if (!window.__autoautoDropEnabled) { return; }
+                var zone = zoneFor(e);
+                if (!zone) { return; }
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                var dt = e.dataTransfer;
+                if (!dt || !dt.files || !dt.files.length) { return; }
+                var queue = zone.id === 'srcfiles' ? 'faceswap_src'
+                          : (zone.id === 'destfiles' ? 'faceswap_dest' : 'enhance');
+                var sink = document.getElementById('autoauto_drop_' + queue);
+                if (!sink) { return; }
+                // pywebview serializa el evento con for..in: un dataTransfer
+                // creado con defineProperty NO es enumerable y llegaba vacío
+                // a Python (el drop no cargaba ninguna foto). Se reenvía un
+                // DragEvent real con el DataTransfer original, cuyos File son
+                // los del disco que pywebview necesita para resolver rutas.
+                var evt;
+                try {
+                  evt = new DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: dt});
+                } catch (err) {
+                  evt = new Event('drop', {bubbles: true});
+                  Object.defineProperty(evt, 'dataTransfer', {value: dt, enumerable: true});
+                }
+                sink.dispatchEvent(evt);
+              }, true);
+            })();
+            """
+            try:
+                window.evaluate_js(js)
+            except Exception as ex:
+                print(f"[NATIVE-DROP] Inyección falló: {ex}")
+                return
+
+            sinks = {
+                "#autoauto_drop_enhance": "enhance",
+                "#autoauto_drop_faceswap_src": "faceswap_src",
+                "#autoauto_drop_faceswap_dest": "faceswap_dest",
+            }
+            bound = 0
+            for selector, queue_name in sinks.items():
+                try:
+                    element = window.dom.get_element(selector)
+                    if element is None:
+                        print(f"[NATIVE-DROP] {selector} no encontrado")
+                        continue
+                    element.events.drop += DOMEventHandler(
+                        _make_on_drop(queue_name),
+                        prevent_default=True,
+                        stop_propagation=True,
+                    )
+                    bound += 1
+                    print(f"[NATIVE-DROP] {selector} -> {queue_name}")
+                except Exception as ex:
+                    print(f"[NATIVE-DROP] {selector}: {ex}")
+            # Sin los receptores, la interceptación tragaría el drop: Gradio
+            # sigue funcionando como siempre.
+            if bound == len(sinks):
+                try:
+                    window.evaluate_js("window.__autoautoDropEnabled = true")
+                except Exception as ex:
+                    print(f"[NATIVE-DROP] No se pudo activar: {ex}")
+            else:
+                print("[NATIVE-DROP] Desactivado: faltan receptores; se usa el drop de Gradio")
+
         window = webview.create_window(
-            "AutoAuto v5.1417",
+            "AutoAuto",
             url=server_url,
             width=1400,
-            height=900
+            height=900,
         )
         threading.Thread(target=_set_window_icon, args=(window.uid,), daemon=True).start()
         # Al cerrar la ventana con la X la sesión debe liberar la GPU y cerrar
@@ -495,7 +633,15 @@ def run():
         webview_storage = os.path.join(
             tempfile.gettempdir(), f"autoauto_webview_{os.getpid()}"
         )
-        webview.start(debug=False, func=None, storage_path=webview_storage)
+        def _delayed_bind(w):
+            import time as _t
+            _t.sleep(6)
+            _bind_native_drop(w)
+        # TEMP-DIAG 2026-11-23: puerto CDP para verificar el drop real.
+        _diag_port = os.environ.get("AUTOAUTO_DIAG_CDP_PORT")
+        if _diag_port:
+            webview.settings["REMOTE_DEBUGGING_PORT"] = int(_diag_port)
+        webview.start(debug=False, func=_delayed_bind, args=(window,), storage_path=webview_storage)
         
         report = shutdown_session("ventana-cerrada")
         _comfyui_report = report.get("comfyui") or {}

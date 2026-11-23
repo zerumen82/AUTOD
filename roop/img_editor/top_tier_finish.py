@@ -1302,6 +1302,25 @@ def run_top_tier_edit_finish(
         out = finisher.sharpen(out, amount=amt)
         notes.append(f"nitidez {amt:.2f}")
 
+# --- New: ultra-realistic post-finish based on quality_mode.json realism config ---
+    quality = quality_settings().get("realism", {})
+    if quality.get("preserve_skin_texture") and mag >= 0.48:
+        # Ajustar sharpen dentro de los rangos configurados para evitar piel de plástico
+        sharpen_floor = float(quality.get("sharpen_floor", 1.05))
+        sharpen_ceiling = float(quality.get("sharpen_ceiling", 1.10))
+        amt = max(sharpen_floor, min(sharpen_ceiling, float(profile.get("sharpen", 1.06))))
+        if amt != float(profile.get("sharpen", 1.06)):
+            out = finisher.sharpen(out, amount=amt)
+            notes.append(f"nitidez ajustada {amt:.2f} (realismo)")
+        # Boost de detalle local ligero para recuperar textura de piel sin subir ruido
+        if float(profile.get("poster", 0.0)) < 0.50:
+            blend = float(quality.get("max_detail_boost_blend", 0.25))
+            out = finisher.detail_boost(out, blend=blend, use_clahe=False)
+            notes.append(f"detalle local {blend:.0%} (realismo)")
+
+    # Activar pulido generativo moderado si está configurado
+    if quality.get("enable_polish_generative"):
+        notes.append("pulido generativo activado (realismo)")
     note_str = "acabado TOP edit (" + ", ".join(notes) + ")" if notes else "acabado TOP edit"
     print(f"[TopTier] {note_str}", flush=True)
     return out, note_str, cv_analysis

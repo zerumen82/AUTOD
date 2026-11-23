@@ -1,20 +1,20 @@
 {
   "name": "Ultra realista",
-  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
+  "description": "Preset de fábrica v5.1439 — máximo detalle real, upscale 2x, sin piel de cera",
   "sliders": {
-    "denoise_strength": 30,
-    "sharpen_strength": 45,
-    "recover_faces_strength": 0.75,
+    "denoise_strength": 16,
+    "sharpen_strength": 26,
+    "recover_faces_strength": 0.5,
     "upscale_factor": 2,
-    "exposure": 1.02,
-    "shadow": 0.9,
-    "highlight": 1.05,
+    "exposure": 1.01,
+    "shadow": 0.95,
+    "highlight": 1.03,
     "temperature": 51,
-    "grain_strength": 10,
-    "grain_size": 6,
-    "deband_strength": 15,
-    "vibrance": 108,
-    "face_model": "CodeFormer"
+    "grain_strength": 6,
+    "grain_size": 2,
+    "deband_strength": 10,
+    "vibrance": 104,
+    "face_model": "GFPGAN"
   },
   "models": {}
 }

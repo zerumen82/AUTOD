@@ -1,19 +1,19 @@
 {
   "name": "Paisaje",
-  "description": "Preset de fábrica v5.1379 (pestaña Mejorar fotos)",
+  "description": "Preset de fábrica v5.1439 — detalle de follaje y cielo sin halo",
   "sliders": {
-    "denoise_strength": 45,
-    "sharpen_strength": 55,
+    "denoise_strength": 30,
+    "sharpen_strength": 26,
     "recover_faces_strength": 0.0,
     "upscale_factor": 2,
     "exposure": 1.0,
-    "shadow": 0.7,
-    "highlight": 1.1,
+    "shadow": 0.78,
+    "highlight": 1.05,
     "temperature": 54,
-    "grain_strength": 8,
-    "grain_size": 12,
-    "deband_strength": 30,
-    "vibrance": 112,
+    "grain_strength": 5,
+    "grain_size": 2,
+    "deband_strength": 22,
+    "vibrance": 108,
     "face_model": "GFPGAN"
   },
   "models": {}
