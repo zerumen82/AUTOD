@@ -8,18 +8,18 @@
     "lama": "models/lama_fp32.onnx"
   },
   "default_slider_values": {
-    "denoise_strength": 25,
-    "sharpen_strength": 18,
+    "denoise_strength": 35,
+    "sharpen_strength": 20,
     "recover_faces_strength": 0.4,
-    "upscale_factor": 1,
+    "upscale_factor": 2,
     "exposure": 1.0,
     "shadow": 1.0,
     "highlight": 1.0,
     "temperature": 50,
-    "grain_strength": 5,
+    "grain_strength": 6,
     "grain_size": 2,
     "deband_strength": 10,
-    "vibrance": 101,
+    "vibrance": 102,
     "face_model": "GFPGAN"
   },
   "control_limits": {
