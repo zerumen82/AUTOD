@@ -8,18 +8,18 @@
     "lama": "models/lama_fp32.onnx"
   },
   "default_slider_values": {
-    "denoise_strength": 65,
-    "sharpen_strength": 40,
-    "recover_faces_strength": 0.8,
-    "upscale_factor": 2,
+    "denoise_strength": 25,
+    "sharpen_strength": 18,
+    "recover_faces_strength": 0.4,
+    "upscale_factor": 1,
     "exposure": 1.0,
     "shadow": 1.0,
     "highlight": 1.0,
     "temperature": 50,
-    "grain_strength": 20,
-    "grain_size": 10,
-    "deband_strength": 0,
-    "vibrance": 100,
+    "grain_strength": 5,
+    "grain_size": 2,
+    "deband_strength": 10,
+    "vibrance": 101,
     "face_model": "GFPGAN"
   },
   "control_limits": {
@@ -45,9 +45,15 @@
   "export": {
     "output_path": "enhance",
     "default_format": "png",
+    "dpi": 254,
+    "color_profile": "sRGB",
     "preserve_original": true,
     "add_applied_filters_to_filename": true,
     "allow_overwrite": true
+  },
+  "large_batch": {
+    "auto_preview_max_files": 60,
+    "max_visible_choices": 100
   },
   "autopilot": {
     "noise_threshold": 0.15,
