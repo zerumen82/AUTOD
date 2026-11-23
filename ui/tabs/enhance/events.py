@@ -25,6 +25,8 @@ from . import logic as enh_logic
 from .logic import process_batch, process_single_image
 from .presets import icon_for_preset, load_presets, save_custom_preset
 
+Image.MAX_IMAGE_PIXELS = None
+
 
 # Presets/ajustes por foto: ruta -> settings dict
 _PER_IMAGE_SETTINGS: dict = {}
@@ -65,7 +67,7 @@ def _normalize_files(raw) -> list:
     return [single] if single else []
 
 
-def _queue_paths(files_val, folder_val) -> list:
+def _queue_paths(files_val, folder_val=None) -> list:
     """Rutas de la cola: sin duplicados y solo imágenes (modo carpeta).
 
     El selector de carpeta de Gradio entrega TODOS los archivos del directorio;
@@ -75,7 +77,7 @@ def _queue_paths(files_val, folder_val) -> list:
     image_exts = {ext.lower() for ext in Image.registered_extensions()}
     out = []
     seen = set()
-    sources = _normalize_files(files_val) + _normalize_files(folder_val)
+    sources = _normalize_files(files_val) + (_normalize_files(folder_val) if folder_val else [])
     for p in sources:
         suffix = Path(p).suffix.lower()
         if suffix and suffix not in image_exts:
@@ -127,7 +129,8 @@ def _load_before(path: Path) -> Image.Image:
     w, h = image.size
     if max(w, h) > _PREVIEW_BEFORE_MAX:
         s = _PREVIEW_BEFORE_MAX / max(w, h)
-        image = image.resize((max(1, int(w * s)), max(1, int(h * s))), Image.LANCZOS)
+        resample = Image.Resampling.BILINEAR if max(w, h) > 2500 else Image.Resampling.LANCZOS
+        image = image.resize((max(1, int(w * s)), max(1, int(h * s))), resample)
     _BEFORE_CACHE[key] = {"mtime": mtime, "image": image}
     _BEFORE_CACHE.move_to_end(key)
     while len(_BEFORE_CACHE) > _BEFORE_CACHE_MAX:
@@ -212,6 +215,17 @@ def _neutral_settings() -> dict:
     return s
 
 
+# v5.1437 — la pila no puede sumar hasta la piel de cera («muy muñeco»):
+# por encima de estos topes el poro se pierde igual, así que satura ahí. El
+# slider manual sigue llegando a 100 para quien lo quiera forzar.
+_STACK_CAPS = {
+    "denoise_strength": 60.0,
+    "sharpen_strength": 45.0,
+    "deband_strength": 60.0,
+    "grain_strength": 30.0,
+}
+
+
 def _merge_settings(base: dict, add: dict) -> dict:
     out = dict(base)
     out.setdefault("accumulated_presets", list(base.get("accumulated_presets", [])))
@@ -225,10 +239,19 @@ def _merge_settings(base: dict, add: dict) -> dict:
         hi = float(rule.get("maximum", 100))
         return float(min(hi, max(lo, value)))
 
+    capped = []
     for key in ("denoise_strength", "sharpen_strength", "deband_strength", "grain_strength"):
-        out[key] = _clamp(key, float(base.get(key, 0)) + float(add.get(key, 0)))
+        total = float(base.get(key, 0)) + float(add.get(key, 0))
+        limit = _STACK_CAPS[key]
+        if total > limit:
+            capped.append(key)
+        out[key] = _clamp(key, min(total, limit))
+    if capped:
+        out["stack_capped"] = capped
+    else:
+        out.pop("stack_capped", None)
     out["recover_faces_strength"] = min(
-        1.0, float(base.get("recover_faces_strength", 0)) + float(add.get("recover_faces_strength", 0))
+        0.8, float(base.get("recover_faces_strength", 0)) + float(add.get("recover_faces_strength", 0))
     )
     out["upscale_factor"] = max(int(base.get("upscale_factor", 1)), int(add.get("upscale_factor", 1)))
     for key in ("exposure", "shadow", "highlight"):
@@ -285,6 +308,7 @@ def wire_events(ui_components):
     """Conecta todos los eventos de la pestaña de mejora de fotos."""
 
     input_files = ui_components["input_files"]
+    btn_browse_pc = ui_components.get("btn_browse_pc")
     input_folder = ui_components["input_folder"]
     select_all = ui_components["select_all"]
     btn_load_sample = ui_components["btn_load_sample"]
@@ -378,7 +402,7 @@ def wire_events(ui_components):
             gr.update(interactive=bool(paths) and index < len(paths) - 1),
         )
 
-    def refresh_queue(files_val, folder_val):
+    def refresh_queue(files_val=None, folder_val=None):
         global _LAST_QUEUE_PATHS
         _PER_IMAGE_SETTINGS.clear()
         paths = _queue_paths(files_val, folder_val)
@@ -429,8 +453,23 @@ def wire_events(ui_components):
             gr.update(value=s["face_model"]),
         )
 
-    def make_pair(files_val, folder_val, selected, *slider_vals):
-        paths = _queue_paths(files_val, folder_val)
+    def make_pair(*args, **kwargs):
+        files_val = kwargs.get("files_val")
+        folder_val = kwargs.get("folder_val")
+        selected = kwargs.get("selected")
+        slider_vals = []
+
+        if len(args) >= _N_SLIDERS + 3:
+            files_val, folder_val, selected = args[0], args[1], args[2]
+            slider_vals = list(args[3:])
+        elif len(args) >= _N_SLIDERS + 1:
+            selected = args[0]
+            slider_vals = list(args[1:])
+        elif len(args) > 0:
+            selected = args[0]
+            slider_vals = list(args[1:])
+
+        paths = _queue_paths(files_val, folder_val) if (files_val or folder_val) else _LAST_QUEUE_PATHS
         if not paths:
             return (None, None, "_Sube al menos una foto para ver el antes/después._", _photo_position(paths, None), *_nav_updates(paths, None)) + tuple(gr.update() for _ in range(_N_SLIDERS))
         path = _pick_path(paths, selected)
@@ -438,7 +477,7 @@ def wire_events(ui_components):
             settings = dict(_PER_IMAGE_SETTINGS[str(path)])
             updates = _slider_updates_from_settings(settings)
         else:
-            settings = _settings(*slider_vals)
+            settings = _settings(*slider_vals) if slider_vals else _neutral_settings()
             _PER_IMAGE_SETTINGS[str(path)] = settings
             updates = tuple(gr.update() for _ in range(_N_SLIDERS))
         try:
@@ -494,12 +533,27 @@ def wire_events(ui_components):
             ) + tuple(gr.skip() for _ in range(_N_SLIDERS))
         return make_pair([selected] if selected else paths, None, selected, *slider_vals)
 
-    def make_after(files_val, folder_val, selected, *slider_vals):
-        paths = _queue_paths(files_val, folder_val)
+    def make_after(*args, **kwargs):
+        files_val = kwargs.get("files_val")
+        folder_val = kwargs.get("folder_val")
+        selected = kwargs.get("selected")
+        slider_vals = []
+
+        if len(args) >= _N_SLIDERS + 3:
+            files_val, folder_val, selected = args[0], args[1], args[2]
+            slider_vals = list(args[3:])
+        elif len(args) >= _N_SLIDERS + 1:
+            selected = args[0]
+            slider_vals = list(args[1:])
+        elif len(args) > 0:
+            selected = args[0]
+            slider_vals = list(args[1:])
+
+        paths = _queue_paths(files_val, folder_val) if (files_val or folder_val) else _LAST_QUEUE_PATHS
         if not paths:
             return None, "_Sube al menos una foto para ver el antes/después._"
         path = _pick_path(paths, selected)
-        settings = _settings(*slider_vals)
+        settings = _settings(*slider_vals) if slider_vals else _neutral_settings()
         if path is not None and str(path) in _PER_IMAGE_SETTINGS:
             settings["accumulated_presets"] = list(
                 _PER_IMAGE_SETTINGS[str(path)].get("accumulated_presets", [])
@@ -527,6 +581,101 @@ def wire_events(ui_components):
         btn_prev_photo, btn_next_photo,
     ]
     _mp_outputs = [preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo, denoise_slider, sharpen_slider, recover_slider, upscale_factor, exposure_slider, shadow_slider, highlight_slider, temperature_slider, grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider, face_model]
+
+    def _browse_pc_paths():
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            paths = filedialog.askopenfilenames(
+                title="Seleccionar fotos",
+                filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.webp *.bmp *.tiff *.tif")],
+            )
+            root.destroy()
+            return list(paths) if paths else None
+        except Exception:
+            return None
+
+    if btn_browse_pc is not None:
+        def _on_browse(selected, *slider_vals):
+            paths = _browse_pc_paths()
+            if not paths:
+                return [gr.update()] * (len(_refresh_outputs) + len(_mp_outputs))
+            try:
+                refresh_result = list(refresh_queue(paths, None))
+            except Exception:
+                return [gr.update()] * (len(_refresh_outputs) + len(_mp_outputs))
+            try:
+                mp_result = list(make_pair_on_import(paths[0], *slider_vals))
+            except Exception:
+                mp_result = [gr.update()] * len(_mp_outputs)
+            if len(refresh_result) < len(_refresh_outputs):
+                refresh_result += [gr.update()] * (len(_refresh_outputs) - len(refresh_result))
+            if len(mp_result) < len(_mp_outputs):
+                mp_result += [gr.update()] * (len(_mp_outputs) - len(mp_result))
+            return refresh_result + mp_result
+
+        btn_browse_pc.click(
+            fn=_on_browse,
+            inputs=[preview_photo] + slider_inputs + [face_model],
+            outputs=_refresh_outputs + _mp_outputs,
+            queue=True,
+            concurrency_limit=1,
+            show_progress="full",
+        )
+
+    _mp_outputs = [preview_before, preview_after, preview_status, preview_counter, btn_prev_photo, btn_next_photo, denoise_slider, sharpen_slider, recover_slider, upscale_factor, exposure_slider, shadow_slider, highlight_slider, temperature_slider, grain_strength_slider, grain_size_slider, deband_slider, vibrance_slider, face_model]
+
+    # Drop nativo (pywebview): recoge rutas completas sin subir File objects.
+    native_drop_timer = gr.Timer(1.0)
+
+    def poll_native_drop(selected, *slider_vals):
+        import roop.globals as _g
+        with _g.NATIVE_DROP_LOCK:
+            paths = list(_g.NATIVE_DROP_QUEUES.get("enhance", []))
+            _g.NATIVE_DROP_QUEUES["enhance"].clear()
+        if not paths:
+            return [gr.update()] * (len(_refresh_outputs) + len(_mp_outputs))
+        print(f"[NATIVE-DROP] enhance: cargando {len(paths)} foto(s) por ruta")
+        print(f"[NATIVE-DROP] enhance: primeras: {[Path(p).name for p in paths[:3]]}")
+        try:
+            refresh_result = list(refresh_queue(paths, None))
+        except Exception as exc:
+            print(f"[NATIVE-DROP] enhance: refresh_queue falló: {exc}")
+            return [gr.update()] * (len(_refresh_outputs) + len(_mp_outputs))
+        try:
+            mp_result = list(make_pair_on_import(paths[0], *slider_vals))
+        except Exception as exc:
+            print(f"[NATIVE-DROP] enhance: vista previa falló: {exc}")
+            mp_result = [gr.update()] * len(_mp_outputs)
+        accepted = len(_LAST_QUEUE_PATHS)
+        print(
+            f"[NATIVE-DROP] enhance: aceptadas {accepted}/{len(paths)} · "
+            f"{refresh_result[0]!r} · {mp_result[2]!r}"
+        )
+        try:
+            if accepted:
+                gr.Info(f"{accepted} foto(s) cargadas por arrastre")
+            else:
+                gr.Warning("El arrastre no trajo fotos compatibles")
+        except Exception:
+            pass
+        # rellenar si falta
+        if len(refresh_result) < len(_refresh_outputs):
+            refresh_result += [gr.update()] * (len(_refresh_outputs) - len(refresh_result))
+        if len(mp_result) < len(_mp_outputs):
+            mp_result += [gr.update()] * (len(_mp_outputs) - len(mp_result))
+        return refresh_result + mp_result
+
+    native_drop_timer.tick(
+        fn=poll_native_drop,
+        inputs=[preview_photo] + slider_inputs + [face_model],
+        outputs=_refresh_outputs + _mp_outputs,
+        queue=True,
+        concurrency_limit=1,
+    )
 
     for comp in (input_files, input_folder):
         event = comp.upload(
@@ -558,7 +707,7 @@ def wire_events(ui_components):
     )
 
     def move_photo(files_val, folder_val, selected, direction):
-        paths = _queue_paths(files_val, folder_val)
+        paths = _LAST_QUEUE_PATHS if _LAST_QUEUE_PATHS else _queue_paths(files_val, folder_val)
         if not paths:
             return gr.update(), _photo_position(paths, None), *_nav_updates(paths, None)
         index = max(0, min(len(paths) - 1, _path_index(paths, selected) + direction))
@@ -697,6 +846,10 @@ def wire_events(ui_components):
         suffix = " · mismo ajuste para todas" if select_all else ""
         pila = settings.get("accumulated_presets") or []
         pila_txt = (" · pila: " + " + ".join(pila)) if pila else ""
+        if settings.get("stack_capped"):
+            pila_txt += " · tope de pila en " + ", ".join(
+                key.replace("_strength", "") for key in settings["stack_capped"]
+            )
         if preset_stack is not None:
             return updates + (f"Preset «{name}» acumulado{suffix}. {preset.get('description', '')}{pila_txt}", gr.update(value=_stack_html(pila)))
         return updates + (f"Preset «{name}» acumulado{suffix}. {preset.get('description', '')}{pila_txt}",)
@@ -990,9 +1143,9 @@ def wire_events(ui_components):
         export_format, apply_filters_to_filename, auto_mode,
         select_all=False, output_path=None,
     ):
-        paths = _queue_paths(files, folder)
+        paths = _queue_paths(files, folder) if (files or folder) else _LAST_QUEUE_PATHS
         if not paths:
-            yield "<div class='enhance-status'>No se seleccionaron archivos.</div>", ""
+            yield "<div class='enhance-status'>No se seleccionaron archivos. Arrastra fotos o usa «Buscar fotos en el PC».</div>", ""
             return
 
         t0 = time.time()
