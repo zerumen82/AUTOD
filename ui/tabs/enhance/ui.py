@@ -10,8 +10,6 @@ cambiarlas sin actualizar events.py.
 
 import gradio as gr
 
-from roop.output_paths import get_enhance_output_dir
-
 from .logic import load_enhance_config, load_persisted_output_dir
 from .presets import icon_for_preset, load_presets
 from .state import EnhanceSessionState
@@ -236,11 +234,34 @@ ENHANCE_CSS = """
     overflow-x: hidden !important;
 }
 .img-enhance-container .enhance-settings-accordion > * { min-width: 0 !important; }
-/* Lotes grandes: la lista sigue visible pero el navegador no maqueta las
-   filas fuera del area visible (content-visibility, soportado por WebView2). */
-.img-enhance-container .enhance-import-input .file-preview tr {
-    content-visibility: auto;
-    contain-intrinsic-size: 28px;
+/* Zona de arrastre: la propia línea de cola. Gradio no aplica elem_id a las
+   filas de layout, así que el id va en el Markdown que muestra el recuento. */
+.img-enhance-container #enhance_input_files {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    margin: 0 auto;
+    padding: 16px 12px;
+    border: 2px dashed #5da8f4;
+    border-radius: 12px;
+    background: #171f2a;
+    width: 100%;
+    box-sizing: border-box;
+}
+.img-enhance-container #enhance_input_files:hover {
+    border-color: #3182ce;
+    background: #1e2837;
+}
+.img-enhance-container #enhance_input_files::before {
+    content: \"\";
+    position: absolute;
+    inset: 0;
+    cursor: grab;
+}
+.img-enhance-container #enhance_input_files p {
+    margin: 0;
+    color: #a3b1c6;
+    pointer-events: none;
 }
 """
 
@@ -345,22 +366,14 @@ def build_enhance_ui():
         # ---------- Panel de control (ancho completo, sliders en horizontal) ----------
         with gr.Column(elem_classes=["enhance-panel"]):
             gr.Markdown("Importar", elem_classes=["enhance-section"])
-            with gr.Tabs():
-                with gr.Tab("Archivos"):
-                    input_files = gr.Files(
-                        label="Seleccionar fotos (varias) — máx. 30 por arrastrar",
-                        file_count="multiple",
-                        height=200,
-                        elem_classes=["enhance-import-input"],
-                    )
-                with gr.Tab("Carpeta"):
-                    input_folder = gr.File(
-                        label="Carpeta entera",
-                        file_count="directory",
-                        file_types=["image"],
-                        height=200,
-                        elem_classes=["enhance-import-input"],
-                    )
+            # El cuadro vacío de gr.Files se retiró (2026-11-23, petición del
+            # usuario): el drop nativo pasa rutas y no sube archivos, así que
+            # se veía vacío aunque la cola sí cargara. La zona de arrastre es
+            # la línea de cola (#enhance_input_files) y el componente queda
+            # oculto para no romper los eventos que lo usan como contrato.
+            input_files = gr.Files(file_count="multiple", file_types=["image"], visible=False)
+            btn_browse_pc = gr.Button("Buscar fotos en el PC (recomendado para lotes grandes)", variant="secondary", visible=False)
+            input_folder = gr.File(visible=False)
             select_all = gr.Checkbox(
                 label="Seleccionar todas (mismo preset/ajustes para todas las fotos)",
                 value=False,
@@ -368,7 +381,11 @@ def build_enhance_ui():
             )
             with gr.Row():
                 with gr.Column(scale=4, min_width=200):
-                    queue_summary = gr.Markdown("_Sin fotos en cola._", elem_classes=["enhance-summary"])
+                    queue_summary = gr.Markdown(
+                        "_Sin fotos en cola. Arrastra aquí tus fotos._",
+                        elem_id="enhance_input_files",
+                        elem_classes=["enhance-summary"],
+                    )
                 btn_load_sample = gr.Button("Cargar ejemplo", variant="secondary", size="sm", scale=1, min_width=120, elem_classes=["btn-secondary"])
 
             gr.Markdown("Presets", elem_classes=["enhance-section"])
@@ -437,6 +454,7 @@ def build_enhance_ui():
     return {
         "session_state": session_state,
         "input_files": input_files,
+        "btn_browse_pc": btn_browse_pc,
         "input_folder": input_folder,
         "select_all": select_all,
         "btn_load_sample": btn_load_sample,
