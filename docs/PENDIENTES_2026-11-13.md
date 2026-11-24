@@ -205,6 +205,12 @@ pasada. Total 4–7 min cuando las comprobaciones fallan.
 - Pendiente: decidir y medir un tope de reintentos por petición, y si el
   fallback directo debe ejecutarse cuando ya hubo dos pasadas. No se cambió
   nada para no aceptar resultados falsos.
+- **v5.1444 (2026-11-24), avance parcial sin cerrar:** los pasos de apariencia
+  local (20→28) y el tope del lado largo de la imagen de trabajo (1536 px)
+  salieron a `config/editor_selection.json`. El tope evita que el codificador
+  Qwen VL se quede minutos con recortes de 3480×2901 (medido en el último
+  calvo). Sigue pendiente el PASS visual con las fotos reales y la decisión
+  sobre reintentos/fallback; P3 **no se declara resuelto**.
 
 ## P4. Umbral de residuo de objetos nombrados (no puestos)
 El umbral `TARGET_RESIDUAL_FAIL` de la política v5.1311 sigue en 40 %. La prenda

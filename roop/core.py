@@ -94,7 +94,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1441 (2026-11-23)"
+APP_VERSION = "v5.1444 (2026-11-24)"
 
 
 def _active_server_path():

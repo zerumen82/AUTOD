@@ -6486,6 +6486,28 @@ class ImgEditorManager:
             # suaviza la máscara de generación; el pegado usa pass_mask.
             if facts["local_appearance"] and work_mask is not None:
                 work_mask = self._soften_generation_edge(work_mask)
+            appearance_steps, max_work_side = self._local_appearance_quality()
+            # v5.1444 (Fase 2): el codificador Qwen VL procesa la imagen de
+            # trabajo antes de muestrear. En el calvo del 24/11 (recorte
+            # 3480x2901) se quedó 5 min sin eventos WS. El cliente ya baja a
+            # ~1 MP para muestrear y el pegado reescala al recorte original,
+            # así que acotar el lado largo aquí no cambia la zona editada.
+            if (facts["local_appearance"] and max_work_side > 0
+                    and work_image is not None and max(work_image.size) > max_work_side):
+                scale = float(max_work_side) / float(max(work_image.size))
+                bounded = (
+                    max(1, int(round(work_image.width * scale))),
+                    max(1, int(round(work_image.height * scale))),
+                )
+                print(
+                    "[ImgEditor] Imagen de trabajo acotada "
+                    f"{work_image.size[0]}x{work_image.size[1]} -> "
+                    f"{bounded[0]}x{bounded[1]} antes de ComfyUI",
+                    flush=True,
+                )
+                work_image = work_image.resize(bounded, Image.Resampling.LANCZOS)
+                if work_mask is not None and work_mask.size != bounded:
+                    work_mask = work_mask.resize(bounded, Image.Resampling.BILINEAR)
             from roop.img_editor.flux_edit_comfy_client import measured_appearance_sample, measured_region_sample
             sample = (
                 measured_appearance_sample(work_mask is not None)
@@ -6499,7 +6521,9 @@ class ImgEditorManager:
             # Más pasos para ediciones de apariencia: el modelo conserva menos el original
             # y aplica el cambio (calva, pelo, edad, piel) de forma más completa.
             if (facts["local_appearance"] or facts.get("surface_recolor")) and isinstance(sample, dict):
-                sample["num_inference_steps"] = max(int(sample.get("num_inference_steps", 8)), 20)
+                sample["num_inference_steps"] = max(
+                    int(sample.get("num_inference_steps", 8)), appearance_steps,
+                )
                 sample["step_cap"] = sample["num_inference_steps"]
             vision_reference = None
             if facts["local_appearance"] and work_mask is not None and not deliver_region:
@@ -6932,33 +6956,98 @@ class ImgEditorManager:
     def _head_zone_for_subject(
         self, image: Image.Image, subject_mask: Image.Image, faces,
         announce: bool = True,
+        raw_prompt: Optional[str] = None,
+        translated_prompt: Optional[str] = None,
     ) -> Optional[Image.Image]:
-        """Head of the measured person, for appearance edits without a part.
+        """Head of ONE measured person, for appearance edits without a part.
 
         "bald" or "beard" are often not in the photo yet, so the segmenter
-        cannot draw them and the clause falls back to the whole person. A
-        full-photo pass has no spatial anchor and the model paints the
-        scalp glossy (2026-10-12, edit_1791760178.png). The head of the
-        measured person is where those changes live; intersecting the head
-        candidates with the measured person keeps the zone on that person.
+        cannot draw them and the clause falls back to the whole person. The
+        head is the spatial anchor for those changes. The subject mask can
+        cover several people (CLIPSeg «Man» lights every man in the frame),
+        so intersecting the mask with the union of ALL detected heads edited
+        another person (2026-11-24, «el hombre debe ser calvo», two faces).
+        The person is chosen with the same measured margin used everywhere
+        else (_leading_face, 1.25x) and every other detected head is cut out
+        before the zone is sent to the sampler and to the paste.
         """
         if subject_mask is None or not faces:
             return None
-        head_union = self._head_mask_from_faces(image, faces)
-        if head_union is None:
+        credible = self._credible_faces(faces)
+        if not credible:
             return None
         person = np.asarray(subject_mask.convert("L")) >= 128
-        head = np.asarray(head_union.convert("L")) >= 128
-        zone = Image.fromarray(((head & person).astype(np.uint8)) * 255, "L")
-        if int((np.asarray(zone) >= 128).sum()) < 48:
+        if int(person.sum()) < 48:
+            return None
+
+        chosen_head = None
+        chosen_label = ""
+        grounded = False
+        # 1) Phrase-grounded measurement. Same rule as _appearance_head_pass:
+        # the wording must light one face 1.25x above the rest, no word lists.
+        if raw_prompt or translated_prompt:
+            recovered = self._appearance_head_pass(
+                image, raw_prompt or "", translated_prompt or "", credible,
+            )
+            if recovered is not None and recovered.get("mask") is not None:
+                chosen_head = np.asarray(recovered["mask"].convert("L")) >= 96
+                chosen_label = "frase medida"
+                grounded = True
+        # 2) Otherwise measure the subject mask itself. _leading_face applies
+        # the same separation; a flat/ambiguous mask never picks a face.
+        if chosen_head is None:
+            face, score, second = self._leading_face(
+                person.astype(np.float32) * 255.0, credible,
+            )
+            if face is not None:
+                head = self._head_mask_from_faces(image, [face])
+                if head is not None:
+                    chosen_head = np.asarray(head.convert("L")) >= 96
+                    chosen_label = f"máscara del sujeto ({score:.1f} vs {second:.1f})"
+            else:
+                # A mask covering several people gives no visual separation.
+                # Editing both is always wrong, so use the most confident
+                # detection as a deterministic measured tiebreak (det_score
+                # is already the project's criterion for credible faces).
+                face = max(
+                    credible,
+                    key=lambda item: float(getattr(item, "det_score", 0.0) or 0.0),
+                )
+                head = self._head_mask_from_faces(image, [face])
+                if head is not None:
+                    chosen_head = np.asarray(head.convert("L")) >= 96
+                    chosen_label = "desempate por confianza medida"
+        if chosen_head is None:
+            print(
+                "[ImgEditor] Varias personas y la medición no separa cuál; "
+                "no se elige una cabeza al azar",
+                flush=True,
+            )
+            return None
+        # Every other detected head stays out of both the generation hole and
+        # the paste. A head sharing most pixels with the chosen one is the
+        # same person seen twice by the detector, not a rival.
+        protection = np.zeros(person.shape, dtype=bool)
+        for face in credible:
+            head = self._head_mask_from_faces(image, [face])
+            if head is None:
+                continue
+            own = np.asarray(head.convert("L")) >= 96
+            if float((own & chosen_head).sum()) / max(1, int(own.sum())) >= 0.55:
+                continue
+            protection |= own
+        zone = chosen_head & ~protection
+        if not grounded:
+            zone &= person
+        if int(zone.sum()) < 48:
             return None
         if announce:
             print(
-                "[ImgEditor] Cabeza del sujeto medida para la edición de apariencia; "
-                "pase local con ancla espacial",
+                "[ImgEditor] Cabeza del sujeto medida para la edición de apariencia "
+                f"({chosen_label}); las demás cabezas quedan fuera",
                 flush=True,
             )
-        return zone
+        return Image.fromarray((zone.astype(np.uint8)) * 255, "L")
 
     def _covered_surface_view(
         self, image: Image.Image, mask: Image.Image,
@@ -7986,6 +8075,25 @@ class ImgEditorManager:
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return 2
         return max(1, value)
+
+    @staticmethod
+    def _local_appearance_quality() -> Tuple[int, int]:
+        """Steps and maximum work-image side for local appearance edits.
+
+        Both come from config so quality and the VRAM/stall guard can be
+        tuned without a code edit. Defaults keep the previous behaviour for
+        steps (20) and disable the size guard (0) if the config is unreadable.
+        """
+        steps, max_side = 20, 0
+        try:
+            from roop.img_editor.element_selection import load_settings
+
+            edit = load_settings()["edit"]
+            steps = max(1, int(edit.get("local_appearance_min_steps", 20)))
+            max_side = max(0, int(edit.get("local_appearance_max_work_side", 0)))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            pass
+        return steps, max_side
 
     def generate_intelligent(self, *args, **kwargs):
         """Public entry: scopes the editor category hint to this request only.
@@ -9116,6 +9224,7 @@ class ImgEditorManager:
                                 and subject_passes[0].get("person") is not None):
                             head_zone = self._head_zone_for_subject(
                                 img, subject_passes[0]["person"], source_faces,
+                                raw_prompt=score_raw, translated_prompt=prompt,
                             )
                             if head_zone is not None:
                                 subject_passes = [{
@@ -9143,6 +9252,7 @@ class ImgEditorManager:
                             head_zone = self._head_zone_for_subject(
                                 img, measured_item["person"], source_faces,
                                 announce=False,
+                                raw_prompt=score_raw, translated_prompt=prompt,
                             )
                             if head_zone is not None and measured_item.get("mask") is not None:
                                 part = np.asarray(
@@ -9626,6 +9736,15 @@ class ImgEditorManager:
                                     generation_mask, paste_limit, local_box,
                                 )
                             )
+                        fast_steps, fast_max_side = self._local_appearance_quality()
+                        if ((appearance_edit or recolor_edit)
+                                and isinstance(appearance_sample, dict)
+                                and background_zone is None):
+                            appearance_sample["num_inference_steps"] = max(
+                                int(appearance_sample.get("num_inference_steps", 8)),
+                                fast_steps,
+                            )
+                            appearance_sample["step_cap"] = appearance_sample["num_inference_steps"]
                         if appearance_edit and generation_mask is not None:
                             print(
                                 "[ImgEditor] Apariencia: una pasada, "
@@ -9640,6 +9759,33 @@ class ImgEditorManager:
                                 f"fuerza {appearance_sample['denoise']:.2f}, sin agujero",
                                 flush=True,
                             )
+                        # v5.1444 (Fase 2): el codificador Qwen VL recibe la
+                        # imagen de trabajo antes de muestrear. Un recorte de
+                        # 3480x2901 lo dejó 5 min sin eventos WS el 24/11.
+                        # Acotar el lado largo no altera la zona: el cliente
+                        # muestrea a ~1 MP y el pegado reescala al recorte.
+                        if (appearance_edit and fast_max_side > 0
+                                and generation_image is not None
+                                and max(generation_image.size) > fast_max_side):
+                            scale = float(fast_max_side) / float(max(generation_image.size))
+                            bounded = (
+                                max(1, int(round(generation_image.width * scale))),
+                                max(1, int(round(generation_image.height * scale))),
+                            )
+                            print(
+                                "[ImgEditor] Imagen de trabajo acotada "
+                                f"{generation_image.size[0]}x{generation_image.size[1]} -> "
+                                f"{bounded[0]}x{bounded[1]} antes de ComfyUI",
+                                flush=True,
+                            )
+                            generation_image = generation_image.resize(
+                                bounded, Image.Resampling.LANCZOS,
+                            )
+                            if (generation_mask is not None
+                                    and generation_mask.size != bounded):
+                                generation_mask = generation_mask.resize(
+                                    bounded, Image.Resampling.BILINEAR,
+                                )
                         if (region_edit and authority_facts.get("structural_remove")
                                 and generation_mask is not None):
                             try:

@@ -30,7 +30,7 @@
   },
   "editor_ui": {
     "default_engine": "auto",
-    "automatic_appearance_engine": "longcat_full"
+    "automatic_appearance_engine": "longcat"
   },
   "style_gate": {
     "concepts": [

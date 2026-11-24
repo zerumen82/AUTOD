@@ -284,7 +284,7 @@ def _harmonize_patch(patch, image, box, write_crop, skin, ring_px=28, person_mas
         _delivered_lab = cv2.cvtColor(
             np.asarray(harmonized.convert("RGB")), cv2.COLOR_RGB2LAB,
         ).astype(np.float32)
-        _delivered_skin = _skin_pixels(harmonized) & write_crop
+        _delivered_skin = _skin_pixels(np.asarray(harmonized.convert("RGB"))) & write_crop
         if _delivered_skin.any():
             _delivered_mean = _delivered_lab[_delivered_skin].mean(axis=0)
             _residual = ring_mean - _delivered_mean

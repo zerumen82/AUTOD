@@ -19,11 +19,11 @@
     "min_absolute": 0.6
   },
   "realism": {
-    "activate_post_edit": True,
-    "enable_polish_generative": True,
+    "activate_post_edit": true,
+    "enable_polish_generative": true,
     "polish_generative_magnitude": 0.6,
     "polish_generative_strength": "moderate",
-    "preserve_skin_texture": True,
+    "preserve_skin_texture": true,
     "min_detail_boost_blend": 0.10,
     "max_detail_boost_blend": 0.25,
     "sharpen_floor": 1.05,
