@@ -2525,9 +2525,11 @@ class ImgEditorManager:
         span = max(int(ys.max() - ys.min() + 1), int(xs.max() - xs.min() + 1))
         photo = np.asarray(image.convert("RGB"), dtype=np.float32)
         height, width = seed.shape
-        # The head around the peak: reach scales with the peak itself, so a
-        # small face keeps a small neighbourhood.
-        hood_r = max(40, int(round(span * 0.35)))
+        # v5.1446: el alcance anterior (span*0.35) dejaba la mayor parte de
+        # la cabeza fuera del alcance, así que el pelo de las sienes y la nuca
+        # no entraba en la zona y sobrevivía al pegado. El alcance ahora cubre
+        # la cabeza medida (span*0.85) y el pelo se queda o se va por completo.
+        hood_r = max(40, int(round(span * 0.85)))
         hood = cv2.dilate(
             seed.astype(np.uint8),
             cv2.getStructuringElement(
@@ -3227,8 +3229,14 @@ class ImgEditorManager:
                 fw, fh = max(1.0, x2 - x1), max(1.0, y2 - y1)
                 cx = int(round((x1 + x2) * 0.5))
                 cy = int(round(y1 + fh * 0.22))
-                rx = max(2, int(round(fw * 0.78)))
-                ry = max(2, int(round(fh * 1.05)))
+                # v5.1446: la elipse anterior (0.78×0.78, 1.05×) dejaba
+                # las sienes y la nuca fuera; una edición de apariencia anclada
+                # a la cabeza no podía repintar esa banda y el pelo original
+                # sobrevivía al pegado (edit_1795544625, log 19:23). Más
+                # cobertura de la cabeza, sin tocar la cara bajo la línea de
+                # los ojos (se resta más abajo).
+                rx = max(2, int(round(fw * 0.88)))
+                ry = max(2, int(round(fh * 1.35)))
                 cv2.ellipse(head, (cx, cy), (rx, ry), 0, 0, 360, 255, thickness=-1)
 
                 # A frontal ellipse leaves the posterior hairline/nape out on
@@ -3245,8 +3253,8 @@ class ImgEditorManager:
                             back_dir = -1 if nose_offset > 0 else 1
                             nape_cx = int(round(cx + back_dir * fw * 0.48))
                             nape_cy = int(round(y1 + fh * 0.42))
-                            nape_rx = max(2, int(round(fw * 0.40)))
-                            nape_ry = max(2, int(round(fh * 0.42)))
+                            nape_rx = max(2, int(round(fw * 0.50)))
+                            nape_ry = max(2, int(round(fh * 0.55)))
                             cv2.ellipse(
                                 head,
                                 (nape_cx, nape_cy),
@@ -10463,6 +10471,33 @@ class ImgEditorManager:
                                 " | cambio solicitado apenas visible"
                                 if no_op else " | cumplimiento visual no verificado"
                             )
+                            # v5.1446: esta ruta también mide el cambio pedido
+                            # antes de entregar. Antes se saltaba y la foto se
+                            # entregaba con «cumplimiento visual no verificado»
+                            # sin decir qué falló.
+                            try:
+                                _mv_zone = locals().get("subject_mask")
+                                if _mv_zone is None:
+                                    _mv_zone = locals().get("final_mask")
+                                _mv = (
+                                    self._measure_requested_change(
+                                        img, output, prompt_raw, prompt,
+                                        _mv_zone,
+                                    )
+                                    if _mv_zone is not None else None
+                                )
+                                if _mv is not None and not _mv.get("ok"):
+                                    _unmet = _mv.get("unmet") or "cambio no medido"
+                                    no_op_warning = f" | Aviso: {_unmet}"
+                                    print(
+                                        "[ImgEditor] Verificación medida: NO cumple "
+                                        f"({_unmet})", flush=True,
+                                    )
+                            except Exception as _mv_exc:
+                                print(
+                                    "[ImgEditor] Verificación medida omitida: "
+                                    f"{_mv_exc}", flush=True,
+                                )
                             print(
                                 f"[ImgEditor] {frame_note}{no_op_warning}{warning}",
                                 flush=True,
