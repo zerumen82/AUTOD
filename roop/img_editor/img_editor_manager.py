@@ -3211,6 +3211,97 @@ class ImgEditorManager:
             
         return keep
 
+    def _head_with_its_hair(
+        self, image: Image.Image, head_zone: Image.Image,
+        faces, masker,
+    ) -> Optional[Image.Image]:
+        """Cabeza medida + el pelo que cuelga de ella (general).
+
+        La elipse de la cara no llega a las sienes ni a la nuca. Para una
+        edición de apariencia anclada a la cabeza el agujero tiene que cubrir
+        el pelo real de ESA cabeza; si no, el pelo que sobresale queda fuera
+        del agujero y del pegado y deja rastros (edit_1795544625, 19:23).
+        El pelo se mide (CLIPSeg) y se queda solo el que pertenece a esta
+        cabeza; las demás cabezas de la foto se restan siempre.
+        """
+        if head_zone is None or masker is None:
+            return head_zone
+        try:
+            size = image.size
+            head = np.asarray(
+                head_zone.convert("L").resize(size, Image.Resampling.NEAREST)
+            ) >= 96
+            if int(head.sum()) < 48:
+                return head_zone
+            hair_img = masker.generate_mask(image, "hair")
+            if hair_img is None:
+                return head_zone
+            hair = np.asarray(
+                hair_img.convert("L").resize(size, Image.Resampling.NEAREST)
+            ) >= 96
+            ys, xs = np.where(head)
+            span = max(
+                int(ys.max() - ys.min() + 1), int(xs.max() - xs.min() + 1),
+            )
+            # Alcance: la cabeza medida. El pelo cuelga junto a ella.
+            reach = cv2.dilate(
+                head.astype(np.uint8),
+                cv2.getStructuringElement(
+                    cv2.MORPH_ELLIPSE,
+                    (max(9, int(span * 0.45)) | 1,) * 2,
+                ),
+            ) > 0
+            zone = hair & reach
+            if not zone.any():
+                return head_zone
+            count, labels, stats, _ = cv2.connectedComponentsWithStats(
+                zone.astype(np.uint8), connectivity=8,
+            )
+            # Los otros cabezas de la foto.
+            other_heads = []
+            for face in self._credible_faces(faces) if faces else []:
+                om = self._head_mask_from_faces(image, [face])
+                if om is None:
+                    continue
+                own = np.asarray(
+                    om.convert("L").resize(size, Image.Resampling.NEAREST)
+                ) >= 96
+                if float((own & head).sum()) / max(1, int(own.sum())) >= 0.55:
+                    continue
+                other_heads.append(own)
+            kept = np.zeros(zone.shape, dtype=bool)
+            for index in range(1, count):
+                if int(stats[index, cv2.CC_STAT_AREA]) < 24:
+                    continue
+                piece = labels == index
+                own_overlap = int((piece & head).sum())
+                # Tiene que pertenecer a ESTA cabeza: al menos 15 % del
+                # mechón cae sobre la elipse de la cabeza.
+                if own_overlap / max(1, int(piece.sum())) < 0.15:
+                    continue
+                # Y no puede ser de otra cabeza.
+                blocked = False
+                for oh in other_heads:
+                    if int((piece & oh).sum()) / max(1, int(piece.sum())) >= 0.15:
+                        blocked = True
+                        break
+                if blocked:
+                    continue
+                kept |= piece
+            if not kept.any():
+                return head_zone
+            print(
+                "[ImgEditor] Cabeza + su pelo medido en la zona "
+                f"(+{int(kept.sum())} px); las demás cabezas quedan fuera",
+                flush=True,
+            )
+            return Image.fromarray(
+                ((head | kept).astype(np.uint8) * 255), "L",
+            )
+        except Exception as exc:
+            print(f"[ImgEditor] Pelo de la cabeza no medido: {exc}", flush=True)
+            return head_zone
+
     def _head_mask_from_faces(self, image: Image.Image, faces) -> Optional[Image.Image]:
         """Create a union of head-only masks from detected faces.
 
@@ -9259,6 +9350,10 @@ class ImgEditorManager:
                                 raw_prompt=score_raw, translated_prompt=prompt,
                             )
                             if head_zone is not None:
+                                head_zone = self._head_with_its_hair(
+                                    img, head_zone, source_faces,
+                                    self._get_clipseg_masker(),
+                                ) or head_zone
                                 subject_passes = [{
                                     **subject_passes[0],
                                     "mask": head_zone,
@@ -9286,6 +9381,11 @@ class ImgEditorManager:
                                 announce=False,
                                 raw_prompt=score_raw, translated_prompt=prompt,
                             )
+                            if head_zone is not None:
+                                head_zone = self._head_with_its_hair(
+                                    img, head_zone, source_faces,
+                                    self._get_clipseg_masker(),
+                                ) or head_zone
                             if head_zone is not None and measured_item.get("mask") is not None:
                                 part = np.asarray(
                                     measured_item["mask"].convert("L").resize(
