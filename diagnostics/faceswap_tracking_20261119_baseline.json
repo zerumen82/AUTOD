@@ -1,0 +1,11 @@
+{
+  "source_log": "logs/process_20261119_015653.log (pruned by log rotation during verification)",
+  "video": "1753699274468.mp4",
+  "bboxes": {
+    "1": [329, 480, 432, 574],
+    "190": [305, 457, 443, 556],
+    "195": [300, 458, 439, 559],
+    "270": [653, 223, 900, 497]
+  },
+  "similarity_270": 0.27
+}
