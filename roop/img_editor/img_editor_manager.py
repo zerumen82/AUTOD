@@ -6849,18 +6849,42 @@ class ImgEditorManager:
         head = np.asarray(head_mask.convert("L").resize(size, Image.Resampling.NEAREST)) >= 128
         ys = np.flatnonzero(head.any(axis=1))
         if ys.size == 0:
+            # v5.1445 — antes volvia None sin traza y el calvo del 24/11 se
+            # entrego con pelo sin que el log dijera que la medicion no se
+            # hizo (edit_1795521434).
+            print(
+                "[ImgEditor] Pelo residual no medido: la mascara de cabeza "
+                "quedo vacia al reescalar",
+                flush=True,
+            )
             return None
         top, bottom = int(ys[0]), int(ys[-1])
         head[int(top + 0.60 * (bottom - top)) + 1:, :] = False
         if float(head.mean()) < 0.005:
+            print(
+                "[ImgEditor] Pelo residual no medido: la zona de cuero "
+                f"cabelludo es {float(head.mean()):.2%} de la foto (minimo 0,5%)",
+                flush=True,
+            )
             return None
         source_hair = masker.generate_mask(source, "hair")
         if source_hair is None:
+            print(
+                "[ImgEditor] Pelo residual no medido: el segmentador no "
+                "encontro pelo en la foto de entrada",
+                flush=True,
+            )
             return None
         result_hair = masker.generate_mask(result.resize(size, Image.Resampling.LANCZOS), "hair")
         before = float((np.asarray(source_hair.convert("L").resize(size)) >= 96)[head].mean())
         after = (float((np.asarray(result_hair.convert("L").resize(size)) >= 96)[head].mean())
                  if result_hair is not None else 0.0)
+        if result_hair is None:
+            print(
+                "[ImgEditor] Pelo residual en el resultado no encontrado por "
+                "el segmentador; se mide 0% (sin veredicto de pelo)",
+                flush=True,
+            )
         return before, after
 
     @staticmethod
