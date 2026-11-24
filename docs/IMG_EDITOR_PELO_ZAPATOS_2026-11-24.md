@@ -78,6 +78,57 @@ no reintentó y las botas se guardaron.
 - Revisión visual de los PNG entregados (`edit_1795474328.png`,
   `edit_1795521434.png`, `edit_1795522333.png`) para confirmar el síntoma.
 
+## Revisión de los renders posteriores (log `ui_start_20261124_140346.log`, 14:03–19:23)
+
+App relanzada a las 14:03, es decir con v5.1445 ya cargada (20 pasos, residual
+0,05). Ocho peticiones, todas «el hombre debe ser calvo»:
+
+| Hora | Salida | Calidad | Resultado visual |
+|---|---|---|---|
+| 14:26 / 14:31 / 14:34 | `edit_1795526760`, `edit_1795527096`, `edit_1795527239` | no | cabeza con pelo |
+| 16:16 | `edit_1795533370` | no | cabeza con pelo |
+| 17:32 | `edit_1795537947` | sí | coronilla pelada, banda de pelo en sienes/nuca |
+| 17:38 | `edit_1795538329` | sí | igual |
+| 18:44 | `edit_1795542250` | sí | igual |
+| 19:20 | `edit_1795544427` | no | igual |
+| 19:23 | `edit_1795544625` | sí | igual, con mechones sueltos sobre el cuero cabelludo |
+
+Medidas de los tres últimos pases (idénticas entre sí):
+
+```
+[ImgEditor] Zona pedida 'bald' medida (1.7%, 0 px fuera de la silueta)
+[ImgEditor] El pelo de la misma cabeza entra en la zona (+5424 px)
+[ImgEditor] Apariencia: una pasada, 20 pasos, fuerza 1.00
+[ImgEditor] Cambio medido sobre el sujeto: maximo 162-170 niveles, umbral Otsu=71-74,
+            respuesta en 7.8-7.9% del sujeto
+[ImgEditor] Zona pegada medida sobre el sujeto: 1.6-1.7% del recorte
+[ImgEditor] Refino focal omitido: el cambio medido no abre una ventana focal
+[ImgEditor] solo la zona medida, el resto de la foto se conserva | cumplimiento visual no verificado
+```
+
+Lectura:
+
+1. **Los 20 pasos están activos** («una pasada, 20 pasos») y el cambio ya no se
+   hunde como en v5.1444: la coronilla sale pelada desde las 17:32. La subida a
+   28 pasos era, por tanto, parte del problema, pero no todo.
+2. **La zona de generación sigue siendo pequeña para un calvo completo**: el
+   segmentador mide `bald` en 1,7 % de la foto y la continuación de pelo de esa
+   cabeza solo aporta 5 424 px. El modelo repinta lo que cae dentro de la
+   máscara; la banda de pelo de sienes y nuca queda fuera y sobrevive al pegado
+   («cambio medido ∩ permitido»). Es el límite que la nota anterior dejó como
+   siguiente palanca, ahora medido.
+3. **La verificación independiente de pelo no se ejecutó en ninguno de los ocho
+   renders**: no aparece `Pelo en cabeza solicitada` ni ninguna de las trazas
+   nuevas de `_bald_hair_coverage`. La causa está en el código, no en la
+   medición: el bloque de pelo vive en `img_editor_manager.py` hacia la línea
+   13 378 y exige `_focal_head_plan` o `_head_hole_plan`, pero la ruta de
+   apariencia local sale antes, en el retorno de la línea ~10 426 con
+   `cumplimiento visual no verificado`. Es una red de seguridad muerta en esta
+   ruta: el aviso que debía impedir entregar un calvo con pelo nunca se calcula.
+4. El mensaje final que ve el usuario ya admite `cumplimiento visual no
+   verificado`, así que el problema no es que la app «diga OK»: es que entrega
+   igual y sin reintento.
+
 ## Límite y siguiente paso
 **Sin PASS visual nuevo**: no se ha vuelto a renderizar con ComfyUI en este
 turno. Hay que reiniciar la app y repetir los dos prompts reales:
