@@ -9657,8 +9657,20 @@ class ImgEditorManager:
                         and subject_mask is not None
                         and appearance_edit and deliver_region
                     )
+                    # v5.1448: para una edición de apariencia anclada a una
+                    # cabeza, el modelo ve la persona entera (máscara completa)
+                    # para tener contexto y repintar con decisión; el pegado
+                    # sigue restringido a la cabeza+pelo medidos. Con la máscara
+                    # parcial (solo cabeza) el modelo preservaba el pelo y
+                    # dejaba rastros (log 21:54, 6.8% de cambio, 1.6% pegado).
+                    if (appearance_edit and subject_mask is not None
+                            and len(subject_passes) == 1
+                            and subject_passes[0].get("person") is not None):
+                        generation_subject = subject_passes[0]["person"]
+                    else:
+                        generation_subject = subject_mask
                     generation_mask = (
-                        subject_mask
+                        generation_subject
                         if (
                             (appearance_edit or region_edit)
                             and not instruction_on_photo
