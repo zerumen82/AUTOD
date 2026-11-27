@@ -109,6 +109,13 @@ def build_faceswap_ui():
             }
             .frame-btn { min-width: 45px !important; font-weight: bold !important; }
             .native-drop-control { display: none !important; }
+            /* Zona de arrastre visible: las fotos se sueltan en la galería o
+               en la línea de listado (ya no hay caja de subida). */
+            #faceswap_src_file_list, #faceswap_dest_file_list {
+                border: 1px dashed #3b82f6 !important;
+                border-radius: 8px !important;
+                padding: 8px 10px !important;
+            }
         </style>
     """)
 
@@ -153,11 +160,19 @@ def build_faceswap_ui():
 
                 with gr.Row(variant="panel"):
                     with gr.Column():
-                        src_file_list = gr.Markdown("📚 **Archivos de origen:** ninguno cargado", elem_id="faceswap_src_file_list")
+                        src_file_list = gr.Markdown(
+                            "📚 **Archivos de origen:** ninguno cargado\n\n"
+                            "_Arrastra las fotos sobre la galería de la izquierda o sobre esta línea._",
+                            elem_id="faceswap_src_file_list",
+                        )
                         source_path_input = gr.Textbox(visible=False, elem_id="source_path_input")
                         bt_add_source_paths = gr.Button(visible=False, elem_id="bt_add_source_paths")
                     with gr.Column():
-                        dest_file_list = gr.Markdown("📚 **Archivos de destino:** ninguno cargado", elem_id="faceswap_dest_file_list")
+                        dest_file_list = gr.Markdown(
+                            "📚 **Archivos de destino:** ninguno cargado\n\n"
+                            "_Arrastra las fotos o el vídeo sobre la galería de la derecha o sobre esta línea._",
+                            elem_id="faceswap_dest_file_list",
+                        )
                         bt_browse_path = gr.Button(visible=False, elem_id="bt_browse_path")
                         target_path_input = gr.Textbox(visible=False, elem_id="target_path_input")
                         bt_add_target_path = gr.Button(visible=False, elem_id="bt_add_target_path")

@@ -94,7 +94,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1466 (2026-11-27)"
+APP_VERSION = "v5.1467 (2026-11-27)"
 
 
 def _active_server_path():
@@ -541,8 +541,7 @@ def run():
                 // En Mejorar fotos vale toda la pestaña: Gradio no aplica
                 // elem_id a las filas de layout y exigir acertar en la línea
                 // de cola hacía que el drop se perdiera fuera de ella.
-                return t.closest('#enhance_input_files,#srcfiles,#destfiles,.img-enhance-container,.origin-gallery,.target-gallery');
-              }
+                return t.closest('#enhance_input_files,#srcfiles,#destfiles,.img-enhance-container,.origin-gallery,.target-gallery,#faceswap_src_file_list,#faceswap_dest_file_list');}
               document.addEventListener('dragover', function(e){
                 if (window.__autoautoDropEnabled && zoneFor(e)) { e.preventDefault(); }
               }, true);
@@ -554,9 +553,11 @@ def run():
                 e.stopImmediatePropagation();
                 var dt = e.dataTransfer;
                 if (!dt || !dt.files || !dt.files.length) { return; }
-                var queue = (zone.id === 'srcfiles' || zone.classList.contains('origin-gallery'))
+                var queue = (zone.id === 'srcfiles' || zone.id === 'faceswap_src_file_list'
+                             || zone.classList.contains('origin-gallery'))
                           ? 'faceswap_src'
-                          : ((zone.id === 'destfiles' || zone.classList.contains('target-gallery'))
+                          : ((zone.id === 'destfiles' || zone.id === 'faceswap_dest_file_list'
+                              || zone.classList.contains('target-gallery'))
                               ? 'faceswap_dest' : 'enhance');
                 var sink = document.getElementById('autoauto_drop_' + queue);
                 if (!sink) { return; }

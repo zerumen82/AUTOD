@@ -239,6 +239,16 @@ def _file_indicator_text():
         return "📂 **Archivo:** Ninguno seleccionado"
 
 
+_SRC_EMPTY_TEXT = (
+    "📚 **Archivos de origen:** ninguno cargado\n\n"
+    "_Arrastra las fotos sobre la galería de la izquierda o sobre esta línea._"
+)
+_DEST_EMPTY_TEXT = (
+    "📚 **Archivos de destino:** ninguno cargado\n\n"
+    "_Arrastra las fotos o el vídeo sobre la galería de la derecha o sobre esta línea._"
+)
+
+
 def _src_files_text():
     """Listado de archivos de origen cargados y caras aportadas por cada uno."""
     try:
@@ -247,14 +257,14 @@ def _src_files_text():
             name = getattr(face_set, "name", None) or "origen"
             counts[name] = counts.get(name, 0) + 1
         if not counts:
-            return "📚 **Archivos de origen:** ninguno cargado"
+            return _SRC_EMPTY_TEXT
         items = []
         for i, (name, n) in enumerate(counts.items()):
             faces = "1 cara" if n == 1 else f"{n} caras"
             items.append(f"{i + 1}. `{name}` — {faces}")
         return f"📚 **Archivos de origen ({len(counts)}):**\n\n" + "\n".join(items)
     except Exception:
-        return "📚 **Archivos de origen:** ninguno cargado"
+        return _SRC_EMPTY_TEXT
 
 
 def _dest_files_text():
@@ -262,7 +272,7 @@ def _dest_files_text():
     try:
         entries = state.list_files_process
         if not entries:
-            return "📚 **Archivos de destino:** ninguno cargado"
+            return _DEST_EMPTY_TEXT
         active = state.selected_preview_index
         items = []
         for i, entry in enumerate(entries):
@@ -273,7 +283,7 @@ def _dest_files_text():
             items.append(f"{i + 1}. {marker}`{name}`{faces}")
         return f"📚 **Archivos de destino ({len(entries)}):**\n\n" + "\n".join(items)
     except Exception:
-        return "📚 **Archivos de destino:** ninguno cargado"
+        return _DEST_EMPTY_TEXT
 
 
 def on_face_selection_click(evt: gr.SelectData, frame_num):
