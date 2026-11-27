@@ -17,7 +17,7 @@ DETECTED_FACES_GALLERY_COLUMNS = 4
 is_deleting_input_face = False
 is_deleting_target_face = False
 
-_target_load_lock = threading.Lock()
+_target_load_lock = threading.RLock()
 
 # v5.1408: rutas ya incorporadas al banco de origen / a la cola de destino.
 # Permite que una segunda subida sume archivos sin repetir ni borrar los anteriores.
@@ -239,6 +239,43 @@ def _file_indicator_text():
         return "📂 **Archivo:** Ninguno seleccionado"
 
 
+def _src_files_text():
+    """Listado de archivos de origen cargados y caras aportadas por cada uno."""
+    try:
+        counts = {}
+        for face_set in roop.globals.INPUT_FACESETS:
+            name = getattr(face_set, "name", None) or "origen"
+            counts[name] = counts.get(name, 0) + 1
+        if not counts:
+            return "📚 **Archivos de origen:** ninguno cargado"
+        items = []
+        for i, (name, n) in enumerate(counts.items()):
+            faces = "1 cara" if n == 1 else f"{n} caras"
+            items.append(f"{i + 1}. `{name}` — {faces}")
+        return f"📚 **Archivos de origen ({len(counts)}):**\n\n" + "\n".join(items)
+    except Exception:
+        return "📚 **Archivos de origen:** ninguno cargado"
+
+
+def _dest_files_text():
+    """Listado de archivos de destino cargados: activo y caras elegidas por archivo."""
+    try:
+        entries = state.list_files_process
+        if not entries:
+            return "📚 **Archivos de destino:** ninguno cargado"
+        active = state.selected_preview_index
+        items = []
+        for i, entry in enumerate(entries):
+            name = os.path.basename(entry.filename)
+            n = len(_get_file_bank(name, entry.filename))
+            marker = "▶ " if i == active else ""
+            faces = f" — 🎯 {n}/{_MAX_REFS_PER_FILE}" if n else ""
+            items.append(f"{i + 1}. {marker}`{name}`{faces}")
+        return f"📚 **Archivos de destino ({len(entries)}):**\n\n" + "\n".join(items)
+    except Exception:
+        return "📚 **Archivos de destino:** ninguno cargado"
+
+
 def on_face_selection_click(evt: gr.SelectData, frame_num):
     """Maneja el clic en galería, sincroniza el slider, añade la cara y actualiza el feedback visual."""
     if not evt or evt.index is None:
@@ -277,7 +314,7 @@ def on_face_selection_click(evt: gr.SelectData, frame_num):
         print(f"[FaceSelection] Error: {e}")
         boxed_frame_gradio = gr.update()
 
-    return gr.update(maximum=max(1, total_faces), value=face_index + 1), boxed_frame_gradio
+    return gr.update(maximum=max(2, total_faces), value=face_index + 1), boxed_frame_gradio
 
 
 def on_preview_click(evt: gr.SelectData, frame_num):
@@ -537,8 +574,8 @@ def wire_events(ui_comp):
         inputs=[ui_comp["preview_frame_num"]],
         outputs=[ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["previewimage"]]
     ).then(
-        fn=lambda: _file_indicator_text(),
-        outputs=[ui_comp["file_indicator"]]
+        fn=lambda: (_file_indicator_text(), _dest_files_text()),
+        outputs=[ui_comp["file_indicator"], ui_comp["dest_file_list"]]
     )
 
     def detect_faces_in_frame(frame_num):
@@ -592,8 +629,8 @@ def wire_events(ui_comp):
         fn=lambda: (gr.update(visible=True), logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"), logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"), *logic.update_pagination_buttons(len(ui.globals.ui_target_thumbs), "target")),
         outputs=[ui_comp["dynamic_face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]]
     ).then(
-        fn=lambda: _file_indicator_text(),
-        outputs=[ui_comp["file_indicator"]]
+        fn=lambda: (_file_indicator_text(), _dest_files_text()),
+        outputs=[ui_comp["file_indicator"], ui_comp["dest_file_list"]]
     )
     
     # ARCHIVOS ORIGEN/DESTINO
@@ -629,7 +666,7 @@ def wire_events(ui_comp):
             state.current_input_page = 0
             state.source_load_summary = ""
             selected_input_face_idx = None
-            return [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False)
+            return [], "📄 Página 1 de 1 (0 caras)", gr.update(interactive=False), gr.update(interactive=False), _src_files_text()
 
         # gr.Files acumula la selección: una segunda subida vuelve a traer los
         # archivos anteriores. Solo se extraen caras de los archivos nuevos y
@@ -718,6 +755,7 @@ def wire_events(ui_comp):
             logic.get_faces_for_page(ui.globals.ui_input_thumbs, "input"),
             logic.update_pagination_info(ui.globals.ui_input_thumbs, "input"),
             *logic.update_pagination_buttons(total_faces, "input"),
+            _src_files_text(),
         )
 
     def _src_loading_outputs():
@@ -728,6 +766,7 @@ def wire_events(ui_comp):
             "⏳ Cargando caras...",
             gr.update(interactive=False),
             gr.update(interactive=False),
+            _src_files_text(),
         )
 
     def _safe_on_src_changed(files):
@@ -763,14 +802,8 @@ def wire_events(ui_comp):
         ui_comp["input_page_info"],
         ui_comp["bt_input_prev"],
         ui_comp["bt_input_next"],
+        ui_comp["src_file_list"],
     ]
-    ui_comp["bt_srcfiles"].upload(
-        fn=_safe_on_src_changed,
-        inputs=[ui_comp["bt_srcfiles"]],
-        outputs=_src_outputs,
-        show_progress="full",
-        queue=True,
-    )
 
     def _direct_paths(value):
         value = (value or "").strip()
@@ -792,6 +825,8 @@ def wire_events(ui_comp):
         inputs=[ui_comp["source_path_input"]],
         outputs=[ui_comp["source_path_input"], *_src_outputs],
         show_progress="hidden",
+        concurrency_id="faceswap_source_load",
+        concurrency_limit=1,
     )
 
     def _resolve_target_path(f):
@@ -816,6 +851,43 @@ def wire_events(ui_comp):
     def _target_unchanged_outputs():
         return tuple(gr.update() for _ in range(10))
 
+    def _current_target_outputs():
+        """Repinta lo ya cargado en el destino, sin volver a detectar nada.
+
+        v5.1462: `_LOADED_TARGET_PATHS` es del proceso servidor, no de la
+        ventana. Si se vuelve a soltar el mismo lote (o se abre otra ventana
+        contra el mismo servidor), la carga no tiene archivos nuevos y antes
+        se devolvían salidas sin tocar: la galería de esa ventana se quedaba
+        vacía aunque las caras existieran. Se devuelve el estado actual.
+        """
+        total = len(state.list_files_process)
+        index = min(state.selected_preview_index, max(0, total - 1))
+        candidate_panel, candidate_faces = _stored_candidate_outputs()
+        return (
+            gr.update(),
+            gr.update(),
+            gr.update(interactive=index > 0),
+            gr.update(interactive=index < total - 1),
+            candidate_panel,
+            candidate_faces,
+            logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"),
+            logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"),
+            *logic.update_pagination_buttons(state.current_target_page, "target"),
+        )
+
+    def _stored_candidate_outputs():
+        """Candidatas ya detectadas del archivo activo, sin volver a detectar."""
+        faces = state.SELECTION_FACES_DATA or []
+        if not faces:
+            return gr.update(visible=False), []
+        thumbs = [
+            _normalize_face_thumb(util.convert_to_gradio(thumb, is_rgb=True), 300)
+            for _, thumb in faces
+        ]
+        return gr.update(visible=True), gr.Gallery(
+            value=thumbs, columns=min(4, max(1, len(thumbs)))
+        )
+
     def _load_target_files(paths, append=False):
         global _LOADED_TARGET_PATHS
         normalized = [os.path.normpath(p) for p in (paths or []) if p]
@@ -830,8 +902,8 @@ def wire_events(ui_comp):
         for p in fresh:
             _LOADED_TARGET_PATHS.add(os.path.normcase(os.path.abspath(p)))
         if append and not fresh:
-            gr.Warning("Esos archivos ya estaban cargados; no se añadió ninguno.")
-            return _target_unchanged_outputs(), 0
+            gr.Warning("Esos archivos ya estaban cargados; se muestran los del destino actual.")
+            return _current_target_outputs(), 0
 
         loaded_entries = []
         first_preview = None
@@ -853,11 +925,13 @@ def wire_events(ui_comp):
 
         if not loaded_entries:
             gr.Warning("No se pudo abrir ningún archivo de destino; se conserva la selección anterior.")
-            return _target_unchanged_outputs(), 0
+            return _current_target_outputs(), 0
 
         if append:
-            # Sumar a la cola sin tocar la selección ni las caras ya elegidas.
+            # Sumar a la cola y activar el primer archivo nuevo: sus caras se
+            # eligen a mano, igual que al soltar el primer lote.
             state.list_files_process.extend(loaded_entries)
+            state.selected_preview_index = len(state.list_files_process) - len(loaded_entries)
         else:
             state.current_target_page = 0
             state.SELECTION_FACES_DATA = []
@@ -877,16 +951,29 @@ def wire_events(ui_comp):
         active_entry = state.list_files_process[state.selected_preview_index]
         roop.globals.target_path = active_entry.filename
         _log(f"[LOAD] Destino: {total} archivo(s) - activo {os.path.basename(active_entry.filename)}")
-        preview_update = gr.update() if append else (
+        preview_update = (
             gr.update(value=first_preview) if first_preview is not None else gr.update()
         )
+        # v5.1463: el destino se elige a mano, como antes de v5.1460. La carga
+        # solo muestra las candidatas del archivo activo; ninguna cara entra en
+        # «Caras de destino» sin un clic. El origen sigue cargándose automático.
+        candidate_panel = gr.update(visible=False)
+        candidate_faces = []
+        try:
+            detected = detect_faces_in_frame(1)
+            candidate_panel = detected[0]
+            candidate_faces = detected[2]
+            if detected[3] is not None:
+                preview_update = detected[3]
+        except Exception as error:
+            _log(f"[LOAD] Detección inicial de destino omitida: {error}")
         return (
-            gr.update(maximum=active_entry.endframe, value=1),
+            gr.update(maximum=max(2, active_entry.endframe), value=1),
             preview_update,
             gr.update(interactive=False),
             gr.update(interactive=total > 1),
-            gr.update(visible=False),
-            [],
+            candidate_panel,
+            candidate_faces,
             logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"),
             logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"),
             *logic.update_pagination_buttons(state.current_target_page, "target")
@@ -904,36 +991,37 @@ def wire_events(ui_comp):
 
     def _safe_on_dest_changed(files, append=False):
         nonlocal _dest_processing, _dest_last_key, _dest_last_finished_at
-        files_key = _dest_files_key(files)
-        now = time.time()
-        if _dest_processing:
-            return _target_empty_outputs()
-        if files_key and files_key == _dest_last_key and (now - _dest_last_finished_at) < 3.0:
-            return on_dest_changed(files, append=append)
-        _dest_processing = True
-        try:
-            result = on_dest_changed(files, append=append)
-            _dest_last_key = files_key
-            _dest_last_finished_at = time.time()
-            return result
-        except Exception as exc:
-            print(f"[UI] Error cargando destino: {exc}")
-            return _target_empty_outputs()
-        finally:
-            _dest_processing = False
+        with _target_load_lock:
+            files_key = _dest_files_key(files)
+            now = time.time()
+            if _dest_processing:
+                return _target_unchanged_outputs()
+            if files_key and files_key == _dest_last_key and (now - _dest_last_finished_at) < 3.0:
+                return _current_target_outputs()
+            _dest_processing = True
+            try:
+                result = on_dest_changed(files, append=append)
+                _dest_last_key = files_key
+                _dest_last_finished_at = time.time()
+                return result
+            except Exception as exc:
+                print(f"[UI] Error cargando destino: {exc}")
+                return _target_unchanged_outputs()
+            finally:
+                _dest_processing = False
 
     def on_add_target_path(ruta):
         paths = _direct_paths(ruta)
         if not paths:
             _log(f"[LOAD] Ruta no existe en el servidor: {ruta}")
             gr.Warning("La ruta no existe en el servidor; se conserva el destino cargado.")
-            return (gr.update(), *_target_unchanged_outputs(), gr.update())
+            return (gr.update(), *_target_unchanged_outputs(), gr.update(), _dest_files_text())
         _log(f"[LOAD] Cargando por ruta (sin subida por red): {len(paths)} archivo(s)")
         with _target_load_lock:
             outs, loaded_count = _load_target_files(paths, append=True)
         if not loaded_count:
-            return (gr.update(), *outs, gr.update())
-        return (gr.update(value=f"✅ {loaded_count} archivo(s) añadido(s) por ruta directa", label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)"), *outs, _file_indicator_text())
+            return (gr.update(), *outs, gr.update(), _dest_files_text())
+        return (gr.update(value=f"✅ {loaded_count} archivo(s) añadido(s) por ruta directa", label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)"), *outs, _file_indicator_text(), _dest_files_text())
 
     def on_browse_and_load():
         try:
@@ -948,21 +1036,21 @@ def wire_events(ui_comp):
             )
             root.destroy()
             if not path:
-                return (gr.update(), *_target_unchanged_outputs(), gr.update())
+                return (gr.update(), *_target_unchanged_outputs(), gr.update(), _dest_files_text())
             _log(f"[LOAD] Diálogo nativo → ruta: {path}")
             with _target_load_lock:
                 outs, loaded_count = _load_target_files([path], append=True)
             if not loaded_count:
-                return (gr.update(), *outs, gr.update())
-            return (gr.update(value=f"✅ {os.path.basename(path)} cargado por ruta directa (sin subida)", label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)"), *outs, f"📂 **Archivo ({state.selected_preview_index+1}/{len(state.list_files_process)}):** {os.path.basename(state.list_files_process[0].filename)}")
+                return (gr.update(), *outs, gr.update(), _dest_files_text())
+            return (gr.update(value=f"✅ {os.path.basename(path)} cargado por ruta directa (sin subida)", label="⚡ Ruta directa en el servidor (recomendado si el video es grande/remoto)"), *outs, f"📂 **Archivo ({state.selected_preview_index+1}/{len(state.list_files_process)}):** {os.path.basename(state.list_files_process[0].filename)}", _dest_files_text())
         except Exception as e:
             _log(f"[BROWSE] Error abriendo diálogo: {e}")
             gr.Warning(f"No se pudo abrir el diálogo: {e}")
-            return (gr.update(), *_target_unchanged_outputs(), gr.update())
+            return (gr.update(), *_target_unchanged_outputs(), gr.update(), _dest_files_text())
 
     # NAVEGACIÓN Y INDICADORES
     def update_file_indicator():
-        return _file_indicator_text()
+        return _file_indicator_text(), _dest_files_text()
 
     def update_source_random_state():
         has_video = any(util.is_video(entry.filename) for entry in state.list_files_process) if state.list_files_process else False
@@ -970,18 +1058,9 @@ def wire_events(ui_comp):
             return gr.update(interactive=False, value=False)
         return gr.update(interactive=True)
 
-    def on_dest_upload(files):
-        """Subida por componente: suma un bloque nuevo, no reemplaza la cola."""
-        return _safe_on_dest_changed(files, append=True)
-
-    _path_outputs = [ui_comp["target_path_input"], ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["file_indicator"]]
-    ui_comp["bt_destfiles"].upload(
-        fn=on_dest_upload,
-        inputs=[ui_comp["bt_destfiles"]],
-        outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"]],
-        show_progress="full",
-        queue=True,
-    ).then(update_file_indicator, None, ui_comp["file_indicator"]).then(update_source_random_state, None, ui_comp["source_random"])
+    # v5.1465: la caja de subida de destino se retira; el destino se carga
+    # arrastrando sobre la galería (cola nativa) o por ruta directa.
+    _path_outputs = [ui_comp["target_path_input"], ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"], ui_comp["dynamic_face_selection"], ui_comp["face_selection"], ui_comp["target_faces"], ui_comp["target_page_info"], ui_comp["bt_target_prev"], ui_comp["bt_target_next"], ui_comp["file_indicator"], ui_comp["dest_file_list"]]
     ui_comp["bt_add_target_path"].click(fn=on_add_target_path, inputs=[ui_comp["target_path_input"]], outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
     ui_comp["target_path_input"].submit(fn=on_add_target_path, inputs=[ui_comp["target_path_input"]], outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
     ui_comp["bt_browse_path"].click(fn=on_browse_and_load, outputs=_path_outputs, queue=False).then(update_source_random_state, None, ui_comp["source_random"])
@@ -999,10 +1078,7 @@ def wire_events(ui_comp):
 
     def _take_native_drop(queue_name):
         import roop.globals as _g
-        with _g.NATIVE_DROP_LOCK:
-            paths = list(_g.NATIVE_DROP_QUEUES.get(queue_name, []))
-            _g.NATIVE_DROP_QUEUES[queue_name].clear()
-        return paths
+        return _g.native_drop_pop(queue_name)
 
     def poll_native_src_drop():
         paths = [p for p in _take_native_drop("faceswap_src") if _is_image_path(p)]
@@ -1024,6 +1100,7 @@ def wire_events(ui_comp):
         outputs=_src_outputs,
         queue=True,
         concurrency_limit=1,
+        concurrency_id="faceswap_source_load",
     )
     drop_dest_timer = gr.Timer(1.0)
     drop_dest_timer.tick(
@@ -1031,7 +1108,8 @@ def wire_events(ui_comp):
         outputs=_dest_drop_outputs,
         queue=True,
         concurrency_limit=1,
-    ).then(update_file_indicator, None, ui_comp["file_indicator"]).then(
+        concurrency_id="faceswap_target_load",
+    ).then(update_file_indicator, None, [ui_comp["file_indicator"], ui_comp["dest_file_list"]]).then(
         update_source_random_state, None, ui_comp["source_random"]
     )
 
@@ -1062,20 +1140,50 @@ def wire_events(ui_comp):
     ui_comp["preview_frame_num"].release(fn=on_frame_change, inputs=[ui_comp["preview_frame_num"]], outputs=[ui_comp["previewimage"], ui_comp["preview_frame_num"]])
 
     def navigate_file(direction):
-        if not state.list_files_process:
-            return gr.update(), None, gr.update(), gr.update()
-        state.selected_preview_index = min(len(state.list_files_process)-1, state.selected_preview_index + 1) if direction == "next" else max(0, state.selected_preview_index - 1)
-        entry = state.list_files_process[state.selected_preview_index]
-        roop.globals.target_path = entry.filename
-        state.CURRENT_DETECTED_FRAME = -1
-        state.CURRENT_DETECTED_KEY = None
-        state.SELECTION_FACES_DATA = None
-        from roop.capturer import get_video_frame, get_image_frame
-        frame = get_video_frame(entry.filename, 1) if util.is_video(entry.filename) else get_image_frame(entry.filename)
-        return gr.update(maximum=entry.endframe, value=1), util.convert_to_gradio(frame), gr.update(interactive=state.selected_preview_index>0), gr.update(interactive=state.selected_preview_index<len(state.list_files_process)-1)
+        with _target_load_lock:
+            if not state.list_files_process:
+                return tuple(gr.update() for _ in range(10))
+            state.selected_preview_index = min(len(state.list_files_process)-1, state.selected_preview_index + 1) if direction == "next" else max(0, state.selected_preview_index - 1)
+            entry = state.list_files_process[state.selected_preview_index]
+            roop.globals.target_path = entry.filename
+            state.CURRENT_DETECTED_FRAME = -1
+            state.CURRENT_DETECTED_KEY = None
+            state.SELECTION_FACES_DATA = None
+            from roop.capturer import get_video_frame, get_image_frame
+            frame = get_video_frame(entry.filename, 1) if util.is_video(entry.filename) else get_image_frame(entry.filename)
+            panel = gr.update(visible=False)
+            candidates = []
+            preview = util.convert_to_gradio(frame)
+            try:
+                detected = detect_faces_in_frame(1)
+                panel, _, candidates, boxed, _ = detected
+                if boxed is not None:
+                    preview = boxed
+            except Exception as error:
+                _log(f"[LOAD] Detección al navegar omitida: {error}")
+            return (
+                gr.update(maximum=max(2, entry.endframe), value=1), preview,
+                gr.update(interactive=state.selected_preview_index > 0),
+                gr.update(interactive=state.selected_preview_index < len(state.list_files_process)-1),
+                panel, candidates,
+                logic.get_faces_for_page(ui.globals.ui_target_thumbs, "target"),
+                logic.update_pagination_info(ui.globals.ui_target_thumbs, "target"),
+                *logic.update_pagination_buttons(state.current_target_page, "target"),
+            )
 
-    ui_comp["bt_prev_file"].click(fn=lambda: navigate_file("prev"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]], queue=False).then(update_file_indicator, None, ui_comp["file_indicator"])
-    ui_comp["bt_next_file"].click(fn=lambda: navigate_file("next"), outputs=[ui_comp["preview_frame_num"], ui_comp["previewimage"], ui_comp["bt_prev_file"], ui_comp["bt_next_file"]], queue=False).then(update_file_indicator, None, ui_comp["file_indicator"])
+    _navigation_outputs = [ui_comp[k] for k in (
+        "preview_frame_num", "previewimage", "bt_prev_file", "bt_next_file",
+        "dynamic_face_selection", "face_selection", "target_faces",
+        "target_page_info", "bt_target_prev", "bt_target_next",
+    )]
+    for button, direction in (("bt_prev_file", "prev"), ("bt_next_file", "next")):
+        ui_comp[button].click(
+            fn=lambda chosen=direction: navigate_file(chosen),
+            outputs=_navigation_outputs,
+            queue=True,
+            concurrency_id="faceswap_target_load",
+            concurrency_limit=1,
+        ).then(update_file_indicator, None, [ui_comp["file_indicator"], ui_comp["dest_file_list"]])
 
     # PAGINACIÓN
     ui_comp["bt_input_prev"].click(fn=lambda: on_input_page_change(-1), outputs=[ui_comp["input_faces"], ui_comp["input_page_info"], ui_comp["bt_input_prev"], ui_comp["bt_input_next"]])
@@ -1098,13 +1206,14 @@ def wire_events(ui_comp):
         _src_last_key = None
         _src_last_finished_at = 0.0
         _log("[CLEAR] Origen: todos los archivos y caras retirados de la UI")
-        return (None, gr.update(value=""), *_src_pagination_outputs(),
+        return (gr.update(value=""), *_src_pagination_outputs(),
                 gr.update(value=None, visible=False))
 
     def clear_target():
         global selected_target_face_idx, _LOADED_TARGET_PATHS
-        _LOADED_TARGET_PATHS.clear()
+        nonlocal _dest_last_key, _dest_last_finished_at
         with _target_load_lock:
+            _LOADED_TARGET_PATHS.clear()
             state.list_files_process = []
             state.selected_preview_index = 0
             state.current_target_page = 0
@@ -1125,9 +1234,12 @@ def wire_events(ui_comp):
             if hasattr(roop.globals, 'selected_face_references'):
                 roop.globals.selected_face_references.clear()
             roop.globals.target_path = None
+            _dest_last_key = None
+            _dest_last_finished_at = 0.0
         _log("[CLEAR] Destino: todos los archivos, caras y previews retirados de la UI")
-        return (None, gr.update(value=""), *_target_empty_outputs(),
+        return (gr.update(value=""), *_target_empty_outputs(),
                 "📂 **Archivo:** Ninguno seleccionado",
+                _dest_files_text(),
                 gr.update(value=None, visible=False),
                 "### ✨ Busca caras en el frame",
                 gr.update(value="🔍 BUSCAR CARAS EN ESTE FRAME"),
@@ -1135,16 +1247,22 @@ def wire_events(ui_comp):
 
     ui_comp["bt_clear_source"].click(
         fn=clear_source,
-        outputs=[ui_comp[k] for k in ("bt_srcfiles", "source_path_input", "input_faces",
-                 "input_page_info", "bt_input_prev", "bt_input_next", "preview_result")],
+        outputs=[ui_comp[k] for k in ("source_path_input", "input_faces",
+                 "input_page_info", "bt_input_prev", "bt_input_next", "src_file_list", "preview_result")],
+        queue=True,
+        concurrency_id="faceswap_source_load",
+        concurrency_limit=1,
     )
     ui_comp["bt_clear_target"].click(
         fn=clear_target,
-        outputs=[ui_comp[k] for k in ("bt_destfiles", "target_path_input", "preview_frame_num",
+        outputs=[ui_comp[k] for k in ("target_path_input", "preview_frame_num",
                  "previewimage", "bt_prev_file", "bt_next_file", "dynamic_face_selection",
                  "face_selection", "target_faces", "target_page_info", "bt_target_prev",
-                 "bt_target_next", "file_indicator", "preview_result", "face_detection_title",
+                 "bt_target_next", "file_indicator", "dest_file_list", "preview_result", "face_detection_title",
                  "bt_use_face_from_preview", "face_selector_slider")],
+        queue=True,
+        concurrency_id="faceswap_target_load",
+        concurrency_limit=1,
     ).then(update_source_random_state, None, ui_comp["source_random"])
 
     # AJUSTES EXPERTOS
@@ -1174,7 +1292,7 @@ def wire_events(ui_comp):
         def _use_result_as_source():
             output_dir = getattr(roop.globals, 'output_path', None)
             if not output_dir or not os.path.isdir(output_dir):
-                return [], "❌ No hay directorio de salida", gr.update(interactive=False), gr.update(interactive=False)
+                return [], "❌ No hay directorio de salida", gr.update(interactive=False), gr.update(interactive=False), _src_files_text()
             # Buscar el archivo más reciente en el directorio de salida
             files = []
             for f in os.listdir(output_dir):
@@ -1182,18 +1300,20 @@ def wire_events(ui_comp):
                 if os.path.isfile(fp) and _is_image_path(fp):
                     files.append((fp, os.path.getmtime(fp)))
             if not files:
-                return [], "❌ No hay resultados para usar como origen", gr.update(interactive=False), gr.update(interactive=False)
+                return [], "❌ No hay resultados para usar como origen", gr.update(interactive=False), gr.update(interactive=False), _src_files_text()
             files.sort(key=lambda x: x[1], reverse=True)
             latest = files[0][0]
             # Cargar como source
             try:
                 return _safe_on_src_changed([latest])
             except Exception as e:
-                return [], f"❌ Error: {e}", gr.update(interactive=False), gr.update(interactive=False)
+                return [], f"❌ Error: {e}", gr.update(interactive=False), gr.update(interactive=False), _src_files_text()
 
         ui_comp["bt_use_result_as_source"].click(
             fn=_use_result_as_source,
             outputs=_src_outputs,
+            concurrency_id="faceswap_source_load",
+            concurrency_limit=1,
         )
 
 def on_input_page_change(delta):

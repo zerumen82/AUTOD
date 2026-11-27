@@ -3,8 +3,8 @@
 """Fase 2 — la ruta real acota la imagen de trabajo antes de ComfyUI.
 
 Fuerza el tope a 200 px sobre la foto del probe de calvo (1138x561) y
-comprueba que el cliente recibe una imagen acotada, con la máscara del mismo
-tamano y 28 pasos. Sin ComfyUI real ni reinicio de la UI.
+comprueba que el cliente recibe una imagen acotada y los pasos de la receta
+LongCat vigente. Sin ComfyUI real ni reinicio de la UI.
 """
 import io
 import os
@@ -20,6 +20,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from roop.face_util import get_face_analyser_cpu  # noqa: E402
+from roop.img_editor.gen_prompt_config import get_longcat_model_config  # noqa: E402
 from roop.img_editor.img_editor_manager import ImgEditorManager  # noqa: E402
 
 SRC = os.path.join("ui", "tob", "ComfyUI", "input", "fast_1792015141.png")
@@ -77,7 +78,10 @@ def main() -> int:
     assert first_side <= 200, f"el primer pase recibió una imagen de {first_side} px"
     steps = [int(call["num_inference_steps"]) for call in generates
              if "num_inference_steps" in call]
-    assert steps and min(steps) >= 28, f"pasos insuficientes: {steps}"
+    expected_steps = int(get_longcat_model_config()["steps"])
+    assert steps and min(steps) >= expected_steps, (
+        f"pasos por debajo de la receta {expected_steps}: {steps}"
+    )
     print(f"pasos enviados: {steps}")
     print("PASS — Fase 2: tope de resolución aplicado en la ruta real")
     return 0

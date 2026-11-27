@@ -633,9 +633,7 @@ def wire_events(ui_components):
 
     def poll_native_drop(selected, *slider_vals):
         import roop.globals as _g
-        with _g.NATIVE_DROP_LOCK:
-            paths = list(_g.NATIVE_DROP_QUEUES.get("enhance", []))
-            _g.NATIVE_DROP_QUEUES["enhance"].clear()
+        paths = _g.native_drop_pop("enhance")
         if not paths:
             return [gr.update()] * (len(_refresh_outputs) + len(_mp_outputs))
         print(f"[NATIVE-DROP] enhance: cargando {len(paths)} foto(s) por ruta")

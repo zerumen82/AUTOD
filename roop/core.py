@@ -94,7 +94,7 @@ def live_swap(frame, options):
         return frame
 
 
-APP_VERSION = "v5.1448 (2026-11-24)"
+APP_VERSION = "v5.1466 (2026-11-27)"
 
 
 def _active_server_path():
@@ -507,8 +507,7 @@ def run():
                     print(f"[NATIVE-DROP] {queue_name}: {len(paths)} ruta(s) recibidas")
                     try:
                         import roop.globals as _g
-                        with _g.NATIVE_DROP_LOCK:
-                            _g.NATIVE_DROP_QUEUES.setdefault(queue_name, []).extend(paths)
+                        _g.native_drop_push(queue_name, paths)
                     except Exception:
                         pass
                 return _on_drop
@@ -542,7 +541,7 @@ def run():
                 // En Mejorar fotos vale toda la pestaña: Gradio no aplica
                 // elem_id a las filas de layout y exigir acertar en la línea
                 // de cola hacía que el drop se perdiera fuera de ella.
-                return t.closest('#enhance_input_files,#srcfiles,#destfiles,.img-enhance-container');
+                return t.closest('#enhance_input_files,#srcfiles,#destfiles,.img-enhance-container,.origin-gallery,.target-gallery');
               }
               document.addEventListener('dragover', function(e){
                 if (window.__autoautoDropEnabled && zoneFor(e)) { e.preventDefault(); }
@@ -555,8 +554,10 @@ def run():
                 e.stopImmediatePropagation();
                 var dt = e.dataTransfer;
                 if (!dt || !dt.files || !dt.files.length) { return; }
-                var queue = zone.id === 'srcfiles' ? 'faceswap_src'
-                          : (zone.id === 'destfiles' ? 'faceswap_dest' : 'enhance');
+                var queue = (zone.id === 'srcfiles' || zone.classList.contains('origin-gallery'))
+                          ? 'faceswap_src'
+                          : ((zone.id === 'destfiles' || zone.classList.contains('target-gallery'))
+                              ? 'faceswap_dest' : 'enhance');
                 var sink = document.getElementById('autoauto_drop_' + queue);
                 if (!sink) { return; }
                 // pywebview serializa el evento con for..in: un dataTransfer
@@ -640,6 +641,17 @@ def run():
         # TEMP-DIAG 2026-11-23: puerto CDP para verificar el drop real.
         _diag_port = os.environ.get("AUTOAUTO_DIAG_CDP_PORT")
         if _diag_port:
+            # v5.1462: pywebview 5.2 no pasa REMOTE_DEBUGGING_PORT a EdgeChromium
+            # (esa clave existe en versiones posteriores), así que el puerto CDP
+            # nunca se abría y los probes de arrastre no podían conectarse.
+            # WebView2 sí lee sus argumentos extra del navegador de esta variable
+            # de entorno; hay que fijarla antes de webview.start().
+            _cdp_flag = f"--remote-debugging-port={int(_diag_port)}"
+            _extra_args = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+            if _cdp_flag not in _extra_args:
+                os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+                    f"{_extra_args} {_cdp_flag}".strip()
+                )
             webview.settings["REMOTE_DEBUGGING_PORT"] = int(_diag_port)
         webview.start(debug=False, func=_delayed_bind, args=(window,), storage_path=webview_storage)
         

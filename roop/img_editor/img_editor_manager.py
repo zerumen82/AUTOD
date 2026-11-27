@@ -13,6 +13,7 @@ from roop.img_editor.gen_prompt_config import (
     get_kontext_model_config,
     get_longcat_model_config,
     get_longcat_full_model_config,
+    get_route_editor_config,
     SubjectPromptConfigError,
 )
 
@@ -304,6 +305,7 @@ class ImgEditorManager:
                     source_centers.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
             if not source_centers:
                 return None
+            baseline_centers = None
             bad = np.zeros((original.height, original.width), dtype=np.uint8)
             found = False
             soft_sigma = 3.0
@@ -321,6 +323,23 @@ class ImgEditorManager:
                     for sx, sy in source_centers
                 )
                 if distance <= 0.6 * h:
+                    continue
+                # The caller may have filtered weak detections from the
+                # original. A face-like badge or poster that the same
+                # detector sees in both images is not a newly added person.
+                if baseline_centers is None:
+                    baseline_centers = []
+                    for reference in self._detect_edit_faces(original):
+                        try:
+                            rx1, ry1, rx2, ry2 = [float(v) for v in reference.bbox]
+                        except (TypeError, ValueError, AttributeError):
+                            continue
+                        if rx2 > rx1 and ry2 > ry1:
+                            baseline_centers.append(((rx1 + rx2) / 2.0, (ry1 + ry2) / 2.0))
+                if any(
+                    ((cx - sx) ** 2 + (cy - sy) ** 2) ** 0.5 <= 0.6 * h
+                    for sx, sy in baseline_centers
+                ):
                     continue
                 radius = max(6, int(round(0.10 * max(w, h))))
                 bx1 = max(0, int(x1) - radius)
@@ -822,12 +841,16 @@ class ImgEditorManager:
         Returns: (engine_override, version_override, log_reason)
                  (None, None, "") si el engine preferido ya es el correcto.
         """
+        # Una petición explícita de Qwen conserva ese motor en esta ruta.
+        if preferred_engine == "qwen_edit":
+            return None, None, ""
         # v5.1102: Q4_K_M — el Q2_K era una "copy machine" (copia con offset,
         # gris con uxo). Q4 + offload en 8GB, adherencia real.
         # LongCat retirado del Editor (sustituido por Kontext): los alias
         # longcat/longcat_full/imagine se normalizan a kontext por
         # compatibilidad con UIs/APKs antiguas.
         _KONTEXT_VERSION = get_kontext_model_config()["model_file"]
+        _LONGCAT_FULL_VERSION = get_longcat_full_model_config()["model_file"]
 
         # Kontext es el régimen fuerte. Se respeta salvo POV/postura: en esos
         # casos su ancla contradice la instrucción y debe dejar paso al router
@@ -1638,7 +1661,7 @@ class ImgEditorManager:
         user_prompt = (user_prompt or "").strip()
         img_context = (img_context or "").strip()
 
-        is_longcat = engine in ("longcat", "longcat_full", "imagine", "kontext") or "longcat" in engine.lower()
+        is_longcat = engine in ("longcat", "longcat_full", "imagine", "kontext", "qwen_edit") or "longcat" in engine.lower()
         # Alias legacy: longcat/imagine/longcat_full → Kontext (motor del Editor).
         is_hart = engine == "hart"
         mask_target = (mask_target or "subject").lower()
@@ -3213,7 +3236,7 @@ class ImgEditorManager:
 
     def _head_with_its_hair(
         self, image: Image.Image, head_zone: Image.Image,
-        faces, masker,
+        faces, masker, subject_mask: Optional[Image.Image] = None,
     ) -> Optional[Image.Image]:
         """Cabeza medida + el pelo que cuelga de ella (general).
 
@@ -3227,18 +3250,60 @@ class ImgEditorManager:
         if head_zone is None or masker is None:
             return head_zone
         try:
+            from roop.img_editor.element_selection import load_settings
+
+            edit_config = load_settings()["edit"]
+            head_config = edit_config["head_measurement"]
+            silhouette_config = edit_config["measured_silhouette"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"[ImgEditor] Configuración de silueta no disponible: {exc}", flush=True)
+            return head_zone
+        # Bound mask math on large photos; restore the mask at source size.
+        long_side = max(image.size)
+        work_side = int(silhouette_config["work_side"])
+        if work_side <= 0:
+            raise ValueError("edit.measured_silhouette.work_side must be positive")
+        if long_side > work_side:
+            scale = float(work_side) / float(long_side)
+            work_size = (
+                max(1, int(round(image.width * scale))),
+                max(1, int(round(image.height * scale))),
+            )
+            small_faces = []
+            for face in faces or []:
+                box = tuple(float(value) * scale for value in face.bbox)
+                scaled = SimpleNamespace(bbox=box)
+                landmarks = getattr(face, "kps", None)
+                if landmarks is not None:
+                    scaled.kps = np.asarray(landmarks, dtype=np.float32) * scale
+                if getattr(face, "det_score", None) is not None:
+                    scaled.det_score = face.det_score
+                small_faces.append(scaled)
+            small_head_zone = head_zone.resize(work_size, Image.Resampling.NEAREST)
+            small_image = image.resize(work_size, Image.Resampling.BOX)
+            result = self._head_with_its_hair(
+                small_image, small_head_zone, small_faces, masker,
+                subject_mask.resize(work_size, Image.Resampling.NEAREST)
+                if subject_mask is not None else None,
+            )
+            if result is None:
+                return head_zone
+            return result.resize(image.size, Image.Resampling.NEAREST)
+        try:
             size = image.size
             head = np.asarray(
                 head_zone.convert("L").resize(size, Image.Resampling.NEAREST)
             ) >= 96
             if int(head.sum()) < 48:
                 return head_zone
-            hair_img = masker.generate_mask(image, "hair")
-            if hair_img is None:
-                return head_zone
-            hair = np.asarray(
-                hair_img.convert("L").resize(size, Image.Resampling.NEAREST)
-            ) >= 96
+            try:
+                hair_img = masker.generate_mask(image, head_config["hair_query"])
+            except Exception:
+                hair_img = None
+            hair = (
+                np.asarray(hair_img.convert("L").resize(size, Image.Resampling.NEAREST)) >= 96
+                if hair_img is not None else np.zeros_like(head)
+            )
             ys, xs = np.where(head)
             span = max(
                 int(ys.max() - ys.min() + 1), int(xs.max() - xs.min() + 1),
@@ -3252,8 +3317,6 @@ class ImgEditorManager:
                 ),
             ) > 0
             zone = hair & reach
-            if not zone.any():
-                return head_zone
             count, labels, stats, _ = cv2.connectedComponentsWithStats(
                 zone.astype(np.uint8), connectivity=8,
             )
@@ -3266,7 +3329,7 @@ class ImgEditorManager:
                 own = np.asarray(
                     om.convert("L").resize(size, Image.Resampling.NEAREST)
                 ) >= 96
-                if float((own & head).sum()) / max(1, int(own.sum())) >= 0.55:
+                if float((own & head).sum()) / max(1, int(own.sum())) >= head_config["own_head_overlap_fraction"]:
                     continue
                 other_heads.append(own)
             kept = np.zeros(zone.shape, dtype=bool)
@@ -3288,19 +3351,204 @@ class ImgEditorManager:
                 if blocked:
                     continue
                 kept |= piece
-            if not kept.any():
-                return head_zone
             print(
                 "[ImgEditor] Cabeza + su pelo medido en la zona "
                 f"(+{int(kept.sum())} px); las demás cabezas quedan fuera",
                 flush=True,
             )
+            measured = head | kept
+            refined = self._refine_head_silhouette(
+                image, measured, kept, head, faces, masker, head_config,
+                silhouette_config, subject_mask,
+            )
             return Image.fromarray(
-                ((head | kept).astype(np.uint8) * 255), "L",
+                ((refined if refined is not None else measured).astype(np.uint8) * 255), "L",
             )
         except Exception as exc:
             print(f"[ImgEditor] Pelo de la cabeza no medido: {exc}", flush=True)
             return head_zone
+
+    def _refine_head_silhouette(
+        self, image: Image.Image, candidate: np.ndarray, hair: np.ndarray,
+        head: np.ndarray, faces, masker, head_settings: dict,
+        silhouette_settings: dict, subject_mask: Optional[Image.Image] = None,
+    ) -> Optional[np.ndarray]:
+        """Keep the visible head and hair, excluding room inside the ellipse.
+
+        The face detector's broad ellipse is only a probable region. The
+        segmenter's face and the selected person's hair anchor GrabCut to
+        pixels in this photo; the model never receives the surrounding wall as
+        an editable head. If the anchors fail, the caller keeps its old mask.
+        """
+        if not faces:
+            return None
+        height, width = candidate.shape
+        try:
+            face_mask = masker.generate_mask(image, head_settings["face_query"])
+        except Exception:
+            face_mask = None
+        visible = (
+            np.asarray(face_mask.convert("L").resize(
+                (width, height), Image.Resampling.NEAREST,
+            )) >= 96
+            if face_mask is not None else np.zeros_like(candidate)
+        )
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(
+            visible.astype(np.uint8), connectivity=8,
+        )
+        matches = []
+        for face in self._credible_faces(faces):
+            own_mask = self._head_mask_from_faces(image, [face])
+            if own_mask is None:
+                continue
+            own = np.asarray(own_mask.convert("L")) >= 96
+            own_overlap = float((own & head).sum()) / max(1, int((own | head).sum()))
+            if own_overlap < head_settings["own_head_overlap_fraction"]:
+                continue
+            matches.append((own_overlap, own))
+        if not matches:
+            return None
+        _score, selected_head = max(matches, key=lambda item: item[0])
+        face_seed = np.zeros_like(candidate)
+        for index in range(1, count):
+            if int(stats[index, cv2.CC_STAT_AREA]) < head_settings["min_face_seed_pixels"]:
+                continue
+            piece = labels == index
+            overlap = int((piece & selected_head & head).sum())
+            if overlap >= head_settings["min_face_seed_pixels"]:
+                face_seed |= piece & selected_head & candidate
+        if not face_seed.any() and subject_mask is not None:
+            measured_subject = np.asarray(subject_mask.convert("L").resize(
+                (width, height), Image.Resampling.NEAREST,
+            )) >= 96
+            face_seed = measured_subject & selected_head & head
+        seed = face_seed | hair
+        if not seed.any():
+            return None
+        return self._refine_measured_silhouette(
+            image, candidate, seed, silhouette_settings,
+        )
+
+    @staticmethod
+    def _refine_measured_silhouette(
+        image: Image.Image, candidate: np.ndarray, seed: np.ndarray,
+        settings: dict,
+    ) -> Optional[np.ndarray]:
+        """Constrain a broad candidate to the photographed surface it contains.
+
+        The caller supplies the proposed editable region and actual measured
+        foreground pixels. This operation knows no object type or edit words;
+        callers must use it only when the requested change stays on the
+        photographed surface. Pose, insertion and removal need their original
+        structural region because new pixels may lie outside that surface.
+        """
+        if candidate.shape != seed.shape or not seed.any():
+            return None
+        seed_size = int(settings["seed_erosion_size"])
+        sure = cv2.erode(
+            seed.astype(np.uint8), np.ones((seed_size, seed_size), np.uint8),
+        ) > 0
+        if not sure.any():
+            return None
+        seed_ys, seed_xs = np.where(seed)
+        seed_span = max(
+            int(seed_xs.max() - seed_xs.min() + 1),
+            int(seed_ys.max() - seed_ys.min() + 1),
+        )
+        hull = cv2.convexHull(
+            np.column_stack((seed_xs, seed_ys)).astype(np.int32),
+        )
+        envelope = np.zeros(candidate.shape, dtype=np.uint8)
+        cv2.fillConvexPoly(envelope, hull, 1)
+        envelope_radius = max(1, int(round(
+            seed_span * settings["seed_envelope_fraction"],
+        )))
+        envelope_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (envelope_radius * 2 + 1, envelope_radius * 2 + 1),
+        )
+        envelope = cv2.dilate(envelope, envelope_kernel) > 0
+        reach = max(1, int(round(max(image.size) * settings["reach_fraction"])))
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (reach * 2 + 1, reach * 2 + 1),
+        )
+        allowed = (cv2.dilate(candidate.astype(np.uint8), kernel) > 0) & envelope
+        grab = np.full(candidate.shape, cv2.GC_PR_BGD, dtype=np.uint8)
+        grab[allowed] = cv2.GC_PR_FGD
+        grab[~allowed] = cv2.GC_BGD
+        grab[sure] = cv2.GC_FGD
+        bgr = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        cv2.grabCut(
+            bgr, grab, None, np.zeros((1, 65), np.float64),
+            np.zeros((1, 65), np.float64),
+            int(settings["grabcut_iterations"]), cv2.GC_INIT_WITH_MASK,
+        )
+        found = np.isin(grab, (cv2.GC_FGD, cv2.GC_PR_FGD)) | seed
+        count, labels, _, _ = cv2.connectedComponentsWithStats(
+            found.astype(np.uint8), connectivity=8,
+        )
+        keep = np.zeros_like(found)
+        for index in range(1, count):
+            piece = labels == index
+            if (piece & seed).any():
+                keep |= piece
+        keep &= candidate | seed
+        print(
+            f"[ImgEditor] Silueta medida: {int(candidate.sum())}"
+            f" -> {int(keep.sum())} px; fondo de la región excluido",
+            flush=True,
+        )
+        return keep
+
+    def _refine_measured_surface(
+        self, image: Image.Image, candidate: Image.Image,
+        measured: Image.Image,
+    ) -> Optional[Image.Image]:
+        """Refine an expanded region using the surface measured in this photo."""
+        from roop.img_editor.element_selection import load_settings
+
+        settings = load_settings()["edit"]["measured_silhouette"]
+        work_side = int(settings["work_side"])
+        if work_side <= 0:
+            raise ValueError("edit.measured_silhouette.work_side must be positive")
+        scale = min(1.0, float(work_side) / float(max(image.size)))
+        work_size = (
+            max(1, int(round(image.width * scale))),
+            max(1, int(round(image.height * scale))),
+        )
+        small_image = image.resize(work_size, Image.Resampling.BOX)
+        proposed = np.asarray(candidate.convert("L").resize(
+            work_size, Image.Resampling.NEAREST,
+        )) > 128
+        seed = np.asarray(measured.convert("L").resize(
+            work_size, Image.Resampling.NEAREST,
+        )) > 128
+        seed &= proposed
+        if not seed.any():
+            return None
+        if not (proposed & ~seed).any():
+            radius = max(1, int(round(max(work_size) * settings["reach_fraction"])))
+            kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1),
+            )
+            proposed = cv2.dilate(seed.astype(np.uint8), kernel) > 0
+        try:
+            refined = self._refine_measured_silhouette(
+                small_image, proposed, seed, settings,
+            )
+        except cv2.error as exc:
+            print(f"[ImgEditor] Refinamiento visual no disponible: {exc}", flush=True)
+            return None
+        if refined is None:
+            return None
+        scaled = Image.fromarray(refined.astype(np.uint8) * 255, "L").resize(
+            image.size, Image.Resampling.NEAREST,
+        )
+        sigma = float(settings["edge_feather_sigma"])
+        if sigma <= 0:
+            return scaled
+        soft = cv2.GaussianBlur(np.asarray(scaled), (0, 0), sigma)
+        return Image.fromarray(soft, "L")
 
     def _head_mask_from_faces(self, image: Image.Image, faces) -> Optional[Image.Image]:
         """Create a union of head-only masks from detected faces.
@@ -3746,6 +3994,7 @@ class ImgEditorManager:
         mask: Image.Image, box, limit_mask: Optional[Image.Image] = None,
         keep_measured_mask: bool = False,
         exact_paste: bool = False,
+        expand_head_support: bool = False, source_faces=(),
     ) -> Image.Image:
         """Paste the edited sample back onto the original photo.
 
@@ -3768,6 +4017,117 @@ class ImgEditorManager:
         local_mask = mask.convert("L")
         if local_mask.size != source.size:
             local_mask = local_mask.resize(source.size, Image.Resampling.BILINEAR)
+        protected_heads = None
+        head_feather_px = None
+        if expand_head_support:
+            from roop.img_editor.element_selection import load_settings
+
+            settings = load_settings()["edit"]["head_measurement"]
+            growth = float(settings["paste_support_growth_fraction"])
+            feather = float(settings["paste_edge_feather_fraction"])
+            if not (0.0 < growth < 0.5 and 0.0 < feather < 0.5):
+                raise ValueError("head paste growth and feather fractions must be between 0 and 0.5")
+            measured = np.asarray(local_mask) >= 96
+            if measured.any():
+                ys, xs = np.where(measured)
+                span = max(int(np.ptp(xs)) + 1, int(np.ptp(ys)) + 1)
+                radius = max(1, int(round(span * growth)))
+                kernel = cv2.getStructuringElement(
+                    cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1),
+                )
+                x0 = max(0, int(xs.min()) - radius)
+                y0 = max(0, int(ys.min()) - radius)
+                x3 = min(source.width, int(xs.max()) + radius + 1)
+                y3 = min(source.height, int(ys.max()) + radius + 1)
+                grown = np.zeros_like(measured)
+                grown[y0:y3, x0:x3] = cv2.dilate(
+                    measured[y0:y3, x0:x3].astype(np.uint8), kernel,
+                ) > 0
+                protected_heads = np.zeros_like(grown)
+                face_regions = []
+                for face in source_faces or ():
+                    other = self._head_mask_from_faces(source, [face])
+                    if other is None:
+                        continue
+                    other_arr = np.asarray(other.convert("L")) >= 96
+                    face_regions.append((int((other_arr & measured).sum()), other_arr))
+                if face_regions:
+                    chosen_index = max(
+                        range(len(face_regions)),
+                        key=lambda index: face_regions[index][0],
+                    )
+                    if face_regions[chosen_index][0] > 0:
+                        chosen = face_regions[chosen_index][1]
+                        same_head_iou = float(settings["paste_same_head_iou_fraction"])
+                        if not 0.0 < same_head_iou <= 1.0:
+                            raise ValueError("head paste same-head IoU must be in (0, 1]")
+                        for index, (_, other_arr) in enumerate(face_regions):
+                            if index == chosen_index:
+                                continue
+                            iou = float((chosen & other_arr).sum()) / max(
+                                1, int((chosen | other_arr).sum()),
+                            )
+                            if iou < same_head_iou:
+                                protected_heads |= other_arr
+                        if limit_mask is not None:
+                            # A measured head silhouette can omit an attached
+                            # upper accessory. Follow the photographed person
+                            # above the face, bounded by this head's geometry,
+                            # so the model's removal can cover the old outline.
+                            upper_fraction = float(settings["paste_upper_subject_fraction"])
+                            subject_growth = float(settings["paste_upper_subject_growth_fraction"])
+                            if not (0.0 < upper_fraction < 0.5 and 0.0 < subject_growth < 0.2):
+                                raise ValueError("head upper support fractions out of range")
+                            upper_radius = max(1, int(round(span * subject_growth)))
+                            upper_kernel = cv2.getStructuringElement(
+                                cv2.MORPH_ELLIPSE,
+                                (upper_radius * 2 + 1, upper_radius * 2 + 1),
+                            )
+                            ceiling = int(ys.min() + (ys.max() - ys.min()) * upper_fraction)
+                            ux0 = max(0, int(xs.min()) - upper_radius)
+                            ux3 = min(source.width, int(xs.max()) + upper_radius + 1)
+                            uy0 = max(0, int(ys.min()) - upper_radius)
+                            uy3 = min(source.height, ceiling + 1)
+                            # Dilate only around this head. Full-frame int64
+                            # coordinate grids and dilation were expensive on
+                            # multi-megapixel photos without improving the ROI.
+                            wx0 = max(0, ux0 - upper_radius)
+                            wx3 = min(source.width, ux3 + upper_radius)
+                            wy0 = max(0, uy0 - upper_radius)
+                            wy3 = min(source.height, uy3 + upper_radius)
+                            person_image = limit_mask.convert("L")
+                            if person_image.size != source.size:
+                                person_image = person_image.resize(
+                                    source.size, Image.Resampling.NEAREST,
+                                )
+                            person_roi = np.asarray(person_image.crop(
+                                (wx0, wy0, wx3, wy3),
+                            )) >= 96
+                            person_roi = cv2.dilate(
+                                person_roi.astype(np.uint8), upper_kernel,
+                            ) > 0
+                            person_upper = person_roi[
+                                uy0 - wy0:uy3 - wy0, ux0 - wx0:ux3 - wx0,
+                            ]
+                            upper = chosen[uy0:uy3, ux0:ux3] & person_upper
+                            grown_roi = grown[uy0:uy3, ux0:ux3]
+                            added_upper = int((upper & ~grown_roi).sum())
+                            grown_roi |= upper
+                            if added_upper:
+                                print(
+                                    "[ImgEditor] Apariencia de cabeza: silueta superior "
+                                    f"del sujeto añadida (+{added_upper} px)",
+                                    flush=True,
+                                )
+                grown &= ~protected_heads
+                local_mask = Image.fromarray(grown.astype(np.uint8) * 255, "L")
+                head_feather_px = max(1, int(round(span * feather)))
+                print(
+                    f"[ImgEditor] Apariencia de cabeza: soporte de pegado "
+                    f"{int(measured.sum())} -> {int(grown.sum())} px "
+                    f"(radio {radius}px); otras cabezas protegidas",
+                    flush=True,
+                )
         local_mask = local_mask.crop((x1, y1, x2, y2))
         if edited.size != (crop_w, crop_h):
             scale_up = max(crop_w / max(1, edited.width), crop_h / max(1, edited.height))
@@ -3904,7 +4264,14 @@ class ImgEditorManager:
         change_ratio = (
             change_area / float(crop_w * crop_h) if crop_w * crop_h > 0 else 0.0
         )
-        if exact_paste or change_ratio < 0.25:
+        if head_feather_px is not None:
+            soft = self._feather_mask(local_mask, amount=head_feather_px)
+            print(
+                f"[ImgEditor] Apariencia de cabeza: transición exterior "
+                f"{head_feather_px}px sobre el soporte medido",
+                flush=True,
+            )
+        elif exact_paste or change_ratio < 0.25:
             # v5.1264 apagó el feather a 0px para no dejar el halo exterior.
             # v5.1345 — medido 2026-11-13 («ir sin sujetador», la edición que
             # el usuario vio con el pegote): con 0px el borde del cambio es una
@@ -3942,7 +4309,12 @@ class ImgEditorManager:
             measured_arr = np.asarray(measured_zone, dtype=np.uint8)
             if measured_arr.shape == keep.shape:
                 keep = np.maximum(keep, measured_arr)
-        if keep.shape[:2] == soft_arr.shape[:2]:
+        if head_feather_px is not None and protected_heads is not None:
+            other_crop = protected_heads[y1:y2, x1:x2]
+            soft = Image.fromarray(
+                np.where(other_crop, 0, soft_arr).astype(np.uint8), "L",
+            )
+        elif keep.shape[:2] == soft_arr.shape[:2]:
             # This is a paste boundary, not another object segmentation.
             # Otsu separates measured support from its weak rim; zero always
             # remains outside, including when the measured threshold is zero.
@@ -5787,7 +6159,11 @@ class ImgEditorManager:
         span = max(
             int(ys.max() - ys.min() + 1), int(xs.max() - xs.min() + 1),
         )
-        erode_r = max(2, int(round(span * 0.06)))
+        from roop.img_editor.element_selection import load_settings
+
+        erode_r = max(2, int(round(
+            span * float(load_settings()["edit"]["recolor_seed_erosion_fraction"])
+        )))
         erode_k = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (erode_r * 2 + 1, erode_r * 2 + 1),
         )
@@ -5797,6 +6173,48 @@ class ImgEditorManager:
         median_color = np.median(photo[core], axis=0)
         color_distance = np.linalg.norm(photo - median_color, axis=2)
         spread = float(np.percentile(color_distance[core], 90))
+        max_spread = float(
+            load_settings()["edit"]["recolor_growth_max_seed_color_spread"]
+        )
+        if not 0.0 < max_spread < 255.0:
+            raise ValueError(
+                "edit.recolor_growth_max_seed_color_spread must be between 0 and 255"
+            )
+        if spread >= max_spread:
+            fraction = float(
+                load_settings()["edit"]["recolor_heterogeneous_seed_erosion_fraction"]
+            )
+            if not 0.0 < fraction < 0.5:
+                raise ValueError(
+                    "edit.recolor_heterogeneous_seed_erosion_fraction must be between 0 and 0.5"
+                )
+            radius = max(1, int(round(max(image.size) * fraction)))
+            kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1),
+            )
+            core_seed = cv2.erode(seed.astype(np.uint8), kernel) > 0
+            try:
+                refined = self._refine_measured_silhouette(
+                    image, seed, core_seed,
+                    load_settings()["edit"]["measured_silhouette"],
+                ) if core_seed.any() else None
+            except cv2.error as exc:
+                print(
+                    f"[ImgEditor] Refinamiento visual no disponible; "
+                    f"se conserva la región medida: {exc}",
+                    flush=True,
+                )
+                refined = None
+            print(
+                f"[ImgEditor] Superficie de color heterogéneo "
+                f"(dispersión={spread:.1f}); "
+                "se perfila la región medida sin extender por color",
+                flush=True,
+            )
+            return (
+                Image.fromarray(refined.astype(np.uint8) * 255, "L")
+                if refined is not None else None
+            )
         limit = max(spread + 18.0, 18.0)
         same = color_distance <= limit
         same |= seed
@@ -6030,6 +6448,112 @@ class ImgEditorManager:
             )
             return None
 
+    @staticmethod
+    def _recolor_source_texture(
+        original: Image.Image, generated: Image.Image, surface: Image.Image,
+        local_box=None,
+    ) -> Optional[Image.Image]:
+        """Keep photographed geometry while transferring a generated colour edit.
+
+        A multi-colour subject can be redrawn by the model at a new contour.
+        Its chroma is still the requested edit; the photographed luminance and
+        measured surface provide the original detail and boundary. Uniform
+        surfaces retain the existing completion route.
+        """
+        from PIL import ImageFilter
+        from roop.img_editor.element_selection import load_settings
+
+        source = original.convert("RGB")
+        measured = surface.convert("L")
+        if measured.size != source.size:
+            measured = measured.resize(source.size, Image.Resampling.NEAREST)
+        global_box = (
+            tuple(int(v) for v in local_box)
+            if local_box is not None
+            else (0, 0, source.width, source.height)
+        )
+        left, top, right, bottom = global_box
+        if not (0 <= left < right <= source.width
+                and 0 <= top < bottom <= source.height):
+            raise ValueError("local recolor box lies outside the source photo")
+        view = source.crop(global_box)
+        measured = measured.crop(global_box)
+        if measured.getbbox() is None:
+            return None
+        width, height = view.size
+        settings = load_settings()["edit"]
+        scale = min(
+            1.0, float(settings["measured_silhouette"]["work_side"]) / max(width, height)
+        )
+        work = (max(1, round(width * scale)), max(1, round(height * scale)))
+        photo = np.asarray(view.resize(work, Image.Resampling.BOX), dtype=np.float32)
+        seed = np.asarray(measured.resize(work, Image.Resampling.NEAREST)) >= 96
+        if int(seed.sum()) < 48:
+            return None
+        ys, xs = np.where(seed)
+        span = max(int(np.ptp(ys)) + 1, int(np.ptp(xs)) + 1)
+        radius = max(2, int(round(
+            span * float(settings["recolor_seed_erosion_fraction"])
+        )))
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1),
+        )
+        core = cv2.erode(seed.astype(np.uint8), kernel) > 0
+        if int(core.sum()) < 48:
+            core = seed
+        median = np.median(photo[core], axis=0)
+        spread = float(np.percentile(np.linalg.norm(photo[core] - median, axis=1), 90))
+        cutoff = float(settings["recolor_growth_max_seed_color_spread"])
+        if spread < cutoff:
+            return None
+
+        edited = generated.convert("RGB")
+        feather = min(
+            float(settings["recolor_texture_feather_max_px"]),
+            max(
+                float(settings["recolor_texture_feather_min_px"]),
+                max(view.size) * float(settings["recolor_texture_feather_fraction"]),
+            ),
+        )
+        alpha = measured.filter(ImageFilter.GaussianBlur(radius=feather))
+        bounds = alpha.getbbox()
+        if bounds is None:
+            return None
+        result = source.copy()
+        tile = int(settings["recolor_texture_tile_px"])
+        if tile < 64:
+            raise ValueError("edit.recolor_texture_tile_px must be at least 64")
+        for y in range(bounds[1], bounds[3], tile):
+            for x in range(bounds[0], bounds[2], tile):
+                x2, y2 = min(bounds[2], x + tile), min(bounds[3], y + tile)
+                weight = np.asarray(alpha.crop((x, y, x2, y2)), dtype=np.float32) / 255.0
+                if not weight.any():
+                    continue
+                src = np.asarray(view.crop((x, y, x2, y2)), dtype=np.uint8)
+                sample = np.asarray(edited.resize(
+                    (x2 - x, y2 - y), Image.Resampling.LANCZOS,
+                    box=(
+                        x * edited.width / width, y * edited.height / height,
+                        x2 * edited.width / width, y2 * edited.height / height,
+                    ),
+                ), dtype=np.uint8)
+                src_lab = cv2.cvtColor(src, cv2.COLOR_RGB2LAB)
+                edit_lab = cv2.cvtColor(sample, cv2.COLOR_RGB2LAB)
+                src_lab[..., 1:] = edit_lab[..., 1:]
+                coloured = cv2.cvtColor(src_lab, cv2.COLOR_LAB2RGB)
+                blended = (
+                    coloured.astype(np.float32) * weight[..., None]
+                    + src.astype(np.float32) * (1.0 - weight[..., None])
+                ).astype(np.uint8)
+                result.paste(Image.fromarray(blended, "RGB"), (left + x, top + y))
+        print(
+            f"[ImgEditor] Color generado sobre textura original "
+            f"(dispersión={spread:.1f}, zona={int(seed.sum())} px); "
+            "contorno y detalle fotográficos conservados",
+            flush=True,
+        )
+        return result
+
     def _measured_region_passes(
         self, image: Image.Image, raw_prompt: str, translated_prompt: str,
         surface_recolor: bool = False, faces=(), structural_remove: bool = False,
@@ -6206,6 +6730,10 @@ class ImgEditorManager:
                 Image.fromarray(best).convert("L"), best,
             )
             zone = mask if mask is not None else Image.fromarray(best).convert("L")
+        if not surface_recolor and not structural_remove and not allow_multiple_regions:
+            refined = self._refine_measured_surface(image, zone, subject)
+            if refined is not None:
+                zone = refined
         if surface_recolor:
             zone = self._close_recolor_halo(image, zone, faces) or zone
         return [{
@@ -6224,6 +6752,7 @@ class ImgEditorManager:
         translated_prompt: str,
         faces,
         detected_faces=None,
+        refine_existing_surface: bool = False,
     ) -> list:
         """One tight mask per person named in the instruction.
 
@@ -6291,10 +6820,17 @@ class ImgEditorManager:
                     f"({coverage:.1%}); se conserva la zona sin exigir solape facial",
                     flush=True,
                 )
-            grown_coverage = float((limited > 96).mean())
+            grown_coverage = float((limited > 128).mean())
             # A mask with fewer than 48 pixels is still a speck.
-            if int((limited > 96).sum()) < 48 or grown_coverage > 0.85:
+            if int((limited > 128).sum()) < 48 or grown_coverage > 0.85:
                 continue
+            if refine_existing_surface:
+                refined = self._refine_measured_surface(
+                    image, Image.fromarray(limited).convert("L"),
+                    Image.fromarray(region).convert("L"),
+                )
+                if refined is not None:
+                    limited = np.asarray(refined.convert("L"), dtype=np.uint8)
             if coverage < 0.04:
                 print(
                     f"[ImgEditor] '{query}' cubre {coverage:.1%} de la foto y coincide con una cara; "
@@ -6364,6 +6900,13 @@ class ImgEditorManager:
         else:
             passes = self._measured_subject_passes(
                 image, raw, translated, faces, detected_faces=detected_faces,
+                refine_existing_surface=bool(
+                    facts.get("local_appearance")
+                    and not facts.get("structural_add")
+                    and not facts.get("structural_remove")
+                    and not facts.get("pose")
+                    and not facts.get("body")
+                ),
             )
             if not passes and facts.get("local_appearance"):
                 recovered = self._appearance_head_pass(image, raw, translated, faces)
@@ -6417,6 +6960,7 @@ class ImgEditorManager:
             narrowed.append({
                 **item,
                 "mask": local_mask,
+                "request_seed": requested,
                 "person": person_mask,
                 "measured_request": measured_request,
                 "deliver_region": deliver_region,
@@ -7081,6 +7625,7 @@ class ImgEditorManager:
         announce: bool = True,
         raw_prompt: Optional[str] = None,
         translated_prompt: Optional[str] = None,
+        request_mask: Optional[Image.Image] = None,
     ) -> Optional[Image.Image]:
         """Head of ONE measured person, for appearance edits without a part.
 
@@ -7106,9 +7651,23 @@ class ImgEditorManager:
         chosen_head = None
         chosen_label = ""
         grounded = False
-        # 1) Phrase-grounded measurement. Same rule as _appearance_head_pass:
+        # A measured requested part can separate people when the broad
+        # subject query lights several of them. Use the existing face margin.
+        if request_mask is not None:
+            requested = np.asarray(
+                request_mask.convert("L").resize(image.size, Image.Resampling.NEAREST),
+                dtype=np.float32,
+            )
+            face, score, second = self._leading_face(requested, credible)
+            if face is not None:
+                head = self._head_mask_from_faces(image, [face])
+                if head is not None:
+                    chosen_head = np.asarray(head.convert("L")) >= 96
+                    chosen_label = f"parte pedida ({score:.1f} vs {second:.1f})"
+                    grounded = True
+        # Phrase-grounded measurement. Same rule as _appearance_head_pass:
         # the wording must light one face 1.25x above the rest, no word lists.
-        if raw_prompt or translated_prompt:
+        if chosen_head is None and (raw_prompt or translated_prompt):
             recovered = self._appearance_head_pass(
                 image, raw_prompt or "", translated_prompt or "", credible,
             )
@@ -7128,18 +7687,23 @@ class ImgEditorManager:
                     chosen_head = np.asarray(head.convert("L")) >= 96
                     chosen_label = f"máscara del sujeto ({score:.1f} vs {second:.1f})"
             else:
-                # A mask covering several people gives no visual separation.
-                # Editing both is always wrong, so use the most confident
-                # detection as a deterministic measured tiebreak (det_score
-                # is already the project's criterion for credible faces).
-                face = max(
-                    credible,
-                    key=lambda item: float(getattr(item, "det_score", 0.0) or 0.0),
-                )
-                head = self._head_mask_from_faces(image, [face])
-                if head is not None:
-                    chosen_head = np.asarray(head.convert("L")) >= 96
-                    chosen_label = "desempate por confianza medida"
+                # El desempate por confianza solo considera caras que caen
+                # sobre el sujeto medido. En una foto con varios hombres la
+                # detección más segura puede pertenecer a otra persona.
+                candidates = []
+                for candidate in credible:
+                    head = self._head_mask_from_faces(image, [candidate])
+                    if head is None:
+                        continue
+                    candidate_head = np.asarray(head.convert("L")) >= 96
+                    if int((candidate_head & person).sum()) >= 48:
+                        candidates.append((candidate, candidate_head))
+                if candidates:
+                    face, chosen_head = max(
+                        candidates,
+                        key=lambda pair: float(getattr(pair[0], "det_score", 0.0) or 0.0),
+                    )
+                    chosen_label = "desempate dentro del sujeto medido"
         if chosen_head is None:
             print(
                 "[ImgEditor] Varias personas y la medición no separa cuál; "
@@ -8282,10 +8846,15 @@ class ImgEditorManager:
         passes_used = 0
         max_passes = self._max_generation_passes()
         pass_budget = {"used": 0, "max": max_passes}
+        # Auto usa la misma configuración de ruta documentada en spec/00.
+        # _auto_route_engine también alimenta el respaldo de cámara.
+        _auto_route_engine = None
         if auto_requested:
-            engine = "longcat"
+            _auto_default = get_route_editor_config()["default_engine"]
+            engine = _auto_default
+            _auto_route_engine = _auto_default
             print(
-                "[ImgEditor] Auto: LongCat Turbo como ruta general; "
+                f"[ImgEditor] Auto: {engine} como ruta general; "
                 "los conceptos de cámara medidos pueden activar Qwen Cámara",
                 flush=True,
             )
@@ -8329,10 +8898,13 @@ class ImgEditorManager:
         print(f"[ImgEditor] DEBUG generate_intelligent: selection_analysis={selection_analysis is not None}, selected_region_ids={selected_region_ids}", flush=True)
         if selection_analysis is not None or selected_region_ids:
             print("[ImgEditor] DEBUG: Taking selected_region_edit path", flush=True)
+            if engine == "qwen_edit":
+                return None, "Qwen Edit no admite una selección regional; usa Auto o LongCat", None
             from roop.img_editor.selected_region_edit import edit_selected_region
             return edit_selected_region(
                 self, img, prompt, selection_analysis, selected_region_ids,
-                engine=engine, negative_prompt=negative_prompt,
+                engine=engine,
+                negative_prompt=negative_prompt,
                 num_inference_steps=num_inference_steps, guidance_scale=guidance_scale,
                 seed=seed, progress_callback=progress_callback,
                 quality_mode=quality_mode, auto_upscale=auto_upscale,
@@ -8567,15 +9139,21 @@ class ImgEditorManager:
                 or quality_style == "solo_mejora"
                 or (quality_hybrid and quality_use_generative is True)
                 or get_vram_gb() <= 0):
-            print("[ImgEditor] Qwen Cámara no aplica a esta solicitud; usando LongCat", flush=True)
-            engine = "longcat"
+            # v5.1451: el respaldo es el motor por defecto de Auto (config),
+            # no un motor fijo.
+            _camera_fallback = _auto_route_engine or "longcat"
+            print(
+                f"[ImgEditor] Qwen Cámara no aplica a esta solicitud; usando {_camera_fallback}",
+                flush=True,
+            )
+            engine = _camera_fallback
 
         # A camera move gets its dedicated pass. Independent edits follow only
         # on regions measured in that new view; never regenerate the full frame.
         if (explicit_viewpoint_request and prompt and _compound_depth == 0
                 and mask_image is None and quality_style != "solo_mejora"
                 and not (quality_hybrid and quality_use_generative is True)
-                and engine in ("longcat", "imagine", "qwen_camera", "kontext")
+                and engine in ("longcat", "imagine", "qwen_camera", "kontext", "qwen_edit")
                 and get_vram_gb() > 0):
             camera_message = "Qwen Camera no terminó"
             try:
@@ -8766,7 +9344,8 @@ class ImgEditorManager:
             from roop.img_editor.selected_region_edit import edit_described_subject
             described = edit_described_subject(
                 self, img, prompt_raw, prompt, detected_faces,
-                engine=engine, negative_prompt=negative_prompt, seed=seed,
+                engine=engine,
+                negative_prompt=negative_prompt, seed=seed,
                 automatic=auto_requested,
                 progress_callback=progress_callback, quality_mode=quality_mode,
                 auto_upscale=auto_upscale, enhance_tier=enhance_tier,
@@ -9323,6 +9902,13 @@ class ImgEditorManager:
                     subject_passes = self._measured_subject_passes(
                         img, score_raw, prompt, source_faces,
                         detected_faces=detected_faces,
+                        refine_existing_surface=bool(
+                            appearance_edit
+                            and not authority_facts.get("structural_add")
+                            and not authority_facts.get("structural_remove")
+                            and not authority_facts.get("pose")
+                            and not authority_facts.get("body")
+                        ),
                     )
                     tried_head = False
                     if appearance_edit and not subject_passes:
@@ -9353,12 +9939,14 @@ class ImgEditorManager:
                                 head_zone = self._head_with_its_hair(
                                     img, head_zone, source_faces,
                                     self._get_clipseg_masker(),
+                                    subject_passes[0]["person"],
                                 ) or head_zone
                                 subject_passes = [{
                                     **subject_passes[0],
                                     "mask": head_zone,
                                     "deliver_region": False,
                                     "measured_request": True,
+                                    "head_appearance": True,
                                 }]
                         # v5.1211 (medido, sin formas ni palabras): si la parte
                         # que el segmentador midió está CONTENIDA en la cabeza,
@@ -9376,19 +9964,30 @@ class ImgEditorManager:
                                 and not subject_passes[0].get("deliver_region")
                                 and subject_passes[0].get("person") is not None):
                             measured_item = subject_passes[0]
+                            # Color continuation can spread a small requested
+                            # part across the person. Classify its location
+                            # from the original segmenter seed, before that
+                            # growth, so the regenerated contour is not cut.
+                            request_seed = (
+                                measured_item.get("request_seed")
+                                if measured_item.get("request_seed") is not None
+                                else measured_item.get("mask")
+                            )
                             head_zone = self._head_zone_for_subject(
                                 img, measured_item["person"], source_faces,
                                 announce=False,
                                 raw_prompt=score_raw, translated_prompt=prompt,
+                                request_mask=request_seed,
                             )
                             if head_zone is not None:
                                 head_zone = self._head_with_its_hair(
                                     img, head_zone, source_faces,
                                     self._get_clipseg_masker(),
+                                    measured_item["person"],
                                 ) or head_zone
                             if head_zone is not None and measured_item.get("mask") is not None:
                                 part = np.asarray(
-                                    measured_item["mask"].convert("L").resize(
+                                    request_seed.convert("L").resize(
                                         img.size, Image.Resampling.NEAREST,
                                     )
                                 ) >= 96
@@ -9402,7 +10001,11 @@ class ImgEditorManager:
                                     float((part & head).sum()) / part_px
                                     if part_px else 0.0
                                 )
-                                if part_px >= 48 and inside >= 0.85:
+                                from roop.img_editor.element_selection import load_settings
+
+                                head_settings = load_settings()["edit"]["head_measurement"]
+                                if (part_px >= int(head_settings["min_face_seed_pixels"])
+                                        and inside >= float(head_settings["request_seed_inside_fraction"])):
                                     print(
                                         "[ImgEditor] La parte pedida mide dentro "
                                         f"de la cabeza ({inside:.0%}): el agujero "
@@ -9414,6 +10017,7 @@ class ImgEditorManager:
                                         **measured_item,
                                         "mask": head_zone,
                                         "paste_change_only": True,
+                                        "head_appearance": True,
                                     }]
                                     # v5.1213: esta ruta entrega el mismo
                                     # cambio de apariencia anclado a la cabeza
@@ -9443,6 +10047,7 @@ class ImgEditorManager:
                         extended = self._complete_request_surface(
                             img, surface, whole, source_faces,
                             masker=self._get_clipseg_masker(),
+                            complete_hair=False,
                         )
                         if extended is not None:
                             surface = extended
@@ -9534,6 +10139,13 @@ class ImgEditorManager:
                     subject_passes = self._measured_subject_passes(
                         img, score_raw, prompt, source_faces,
                         detected_faces=detected_faces,
+                        refine_existing_surface=bool(
+                            appearance_edit
+                            and not authority_facts.get("structural_add")
+                            and not authority_facts.get("structural_remove")
+                            and not authority_facts.get("pose")
+                            and not authority_facts.get("body")
+                        ),
                     )
                     if subject_passes:
                         print(
@@ -9695,7 +10307,7 @@ class ImgEditorManager:
                         and not instruction_on_photo
                     ):
                         generation_image, generation_mask, local_box = self._appearance_work_region(
-                            img, subject_mask,
+                            img, generation_subject,
                             subject_passes[0].get("person")
                             if len(subject_passes) == 1 else None,
                         )
@@ -9889,6 +10501,38 @@ class ImgEditorManager:
                                 fast_steps,
                             )
                             appearance_sample["step_cap"] = appearance_sample["num_inference_steps"]
+                        native_local_edit = bool(
+                            appearance_edit and generation_mask is not None
+                            and local_box is not None and engine == "longcat"
+                            and len(subject_passes) == 1
+                            and not region_edit
+                            and not any(authority_facts.get(concept) for concept in (
+                                "pose", "body", "structural_add",
+                                "structural_remove", "scenario",
+                            ))
+                        )
+                        native_refine_enabled = True
+                        if native_local_edit:
+                            from roop.img_editor.element_selection import load_settings
+
+                            native_refine_enabled = bool(
+                                load_settings()["edit"]["native_local_focused_refine_enabled"]
+                            )
+                            native_recipe = get_longcat_model_config()
+                            appearance_sample["num_inference_steps"] = int(native_recipe["steps"])
+                            appearance_sample["step_cap"] = int(native_recipe["steps"])
+                            appearance_sample["reference_latents_method"] = native_recipe[
+                                "reference_latents_method"
+                            ]
+                            sampling_mask = None
+                            print(
+                                "[ImgEditor] Apariencia local: edición nativa "
+                                "LongCat sin máscara de ruido; el pegado conserva "
+                                "solo la región medida",
+                                flush=True,
+                            )
+                        else:
+                            sampling_mask = generation_mask
                         if appearance_edit and generation_mask is not None:
                             print(
                                 "[ImgEditor] Apariencia: una pasada, "
@@ -9958,8 +10602,8 @@ class ImgEditorManager:
                                         seed=seed,
                                         prompt_authority=prompt_authority,
                                         preserve_frame=preserve_frame,
-                                        mask_image=generation_mask,
-                                        keep_source_pixels=generation_mask is not None,
+                                        mask_image=sampling_mask,
+                                        keep_source_pixels=sampling_mask is not None,
                                         reference_image=vision_reference,
                                         lora_name=lora_name, lora_strength=lora_strength,
                                         progress_callback=progress_callback,
@@ -9979,8 +10623,8 @@ class ImgEditorManager:
                                     seed=seed,
                                     prompt_authority=prompt_authority,
                                     preserve_frame=preserve_frame,
-                                    mask_image=generation_mask,
-                                    keep_source_pixels=generation_mask is not None,
+                                    mask_image=sampling_mask,
+                                    keep_source_pixels=sampling_mask is not None,
                                     reference_image=vision_reference,
                                     lora_name=lora_name, lora_strength=lora_strength,
                                     progress_callback=progress_callback,
@@ -9995,8 +10639,8 @@ class ImgEditorManager:
                             seed=seed,
                             prompt_authority=prompt_authority,
                             preserve_frame=preserve_frame,
-                            mask_image=generation_mask,
-                            keep_source_pixels=generation_mask is not None,
+                            mask_image=sampling_mask,
+                            keep_source_pixels=sampling_mask is not None,
                             reference_image=vision_reference,
                             lora_name=lora_name, lora_strength=lora_strength,
                             progress_callback=progress_callback,
@@ -10012,6 +10656,22 @@ class ImgEditorManager:
                         else:
                             output = fast_result.image.convert("RGB")
                             gen_size = output.size
+                            texture_recolor_applied = False
+                            if (
+                                recolor_edit and subject_mask is not None
+                                and len(subject_passes) == 1
+                                and not subject_passes[0].get("requested_part")
+                                and not any(authority_facts.get(concept) for concept in (
+                                    "pose", "body", "structural_add",
+                                    "structural_remove", "scenario",
+                                ))
+                            ):
+                                recolored = self._recolor_source_texture(
+                                    img, output, subject_mask, local_box,
+                                )
+                                if recolored is not None:
+                                    output = recolored
+                                    texture_recolor_applied = True
                             if background_zone is not None:
                                 # v5.1357: las personas medidas vuelven sobre el
                                 # escenario nuevo; la costura se suaviza y el
@@ -10125,6 +10785,7 @@ class ImgEditorManager:
                                             None,
                                         )
                             if (region_edit and generation_mask is not None
+                                    and not texture_recolor_applied
                                     and not (recolor_edit
                                              and any(item.get("requested_part") for item in subject_passes))):
                                 output, repair_msg = self._repair_inserted_surface(
@@ -10136,7 +10797,13 @@ class ImgEditorManager:
                                 if repair_msg:
                                     fast_msg = f"{fast_msg}; {repair_msg}"
 
-                            if body_edit and subject_mask is not None:
+                            if texture_recolor_applied:
+                                print(
+                                    "[ImgEditor] Color integrado en la textura "
+                                    "y el contorno medidos",
+                                    flush=True,
+                                )
+                            elif body_edit and subject_mask is not None:
                                 zone_box = (
                                     local_box
                                     if local_box is not None
@@ -10191,28 +10858,41 @@ class ImgEditorManager:
                                     )
                                     # v5.1211: cabeza como agujero pega el
                                     # cambio medido, no la máscara entera.
-                                    and not subject_passes[0].get("paste_change_only")
+                                    and (native_local_edit or not subject_passes[0].get("paste_change_only"))
                                 )
                                 output = self._integrate_local_generation(
                                     img, output, subject_mask, local_box,
                                     limit_mask=paste_limit,
                                     keep_measured_mask=keep_request,
+                                    expand_head_support=bool(
+                                        native_local_edit
+                                        and len(subject_passes) == 1
+                                        and subject_passes[0].get("head_appearance")
+                                    ),
+                                    source_faces=detected_faces or source_faces,
                                 )
                                 print(
                                     "[ImgEditor] Región integrada sobre la foto original",
                                     flush=True,
                                 )
-                                refined = self._second_focused_pass(
-                                    fast_client, output, img, subject_mask,
-                                    local_box, gen_size, fast_prompt,
-                                    negative_prompt, seed, prompt_authority,
-                                    preserve_frame, vision_reference,
-                                    lora_name, lora_strength, appearance_sample,
-                                    progress_callback, cancel_check,
-                                )
-                                if refined is not None:
-                                    output = refined
-                                    fast_msg = f"{fast_msg}; refino focal de la zona medida"
+                                if native_local_edit and not native_refine_enabled:
+                                    print(
+                                        "[ImgEditor] Refino focal omitido: la edición "
+                                        "local nativa conserva su primer pase",
+                                        flush=True,
+                                    )
+                                else:
+                                    refined = self._second_focused_pass(
+                                        fast_client, output, img, subject_mask,
+                                        local_box, gen_size, fast_prompt,
+                                        negative_prompt, seed, prompt_authority,
+                                        preserve_frame, vision_reference,
+                                        lora_name, lora_strength, appearance_sample,
+                                        progress_callback, cancel_check,
+                                    )
+                                    if refined is not None:
+                                        output = refined
+                                        fast_msg = f"{fast_msg}; refino focal de la zona medida"
                             elif instruction_on_photo:
                                 output = self._integrate_local_generation(
                                     img, output, subject_mask,
@@ -10241,6 +10921,7 @@ class ImgEditorManager:
                         if (
                             multi_output is None
                             and recolor_edit
+                            and not texture_recolor_applied
                             and subject_mask is not None
                             and len(subject_passes) == 1
                         ):
@@ -10377,8 +11058,8 @@ class ImgEditorManager:
                                         seed=seed,
                                         prompt_authority=prompt_authority,
                                         preserve_frame=preserve_frame,
-                                        mask_image=generation_mask,
-                                        keep_source_pixels=generation_mask is not None,
+                                        mask_image=sampling_mask,
+                                        keep_source_pixels=sampling_mask is not None,
                                         reference_image=vision_reference,
                                         lora_name=lora_name, lora_strength=lora_strength,
                                         progress_callback=progress_callback,
@@ -10420,6 +11101,12 @@ class ImgEditorManager:
                                             img, output, subject_mask, local_box,
                                             limit_mask=paste_limit,
                                             keep_measured_mask=keep_request,
+                                            expand_head_support=bool(
+                                                native_local_edit
+                                                and len(subject_passes) == 1
+                                                and subject_passes[0].get("head_appearance")
+                                            ),
+                                            source_faces=detected_faces or source_faces,
                                         )
                                     elif instruction_on_photo:
                                         output = self._integrate_local_generation(
@@ -10445,7 +11132,8 @@ class ImgEditorManager:
                                         if body_edit and body_zone is not None
                                         else subject_mask
                                     )
-                                    if local_box is not None and refine_subject is not None:
+                                    if (local_box is not None and refine_subject is not None
+                                            and (not native_local_edit or native_refine_enabled)):
                                         refined = self._second_focused_pass(
                                             fast_client, output, img,
                                             refine_subject, local_box, gen_size,
@@ -10460,6 +11148,12 @@ class ImgEditorManager:
                                             fast_msg = (
                                                 f"{fast_msg}; refino focal de la zona medida"
                                             )
+                                    elif native_local_edit and not native_refine_enabled:
+                                        print(
+                                            "[ImgEditor] Refino focal del reintento omitido: "
+                                            "la edición local nativa conserva su pase",
+                                            flush=True,
+                                        )
                                     # v5.1220: si el retry vuelve a pintar la
                                     # misma cara, esa región se restaura de
                                     # la foto original: una foto no gana
@@ -12035,7 +12729,8 @@ class ImgEditorManager:
                     if self.qwen_edit_client is None:
                         self.qwen_edit_client = get_qwen_edit_comfy_client()
                     client = self.qwen_edit_client
-                    version = "q2"
+                    from roop.img_editor.element_selection import load_settings as _load_edit_settings
+                    version = _load_edit_settings().get("edit", {}).get("qwen_version", "q2")
                 elif engine == "omnigen2":
                     from roop.img_editor.omnigen2_gguf_comfy_client import get_omnigen2_comfy_client
                     if self.omnigen2_client is None:
@@ -12101,7 +12796,10 @@ class ImgEditorManager:
                     # (ReferenceLatent global). Toda máscara focal, automática o
                     # manual, debe ir a LongCat, cuyo workflow la conecta al
                     # inpaint.
-                    if engine not in ("longcat", "imagine", "longcat_full"):
+                    # v5.1451: qwen_edit también conserva su motor: su workflow
+                    # es img2img sin máscara y el composite post-generación
+                    # (final_mask) escribe solo la región medida.
+                    if engine not in ("longcat", "imagine", "longcat_full", "qwen_edit"):
                         engine = "kontext"
                         version = get_kontext_model_config()["model_file"]
                         from roop.img_editor.flux_edit_comfy_client import get_flux_edit_comfy_client
@@ -12112,8 +12810,12 @@ class ImgEditorManager:
                     if _compound_scene_background:
                         print("[ImgEditor] Máscara de fondo reservada para composición final; generación visual global", flush=True)
                     else:
+                        _mask_route = (
+                            "con composite medido post-generación"
+                            if engine == "qwen_edit" else "con inpaint"
+                        )
                         print(
-                            f"[ImgEditor] Máscara focal {_mask_origin} → {engine} con inpaint "
+                            f"[ImgEditor] Máscara focal {_mask_origin} → {engine} {_mask_route} "
                             "(router global omitido)",
                             flush=True,
                         )
@@ -12323,18 +13025,25 @@ class ImgEditorManager:
                         )
                     elif engine == "qwen_edit":
                         self._release_local_gpu_before_comfy()
-                        qwen_version = "Qwen_Image_Edit-Q2_K.gguf"
+                        # v5.1451 — la versión del modelo (nsfw/2511/q2/q3) sale de
+                        # config/editor_selection.json (edit.qwen_version); el cliente
+                        # mapea cada clave al GGUF NSFW Rapid AIO (diffusion_models/v23).
+                        from roop.img_editor.element_selection import load_settings as _load_edit_settings
+                        qwen_version = _load_edit_settings().get("edit", {}).get("qwen_version", "q2")
                         success, msg = client.load(qwen_version=qwen_version)
                         if not success:
                             return None, msg or "Qwen-Image-Edit no disponible", final_mask
                         qwen_prompt = prompt_enhanced or prompt
-                        result_obj, msg = client.generate(
-                            prompt=qwen_prompt,
-                            source_image=img,
-                            num_inference_steps=params.get("num_inference_steps", 20),
-                            guidance_scale=params.get("guidance_scale", 3.5),
-                            denoise=params.get("denoise", 0.80),
-                        )
+                        # v5.1451: construir gen_params con los parámetros esperados por el cliente
+                        gen_params = {
+                            "image": img,
+                            "prompt": qwen_prompt,
+                            "num_inference_steps": params.get("num_inference_steps", 8),
+                            "guidance_scale": params.get("guidance_scale", 3.5),
+                            "seed": params.get("seed", None),
+                            "denoise": params.get("denoise", 0.80),
+                        }
+                        result_obj, msg = client.generate(**gen_params)
                     else:
                         self._release_local_gpu_before_comfy()
                         # v5.1232 — el cambio corporal medido («quitar») se

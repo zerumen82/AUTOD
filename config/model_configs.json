@@ -154,6 +154,7 @@
     "name": "LongCat Turbo",
     "explicit": false,
     "steps": 8,
+    "reference_latents_method": "index",
     "cfg": 1.0,
     "sampler": "euler_ancestral",
     "scheduler": "simple",

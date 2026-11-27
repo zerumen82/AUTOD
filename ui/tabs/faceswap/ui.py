@@ -130,7 +130,7 @@ def build_faceswap_ui():
                             allow_preview=False, preview=False,
                             visible=True, object_fit="cover"
                         )
-                        input_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
+                        input_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)", elem_id="faceswap_input_page_info")
                         with gr.Row():
                             bt_input_prev = gr.Button("⬅", size="sm")
                             bt_input_next = gr.Button("➡", size="sm")
@@ -138,14 +138,14 @@ def build_faceswap_ui():
 
                     # Destino
                     with gr.Column():
-                        gr.HTML('<div class="face-counter">🎯 CARAS DE DESTINO</div>')
+                        gr.HTML('<div class="face-counter">🎯 CARAS DE DESTINO SELECCIONADAS</div>')
                         target_faces = gr.Gallery(
                             label="Destino", columns=3, height=400,
                             elem_classes=["target-gallery"], interactive=True,
                             allow_preview=False, preview=False,
                             visible=True, object_fit="cover"
                         )
-                        target_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)")
+                        target_page_info = gr.Markdown("📄 Página 1 de 1 (0 caras)", elem_id="faceswap_target_page_info")
                         with gr.Row():
                             bt_target_prev = gr.Button("⬅", size="sm")
                             bt_target_next = gr.Button("➡", size="sm")
@@ -153,11 +153,11 @@ def build_faceswap_ui():
 
                 with gr.Row(variant="panel"):
                     with gr.Column():
-                        bt_srcfiles = gr.Files(label="📁 1. Caras Origen (Fotos)", file_count="multiple", height=200, elem_id="srcfiles")
+                        src_file_list = gr.Markdown("📚 **Archivos de origen:** ninguno cargado", elem_id="faceswap_src_file_list")
                         source_path_input = gr.Textbox(visible=False, elem_id="source_path_input")
                         bt_add_source_paths = gr.Button(visible=False, elem_id="bt_add_source_paths")
                     with gr.Column():
-                        bt_destfiles = gr.Files(label="📁 2. Destino (Fotos o Video)", file_count="multiple", height=200, elem_id="destfiles")
+                        dest_file_list = gr.Markdown("📚 **Archivos de destino:** ninguno cargado", elem_id="faceswap_dest_file_list")
                         bt_browse_path = gr.Button(visible=False, elem_id="bt_browse_path")
                         target_path_input = gr.Textbox(visible=False, elem_id="target_path_input")
                         bt_add_target_path = gr.Button(visible=False, elem_id="bt_add_target_path")
@@ -189,7 +189,7 @@ def build_faceswap_ui():
                 with gr.Row(visible=False, variant="panel", elem_classes=["dynamic-panel"]) as dynamic_face_selection:
                     with gr.Column():
                         with gr.Row():
-                            face_detection_title = gr.Markdown("### ✨ Busca caras en el frame")
+                            face_detection_title = gr.Markdown("### ✨ Caras detectadas en el destino")
                             with gr.Row():
                                 gender_filter = gr.Dropdown(["Todos", "Hombres", "Mujeres"], value="Todos", label="Género", scale=1)
                                 size_filter = gr.Dropdown(["Todos", "Grandes", "Medianas", "Pequeñas"], value="Todos", label="Tamaño", scale=1)
@@ -241,7 +241,8 @@ def build_faceswap_ui():
 
 
     return {
-        "input_faces": input_faces, "target_faces": target_faces, "bt_srcfiles": bt_srcfiles, "bt_destfiles": bt_destfiles,
+        "input_faces": input_faces, "target_faces": target_faces,
+        "dest_file_list": dest_file_list, "src_file_list": src_file_list,
         "target_path_input": target_path_input, "bt_add_target_path": bt_add_target_path, "bt_browse_path": bt_browse_path,
         "source_path_input": source_path_input, "bt_add_source_paths": bt_add_source_paths,
         "previewimage": previewimage, "preview_frame_num": preview_frame_num, "face_detection_title": face_detection_title, 

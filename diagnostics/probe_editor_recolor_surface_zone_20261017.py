@@ -150,6 +150,23 @@ def main():
               red_inside / red_total >= 0.60,
               f"{red_inside}/{red_total} = {red_inside / red_total:.1%}")
 
+    print("\n[3] pared grande: semilla en media foto, continuación aún necesaria")
+    large = np.zeros((height, width, 3), dtype=np.uint8)
+    large[:] = WALL
+    large[:, 240:] = WOOD
+    large_seed = np.zeros((height, width), dtype=np.uint8)
+    large_seed[:, :160] = 255
+    large_zone = _run(
+        manager, Image.fromarray(large), large_seed,
+        "las paredes son de color gris", "the walls are gray",
+    )
+    check("pared grande medida", large_zone is not None)
+    if large_zone is not None:
+        check("pared grande completada",
+              float(large_zone[:, :240].mean()) >= 0.90)
+        check("superficie vecina fuera",
+              float(large_zone[:, 240:].mean()) <= 0.05)
+
     print(f"\n{'=' * 60}\n{'PASS' if not FAILED else 'FAIL'} — {len(FAILED)} fallos")
     if FAILED:
         for name in FAILED:

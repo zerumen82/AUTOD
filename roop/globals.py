@@ -233,9 +233,97 @@ apply_conservative_defaults()
 # Drop nativo (pywebview): rutas completas entregadas por el navegador nativo,
 # sin subir File objects por el renderer de WebView2. Una cola por zona de drop
 # para que cada pestaña consuma solo lo que se soltó sobre ella.
+#
+# Problema 2026-11-26 (v5.1456): la ventana pywebview puede ser SECUNDARIA y
+# reutilizar un servidor Gradio primario ya vivo (dos procesos distintos). El
+# handler del drop corre en el proceso secundario y encolaba en SU memoria; el
+# gr.Timer que consume la cola corre en el proceso primario, con otra memoria.
+# Las rutas nunca cruzaban y el arrastre no cargaba nada. Solución: cola
+# respaldada por ficheros en una carpeta compartida. El productor (secundario)
+# escribe un JSON por lote con nombre único; el consumidor (primario) lee y
+# borra los pendientes de su zona. Se conserva la cola en memoria para el caso
+# de un único proceso (y para los probes que la manipulan directamente).
+import json as _json
+import os as _os
+import time as time
+import uuid as _uuid
+
 NATIVE_DROP_LOCK = threading.Lock()
 NATIVE_DROP_QUEUES = {
     "enhance": [],
     "faceswap_src": [],
     "faceswap_dest": [],
 }
+
+
+def _native_drop_dir():
+    try:
+        base = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    except Exception:
+        base = _os.getcwd()
+    return _os.path.join(base, "logs", "native_drop")
+
+
+def native_drop_push(queue_name, paths):
+    """Encola rutas para que las consuma el proceso servidor Gradio.
+
+    Escribe en memoria (mismo proceso) y además un fichero JSON con nombre
+    único (cross-proceso). El productor puede ser la ventana secundaria.
+    """
+    paths = [str(p) for p in (paths or []) if p]
+    if not paths:
+        return
+    with NATIVE_DROP_LOCK:
+        NATIVE_DROP_QUEUES.setdefault(queue_name, []).extend(paths)
+    try:
+        directory = _native_drop_dir()
+        _os.makedirs(directory, exist_ok=True)
+        fname = f"{queue_name}.{_os.getpid()}.{int(time.time() * 1000)}.{_uuid.uuid4().hex}.json"
+        final = _os.path.join(directory, fname)
+        tmp = final + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            _json.dump({"queue": queue_name, "paths": paths}, handle)
+        _os.replace(tmp, final)
+    except Exception as exc:
+        print(f"[NATIVE-DROP] no se pudo persistir la cola ({queue_name}): {exc}")
+
+
+def native_drop_pop(queue_name):
+    """Devuelve y vacía las rutas pendientes de una zona (memoria + ficheros)."""
+    paths = []
+    with NATIVE_DROP_LOCK:
+        paths.extend(NATIVE_DROP_QUEUES.get(queue_name, []))
+        NATIVE_DROP_QUEUES[queue_name] = []
+    try:
+        directory = _native_drop_dir()
+        if _os.path.isdir(directory):
+            prefix = queue_name + "."
+            for name in _os.listdir(directory):
+                if not name.startswith(prefix) or not name.endswith(".json"):
+                    continue
+                full = _os.path.join(directory, name)
+                try:
+                    with open(full, "r", encoding="utf-8") as handle:
+                        data = _json.load(handle)
+                    paths.extend(str(p) for p in data.get("paths", []) if p)
+                except Exception:
+                    # Fichero a medio escribir de otro proceso: se deja para el
+                    # siguiente tick en vez de perder las rutas.
+                    continue
+                try:
+                    _os.remove(full)
+                except Exception:
+                    pass
+    except Exception as exc:
+        print(f"[NATIVE-DROP] no se pudo leer la cola ({queue_name}): {exc}")
+    # El mismo proceso escribe el lote en memoria y en JSON. Al consumir ambas
+    # copias, cada archivo debe aparecer una sola vez, igual que si el drop
+    # viniera de una ventana secundaria y solo se viera el JSON.
+    unique = []
+    seen = set()
+    for path in paths:
+        key = _os.path.normcase(_os.path.abspath(path))
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique

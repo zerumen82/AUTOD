@@ -71,7 +71,10 @@ def _check_matching_contracts():
     #     coronilla (lejos de todo centro de referencia) -> mascara.
     with patch.object(
         ImgEditorManager, "_detect_edit_faces",
-        return_value=reference + [_face(140, 60, 250, 190)],
+        side_effect=lambda image: (
+            reference if image is source
+            else reference + [_face(140, 60, 250, 190)]
+        ),
     ):
         mask = manager._added_face_mask(source, source.copy(), reference)
     assert mask is not None, "la cara lejana de toda referencia debe rechazarse"

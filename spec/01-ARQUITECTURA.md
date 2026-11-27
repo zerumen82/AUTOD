@@ -75,6 +75,34 @@ El backbone CLIP local se inyecta por parámetro; no se modifica `clip.load`.
   (`nlp/semantic_analyzer.py`), elección de motor (`_route_edit_engine`),
   medición de máscaras, ventana local (`_appearance_work_region`), integración
   (`_integrate_local_generation`) y verificación VLM (`instruction_verifier`).
+- En apariencia local, la silueta del sujeto medido determina la ventana de
+  trabajo y el contexto. LongCat Turbo edita esa ventana con su receta nativa
+  de 8 pasos y referencia visual `index`, sin máscara de ruido latente; en la
+  prueba neutra la máscara de ruido devolvía el pelo intacto. La integración
+  escribe la región pedida, medida en la foto. Para una cabeza, el soporte de
+  pegado se amplía proporcionalmente a su tamaño y suaviza el borde exterior:
+  así entran tanto el contorno nuevo del modelo como el material anterior que
+  desapareció. El soporte excluye las demás cabezas detectadas, incluso las de
+  menor confianza. Esta ampliación se limita a apariencia local de cabeza;
+  fuera de ella sigue la integración de cada categoría.
+- Cuando una región amplia cubre una superficie existente,
+  `_refine_measured_silhouette` usa píxeles medidos del primer plano como semilla
+  de GrabCut local y excluye fondo dentro de esa región. La utilidad no conoce
+  palabras ni clases de objeto. `_head_with_its_hair` la alimenta con el rostro
+  seleccionado y pelo medido; si no hay pelo, usa la cara o el sujeto medido.
+  `_refine_measured_surface` aplica el mismo cálculo a apariencia local de
+  sujetos y regiones locales de objetos, con resolución y borde configurados.
+  Postura, cuerpo, añadir y quitar conservan sus regiones estructurales, que
+  pueden necesitar píxeles nuevos fuera de la silueta previa. La selección
+  de región por el segmentador y la calidad de generación siguen requiriendo
+  PASS visual independiente por categoría.
+- En recoloración de una superficie con dispersión cromática alta, la región
+  semántica se perfila con GrabCut antes de generar. Después, el color (Lab a/b)
+  de la salida de LongCat se transfiere por teselas a la luminancia y geometría
+  originales dentro de esa región, con borde suave configurable. Así la
+  generación aporta el color pedido sin sustituir el contorno de la foto. La
+  dispersión se mide en la superficie, sin listas de nombres ni colores. En
+  superficies uniformes sigue la expansión por color y la integración previa.
 - Clientes: `flux_edit_comfy_client.py` (Kontext/Klein y compatibilidad de
   alias antiguos), `qwen_camera_comfy_client.py` (POV), `qwen_edit`, `boogu`,
   `hart`, `icedit`, `omnigen2`. La presencia de un cliente no autoriza usarlo

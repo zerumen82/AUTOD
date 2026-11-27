@@ -142,3 +142,51 @@ turno. Hay que reiniciar la app y repetir los dos prompts reales:
 Si con 20 pasos el pelo sigue, el siguiente lever medido es ampliar la zona de
 la cabeza al pelo real del sujeto (la elipse `_head_mask_from_faces` no siempre
 cubre el pelo que sobresale) antes de tocar el prompt.
+
+## Post-v5.1446 — zona medida más amplia y verificación medida en ruta rápida
+
+### v5.1446 — cabeza más amplia y verificación medida en la ruta rápida, sin hardcode
+(commit `e12d4fd`, 20:04)
+- `_head_mask_from_faces`: la elipse de la cabeza pasa de 0,78×1,05 a **0,88×1,35**
+  con lóbulo posterior 0,50×0,55; las sienes y la nuca ya entran en la zona de
+  cualquier edición anclada a la cabeza.
+- `_complete_hair_surface`: alcance de `span*0.35` → `span*0.85`, así el pelo de
+  la cabeza se mide o se excluye completo (antes solo el mechón a 70 px del pico).
+- La ruta rápida que antes terminaba en «cumplimiento visual no verificado» ahora
+  ejecuta `_measure_requested_change` antes de entregar y avisa lo que no se
+  cumplió.
+- Validación: `py_compile`, probes de apariencia en verde; sin PASS visual nuevo.
+
+### v5.1447 — el agujero de cabeza incluye el pelo medido (sin rastros)
+(commit `0f2d497`, 20:58)
+- Nuevo helper `_head_with_its_hair`: el pelo medido por CLIPSeg se une al
+  agujero de la cabeza solo si pertenece a ESA cabeza (≥15 % del mechón sobre el
+  elimpse, sin solapar otra cabeza ≥15 %); las demás cabezas se restan. Aplica
+  en las dos rutas de cabeza (entrega por cabeza y cabeza-como-agujero).
+- Efecto: el modelo repinta todo el pelo de esa persona y el pegado ya no
+  deja banda original. El helper es general (no depende de la palabra
+  «calvo»).
+
+### v5.1448 — el modelo ve la persona entera para repintar la cabeza (sin rastros)
+(commit `e635587`, 22:41)
+- Para una edición de apariencia anclada a una cabeza, la generación usa la
+  máscara de la persona entera (contexto completo) para que el modelo repinte
+  con decisión; el pegado sigue restringido a la cabeza+pelo medidos
+  (cuerpo intacto). Causa medida del residuo: una máscara parcial hace que el
+  modelo sea conservador (6,8 % de cambio, 1,6 % pegado).
+
+### v5.1449 — cuelgue en fotos grandes al pegar el pelo a la cabeza (árbol, sin commit confirmado)
+- `_head_with_its_hair` sobre foto de 3480×2901: dilata/componentes conectados
+  bajan a la cota de 768 px que usa el resto del cálculo de máscaras y la máscara
+  resultante se reescala al tamaño original. Evita el bloqueo; sin cambio de
+  comportamiento.
+
+### Desplegable de zonas (v5.1450, árbol sin commit confirmado)
+- `ui/tabs/img_editor/events.py`: `region_choices` de `.input` → `.change` (se
+  dispara al elegir en un Dropdown multiselect en Gradio 6; el default
+  «seleccionar» no marcaba). Inofensivo: `on_select` re-renderiza la zona
+  elegida o vacía.
+
+## Limitaciones medidas de esta review
+- No se ha vuelto a renderizar con ComfyUI en esta turna (sin PASS visual). Los
+  valores verificables son los de despacho (`py_compile`, probes verdes).

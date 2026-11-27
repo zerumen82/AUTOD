@@ -69,6 +69,22 @@ def main() -> int:
         f"{leaked_after} px"
     )
 
+    # El sujeto amplio ilumina las dos personas y el desempate anterior
+    # escogía la detección más confiable. La parte solicitada señala la otra.
+    requested = Image.fromarray(head_second.astype(np.uint8) * 255, "L")
+    requested_zone = manager._head_zone_for_subject(
+        photo, subject_mask, faces, announce=False, request_mask=requested,
+    )
+    assert requested_zone is not None, "se perdió la cabeza de la parte pedida"
+    selected = np.asarray(requested_zone.convert("L")) >= 128
+    selected_pixels = int((selected & head_second).sum())
+    wrong_pixels = int((selected & head_first).sum())
+    assert selected_pixels >= 48 and wrong_pixels < 50, (
+        f"la parte pidió la segunda cabeza, pero entraron {wrong_pixels} px "
+        f"de la primera y solo {selected_pixels} px de la segunda"
+    )
+    print(f"Parte pedida en la segunda cara: {selected_pixels} px; ajena: {wrong_pixels} px")
+
     # Una sola cara: la zona sigue existiendo (no se rompe el caso simple).
     only = manager._head_zone_for_subject(
         photo, Image.fromarray(

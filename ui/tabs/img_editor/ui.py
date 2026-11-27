@@ -243,7 +243,6 @@ def build_img_editor_ui():
                         ("LongCat Turbo (8 GB)", "longcat"),
                         ("🎯 FLUX.1 Kontext Q4_K_M", "kontext"),
                         ("📷 Qwen Cámara (POV/ángulos, ~1152px en 8 GB)", "qwen_camera"),
-                        ("Compatibilidad app antigua (Kontext)", "imagine"),
                         ("✨ FLUX.2 Klein 4B (img2img rápido, 4 pasos, entra en 8GB)", "klein"),
                         ("⚠️ FLUX.2 Klein 9B (NO entra en 8GB, usar solo con 12GB+)", "klein_9b"),
                     ]

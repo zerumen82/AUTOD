@@ -1,5 +1,106 @@
 # spec/03 — Pendientes y deudas declaradas
 
+## 2026-11-27 — v5.1463: el destino de FaceSwap vuelve a elegirse a mano
+
+- La prueba real de v5.1462 mostró que soltar un destino y pulsar su candidata respondía «Esa cara ya es destino», y que un lote de 10 destinos registraba una cara por archivo sin intervención. Procedía de v5.1460, que auto-registraba la única cara para no dejar la galería principal vacía. Ahora la carga solo muestra candidatas del archivo activo (también al añadir bloques, activando el primero nuevo) y el usuario elige con un clic; el origen sigue automático. `probe_faceswap_append_blocks_20261122` PASS con la nueva política y la comprobación aislada del probe de arrastre PASS (carga sin caras, clic 1/3, reenvío repinta). El probe CDP completo está adaptado pero no se ejecutó contra WebView2; H-FS-VISIBLE-SINGLE sigue abierto hasta el PASS visual del usuario.
+
+## 2026-11-27 — v5.1460: FaceSwap aún no mostraba destino arriba; nueva muestra de Editor FAIL
+
+- El usuario confirmó que v5.1459 seguía sin mostrar las caras en la galería principal de Destino y que quería de vuelta el listado de archivos de Origen. Su arrastre real de 10 destinos llegó al backend (`logs/ui_start_20261127_083113.log`) y detectó una cara, pero el flujo solo mostraba candidatas más abajo y dejaba la galería principal vacía. v5.1460 registra automáticamente la única cara detectada del destino activo; con varias mantiene la elección manual. La navegación entre archivos vuelve a detectar y mostrar la cara del archivo actual, y el listado de Origen es visible otra vez. Falta repetir la prueba visual en la ventana v5.1460 con lote y navegación antes de cerrar H-FS-VISIBLE-SINGLE.
+- Una generación completa nueva con la muestra neutral Grace Hopper y `Tipo de edición=Rasgos` (`diagnostics/out/appearance_reference_20261023/1795764767693508900/`) dio **FAIL visual**: la primera salida LongCat quitó el sombrero, pero el pegado conservó zonas del sombrero antiguo detrás del cráneo; el reintento por supuesta cara añadida cambió la identidad y aún dejó un arco del sombrero. El probe terminó con aserción antigua de una sola llamada porque hubo dos pasadas reales; la imagen y métricas finales sí quedaron guardadas. La causa del reintento y el contorno de cabeza con accesorios siguen bajo análisis; no declarar H-EDIT-003 ni versatilidad general resueltos.
+
+## 2026-11-27 — v5.1459: pegado de cabeza y carga visual FaceSwap
+
+- La salida LongCat `FastEdit_01438_.png` sí muestra el cráneo completo; la reproducción sin inferencia sobre su entrada guardada (`fast_1795733009.png`) todavía amputaba la cabeza en v5.1458. La región pedida inicial mide 14 504 px y está 100 % dentro de la cabeza, pero su crecimiento por color se extendía por el sujeto; la comprobación posterior veía esa región grande y dejaba `head_appearance=False`. Se conserva la semilla inicial para decidir por máscara medida y se aplica el soporte de cabeza existente. Replay posterior: cráneo continuo, interior idéntico a la salida LongCat y exterior conservado. Falta una prueba visual UI nueva con la foto original de alta resolución; H-EDIT-003 sigue abierto.
+- En FaceSwap, el usuario arrastraba archivos sobre las galerías grandes y no veía las caras: el capturador nativo solo escuchaba los selectores de archivos. Los cuadros grandes ahora aceptan drop, las caras candidatas del destino activo se detectan al cargar sin seleccionarlas automáticamente y los campos duplicados de nombres se ocultan. La prueba CDP real en WebView2 v5.1459 mostró 1 cara de origen, 1 candidata de destino y archivo `1/1`; al pulsar la candidata apareció 1 cara en Destino (`1/3`). Antes de la corrección, el mismo drop daba archivo `1/2` porque la cola se leía desde memoria y JSON; `native_drop_pop` ahora deduplica rutas normalizadas y el probe same-process pasa. La ruta de ventana secundaria al servidor primario pasó en prueba de integración. La carga visual tiene PASS acotado; el intercambio final de vídeo y sus criterios visuales generales siguen abiertos en `docs/PENDIENTES_2026-11-13.md`.
+
+## 2026-11-27 — v5.1458: segunda pasada destruye la primera generación
+
+- Las dos pruebas UI v5.1455 de «EL HOMBRE DEBE SER CALVO» con **Tipo de edición = Rasgos (`features`)** produjeron un primer bruto LongCat calvo y limpio (`FastEdit_01438_.png` y `01440_.png`). El refinado focal automático (`FastEdit_01439_.png` y `01441_.png`) añadió bordes dentados y textura rota a la cabeza/cara. Esas anomalías aparecen en `img_editor/edit_1795733254.png` y `edit_1795733455.png`: **FAIL visual real**, no no-op del modelo. El guard previo de cara añadida/colapsada no las detectó. La primera pasada se amplió 4,37×; el refino usó una ventana 2846×2815 reducida a 1024×1024 y añadió ~45 s por intento.
+- La ruta nativa de apariencia local omite el refino focal automático por defecto mediante `edit.native_local_focused_refine_enabled=false`, tanto en el pase principal como en el reintento. El reintento usa el mismo soporte de pegado y protección multicara que el primero. Es una política de ruta, sin vocabulario de calvicie ni clases; postura, cuerpo, añadir/quitar y escenario conservan sus rutas. Falta verificar visualmente la salida completa desde la UI vigente, especialmente la nitidez de fotos grandes; **H-EDIT-003 y H-EDIT-VERSATILIDAD-20261126 siguen abiertos**.
+
+## 2026-11-26 — v5.1455: primera prueba UI de calvicie FAIL, replay corregido
+
+- El usuario repitió «EL HOMBRE DEBE SER CALVO» dos veces con **Tipo de edición
+  = Rasgos (`features`)**. `logs/ui_start_20261126_v51454.stdout.log` registró
+  `local_appearance`, LongCat Turbo 8 pasos y referencia `index`. La salida
+  bruta real `FastEdit_01436_.png`/`01437_.png` sí quitó el pelo; los resultados
+  UI `img_editor/edit_1795731399.png`/`edit_1795731478.png` dejaron un bulto
+  en el cráneo y pelo detrás: **FAIL visual**. El PASS del astronauta neutro no
+  validaba esta foto. La UI se cerró tras las dos pruebas, con cola 0/0.
+- Causa medida: el pegado restringía la generación al contorno de la cabeza
+  vieja y recortaba por fuera incluso el feather de 1 px. El modelo había
+  cambiado la silueta; el contorno nuevo quedaba amputado y asomaba pelo
+  original. v5.1455 amplía solo el soporte de apariencia local de cabeza en
+  proporción a su tamaño (config: 0,06) y difumina el borde exterior (0,02).
+  La dilatación opera dentro del ROI. La cabeza propia se elige por máximo
+  solape; todas las demás detecciones, también de baja confianza, se protegen
+  salvo duplicados con IoU ≥0,8. `features` sigue activando esta ruta; ningún
+  término de prompt ni género decide la ampliación.
+- Replay sin nueva inferencia de ambas salidas LongCat reales en
+  `diagnostics/out/editor_bald_last_ui_replay_20261126/`: tester **PASS visual
+  acotado del composite** (sin pelo, halo ni corte evidente; mujer y hombre de
+  la derecha intactos). El probe multicara con cabezas solapadas 63,3 % y
+  segunda detección 0,31 frente a 0,9 deja esa cabeza idéntica píxel a píxel.
+  Reviewer: **APPROVE técnico**. Ruff, py_compile, JSON, diff y build PASS.
+- **H-EDIT-003 sigue abierto:** el replay reconstruye la fuente a partir de la
+  entrada guardada de ComfyUI y fuerza la misma ventana completa que consta en
+  el log, pero no es un render nuevo en la UI. No se volvió a inferir sobre la
+  foto explícita. Falta PASS visual de la UI con v5.1455 y fotos más grandes;
+  una cara no detectada no puede protegerse. Tras confirmar cola 0/0 se sustituyó
+  la instancia v5.1454 por v5.1455; Gradio responde HTTP 200 en 7861.
+
+## 2026-11-26 — v5.1454: recoloración real del gato, PASS acotado
+
+- Tras el FAIL visual del gato se comprobó que la expansión de una superficie de
+  color heterogéneo invadía el fondo y que la continuación de pelo añadía más
+  píxeles. La expansión usa la dispersión RGB p90 del núcleo medido: gato 85,9
+  frente a pared parcial 3,5 y pared grande 12,1. En heterogéneas, GrabCut
+  perfila la región; si falla, conserva la máscara semántica sin abortar. La
+  continuación de pelo queda desactivada solo en el recolor de región.
+- El primer render restringido (`1795723663305177100`) dejó un halo azul; el
+  segundo (`1795725672890169700`) quitó el halo ancho pero mostró un corte duro
+  en el contorno. La integración final transfiere los canales cromáticos Lab de
+  LongCat a la textura y luminancia originales dentro de la región medida.
+  Respeta `local_box` desplazado y procesa por teselas; los parámetros están en
+  `config/editor_selection.json`, sin clases, colores ni palabras codificados.
+- Render real final `logs/editor_cat_texture_real_20261126.log`, muestra
+  `diagnostics/out/appearance_reference_20261023/1795730461435269800/`:
+  **PASS visual acotado** del tester: gato azul, textura y bigotes conservados,
+  sin halo ni corte relevante. En comparación con la máscara medida, 0 píxeles
+  cambiados de 24 115 a más de 6 px del borde. Reviewer: **APPROVE técnico**.
+  Probes de recorte desplazado, fallback GrabCut, selección animal/objeto y pared
+  grande: PASS. Ruff de los Python tocados, compilación, JSON, diff y build
+  PyInstaller final: PASS.
+- `H-EDIT-VERSATILIDAD-20261126` sigue **abierto**: una foto de gato y un
+  astronauta calvo no validan todas las personas, animales y objetos, ni
+  postura, añadir o quitar. La máscara de la taza del probe aún incluye café y
+  parte de la cuchara y no delimita bien asa/cuerpo. No hay PASS visual de esas
+  categorías. La UI anterior ya no tenía proceso; al terminar se inició
+  v5.1454 en 7861, con ComfyUI en 8188 y HEAD HTTP 200.
+
+## 2026-11-26 — v5.1454: imagen bruta sin edición de apariencia
+
+- La UI v5.1453 recibió «EL HOMBRE DEBE SER CALVO» y terminó con el pelo intacto (`logs/ui_start_20261126_145825.log`, `img_editor/edit_1795701868.png`). La salida bruta de LongCat `FastEdit_01427_.png` también conserva el pelo: el generador no lo quitó, así que ampliar solo el pegado no resolvería el caso.
+- Causa en código: se calculaba `generation_subject` para que el modelo recibiera la persona completa, pero `_appearance_work_region` recibía `subject_mask` (la cabeza), sobrescribiendo la máscara de generación. Solo 4,0 % del recorte entró en el sampler; se pegó 0,2 %. v5.1454 pasa `generation_subject` a la ventana y conserva la máscara de cabeza como límite de pegado.
+- Probe sin generación sobre astronauta real: persona medida 108 722 px = foco de generación 108 722 px = máscara enviada en recorte 108 722 px. **PASS de cableado**. Render real v5.1454 (`logs/editor_person_mask_real_escalated_20261126.log`, `diagnostics/out/appearance_reference_20261023/1795710019073788700/`): la máscara pasó al 43,5 % del recorte y el cambio medido subió a 1,0 % del recorte, pero la salida bruta y la integrada conservan el pelo: **FAIL visual**. Se compara el flujo Turbo de 8 pasos sin máscara de ruido en una foto neutra antes de modificar la ruta. No volver a renderizar la foto explícita del usuario.
+- Comparación diagnóstica (`logs/editor_unmasked_eight_real_20261126.log`, muestra `1795710447155110700`): con el mismo recorte, Turbo sin máscara latente, 8 pasos y referencia `index` entregó la cabeza calva en bruto, pero el pegado parcial dejó un contorno del pelo anterior. La ruta de apariencia local de un sujeto usa ahora esa receta nativa configurada y pega completa la región medida; no hay palabras o géneros en el despacho.
+- Render real integrado (`logs/editor_native_appearance_real_20261126.log`, muestra `1795711247237696700`): salida bruta y resultado final visualmente calvos; 19 331 píxeles modificados, **0 fuera de la cabeza medida**. PASS visual **acotado al astronauta neutro y a esta instrucción**; la cara cambió dentro de la cabeza. No hay PASS visual general de personas, animales, objetos, postura ni añadir/quitar. No volver a renderizar la foto explícita del usuario.
+- Verificación adicional de versatilidad con gato real (`logs/editor_cat_appearance_real_20261126.log`, muestra `1795717826045511900`): la petición «El gato debe ser azul» entra por `region_edit`, conserva el flujo previo con máscara latente y 20 pasos. El gato sale azul, pero también se tiñe el fondo y quedan manchas; **FAIL visual de animal/región**. El usuario pidió detener las pruebas si el resultado era erróneo; la categoría queda abierta. No extrapolar el PASS de calvicie a esta ruta.
+
+## 2026-11-26 — v5.1453: siluetas medidas y versatilidad del Image Editor
+
+- La elipse de cabeza incluía fondo y podía terminar antes del pelo lateral. GrabCut local restringe la cabeza a cara, pelo y sujeto medidos; sin pelo detectado intenta cara/sujeto. La cara se asocia a la cabeza elegida por solape. Parámetros en `config/editor_selection.json`.
+- La utilidad se integra en apariencia local de sujetos y región local de objetos cuando hay semilla visual y ampliación de región. Postura, cuerpo, añadir y quitar conservan espacio estructural.
+- Foto real del gato: PASS técnico de máscara que excluye fondo. La máscara de `cup` incluye café y parte de cuchara, y deja fuera parte del asa/cuerpo: FAIL de selección fina. Render real del astronauta con LongCat y reintento focal: **FAIL visual** por pelo lateral y superior residual. No hay PASS visual de animales, objetos, postura, añadir ni quitar.
+- La suite `probe_editor_versatility_integrity_20261105.py` conserva dos fallos conocidos de `RemovalContracts` con LaMa. Un añadido sin zona medida puede conservar la foto. `H-EDIT-VERSATILIDAD-20261126` y `H-EDIT-003` siguen abiertos.
+
+## 2026-11-25 — v5.1452: listas FaceSwap y edición visual del Image Editor
+
+- FaceSwap: corregidos en origen el número de salidas del callback y en destino el tipo devuelto a `gr.Files`; ambos listados usan ahora nombres de archivo ligeros. Probe con drop nativo, carga, limpieza y recarga: PASS técnico. **Pendiente:** PASS visual en pywebview con la versión nueva; no cerrar H-FS-APPEND-BLOCKS todavía.
+- Image Editor: Auto vuelve al motor `route_editor.default_engine` (LongCat). La parte medida ahora decide qué cara editar cuando la máscara de sujeto abarca varias personas; probe con dos caras PASS. Render real de la última edición: más cambio (0,89 % → 2,22 %, con semillas distintas) y persona correcta, pero **FAIL visual** por pelo residual y franja blanca en la cabeza. Evidencia: `logs/editor_headfix_real_escalated_20261125.log` y `diagnostics/out/review_headfix_real_escalated_20261125/face_compare_inspect.jpg`. H-EDIT-003 y las categorías visuales siguen abiertos. No hacer más renders de esa foto explícita.
+- La superposición diagnóstica `diagnostics/out/review_headfix_real_escalated_20261125/call_1_1795616655338925600/mask_overlay_head.png` muestra que la máscara enviada al modelo termina antes del pelo trasero del perfil; el primer resultado generado ya conserva esa franja oscura. Queda pendiente ampliar la región a partir de medición visual de pelo, sin reglas ligadas a «calvo», y comprobarlo con una foto no explícita antes de aceptar la calidad.
+
 ## 2026-11-20 — Lote FaceSwap de 11 vídeos: identidad errónea en el quinto
 
 - `logs/process_20261120_011957.log` a `...021602.log`: cuatro MP4 completos (1784, 1884, 1204 y 170 frames); el quinto se interrumpió en 1736/3192 y los otros seis no empezaron. Comparativas original/salida: `diagnostics/out/faceswap_latest_20261120/`. Son muestras visuales, no PASS de los vídeos completos.

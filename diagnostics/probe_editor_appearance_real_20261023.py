@@ -28,6 +28,7 @@ from ui.tabs.img_editor.state import SelectionSession  # noqa: E402
 def run_case(args):
     samples = {
         "astronaut": "venv/Lib/site-packages/skimage/data/astronaut.png",
+        "chelsea": "venv/Lib/site-packages/skimage/data/chelsea.png",
         "grace": "venv/Lib/site-packages/matplotlib/mpl-data/sample_data/grace_hopper.jpg",
     }
     source = ROOT / samples[args.sample]
@@ -66,6 +67,13 @@ def run_case(args):
         original_prompt = kwargs["prompt"]
         if getattr(args, "prompt_template", None):
             kwargs["prompt"] = args.prompt_template.format(instruction=args.prompt)
+        if getattr(args, "unmasked_eight", False):
+            # Diagnostic comparison with the installed Turbo model's native
+            # eight-step edit: keep the same manager crop and final paste.
+            kwargs["mask_image"] = None
+            kwargs["keep_source_pixels"] = False
+            kwargs["num_inference_steps"] = 8
+            kwargs["reference_latents_method"] = "index"
         if getattr(args, "seed", None) is not None:
             kwargs["seed"] = args.seed
         kwargs["image"].save(out / f"reference_{index}.png")
@@ -76,6 +84,7 @@ def run_case(args):
             "original_prompt": original_prompt,
             "requested_engine": getattr(args, "engine", "kontext"),
             "prompt_template_override": getattr(args, "prompt_template", None),
+            "unmasked_eight": getattr(args, "unmasked_eight", False),
             "client_arguments": {key: kwargs.get(key) for key in (
                 "prompt", "negative_prompt", "num_inference_steps", "guidance_scale",
                 "seed", "denoise", "no_kontext", "reference_latents_method",
@@ -93,7 +102,7 @@ def run_case(args):
         result, message, mask = on_generate(
             photo, args.prompt, getattr(args, "engine", "kontext"), 0.0,
             False, 1, False, "hd", source="diagnostic_neutral_sample",
-            selection_state=session,
+            selection_state=session, scope_hint=args.scope_hint,
         )
         assert result is not None, message
         result.save(out / "result.png")
@@ -101,21 +110,24 @@ def run_case(args):
             mask.save(out / "mask.png")
         before, after = np.asarray(photo), np.asarray(result)
         changed = np.any(before != after, axis=2)
-        exterior = np.asarray(mask) == 0 if mask is not None else np.ones(changed.shape, bool)
+        exterior = np.asarray(mask) == 0 if mask is not None else None
         metrics = {"mode": args.mode, "engine_requested": getattr(args, "engine", "kontext"),
                    "source": str(source), "message": message,
                    "prompt": args.prompt,
                    "generation_prompt_override": getattr(args, "prompt_template", None),
                    "elapsed_s": time.monotonic() - started, "calls": calls,
                    "changed_pixels": int(changed.sum()),
-                   "exterior_changed_pixels": int((changed & exterior).sum()),
+                   "exterior_changed_pixels": (
+                       int((changed & exterior).sum()) if exterior is not None else None
+                   ),
                    "scope": "Real UI callback/inference; visual adherence requires inspection"}
         (out / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
         print(json.dumps(metrics, indent=2), flush=True)
         print(f"EVIDENCE: {out}", flush=True)
         assert len(calls) == 1, "expected exactly one real model pass"
         assert changed.any(), "result is identical"
-        assert not (changed & exterior).any(), "pixels outside measured region changed"
+        if exterior is not None:
+            assert not (changed & exterior).any(), "pixels outside measured region changed"
     finally:
         client.generate = original
         process = comfy_launcher.comfy_process
@@ -129,11 +141,15 @@ def run_case(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("selected", "global"), default="selected")
-    parser.add_argument("--sample", choices=("astronaut", "grace"), default="astronaut")
+    parser.add_argument("--sample", choices=("astronaut", "chelsea", "grace"), default="astronaut")
     parser.add_argument("--engine", choices=("kontext", "auto", "longcat"), default="kontext")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--prompt-template", help="Explicit diagnostic override; recorded in metrics")
+    parser.add_argument("--unmasked-eight", action="store_true",
+                        help="Diagnostic native Turbo edit without a latent noise mask")
     parser.add_argument("--prompt", default="La persona debe ser calva")
+    parser.add_argument("--scope-hint", default="auto",
+                        help="Valor del desplegable Tipo de edición; por ejemplo, features")
     parser.add_argument("--batch-global", action="store_true")
     args = parser.parse_args()
     if args.batch_global:

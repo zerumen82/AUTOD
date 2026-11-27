@@ -768,7 +768,7 @@ def wire_events(ui_comp):
                 ],
                 api_name="analyze_regions",
             )
-        ui_comp["region_choices"].input(
+        ui_comp["region_choices"].change(
             fn=on_select,
             inputs=[ui_comp["region_choices"], ui_comp["input_img"], ui_comp["selection_state"]],
             outputs=[ui_comp["overlay_img"], ui_comp["selection_state"], ui_comp["status"]],
